@@ -1459,20 +1459,36 @@ try {
     const staleId=held.wal.rows[0].id;
     // Make the V1 journal entry a verified canonical completion, preserving
     // the real user's data rather than throwing away it during the restore.
-    const firstCheckpoint=await active.evaluate(()=>{
+    const firstCheckpoint=await active.evaluate(async()=>{
       const core=window.TaskPointsCore;
-      const journal=core.readPendingHabitDeltas();
-      const canonical=window.V2BrowserFixture.rawLegacy();
-      const applied=core.applyPendingHabitDeltas(canonical,journal);
-      const saved=core.saveStateSnapshot(canonical,{
-        immediateWrite:true,replaceCompletions:true,savePath:'habit-journal-compaction'});
-      if(saved?.blocked||saved?.skipped)throw Error('V1 checkpoint failed');
-      const verified=core.verifyPersistedHabitDeltas(
-        window.V2BrowserFixture.rawLegacy(),journal,applied.appliedDeltas);
-      if(verified.length!==1)throw Error('Old-generation V1 checkpoint not verified');
-      core.clearCompactedHabitDeltas(verified);
-      return {remaining:core.readPendingHabitDeltas().length,
-        completed:window.V2BrowserFixture.rawLegacy().completions.filter(c=>c.source==='habit').length};
+      let verified=null;
+      let attempts=0;
+      // A concurrent suspended-tab save can race the verified V1 checkpoint
+      // in WebKit. Never clear the journal on an unverified attempt. Re-read
+      // the retained durable journal and retry the idempotent compaction in
+      // bounded fashion; fail if no attempt actually persists its completion.
+      while(attempts<3){
+        attempts++;
+        const journal=core.readPendingHabitDeltas();
+        if(journal.length!==1)throw Error('Old-generation journal not preserved for retry');
+        const canonical=window.V2BrowserFixture.rawLegacy();
+        const applied=core.applyPendingHabitDeltas(canonical,journal);
+        const saved=core.saveStateSnapshot(canonical,{
+          immediateWrite:true,replaceCompletions:true,savePath:'habit-journal-compaction'});
+        if(saved?.blocked||saved?.skipped)throw Error('V1 checkpoint failed');
+        verified=core.verifyPersistedHabitDeltas(
+          window.V2BrowserFixture.rawLegacy(),journal,applied.appliedDeltas);
+        if(verified.length===1){
+          core.clearCompactedHabitDeltas(verified);
+          return {remaining:core.readPendingHabitDeltas().length,
+            completed:window.V2BrowserFixture.rawLegacy().completions.filter(c=>c.source==='habit').length};
+        }
+        // An unverified save MUST NOT remove the pending WAL or sidecar.
+        if(core.readPendingHabitDeltas().length!==1)
+          throw Error('Old-generation unverified journal was lost');
+        await new Promise(done=>setTimeout(done,25*attempts));
+      }
+      throw Error('Old-generation V1 checkpoint not verified after three preserved-journal attempts');
     });
     assert.deepEqual(firstCheckpoint,{remaining:0,completed:1});
     const rotate=async name=>active.evaluate(async label=>{
