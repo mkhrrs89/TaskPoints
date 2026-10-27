@@ -1903,3 +1903,53 @@ test('older payload-only checkpoint records remain inspectable without upgrading
   assert.deepEqual(app.indexedDB.dump(db.name),before);
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
 });
+
+test('payload-only historical checkpoint stays inspectable but is barred from rollback planning',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const saved=await app.runtime.createPreviewRecoveryCheckpoint();
+  assert.equal(saved.saved,true,JSON.stringify(saved));
+  const db=await new Promise((resolve,reject)=>{
+    const req=app.indexedDB.open('taskpoints_v2_recovery_checkpoints_preview',1);
+    req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+  });
+  const original=structuredClone(app.indexedDB.dump(db.name).snapshots[0]);
+  const historical=structuredClone(original);
+  delete historical.integrityVersion;
+  historical.generation='unverified-claimed-generation';
+  historical.capturedAtISO='1990-01-01T00:00:00.000Z';
+  const bytes=Buffer.from(JSON.stringify(historical.entries),'utf8');
+  historical.fingerprint='sha256:'+createHash('sha256').update(bytes).digest('hex')+':'+bytes.byteLength;
+  const tx=db.transaction('snapshots','readwrite');
+  tx.objectStore('snapshots').put(historical);
+  await new Promise((resolve,reject)=>{
+    tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);tx.onerror=()=>reject(tx.error);
+  });
+  const before=structuredClone(app.indexedDB.dump(db.name));
+  const readable=await app.runtime.inspectPreviewRecoveryCheckpoint(saved.checkpointId);
+  assert.equal(readable.intact,true,JSON.stringify(readable));
+  assert.equal(readable.integrityCoverage,'legacy_payload_only');
+  const plan=await app.runtime.inspectPreviewRollbackPlan(saved.checkpointId);
+  assert.equal(plan.planValid,false);
+  assert.equal(plan.canApply,false);
+  assert.equal(plan.reason,'checkpoint_provenance_unverified');
+  assert.equal(Object.hasOwn(plan,'entries'),false);
+  assert.deepEqual(app.indexedDB.dump(db.name),before,
+    'rejecting weak historical provenance must not rewrite its original evidence');
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
+test('metadata-authenticated checkpoint remains eligible for read-only rollback diff',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const checkpoint=await app.runtime.createPreviewRecoveryCheckpoint();
+  assert.equal(checkpoint.saved,true);
+  const intact=await app.runtime.inspectPreviewRecoveryCheckpoint(checkpoint.checkpointId);
+  assert.equal(intact.integrityCoverage,'metadata_and_payload');
+  const plan=await app.runtime.inspectPreviewRollbackPlan(checkpoint.checkpointId);
+  assert.equal(plan.planValid,true,JSON.stringify(plan));
+  assert.equal(plan.reason,'dry_run_only');
+  assert.equal(plan.canApply,false);
+  assert.equal(plan.generationMatches,true);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
