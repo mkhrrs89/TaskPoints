@@ -583,8 +583,13 @@ try {
       const runtime=window.TaskPointsStateRuntimeV2;
       const core=window.TaskPointsCore;
       const originalRead=core.readPendingHabitDeltas;
+      const originalApply=core.applyPendingHabitDeltas;
       const legacy=localStorage.getItem('taskpoints_v1');
       let readiness,report,blocked;
+      // Keep the synthetic pending journal visible to the handoff audit
+      // while holding effective V1 pilot state unchanged. This isolates
+      // the missing-compaction safety gate from ordinary parity failures.
+      core.applyPendingHabitDeltas=()=>({appliedDeltas:[]});
       core.readPendingHabitDeltas=()=>[{
         id:'habit:h1:2026-10-23',habitId:'h1',dayKey:'2026-10-23',
         source:'habit',status:'full',done:true,
@@ -594,7 +599,10 @@ try {
         readiness=await runtime.inspectPilotReadiness();
         report=await runtime.inspectMutationHandoffPrerequisites();
         blocked=await runtime.rehearseExclusiveWriterLease();
-      }finally{core.readPendingHabitDeltas=originalRead;}
+      }finally{
+        core.readPendingHabitDeltas=originalRead;
+        core.applyPendingHabitDeltas=originalApply;
+      }
       const restored=await runtime.inspectPilotReadiness();
       return {readiness,report,blocked,restored,
         legacyUnchanged:localStorage.getItem('taskpoints_v1')===legacy,
