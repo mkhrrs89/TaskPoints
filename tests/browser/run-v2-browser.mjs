@@ -613,7 +613,7 @@ try {
           storageKey:core.STORAGE_KEY,immediateWrite:true,userInitiated:true,
           savePath:'v2-stale-serialized-fixture'
         });
-      }),expectedRaw);
+      }));
     await other.waitForFunction(()=>
       localStorage.getItem('v2_serialized_generation_holder_ready')==='ready',
       null,{timeout:12000});
