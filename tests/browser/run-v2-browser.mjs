@@ -617,8 +617,16 @@ try {
     await other.waitForFunction(()=>
       localStorage.getItem('v2_serialized_generation_holder_ready')==='ready',
       null,{timeout:12000});
-    await other.evaluate(()=>localStorage.setItem('taskpoints_state_v2_generation_v1',
-      'v2-serialized-generation-change:'+crypto.randomUUID()));
+    const newGeneration=await other.evaluate(()=>{
+      const next='v2-serialized-generation-change:'+crypto.randomUUID();
+      localStorage.setItem('taskpoints_state_v2_generation_v1',next);
+      return next;
+    });
+    // A completed storage write from another WebKit document does not
+    // guarantee that this suspended document sees it immediately.
+    await writer.waitForFunction(expected=>
+      localStorage.getItem('taskpoints_state_v2_generation_v1')===expected,
+      newGeneration,{timeout:12000});
     await writer.evaluate(()=>window.__releaseV2SerializedGeneration());
     const blocked=await pending;
     assert.equal(blocked.reason,'serialized_operation_generation_invalidated',
