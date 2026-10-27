@@ -642,6 +642,71 @@ try {
       v1Unchanged:true,authorityUnchanged:true,physicalPwaKillStillRequired:true};
   });
 
+  await run('preview callback guard refuses stale generation before controlled fixture write',async context=>{
+    const writer=await open(context),other=await open(context);
+    const supportsLocks=await writer.evaluate(()=>
+      typeof navigator.locks?.request==='function');
+    if(!supportsLocks){
+      const denied=await writer.evaluate(()=>
+        window.TaskPointsStateRuntimeV2.exercisePreviewCooperativeWriterLease(()=>{}));
+      assert.equal(denied.reason,'lock_manager_unavailable');
+      assert.equal(denied.canPromote,false);
+      return {unsupportedFailClosed:true};
+    }
+    const originalV1=await other.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const fresh=await writer.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.exercisePreviewCooperativeWriterLease(
+        ({assertPreviewGenerationCurrent})=>{
+          assertPreviewGenerationCurrent();
+          localStorage.setItem('v2_guarded_preview_fresh','ok');
+        }));
+    assert.equal(fresh.sharedLockAcquired,true,JSON.stringify(fresh));
+    assert.equal(fresh.reason,'cooperative_shared_lock_rehearsed');
+    assert.equal(fresh.canPromote,false);
+    const pending=writer.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.exercisePreviewCooperativeWriterLease(
+        async ({assertPreviewGenerationCurrent})=>{
+          localStorage.setItem('v2_guarded_preview_waiting','ready');
+          await new Promise(resolve=>{window.__releaseV2GuardedFixture=resolve;});
+          // No authoritative write is allowed until the voluntary
+          // pre-side-effect generation check succeeds.
+          assertPreviewGenerationCurrent();
+          localStorage.setItem('v2_guarded_preview_stale_write','unsafe');
+        }));
+    await other.waitForFunction(()=>
+      localStorage.getItem('v2_guarded_preview_waiting')==='ready',
+      null,{timeout:12000});
+    await other.evaluate(()=>
+      localStorage.setItem('taskpoints_state_v2_generation_v1',
+        'v2-guarded-fixture-rotation:'+crypto.randomUUID()));
+    await writer.evaluate(()=>window.__releaseV2GuardedFixture());
+    const denied=await pending;
+    assert.equal(denied.reason,'cooperative_operation_generation_invalidated',
+      JSON.stringify(denied));
+    assert.equal(denied.operationRan,true);
+    assert.equal(denied.sharedLockAcquired,true);
+    assert.equal(denied.lockHeldAfterReturn,false);
+    assert.equal(denied.canPromote,false);
+    assert.equal(denied.productionWritersFenced,false);
+    assert.equal(denied.allLegacyWritersKnown,false);
+    const after=await other.evaluate(async()=>({
+      staleWrite:localStorage.getItem('v2_guarded_preview_stale_write'),
+      freshWrite:localStorage.getItem('v2_guarded_preview_fresh'),
+      v1:localStorage.getItem('taskpoints_v1'),
+      lockAvailable:await navigator.locks.request(
+        'taskpoints_v2_writer_handoff_rehearsal_v1',
+        {mode:'exclusive',ifAvailable:true},lock=>Boolean(lock)),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    assert.equal(after.freshWrite,'ok');
+    assert.equal(after.staleWrite,null);
+    assert.equal(after.lockAvailable,true);
+    assert.equal(after.v1,originalV1);
+    assert.equal(after.authority,'legacy_only');
+    return {freshGuardAllowsFixture:true,staleGuardAbortsBeforeWrite:true,
+      lockReleased:true,legacyAuthorityPreserved:true};
+  });
+
   await run('cooperative lease rejects a generation change while callback is pending',async context=>{
     const writer=await open(context),resetTab=await open(context);
     const supported=await writer.evaluate(()=>
