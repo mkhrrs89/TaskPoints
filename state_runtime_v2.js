@@ -8,6 +8,7 @@
   const DB_VERSION = 2;
   const COMPLETION_HABIT_INDEX = 'by_habit_ids';
   const EXCLUSIVE_WRITER_REHEARSAL_LOCK = 'taskpoints_v2_writer_handoff_rehearsal_v1';
+  const PEER_COORDINATION_CHANNEL = 'taskpoints_v2_preview_writer_peers_v1';
   const PREVIEW_RECOVERY_DB = 'taskpoints_v2_recovery_checkpoints_preview';
   const PREVIEW_RECOVERY_STORE = 'snapshots';
   const PREVIEW_RECOVERY_SCHEMA = 1;
@@ -45,6 +46,7 @@
   const contextId = global.crypto?.randomUUID?.() || `v2-context:${Date.now()}:${Math.random().toString(36).slice(2)}`;
   const contextStartedEpochMs = Date.now();
   let revisionChannel = null;
+  let peerCoordinationChannel = null;
   let revisionInvalidationListenersInstalled = false;
   let externalRevisionInvalidated = false;
   let externalRevision = null;
@@ -206,6 +208,103 @@
       }
     });
     return true;
+  }
+
+  // Passive preview-only coordination. A participating V2 tab can answer a
+  // challenge without writing localStorage, acquiring a production lease, or
+  // changing the V1 mutation path. Absence of an answer NEVER proves that a
+  // legacy tab is absent: pre-V2 pages, suspended tabs and unsupported browsers
+  // may write without participating in this protocol.
+  function installPreviewPeerResponder() {
+    if (peerCoordinationChannel) return true;
+    if (!isDarkEnabled() || typeof global.BroadcastChannel !== 'function')
+      return false;
+    try {
+      const channel = new global.BroadcastChannel(PEER_COORDINATION_CHANNEL);
+      const respond = event => {
+        const message = event?.data;
+        if (message?.type !== 'writer_probe_v1'
+          || typeof message.probeId !== 'string' || message.probeId.length > 128
+          || !message.probeId || message.sourceId === contextId) return;
+        try {
+          channel.postMessage({
+            type: 'writer_probe_ack_v1', probeId: message.probeId,
+            sourceId: contextId,
+            previewEnabled: isDarkEnabled(),
+            generation: currentGeneration({ create: false }),
+            webLocksSupported: typeof global.navigator?.locks?.request === 'function'
+          });
+        } catch (_) {}
+      };
+      if (typeof channel.addEventListener === 'function')
+        channel.addEventListener('message', respond);
+      else channel.onmessage = respond;
+      peerCoordinationChannel = channel;
+      return true;
+    } catch (_) { return false; }
+  }
+
+  // Cross-tab discovery is an observational rehearsal, NOT writer fencing.
+  // A zero-peer response is not a single-tab guarantee. Even when every
+  // responding peer supports Web Locks, normal V1 mutation entry points do
+  // not acquire a production lock, so the result is never promotable.
+  async function inspectPreviewWriterPeers() {
+    const report = (reason, peers = []) => ({
+      checked: true, reason,
+      observedPeerCount: peers.length,
+      peers: peers.map(peer => ({
+        previewEnabled: peer.previewEnabled === true,
+        sameGeneration: peer.sameGeneration === true,
+        webLocksSupported: peer.webLocksSupported === true
+      })),
+      respondingPreviewTabsOnly: true,
+      allLegacyWritersKnown: false,
+      productionWritersFenced: false,
+      canPromote: false, mutationAuthority: 'legacy_only', readAuthority: 'legacy_only'
+    });
+    if (!isDarkEnabled()) return report('dark_disabled');
+    if (!installPreviewPeerResponder()
+      || typeof global.setTimeout !== 'function')
+      return report('coordination_channel_unavailable');
+    const generation = currentGeneration({ create: false });
+    if (!generation) return report('generation_unavailable');
+    const startingModeEpoch = darkMirrorModeEpoch;
+    let probe = null;
+    try {
+      probe = new global.BroadcastChannel(PEER_COORDINATION_CHANNEL);
+      const probeId = global.crypto?.randomUUID?.()
+        || `probe:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+      const peers = new Map();
+      const listen = event => {
+        const data = event?.data;
+        if (data?.type !== 'writer_probe_ack_v1'
+          || data.probeId !== probeId || typeof data.sourceId !== 'string'
+          || !data.sourceId || data.sourceId === contextId) return;
+        peers.set(data.sourceId, {
+          previewEnabled: data.previewEnabled === true,
+          sameGeneration: data.generation === generation,
+          webLocksSupported: data.webLocksSupported === true
+        });
+      };
+      if (typeof probe.addEventListener === 'function')
+        probe.addEventListener('message', listen);
+      else probe.onmessage = listen;
+      probe.postMessage({ type: 'writer_probe_v1', probeId, sourceId: contextId });
+      // Fixed, short, explicit observation window. This is intentionally not
+      // a durable membership or heartbeat service and carries no data blobs.
+      await new Promise(resolve => global.setTimeout(resolve, 120));
+      if (!isDarkEnabled() || startingModeEpoch !== darkMirrorModeEpoch
+        || currentGeneration({ create: false }) !== generation)
+        return report('probe_window_changed');
+      const observed = [...peers.values()];
+      return report(observed.some(p => !p.previewEnabled || !p.sameGeneration
+        || !p.webLocksSupported) ? 'observed_peer_not_ready'
+        : 'observational_probe_only', observed);
+    } catch (_) {
+      return report('coordination_probe_failed');
+    } finally {
+      try { probe?.close(); } catch (_) {}
+    }
   }
 
   function publishCommittedRevision(revisionInput, mutationId, generationInput) {
@@ -3947,6 +4046,7 @@
     // startup seed/replay ordering; it does not replace the normal mirror path.
     currentGeneration();
     installRevisionInvalidationListeners();
+    installPreviewPeerResponder();
     installHabitJournalHook();
     const bridge = global.TaskPointsStateRuntimeV2WalBridge;
     if (bridge?.__installedModule && typeof bridge.start === 'function') {
@@ -4046,6 +4146,7 @@
     inspectPilotReadiness,
     inspectPilotCompletionIndexCoverage,
     inspectMutationHandoffPrerequisites,
+    inspectPreviewWriterPeers,
     inspectPreservedParityMismatch,
     inspectLegacyRollbackSource,
     createPreviewRecoveryCheckpoint,
