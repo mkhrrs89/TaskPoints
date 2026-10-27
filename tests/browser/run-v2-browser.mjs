@@ -1576,6 +1576,85 @@ try {
       journalBlockerObserved:true,authority:'legacy_only'};
   });
 
+  await run('full cutover inventory refuses a green pilot and silent legacy writer',async context=>{
+    const inspector=await open(context),participant=await open(context);
+    const silent=await context.newPage();
+    await silent.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const v1Before=await inspector.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const report=await inspector.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.inspectAuthorityCutoverBarriers());
+    assert.equal(report.checked,true);
+    assert.equal(report.reason,'authority_cutover_blocked',JSON.stringify(report));
+    assert.equal(report.canPromote,false);
+    assert.equal(report.mutationAuthority,'legacy_only');
+    assert.equal(report.readAuthority,'legacy_only');
+    assert.equal(report.checks.pilotConsistent,true,JSON.stringify(report));
+    assert.equal(report.checks.allLegacyWritersFenced,false);
+    assert.equal(report.checks.allAuthoritativeCollectionsMigrated,false);
+    assert.equal(report.checks.independentOffDeviceRollbackVerified,false);
+    assert.equal(report.checks.physicalSafariPwaLifecycleValidated,false);
+    assert.equal(report.checks.productionMultiContextHandoffValidated,false);
+    assert.equal(report.rollback.canRestoreFromCheckpoint,false);
+    assert.equal(report.knownUnfencedWriterFamilies.length,7);
+    for(const blocker of [
+      'all_legacy_writers_not_fenced',
+      'nonpilot_authoritative_collections_not_migrated',
+      'independent_off_device_rollback_not_verified',
+      'physical_safari_pwa_lifecycle_not_validated',
+      'production_multi_context_handoff_not_validated'
+    ])assert.ok(report.blockers.includes(blocker),blocker);
+    const after=await inspector.evaluate(()=>({
+      v1:localStorage.getItem('taskpoints_v1'),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    assert.equal(after.v1,v1Before);
+    assert.equal(after.authority,'legacy_only');
+    return {greenPilotStillBlocked:true,sevenWriterFamiliesEnumerated:true,
+      existingLegacyStatePreserved:true,nonpilotCutoverProhibited:true};
+  });
+
+  await run('full cutover inventory catches unrelated V1 key changed during peer probe',async context=>{
+    const inspector=await open(context),legacy=await context.newPage();
+    await legacy.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const v1Before=await inspector.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const pending=inspector.evaluate(async()=>{
+      const original=BroadcastChannel.prototype.postMessage;
+      BroadcastChannel.prototype.postMessage=function(message){
+        // This marker is outside the taskpoints_* namespace being audited.
+        if(message?.type==='writer_probe_v1')
+          localStorage.setItem('v2_cutover_peer_probe_active','yes');
+        return original.apply(this,arguments);
+      };
+      try{return await window.TaskPointsStateRuntimeV2.inspectAuthorityCutoverBarriers();}
+      finally{BroadcastChannel.prototype.postMessage=original;}
+    });
+    await legacy.waitForFunction(()=>
+      localStorage.getItem('v2_cutover_peer_probe_active')==='yes',
+      null,{timeout:12000});
+    const edited=await legacy.evaluate(()=>{
+      localStorage.setItem('taskpoints_notes_v1','legacy-only tab edited notes');
+      return localStorage.getItem('taskpoints_notes_v1');
+    });
+    const report=await pending;
+    assert.equal(edited,'legacy-only tab edited notes');
+    assert.equal(report.reason,'inventory_changed_during_check',JSON.stringify(report));
+    assert.ok(report.blockers.includes('legacy_or_preview_inventory_changed_during_check'));
+    assert.equal(report.canPromote,false);
+    assert.equal(report.checks.allLegacyWritersFenced,false);
+    const final=await inspector.evaluate(()=>({
+      v1:localStorage.getItem('taskpoints_v1'),
+      notes:localStorage.getItem('taskpoints_notes_v1'),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    assert.equal(final.v1,v1Before);
+    assert.equal(final.notes,'legacy-only tab edited notes');
+    assert.equal(final.authority,'legacy_only');
+    return {nonpilotWriteRaceDetected:true,oldLegacyNotesPreserved:true,
+      pilotStateNotClobbered:true,noAuthorityPromotion:true};
+  });
+
   await run('guarded V2 Habit candidate reads prove data without changing V1 authority', async context => {
     const page = await open(context);
     const before = await page.evaluate(async () => {
