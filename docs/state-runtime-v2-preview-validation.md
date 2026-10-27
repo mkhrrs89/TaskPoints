@@ -342,4 +342,6 @@ The concrete existing legacy write-entry inventory includes:
 
 Node contracts test callback rejection, absent Web Locks, preview-host restrictions, operation failure, and preview off/on invalidation. Chromium/WebKit scenarios exercise two simultaneous shared operations, exclusive-versus-shared contention in both directions, lock release following a failed callback, and a silent legacy-only page continuing to write without the new lock.
 
+Browser-level coverage additionally checks that closing a preview tab while its cooperative shared-lock callback remains pending releases the browser lock, allows another tab to complete a *read-only* exclusive rehearsal, and leaves `taskpoints_v1` and authority unchanged. Closing a Playwright page is **not** equivalent to an operating-system kill of a physical Safari/PWA process; the latter remains a required manual validation.
+
 **Cutover remains prohibited.** Before a production lease can replace this prototype: audit and integrate every V1 writer with abort/fencing semantics, preserve urgent writes and crash-recovery behavior, verify an off-device rollback source, migrate all nonpilot collections, and run full physical Safari/PWA lifecycle testing. This test API must never be mistaken for production writer fencing.
