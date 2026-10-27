@@ -1572,3 +1572,98 @@ test('writer-lock rehearsal rejects a pending WAL before requesting exclusivity'
   assert.equal(app.wal.getPendingRows().rows[0].id,pending.mutationId);
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
 });
+
+test('explicit checkpoint captures full V1 namespace independently of V2 and verifies integrity',async()=>{
+  const app=install({initialState:{
+    ...legacyState(),
+    completions:[{id:'task:old',source:'task',points:3}]
+  }});
+  await app.runtime.startCoordinatedDarkMirror();
+  app.localStorage.setItem('taskpoints_habit_order_overlay_v1','{"h1":2}');
+  app.localStorage.setItem('taskpoints_v2_independent_mutation_sample','{"id":"old"}');
+  const source=app.localStorage.getItem(LEGACY_KEY);
+  const v2=structuredClone(app.indexedDB.dump(DB_NAME));
+  const checkpoint=await app.runtime.createPreviewRecoveryCheckpoint();
+  assert.equal(checkpoint.saved,true,JSON.stringify(checkpoint));
+  assert.equal(checkpoint.verified,true);
+  assert.equal(checkpoint.sourceStable,true);
+  assert.equal(checkpoint.canAutoRestore,false);
+  assert.equal(checkpoint.mutationAuthority,'legacy_only');
+  const recovery='taskpoints_v2_recovery_checkpoints_preview';
+  const record=app.indexedDB.dump(recovery)?.snapshots?.[0];
+  assert.ok(record);
+  assert.equal(record.id,checkpoint.checkpointId);
+  const captured=new Map(record.entries);
+  assert.equal(captured.get(LEGACY_KEY),source);
+  assert.equal(captured.get('taskpoints_habit_order_overlay_v1'),'{"h1":2}');
+  assert.equal(captured.get('taskpoints_v2_independent_mutation_sample'),'{"id":"old"}');
+  assert.equal(captured.get(GENERATION_KEY),app.generation.read());
+  const integrity=await app.runtime.inspectPreviewRecoveryCheckpoint(checkpoint.checkpointId);
+  assert.equal(integrity.intact,true,JSON.stringify(integrity));
+  assert.equal(integrity.canAutoRestore,false);
+  assert.equal(integrity.keyCount,record.entries.length);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),v2);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),source);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
+test('a previously saved checkpoint survives a second denied/quota checkpoint write',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const first=await app.runtime.createPreviewRecoveryCheckpoint();
+  assert.equal(first.saved,true,JSON.stringify(first));
+  const dbName='taskpoints_v2_recovery_checkpoints_preview';
+  const original=structuredClone(app.indexedDB.dump(dbName));
+  app.localStorage.setItem('taskpoints_custom_later_note','keep this latest');
+  app.indexedDB.failNext({store:'snapshots',operation:'add',
+    error:new Error('synthetic QuotaExceededError')});
+  const failed=await app.runtime.createPreviewRecoveryCheckpoint();
+  assert.equal(failed.saved,false);
+  assert.equal(failed.reason,'checkpoint_write_failed');
+  assert.deepEqual(app.indexedDB.dump(dbName),original);
+  assert.equal((await app.runtime.inspectPreviewRecoveryCheckpoint(first.checkpointId)).intact,true);
+  assert.equal(app.localStorage.getItem('taskpoints_custom_later_note'),'keep this latest');
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
+test('checkpoint inspection flags damaged data without returning private payloads or auto-repairing',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const made=await app.runtime.createPreviewRecoveryCheckpoint();
+  assert.equal(made.saved,true);
+  const db=await new Promise((resolve,reject)=>{
+    const req=app.indexedDB.open('taskpoints_v2_recovery_checkpoints_preview',1);
+    req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+  });
+  const original=structuredClone(app.indexedDB.dump(db.name).snapshots[0]);
+  const corrupted=structuredClone(original);
+  corrupted.entries[0][1]='tampered checkpoint byte';
+  const tx=db.transaction('snapshots','readwrite');
+  tx.objectStore('snapshots').put(corrupted);
+  await new Promise((resolve,reject)=>{
+    tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);tx.onerror=()=>reject(tx.error);
+  });
+  const verdict=await app.runtime.inspectPreviewRecoveryCheckpoint(made.checkpointId);
+  assert.equal(verdict.intact,false);
+  assert.equal(verdict.reason,'checkpoint_integrity_failed');
+  assert.equal(verdict.canAutoRestore,false);
+  assert.equal(Object.hasOwn(verdict,'entries'),false);
+  assert.equal(app.indexedDB.dump(db.name).snapshots[0].entries[0][1],'tampered checkpoint byte');
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
+test('checkpoint cannot be declared saved when V1 namespace enumeration is unreadable',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const get=app.localStorage.getItem.bind(app.localStorage);
+  app.localStorage.getItem=key=>{
+    if(String(key)===LEGACY_KEY) throw Error('synthetic denied key');
+    return get(key);
+  };
+  const result=await app.runtime.createPreviewRecoveryCheckpoint();
+  app.localStorage.getItem=get;
+  assert.equal(result.saved,false);
+  assert.equal(result.canAutoRestore,false);
+  assert.equal(app.indexedDB.dump('taskpoints_v2_recovery_checkpoints_preview'),null);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
