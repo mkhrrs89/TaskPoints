@@ -39,7 +39,7 @@ function delta(habitId = 'h1', dayKey = '2026-09-01') {
   };
 }
 
-function install({ initialState = legacyState(), initialStorage = {} } = {}) {
+function install({ initialState = legacyState(), initialStorage = {}, uuidNamespace = 'generation-test' } = {}) {
   const localStorage = new FakeStorage({
     [DARK]: '1',
     [LEGACY_KEY]: JSON.stringify(initialState),
@@ -91,7 +91,7 @@ function install({ initialState = legacyState(), initialStorage = {} } = {}) {
     console: { warn() {}, log() {}, error() {} },
     TextEncoder,
     crypto: {
-      randomUUID() { uuid += 1; return `generation-test-${uuid}`; },
+      randomUUID() { uuid += 1; return `${uuidNamespace}-${uuid}`; },
       subtle: {
         async digest(algorithm, bytes) {
           if (algorithm !== 'SHA-256') throw Error('unsupported hashing algorithm');
@@ -1625,7 +1625,7 @@ test('preview peer probe refuses unsupported channels and never creates authorit
 });
 
 test('preview peer challenge observes a participating tab but never equates replies with full writer coverage',async()=>{
-  const app=install(),other=install();
+  const app=install({uuidNamespace:'peer-a'}),other=install({uuidNamespace:'peer-b'});
   // Synthetic same-origin, same-generation MessageChannel network. No V1
   // save path or IndexedDB record is altered by either participant.
   const channels=new Set();
@@ -1669,7 +1669,7 @@ test('preview peer challenge observes a participating tab but never equates repl
 });
 
 test('preview peer challenge detects a responding tab without Web Locks',async()=>{
-  const app=install(),other=install();
+  const app=install({uuidNamespace:'peer-a'}),other=install({uuidNamespace:'peer-b'});
   const channels=new Set();
   class SimulatedBroadcastChannel{
     constructor(name){this.name=name;this.listeners=[];channels.add(this);}
