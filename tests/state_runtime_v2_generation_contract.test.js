@@ -1754,3 +1754,28 @@ test('checkpoint refuses lost legacy enumeration permission without opening a re
   assert.equal(app.indexedDB.dump('taskpoints_v2_recovery_checkpoints_preview'),null);
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
 });
+
+test('V1 changing during asynchronous checkpoint hashing is preserved and never marked a current recovery point',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const before=app.localStorage.getItem(LEGACY_KEY);
+  const newV1=JSON.stringify(legacyState('h1','External edit while checkpoint saves'));
+  const originalDigest=app.context.crypto.subtle.digest.bind(app.context.crypto.subtle);
+  let changed=0;
+  app.context.crypto.subtle.digest=async(type,bytes)=>{
+    if(changed++===0)app.localStorage.setItem(LEGACY_KEY,newV1);
+    return originalDigest(type,bytes);
+  };
+  const result=await app.runtime.createPreviewRecoveryCheckpoint();
+  app.context.crypto.subtle.digest=originalDigest;
+  assert.equal(result.saved,true,JSON.stringify(result));
+  assert.equal(result.verified,true);
+  assert.equal(result.sourceStable,false);
+  assert.equal(result.reason,'checkpoint_saved_but_source_changed');
+  const record=app.indexedDB.dump('taskpoints_v2_recovery_checkpoints_preview').snapshots[0];
+  assert.equal(new Map(record.entries).get(LEGACY_KEY),before,
+    'saved historical snapshot must retain its captured bytes without overwriting newer V1');
+  assert.equal((await app.runtime.inspectPreviewRecoveryCheckpoint(result.checkpointId)).intact,true);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),newV1);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
