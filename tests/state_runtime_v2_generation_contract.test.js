@@ -1452,6 +1452,59 @@ test('guarded V2 readiness rejects revision-signal read denial after asynchronou
   assert.equal((await app.runtime.inspectPilotReadiness()).eligible,true);
 });
 
+test('explicit parity forensics reports both matched and preserved mismatch without reseeding',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const originalV1=app.localStorage.getItem(LEGACY_KEY);
+  const originalMirror=structuredClone(app.indexedDB.dump(DB_NAME));
+  const matched=await app.runtime.inspectPreservedParityMismatch();
+  assert.equal(matched.checked,true);
+  assert.equal(matched.stable,true,JSON.stringify(matched));
+  assert.equal(matched.mismatch,false);
+  assert.equal(matched.reason,'pilot_parity_matched');
+  assert.equal(matched.canRepair,false);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),originalMirror);
+
+  // Simulate an unexplained V1-only write after the pilot was last verified.
+  app.localStorage.setItem(LEGACY_KEY,JSON.stringify(legacyState('h1','Independent newer V1 edit')));
+  const discrepantV1=app.localStorage.getItem(LEGACY_KEY);
+  const beforeInspection=structuredClone(app.indexedDB.dump(DB_NAME));
+  const report=await app.runtime.inspectPreservedParityMismatch();
+  assert.equal(report.checked,true);
+  assert.equal(report.stable,true,JSON.stringify(report));
+  assert.equal(report.mismatch,true);
+  assert.equal(report.canRepair,false);
+  assert.equal(report.evidencePreserved,true);
+  assert.equal(report.reason,'same_generation_parity_mismatch_preserved');
+  assert.equal(report.evidence.changedHabits,1);
+  assert.equal(report.evidence.destructiveReseedBlocked,true);
+  assert.equal(report.mutationAuthority,'legacy_only');
+  assert.equal(report.readAuthority,'legacy_only');
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),discrepantV1);
+  assert.notEqual(discrepantV1,originalV1);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),beforeInspection,
+    'forensics must not silently repair or overwrite either side');
+
+  app.localStorage.setItem(LEGACY_KEY,originalV1);
+  const recovered=await app.runtime.inspectPreservedParityMismatch();
+  assert.equal(recovered.stable,true);
+  assert.equal(recovered.mismatch,false);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),originalMirror);
+});
+
+test('parity forensics does not create V2 storage when no mirror was opened',async()=>{
+  const app=install();
+  const v1=app.localStorage.getItem(LEGACY_KEY);
+  const evidence=await app.runtime.inspectPreservedParityMismatch();
+  assert.equal(evidence.checked,true);
+  assert.equal(evidence.stable,false);
+  assert.equal(evidence.reason,'v2_not_open');
+  assert.equal(evidence.canRepair,false);
+  assert.equal(app.indexedDB.dump(DB_NAME),null);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),v1);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
 test('writer-lock rehearsal refuses unsupported browsers, stays nonauthoritative, and never writes state',async()=>{
   const app=install();
   await app.runtime.startCoordinatedDarkMirror();
