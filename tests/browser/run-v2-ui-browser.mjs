@@ -989,7 +989,15 @@ try{
     await page.locator('#titleInput').fill('Synthetic interleaved task');
     await page.locator('#pointsInput').fill('7');
     await page.locator('#addBtn').click();
+    // Saving a Task can schedule a follow-up Home render. Verify the Task's
+    // durable V1 write before changing tabs, so a still-pending task refresh
+    // cannot steal the SCWM navigation in this multi-domain scenario.
+    await page.waitForFunction(()=>window.TaskPointsCore.readTaskPointsStoredState()
+      .tasks.some(t=>String(t.title||'').toLowerCase()==='synthetic interleaved task'),
+      null,{timeout:15000});
     await page.locator('[data-home-tab="scwm"]').click({force:true});
+    await page.locator('#scoreV2Row .scoreV2-card[data-scorev2="sleep"]')
+      .waitFor({state:'visible',timeout:12000});
     await page.locator('#scoreV2Row .scoreV2-card[data-scorev2="sleep"]').click();
     await page.locator('#sleepEditModal').waitFor({state:'visible'});
     await page.locator('#sleepEditScoreInput').fill('91');
