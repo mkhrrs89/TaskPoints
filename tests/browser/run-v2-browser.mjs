@@ -552,6 +552,7 @@ try {
         authority:runtime.getStatus().readAuthority};
     },created.created.checkpointId);
     assert.equal(after.inspected.intact,true,JSON.stringify(after.inspected));
+    assert.equal(after.inspected.integrityCoverage,'metadata_and_payload');
     assert.match(after.inspected.fingerprint,/^sha256:[0-9a-f]{64}:\d+$/);
     assert.equal(after.rawV1,created.savedV1);
     assert.equal(after.fixtureNote,'preserved from before reload');
@@ -587,6 +588,43 @@ try {
     assert.equal(corrupted.authority,'legacy_only');
     return {independentSave:true,persistsAcrossReload:true,
       integritySha256:true,corruptionRejected:true,authority:'legacy_only'};
+  });
+
+  await run('checkpoint generation tampering is detected without restoring or erasing V1',async context=>{
+    const page=await open(context);
+    const proof=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const saved=await runtime.createPreviewRecoveryCheckpoint();
+      const rawV1=localStorage.getItem('taskpoints_v1');
+      const db=await new Promise((resolve,reject)=>{
+        const req=indexedDB.open('taskpoints_v2_recovery_checkpoints_preview',1);
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      const get=()=>new Promise((resolve,reject)=>{
+        const req=db.transaction('snapshots','readonly').objectStore('snapshots').get(saved.checkpointId);
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      const row=await get();
+      row.generation='forged-origin-generation';
+      const tx=db.transaction('snapshots','readwrite');
+      tx.objectStore('snapshots').put(row);
+      await new Promise((resolve,reject)=>{
+        tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+      });
+      db.close();
+      return {saved,verdict:await runtime.inspectPreviewRecoveryCheckpoint(saved.checkpointId),
+        plan:await runtime.inspectPreviewRollbackPlan(saved.checkpointId),
+        intactV1:localStorage.getItem('taskpoints_v1')===rawV1,
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(proof.saved.saved,true,JSON.stringify(proof.saved));
+    assert.equal(proof.verdict.intact,false);
+    assert.equal(proof.verdict.reason,'checkpoint_integrity_failed');
+    assert.equal(proof.plan.planValid,false);
+    assert.equal(proof.plan.canApply,false);
+    assert.equal(proof.intactV1,true);
+    assert.equal(proof.authority,'legacy_only');
+    return {generationTamperingDetected:true,zeroRestoreWrites:true};
   });
 
   await run('checkpoint rollback preview survives reload and reports differences without writing V1',async context=>{
