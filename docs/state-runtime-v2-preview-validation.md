@@ -469,4 +469,22 @@ visibility, or verify background OS/PWA termination. Safe future cutover
 still requires a transactional authority generation, complete writer
 coverage, recovery and real-device validation.
 
+### Forensic inspection WebKit retry discipline
+
+The read-only V1/V2 mismatch browser check now treats
+`inspection_window_changed` as a **correct fail-closed observation**, not
+as evidence of corruption or permission to reseed. After another tab changes
+or restores `taskpoints_v1`, the harness first waits for that exact raw
+value to become visible in the inspecting tab; if a transient inspection
+window changes during the asynchronous IndexedDB pass, it permits a small
+number of separately executed read-only attempts. Any other refusal is
+still a test failure. Every transient refusal must retain `canRepair:false`,
+`evidencePreserved:true`, and `legacy_only` authority; the successful
+inspection must prove the expected mismatch or match without modifying
+either V1 or the four V2 stores.
+
+This is a test-only synchronization improvement and does **not** weaken
+`inspectPreservedParityMismatch()`, cause an automatic retry inside the
+runtime, or certify cross-tab consistency in production.
+
 **Cutover remains prohibited.** Before a production lease can replace this prototype: audit and integrate every V1 writer with abort/fencing semantics, preserve urgent writes and crash-recovery behavior, verify an off-device rollback source, migrate all nonpilot collections, and run full physical Safari/PWA lifecycle testing. This test API must never be mistaken for production writer fencing.
