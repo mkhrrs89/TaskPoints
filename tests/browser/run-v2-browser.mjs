@@ -590,6 +590,109 @@ try {
       integritySha256:true,corruptionRejected:true,authority:'legacy_only'};
   });
 
+  await run('torn multi-key legacy capture is refused before writing an immutable checkpoint',async context=>{
+    const page=await open(context);
+    const evidence=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const key='taskpoints_preview_capture_race_note';
+      localStorage.setItem(key,'snapshot-before');
+      const originalV1=localStorage.getItem('taskpoints_v1');
+      const originalGet=Storage.prototype.getItem;
+      let injected=false;
+      Storage.prototype.getItem=function(name){
+        const value=originalGet.call(this,name);
+        // This key was already read into the capture before it changed.
+        // A single-pass snapshot would permanently preserve stale bytes.
+        if(this===localStorage&&name===key&&!injected){
+          injected=true;
+          localStorage.setItem(key,'snapshot-after');
+        }
+        return value;
+      };
+      let torn;
+      try{torn=await runtime.createPreviewRecoveryCheckpoint();}
+      finally{Storage.prototype.getItem=originalGet;}
+      const retry=await runtime.createPreviewRecoveryCheckpoint();
+      const db=await new Promise((resolve,reject)=>{
+        const req=indexedDB.open('taskpoints_v2_recovery_checkpoints_preview',1);
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      const records=await new Promise((resolve,reject)=>{
+        const req=db.transaction('snapshots','readonly').objectStore('snapshots').getAll();
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      db.close();
+      return {injected,torn,retry,recordCount:records.length,
+        capturedNote:new Map(records[0]?.entries||[]).get(key),
+        legacyUnchanged:localStorage.getItem('taskpoints_v1')===originalV1,
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(evidence.injected,true);
+    assert.equal(evidence.torn.saved,false);
+    assert.equal(evidence.torn.reason,'legacy_changed_during_capture');
+    assert.equal(evidence.retry.saved,true,JSON.stringify(evidence.retry));
+    assert.equal(evidence.retry.sourceStable,true);
+    assert.equal(evidence.recordCount,1,'no torn checkpoint should survive as a recovery source');
+    assert.equal(evidence.capturedNote,'snapshot-after');
+    assert.equal(evidence.legacyUnchanged,true);
+    assert.equal(evidence.authority,'legacy_only');
+    return {tornInventoryRejected:true,noBadRecoveryCopy:true,
+      stableRetrySucceeded:true,legacyUntouched:true};
+  });
+
+  await run('second-tab edit during SHA-256 capture rejects stale recovery copy',async context=>{
+    const writer=await open(context);
+    const rival=await open(context);
+    const initial=await writer.evaluate(()=>{
+      localStorage.setItem('taskpoints_preview_cross_tab_capture','before');
+      return localStorage.getItem('taskpoints_v1');
+    });
+    const pending=writer.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const originalDigest=SubtleCrypto.prototype.digest;
+      let held=false;
+      SubtleCrypto.prototype.digest=function(){
+        if(!held){
+          held=true;
+          localStorage.setItem('v2_browser_checkpoint_digest_paused','yes');
+          return new Promise((resolve,reject)=>{
+            window.__releaseCheckpointDigest=()=>{
+              Promise.resolve(originalDigest.apply(this,arguments)).then(resolve,reject);
+            };
+          });
+        }
+        return originalDigest.apply(this,arguments);
+      };
+      try{return await runtime.createPreviewRecoveryCheckpoint();}
+      finally{
+        SubtleCrypto.prototype.digest=originalDigest;
+        window.__releaseCheckpointDigest=null;
+      }
+    });
+    await rival.waitForFunction(()=>
+      localStorage.getItem('v2_browser_checkpoint_digest_paused')==='yes',
+      null,{timeout:12000});
+    await rival.evaluate(()=>
+      localStorage.setItem('taskpoints_preview_cross_tab_capture','written-by-rival'));
+    await writer.evaluate(()=>window.__releaseCheckpointDigest());
+    const rejected=await pending;
+    assert.equal(rejected.saved,false,JSON.stringify(rejected));
+    assert.equal(rejected.reason,'legacy_changed_during_capture');
+    const after=await writer.evaluate(async()=>{
+      const saved=await window.TaskPointsStateRuntimeV2.createPreviewRecoveryCheckpoint();
+      return {saved,current:localStorage.getItem('taskpoints_preview_cross_tab_capture'),
+        legacy:localStorage.getItem('taskpoints_v1'),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(after.saved.saved,true,JSON.stringify(after.saved));
+    assert.equal(after.saved.sourceStable,true);
+    assert.equal(after.current,'written-by-rival');
+    assert.equal(after.legacy,initial);
+    assert.equal(after.authority,'legacy_only');
+    return {crossTabMutationDetected:true,staleCheckpointRefused:true,
+      cleanRetrySaved:true,legacyUntouched:true};
+  });
+
   await run('checkpoint generation tampering is detected without restoring or erasing V1',async context=>{
     const page=await open(context);
     const proof=await page.evaluate(async()=>{
