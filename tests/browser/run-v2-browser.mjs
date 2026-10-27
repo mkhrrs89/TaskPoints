@@ -642,6 +642,64 @@ try {
       v1Unchanged:true,authorityUnchanged:true,physicalPwaKillStillRequired:true};
   });
 
+  await run('cooperative lease rejects a generation change while callback is pending',async context=>{
+    const writer=await open(context),resetTab=await open(context);
+    const supported=await writer.evaluate(()=>
+      typeof navigator.locks?.request==='function');
+    if(!supported){
+      const denied=await writer.evaluate(()=>
+        window.TaskPointsStateRuntimeV2.exercisePreviewCooperativeWriterLease(()=>{}));
+      assert.equal(denied.reason,'lock_manager_unavailable');
+      assert.equal(denied.canPromote,false);
+      return {unsupportedFailClosed:true};
+    }
+    const originalV1=await resetTab.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const pending=writer.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.exercisePreviewCooperativeWriterLease(async()=>{
+        localStorage.setItem('v2_cooperative_generation_race_held','ready');
+        await new Promise(resolve=>window.__releaseGenerationRaceWriter=resolve);
+      }));
+    await resetTab.waitForFunction(()=>
+      localStorage.getItem('v2_cooperative_generation_race_held')==='ready',
+      null,{timeout:12000});
+    // Synthetic generation rotation: this is NOT an app Reset All or import.
+    // It models a different tab changing the persistent generation while
+    // the existing preview-only writer callback is suspended.
+    const rotated=await resetTab.evaluate(()=>{
+      const key='taskpoints_state_v2_generation_v1';
+      const before=localStorage.getItem(key);
+      const after='v2-browser-rotation-fixture:'+crypto.randomUUID();
+      localStorage.setItem(key,after);
+      return {before,after};
+    });
+    assert.notEqual(rotated.before,rotated.after);
+    await writer.evaluate(()=>window.__releaseGenerationRaceWriter());
+    const refused=await pending;
+    assert.equal(refused.reason,'generation_or_preview_changed_under_lock',
+      JSON.stringify(refused));
+    assert.equal(refused.sharedLockAcquired,true);
+    assert.equal(refused.operationRan,true);
+    assert.equal(refused.lockHeldAfterReturn,false);
+    assert.equal(refused.canPromote,false);
+    assert.equal(refused.productionWritersFenced,false);
+    assert.equal(refused.allLegacyWritersKnown,false);
+    assert.equal(refused.mutationAuthority,'legacy_only');
+    // The shared lease must be released even when the generation changed.
+    // This direct lock probe is fixture-only; it never claims authority.
+    const free=await resetTab.evaluate(()=>
+      navigator.locks.request('taskpoints_v2_writer_handoff_rehearsal_v1',
+        {mode:'exclusive',ifAvailable:true},lock=>Boolean(lock)));
+    assert.equal(free,true);
+    const final=await resetTab.evaluate(()=>({
+      v1:localStorage.getItem('taskpoints_v1'),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    assert.equal(final.v1,originalV1);
+    assert.equal(final.authority,'legacy_only');
+    return {generationRaceRejected:true,sharedLockReleased:true,
+      v1Unchanged:true,noAuthorityChange:true,physicalPwaTestStillRequired:true};
+  });
+
   await run('exclusive rehearsal blocks a new cooperative writer and releases after callback failure',async context=>{
     const first=await open(context),second=await open(context);
     const supported=await first.evaluate(()=>
