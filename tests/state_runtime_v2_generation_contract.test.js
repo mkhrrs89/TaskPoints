@@ -1780,3 +1780,70 @@ test('V1 changing during asynchronous checkpoint hashing is preserved and never 
   assert.equal(app.localStorage.getItem(LEGACY_KEY),newV1);
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
 });
+
+test('preview-only rollback plan reports changed, removed, and new V1 keys without restoring them',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  app.localStorage.setItem('taskpoints_old_custom_note','older');
+  app.localStorage.setItem('taskpoints_deleted_note','included in checkpoint');
+  const first=await app.runtime.createPreviewRecoveryCheckpoint();
+  assert.equal(first.saved,true,JSON.stringify(first));
+  app.localStorage.setItem('taskpoints_old_custom_note','newer');
+  app.localStorage.removeItem('taskpoints_deleted_note');
+  app.localStorage.setItem('taskpoints_extra_note','retain current');
+  const before=Array.from(app.localStorage.rows.entries());
+  const backup=structuredClone(app.indexedDB.dump('taskpoints_v2_recovery_checkpoints_preview'));
+  const mirror=structuredClone(app.indexedDB.dump(DB_NAME));
+  const plan=await app.runtime.inspectPreviewRollbackPlan(first.checkpointId);
+  assert.equal(plan.planValid,true,JSON.stringify(plan));
+  assert.equal(plan.canApply,false);
+  assert.equal(plan.reason,'dry_run_only');
+  assert.equal(plan.generationMatches,true);
+  assert.equal(plan.counts.restoreMissing,1);
+  assert.equal(plan.counts.removeNewer,1);
+  assert.equal(plan.counts.replaceChanged,1);
+  assert.ok(plan.blockers.includes('external_checkpoint_backup_unverified'));
+  assert.ok(!Object.hasOwn(plan,'entries'));
+  assert.equal(plan.mutationAuthority,'legacy_only');
+  assert.equal(plan.readAuthority,'legacy_only');
+  assert.deepEqual(Array.from(app.localStorage.rows.entries()),before);
+  assert.deepEqual(app.indexedDB.dump('taskpoints_v2_recovery_checkpoints_preview'),backup);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),mirror);
+});
+
+test('rollback plan refuses an invalid checkpoint and a different generation without performing restore',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const first=await app.runtime.createPreviewRecoveryCheckpoint();
+  assert.equal(first.saved,true);
+  assert.equal((await app.runtime.inspectPreviewRollbackPlan('missing')).planValid,false);
+  const generation=app.generation.read();
+  app.localStorage.setItem(GENERATION_KEY,'simulated-import-replacement');
+  const noRestore=await app.runtime.inspectPreviewRollbackPlan(first.checkpointId);
+  assert.equal(noRestore.planValid,true,JSON.stringify(noRestore));
+  assert.equal(noRestore.generationMatches,false);
+  assert.equal(noRestore.canApply,false);
+  assert.equal(noRestore.reason,'checkpoint_generation_differs');
+  assert.equal(app.localStorage.getItem(GENERATION_KEY),'simulated-import-replacement');
+  app.localStorage.setItem(GENERATION_KEY,generation);
+  assert.equal((await app.runtime.inspectPreviewRollbackPlan(first.checkpointId)).reason,'dry_run_only');
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
+test('rollback dry run refuses storage read denial without exposing snapshot records',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const first=await app.runtime.createPreviewRecoveryCheckpoint();
+  assert.equal(first.saved,true);
+  const originalGet=app.localStorage.getItem.bind(app.localStorage);
+  app.localStorage.getItem=key=>{
+    if(String(key)==='taskpoints_v1')throw Error('synthetic locked V1');
+    return originalGet(key);
+  };
+  const blocked=await app.runtime.inspectPreviewRollbackPlan(first.checkpointId);
+  app.localStorage.getItem=originalGet;
+  assert.equal(blocked.planValid,false);
+  assert.equal(blocked.canApply,false);
+  assert.equal(Object.hasOwn(blocked,'entries'),false);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
