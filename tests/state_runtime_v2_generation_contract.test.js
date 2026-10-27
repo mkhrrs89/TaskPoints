@@ -1608,6 +1608,90 @@ test('parity forensics rejects a preview opt-out during the mirror scan',async()
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
 });
 
+test('preview peer probe refuses unsupported channels and never creates authority',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const original=app.localStorage.getItem(LEGACY_KEY);
+  const mirrored=structuredClone(app.indexedDB.dump(DB_NAME));
+  const report=await app.runtime.inspectPreviewWriterPeers();
+  assert.equal(report.reason,'coordination_channel_unavailable');
+  assert.equal(report.observedPeerCount,0);
+  assert.equal(report.allLegacyWritersKnown,false);
+  assert.equal(report.productionWritersFenced,false);
+  assert.equal(report.canPromote,false);
+  assert.equal(report.mutationAuthority,'legacy_only');
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),original);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),mirrored);
+});
+
+test('preview peer challenge observes a participating tab but never equates replies with full writer coverage',async()=>{
+  const app=install(),other=install();
+  // Synthetic same-origin, same-generation MessageChannel network. No V1
+  // save path or IndexedDB record is altered by either participant.
+  const channels=new Set();
+  class SimulatedBroadcastChannel {
+    constructor(name){this.name=name;this.listeners=[];channels.add(this);}
+    addEventListener(type,handler){if(type==='message')this.listeners.push(handler);}
+    postMessage(data){
+      for(const peer of channels){
+        if(peer===this || peer.name!==this.name)continue;
+        queueMicrotask(()=>peer.listeners.forEach(fn=>fn({data})));
+      }
+    }
+    close(){channels.delete(this);}
+  }
+  for(const a of [app,other]){
+    a.context.BroadcastChannel=SimulatedBroadcastChannel;
+    a.context.navigator={locks:{request:async()=>null}};
+  }
+  await app.runtime.startCoordinatedDarkMirror();
+  other.localStorage.setItem(GENERATION_KEY,app.generation.read());
+  await other.runtime.startCoordinatedDarkMirror();
+  const original1=app.localStorage.getItem(LEGACY_KEY);
+  const original2=other.localStorage.getItem(LEGACY_KEY);
+  const v2Before=structuredClone(app.indexedDB.dump(DB_NAME));
+  const observed=await app.runtime.inspectPreviewWriterPeers();
+  assert.equal(observed.reason,'observational_probe_only',JSON.stringify(observed));
+  assert.equal(observed.observedPeerCount,1);
+  assert.equal(observed.peers[0].previewEnabled,true);
+  assert.equal(observed.peers[0].sameGeneration,true);
+  assert.equal(observed.peers[0].webLocksSupported,true);
+  assert.equal(observed.allLegacyWritersKnown,false);
+  assert.equal(observed.productionWritersFenced,false);
+  assert.equal(observed.canPromote,false);
+  assert.equal(observed.mutationAuthority,'legacy_only');
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),original1);
+  assert.equal(other.localStorage.getItem(LEGACY_KEY),original2);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),v2Before);
+  const observedReverse=await other.runtime.inspectPreviewWriterPeers();
+  assert.equal(observedReverse.observedPeerCount,1,JSON.stringify(observedReverse));
+  assert.equal(observedReverse.canPromote,false);
+});
+
+test('preview peer challenge detects a responding tab without Web Locks',async()=>{
+  const app=install(),other=install();
+  const channels=new Set();
+  class SimulatedBroadcastChannel{
+    constructor(name){this.name=name;this.listeners=[];channels.add(this);}
+    addEventListener(type,handler){if(type==='message')this.listeners.push(handler);}
+    postMessage(data){for(const peer of channels)if(peer!==this&&peer.name===this.name)
+      queueMicrotask(()=>peer.listeners.forEach(fn=>fn({data})));}
+    close(){channels.delete(this);}
+  }
+  app.context.BroadcastChannel=SimulatedBroadcastChannel;
+  other.context.BroadcastChannel=SimulatedBroadcastChannel;
+  app.context.navigator={locks:{request:async()=>null}};
+  await app.runtime.startCoordinatedDarkMirror();
+  other.localStorage.setItem(GENERATION_KEY,app.generation.read());
+  await other.runtime.startCoordinatedDarkMirror();
+  const report=await app.runtime.inspectPreviewWriterPeers();
+  assert.equal(report.observedPeerCount,1);
+  assert.equal(report.peers[0].webLocksSupported,false);
+  assert.equal(report.reason,'observed_peer_not_ready');
+  assert.equal(report.allLegacyWritersKnown,false);
+  assert.equal(report.canPromote,false);
+});
+
 test('writer-lock rehearsal refuses unsupported browsers, stays nonauthoritative, and never writes state',async()=>{
   const app=install();
   await app.runtime.startCoordinatedDarkMirror();
