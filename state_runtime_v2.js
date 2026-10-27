@@ -3555,13 +3555,24 @@
       const generation = currentGeneration({ create: false });
       if (!generation || generation !== source.generation)
         return fail('generation_changed_before_capture');
+      // localStorage has no multi-key read transaction. A competing tab
+      // may modify an earlier key while this snapshot enumerates later keys.
+      // Re-read the entire namespace and recheck the legacy journals/WAL
+      // before persisting a checkpoint that could be torn across versions.
+      // An inconsistent attempt must not become an immutable recovery copy.
+      const capturedPayloadFingerprint = await previewRecoveryFingerprint(entries);
+      if (await previewRecoveryFingerprint(captureLegacyNamespace())
+          !== capturedPayloadFingerprint)
+        return fail('legacy_changed_during_capture');
+      const captureSource = await inspectLegacyRollbackSource();
+      if (!captureSource.sourceStable || captureSource.generation !== generation)
+        return fail('legacy_source_changed_during_capture');
       const id = `v1-preview:${global.crypto?.randomUUID?.() || `${Date.now()}:${Math.random().toString(36).slice(2)}`}`;
       const record = {
         id, schemaVersion: PREVIEW_RECOVERY_SCHEMA,
         integrityVersion: 2,
         capturedAtISO: nowIso(), generation, entries
       };
-      const capturedPayloadFingerprint = await previewRecoveryFingerprint(entries);
       record.fingerprint = await previewRecoveryFingerprint(previewRecoveryDigestPayload(record));
       db = await openPreviewRecoveryDb();
       const tx = db.transaction(PREVIEW_RECOVERY_STORE, 'readwrite');
