@@ -737,6 +737,95 @@ try {
       allFourV2StoresPreserved:true,legacyRestorationNotAutomatic:true};
   });
 
+  await run('cross-tab V2-only IndexedDB write during forensic read is refused without overwriting either side',async context=>{
+    const observer=await open(context),rival=await open(context);
+    const original=await observer.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const pending=observer.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const oldGetAll=IDBObjectStore.prototype.getAll;
+      let intercepted=false;
+      IDBObjectStore.prototype.getAll=function(){
+        const req=oldGetAll.apply(this,arguments);
+        if(!intercepted && this.name==='habits'){
+          intercepted=true;
+          // Pause the first V2 Habits read after the IDB request succeeds.
+          // The request's original result has already been captured; a
+          // separate tab can now write a newer value before the inspector's
+          // second read, without changing the V2 revision marker.
+          Object.defineProperty(req,'onsuccess',{
+            configurable:true,
+            set(callback){
+              req.addEventListener('success',event=>{
+                localStorage.setItem('v2_forensics_first_read_held','yes');
+                window.__resumeV2Forensics=()=>callback(event);
+              },{once:true});
+            }
+          });
+        }
+        return req;
+      };
+      try{return await runtime.inspectPreservedParityMismatch();}
+      finally{
+        IDBObjectStore.prototype.getAll=oldGetAll;
+        delete window.__resumeV2Forensics;
+      }
+    });
+    await rival.waitForFunction(()=>
+      localStorage.getItem('v2_forensics_first_read_held')==='yes',
+      null,{timeout:12000});
+    const foreign=await rival.evaluate(async()=>{
+      const db=await window.TaskPointsStateRuntimeV2.open();
+      const oldMeta=await new Promise((resolve,reject)=>{
+        const req=db.transaction('meta','readonly').objectStore('meta').get('runtime');
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      const tx=db.transaction('habits','readwrite');
+      const store=tx.objectStore('habits');
+      const row=await new Promise((resolve,reject)=>{
+        const req=store.get('h1');req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      store.put({...row,value:{...row.value,name:'Independent V2 forensic race'}});
+      await new Promise((resolve,reject)=>{
+        tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+      });
+      return {oldRevision:oldMeta.revision,changedHabit:'h1'};
+    });
+    await observer.evaluate(()=>window.__resumeV2Forensics());
+    const refused=await pending;
+    assert.equal(refused.stable,false,JSON.stringify(refused));
+    assert.equal(refused.mismatch,null);
+    assert.equal(refused.reason,'v2_collections_changed_during_inspection');
+    assert.equal(refused.canRepair,false);
+    assert.equal(refused.mutationAuthority,'legacy_only');
+    const after=await observer.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const report=await runtime.inspectPreservedParityMismatch();
+      const db=await runtime.open();
+      const row=await new Promise((resolve,reject)=>{
+        const req=db.transaction('habits','readonly').objectStore('habits').get('h1');
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      const meta=await new Promise((resolve,reject)=>{
+        const req=db.transaction('meta','readonly').objectStore('meta').get('runtime');
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      return {report,habitName:row.value.name,revision:meta.revision,
+        legacy:localStorage.getItem('taskpoints_v1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(after.report.stable,true,JSON.stringify(after.report));
+    assert.equal(after.report.mismatch,true);
+    assert.equal(after.report.evidence.changedHabits,1);
+    assert.equal(after.report.canRepair,false);
+    assert.equal(after.habitName,'Independent V2 forensic race');
+    assert.equal(after.revision,foreign.oldRevision,
+      'an independent store edit with no meta revision must still be caught');
+    assert.equal(after.legacy,original);
+    assert.equal(after.authority,'legacy_only');
+    return {independentIndexedDbMutationDetected:true,revisionBypassRejected:true,
+      v2EvidencePreserved:true,v1Unchanged:true,authority:'legacy_only'};
+  });
+
   await run('independent immutable SHA-256 checkpoint survives reload and detects tampering without restore',async context=>{
     const page=await open(context);
     const created=await page.evaluate(async()=>{
