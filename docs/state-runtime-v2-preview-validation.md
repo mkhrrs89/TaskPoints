@@ -344,4 +344,22 @@ Node contracts test callback rejection, absent Web Locks, preview-host restricti
 
 Browser-level coverage additionally checks that closing a preview tab while its cooperative shared-lock callback remains pending releases the browser lock, allows another tab to complete a *read-only* exclusive rehearsal, and leaves `taskpoints_v1` and authority unchanged. Closing a Playwright page is **not** equivalent to an operating-system kill of a physical Safari/PWA process; the latter remains a required manual validation.
 
+### Legacy writer inventory: initial CI guard
+
+The V2-only `tests/state_runtime_v2_legacy_writer_inventory_contract.test.js` now scans top-level JavaScript/HTML for direct browser-storage writes and core save/replacement calls. The V2 Contracts workflow hard-gates the following verified legacy write surfaces:
+
+| Source | Existing mutation surface | Handoff implication |
+| --- | --- | --- |
+| `scoring_core.js` | Habit-delta journal, snapshot and replacement writes | Core wrappers alone do not establish global exclusivity |
+| `index.html` | Home snapshot saves, explicit storage removal, Notes and other direct keys | Normal foreground Home writers must be fenced |
+| `today.html` | Snapshot updates from Today | Separate page context may write independently |
+| `settings.html` | Imports, snapshot replacement and direct key writes | Reset/import must rotate generation under a real fence |
+| `notes.html` | Direct Notes contents, dirty/authority keys | Separate Notes authority is not captured by a Habit-only lock |
+| `emergency_recovery.html` | Recovery holds, restored snapshots and journal removal | Urgent rollback/recovery must retain safe operation |
+| `task_mutation_journal.js` | Journal write, delete and snapshot-compaction wrappers | Deferred writer must not bypass a future handoff |
+
+The contract also ensures the developer-only shared-lock rehearsal remains preview-host-gated, does not claim complete writer coverage or promotion authority, and is not silently wired into ordinary legacy pages. These tests are intentionally *pre-cutover* guardrails, not authorization to enable V2 storage authority.
+
+**Scope limitation:** This is a line-oriented candidate-source audit, not an exhaustive JavaScript alias/control-flow analysis and not a runtime survey of all tabs. It can miss indirect writers, generated code, stale already-open pages, writes in nested scripts, and OS/PWA lifecycle races. Future work must inventory these cases, integrate a real cross-tab writer fence at every authoritative mutation entry, and test rollover, error, abort, pending journals, imports, and off-device rollback. No source-scan success can set `allLegacyWritersKnown` or `productionWritersFenced` to true.
+
 **Cutover remains prohibited.** Before a production lease can replace this prototype: audit and integrate every V1 writer with abort/fencing semantics, preserve urgent writes and crash-recovery behavior, verify an off-device rollback source, migrate all nonpilot collections, and run full physical Safari/PWA lifecycle testing. This test API must never be mistaken for production writer fencing.
