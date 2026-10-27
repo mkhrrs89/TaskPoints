@@ -314,3 +314,12 @@ Legacy preview checkpoint records with payload-only SHA-256 remain inspectable w
 `inspectPreviewRollbackPlan()` now refuses these historical records with `checkpoint_provenance_unverified`. Modern `integrityCoverage: 'metadata_and_payload'` records remain eligible for **read-only** diff rehearsal. Neither format can be automatically applied or promoted as the live storage authority. Node contracts and Chromium/WebKit regression tests verify old-record preservation, provenance refusal and unchanged V1.
 
 This is an explicit safety boundary, not a migration that erases older recovery evidence; actual external backup and writer-fenced restoration remain separate cutover prerequisites.
+
+
+## October 27 — Preview-only participating-tab writer discovery
+
+V2 now exposes `inspectPreviewWriterPeers()` to perform a short, voluntary BroadcastChannel challenge across other **currently responsive V2-preview tabs**. Its passive responder is installed only when the V2 dark mirror is enabled; no live V1 save path is wrapped or paused. A probe collects only whether each responding tab has preview enabled, shares the same generation, and supports browser Web Locks. It never copies Habit rows, application state, or recovery payloads into a cross-tab message, and it never writes localStorage.
+
+The report deliberately includes `allLegacyWritersKnown:false`, `productionWritersFenced:false`, and `canPromote:false` **in every outcome**, including when all observed peers responded and Web Locks are supported. An unresponsive, background-suspended, pre-V2, or legacy-only tab can still write without ever answering the challenge. Receiving zero answers never proves there are no other tabs. Absent BroadcastChannel support or a changed generation/preview mode gives a nonpromotable failure/limited result.
+
+Node contracts simulate participating peers (including one without Web Locks) and verify no storage modifications. Actual Chromium/WebKit browser checks use two V2-preview tabs plus a third legacy-only page which writes an unrelated V1 key without responding; the report still refuses to certify complete writer coverage. This is protocol scaffolding, **not a production handoff**. A future stage must gate *all* V1 mutation entry points on a real cross-tab writer lease and test stale tokens, suspended tabs, imports, WAL, compaction, and crash recovery before any authority switch.
