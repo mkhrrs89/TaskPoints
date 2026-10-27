@@ -27,6 +27,10 @@ class FakeStorage {
   removeItem(key) {
     this.rows.delete(String(key));
   }
+
+  get length() { return this.rows.size; }
+
+  key(index) { return Array.from(this.rows.keys())[index] ?? null; }
 }
 
 class FakeRequest {
