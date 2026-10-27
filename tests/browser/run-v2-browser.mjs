@@ -514,6 +514,133 @@ try {
       v1Unchanged:true,noAuthorityPromotion:true};
   });
 
+  await run('explicit serialized lease protects a real V1 snapshot save against participating peers',async context=>{
+    const writer=await open(context),peer=await open(context);
+    const legacy=await context.newPage();
+    await legacy.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const supported=await writer.evaluate(()=>typeof navigator.locks?.request==='function');
+    if(!supported){
+      const refused=await writer.evaluate(()=>
+        window.TaskPointsStateRuntimeV2.exercisePreviewSerializedSnapshotLease(()=>{}));
+      assert.equal(refused.reason,'lock_manager_unavailable');
+      assert.equal(refused.canPromote,false);
+      return {unsupportedFailClosed:true};
+    }
+    const initial=await peer.evaluate(()=>window.V2BrowserFixture.rawLegacy());
+    assert.equal(initial.tasks.length,1);
+    assert.equal(initial.completions.length,1);
+    const pending=writer.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.exercisePreviewSerializedSnapshotLease(async guard=>{
+        localStorage.setItem('v2_serialized_snapshot_holder_ready','ready');
+        await new Promise(resolve=>{window.__releaseV2SnapshotWriter=resolve;});
+        // Read the latest legacy snapshot *inside* the exclusive lock.
+        // Existing synchronous save behavior and safety wrappers are reused.
+        const core=window.TaskPointsCore;
+        const candidate=window.V2BrowserFixture.rawLegacy();
+        candidate.tasks.push({id:'v2-serialized-fixture-task',title:'Serialized fixture task'});
+        guard.assertPreviewGenerationCurrent();
+        const result=core.saveStateSnapshot(candidate,{
+          storageKey:core.STORAGE_KEY,immediateWrite:true,userInitiated:true,
+          savePath:'v2-explicit-serialized-fixture'
+        });
+        if(result?.skipped || result?.blocked || result?.saved===false)
+          throw Error('synthetic_snapshot_save_rejected');
+        const saved=window.V2BrowserFixture.rawLegacy();
+        if(!saved.tasks.some(task=>task.id==='v2-serialized-fixture-task'))
+          throw Error('synthetic_snapshot_save_not_durable');
+      }));
+    await peer.waitForFunction(()=>
+      localStorage.getItem('v2_serialized_snapshot_holder_ready')==='ready',
+      null,{timeout:12000});
+    const busyShared=await peer.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.exercisePreviewCooperativeWriterLease(()=>{}));
+    const busyExclusive=await peer.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.exercisePreviewSerializedSnapshotLease(()=>{}));
+    assert.equal(busyShared.reason,'lock_held_elsewhere');
+    assert.equal(busyShared.operationRan,false);
+    assert.equal(busyExclusive.reason,'lock_held_elsewhere');
+    assert.equal(busyExclusive.operationRan,false);
+    // Existing uncooperative pages are not fenced by this prototype.
+    await legacy.evaluate(()=>
+      localStorage.setItem('tp_projects_v1','legacy-only-unfenced-project-update'));
+    await writer.evaluate(()=>window.__releaseV2SnapshotWriter());
+    const completed=await pending;
+    assert.equal(completed.reason,'serialized_snapshot_rehearsed',JSON.stringify(completed));
+    assert.equal(completed.exclusiveLockAcquired,true);
+    assert.equal(completed.operationRan,true);
+    assert.equal(completed.lockHeldAfterReturn,false);
+    assert.equal(completed.canPromote,false);
+    assert.equal(completed.productionWritersFenced,false);
+    assert.equal(completed.allLegacyWritersKnown,false);
+    const after=await peer.evaluate(()=>({
+      state:window.V2BrowserFixture.rawLegacy(),
+      project:localStorage.getItem('tp_projects_v1'),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    assert.equal(after.state.tasks.length,2);
+    assert.equal(after.state.tasks[0].id,initial.tasks[0].id);
+    assert.ok(after.state.tasks.some(task=>task.id==='v2-serialized-fixture-task'));
+    assert.equal(after.state.completions.length,initial.completions.length);
+    assert.equal(after.state.completions[0].id,initial.completions[0].id);
+    assert.equal(after.project,'legacy-only-unfenced-project-update');
+    assert.equal(after.authority,'legacy_only');
+    return {realSnapshotSavePersisted:true,originalTaskAndCompletionKept:true,
+      sharedAndExclusivePeersBlocked:true,unfencedLegacyPageStillWrites:true,
+      noAuthorityChange:true};
+  });
+
+  await run('serialized legacy snapshot rehearsal aborts before V1 write after cross-tab generation rotation',async context=>{
+    const writer=await open(context),other=await open(context);
+    const supported=await writer.evaluate(()=>typeof navigator.locks?.request==='function');
+    if(!supported){
+      const denied=await writer.evaluate(()=>
+        window.TaskPointsStateRuntimeV2.exercisePreviewSerializedSnapshotLease(()=>{}));
+      assert.equal(denied.reason,'lock_manager_unavailable');
+      return {unsupportedFailClosed:true};
+    }
+    const original=await other.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const pending=writer.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.exercisePreviewSerializedSnapshotLease(async guard=>{
+        localStorage.setItem('v2_serialized_generation_holder_ready','ready');
+        await new Promise(resolve=>{window.__releaseV2SerializedGeneration=resolve;});
+        const core=window.TaskPointsCore;
+        const candidate=window.V2BrowserFixture.rawLegacy();
+        candidate.tasks.push({id:'stale-serialized-fixture-task',title:'Must not persist'});
+        guard.assertPreviewGenerationCurrent();
+        core.saveStateSnapshot(candidate,{
+          storageKey:core.STORAGE_KEY,immediateWrite:true,userInitiated:true,
+          savePath:'v2-stale-serialized-fixture'
+        });
+      }));
+    await other.waitForFunction(()=>
+      localStorage.getItem('v2_serialized_generation_holder_ready')==='ready',
+      null,{timeout:12000});
+    await other.evaluate(()=>localStorage.setItem('taskpoints_state_v2_generation_v1',
+      'v2-serialized-generation-change:'+crypto.randomUUID()));
+    await writer.evaluate(()=>window.__releaseV2SerializedGeneration());
+    const blocked=await pending;
+    assert.equal(blocked.reason,'serialized_operation_generation_invalidated',
+      JSON.stringify(blocked));
+    assert.equal(blocked.exclusiveLockAcquired,true);
+    assert.equal(blocked.operationRan,true);
+    assert.equal(blocked.lockHeldAfterReturn,false);
+    assert.equal(blocked.canPromote,false);
+    assert.equal(blocked.productionWritersFenced,false);
+    const after=await other.evaluate(async()=>({
+      raw:localStorage.getItem('taskpoints_v1'),
+      released:await navigator.locks.request(
+        'taskpoints_v2_writer_handoff_rehearsal_v1',
+        {mode:'exclusive',ifAvailable:true},lock=>Boolean(lock)),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    assert.equal(after.raw,original);
+    assert.equal(after.released,true);
+    assert.equal(after.authority,'legacy_only');
+    return {staleSnapshotNotWritten:true,exclusiveLockReleased:true,
+      legacyStateByteIdentical:true,noAuthorityChange:true};
+  });
+
   await run('cooperative shared writer locks coexist and block exclusive handoff while legacy tabs remain unfenced',async context=>{
     const first=await open(context),second=await open(context);
     const silent=await context.newPage();
