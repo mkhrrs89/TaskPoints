@@ -573,7 +573,7 @@ try {
         authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
     });
     assert.equal(after.proof.lockAcquired,true,JSON.stringify(after.proof));
-    assert.equal(proof.canPromote,false);
+    assert.equal(after.proof.canPromote,false);
     assert.equal(after.v1,original);
     assert.equal(after.one,'committed');
     assert.equal(after.two,'committed');
@@ -633,7 +633,7 @@ try {
       authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
     }));
     assert.equal(proof.lockHeldAfterReturn,false);
-    assert.equal(after.proof.canPromote,false);
+    assert.equal(proof.canPromote,false);
     assert.equal(proof.mutationAuthority,'legacy_only');
     assert.equal(proof.readAuthority,'legacy_only');
     assert.equal(after.v1,originalV1);
