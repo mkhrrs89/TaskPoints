@@ -74,3 +74,14 @@ test('Saving a normal task edit retains existing historical Skills data', () => 
   assert.deepEqual(task.skills, [{ skill: 'Sketching', pts: '5' }]);
   assert.ok(persisted && rendered, 'Normal save and render still run');
 });
+
+
+test('Older Home editor shells also hide Skills controls without discarding their values', () => {
+  const bootstrap = fs.readFileSync(path.join(__dirname, '..', 'home_indexeddb_bootstrap.js'), 'utf8');
+  const fallback = bootstrap.match(/\/\* Cached older Home editors[\s\S]*?\*\/[\s\S]*?\}/);
+  assert.ok(fallback, 'Expected retired Skills fallback for previously cached inline editors');
+  assert.match(fallback[0], /\.task-priority-card div:has\(> label \+ div \[data-task-skills-rows\]\)/);
+  assert.match(fallback[0], /display:\s*none\s*!important/);
+  assert.doesNotMatch(fallback[0], /\.remove\s*\(|replaceChildren|\.value\s*=/,
+    'Fallback must be purely presentational to preserve older editor save behavior');
+});
