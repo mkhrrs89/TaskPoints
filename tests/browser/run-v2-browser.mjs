@@ -514,6 +514,58 @@ try {
       v1Unchanged:true,noAuthorityPromotion:true};
   });
 
+  await run('preview writer peer handshake sees cooperating V2 tabs but cannot certify silent legacy writer',async context=>{
+    const observer=await open(context),cooperator=await open(context);
+    // A real same-origin V1 page can still mutate localStorage without
+    // importing V2 or participating in any BroadcastChannel handshake.
+    const legacyPage=await context.newPage();
+    await legacyPage.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const initial=await observer.evaluate(()=>({
+      v1:localStorage.getItem('taskpoints_v1'),
+      supportsChannel:typeof BroadcastChannel==='function'
+    }));
+    const probe=await observer.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.inspectPreviewWriterPeers());
+    assert.equal(probe.checked,true);
+    assert.equal(probe.canPromote,false);
+    assert.equal(probe.allLegacyWritersKnown,false);
+    assert.equal(probe.productionWritersFenced,false);
+    assert.equal(probe.mutationAuthority,'legacy_only');
+    if(!initial.supportsChannel){
+      assert.equal(probe.reason,'coordination_channel_unavailable');
+      assert.equal(probe.observedPeerCount,0);
+      return {unsupportedFailClosed:true,writerCoverageUnproven:true};
+    }
+    assert.equal(probe.reason,'observational_probe_only',JSON.stringify(probe));
+    assert.equal(probe.observedPeerCount,1,JSON.stringify(probe));
+    assert.equal(probe.peers[0].previewEnabled,true);
+    assert.equal(probe.peers[0].sameGeneration,true);
+    const opposite=await cooperator.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.inspectPreviewWriterPeers());
+    assert.equal(opposite.observedPeerCount,1,JSON.stringify(opposite));
+    assert.equal(opposite.canPromote,false);
+    await legacyPage.evaluate(()=>
+      localStorage.setItem('taskpoints_silent_unfenced_writer','saved without V2 API'));
+    const after=await observer.evaluate(async()=>({
+      probe:await window.TaskPointsStateRuntimeV2.inspectPreviewWriterPeers(),
+      v1:localStorage.getItem('taskpoints_v1'),
+      silentValue:localStorage.getItem('taskpoints_silent_unfenced_writer'),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    assert.equal(after.probe.observedPeerCount,1,
+      'a silent V1 page is not registered as a cooperating peer');
+    assert.equal(after.probe.allLegacyWritersKnown,false,
+      'receiving all visible responses must never imply exhaustive writer membership');
+    assert.equal(after.probe.productionWritersFenced,false);
+    assert.equal(after.probe.canPromote,false);
+    assert.equal(after.v1,initial.v1);
+    assert.equal(after.silentValue,'saved without V2 API');
+    assert.equal(after.authority,'legacy_only');
+    return {respondingPreviewPeers:1,silentWriterUnfenced:true,
+      explicitCoverageLimit:true,legacyDataPreserved:true,authority:'legacy_only'};
+  });
+
   await run('noncooperating browser tab changes unrelated V1 settings during writer lock preflight',async context=>{
     const contender=await open(context),legacyTab=await open(context);
     const initial=await contender.evaluate(()=>({
