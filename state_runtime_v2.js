@@ -3388,6 +3388,39 @@
     'task_journal_and_idle_compaction'
   ]);
 
+  // Observe EVERY origin-localStorage key, including tp_projects_v1 and
+  // other legacy keys outside taskpoints_*. Keep the existing
+  // captureLegacyNamespace() and checkpoint format unchanged: this strict
+  // full-origin enumeration belongs only to the read-only cutover audit.
+  // An equal before/after image is NOT proof of writer fencing (an unfenced
+  // tab can write between checks, or change a value and then restore it).
+  function captureReadOnlyFullStorageInventory() {
+    const storage = global.localStorage;
+    if (!storage || typeof storage.key !== 'function'
+      || typeof storage.getItem !== 'function'
+      || !Number.isSafeInteger(storage.length) || storage.length < 0)
+      throw Error('cutover_full_storage_inventory_unavailable');
+    const count = storage.length;
+    const keys = new Set();
+    for (let i = 0; i < count; i += 1) {
+      const key = storage.key(i);
+      if (typeof key !== 'string' || keys.has(key))
+        throw Error('cutover_full_storage_inventory_changed');
+      keys.add(key);
+    }
+    if (storage.length !== count)
+      throw Error('cutover_full_storage_inventory_changed');
+    const entries = [...keys].sort().map(key => {
+      const value = storage.getItem(key);
+      if (typeof value !== 'string')
+        throw Error('cutover_full_storage_inventory_unreadable');
+      return [key, value];
+    });
+    if (storage.length !== count)
+      throw Error('cutover_full_storage_inventory_changed');
+    return stableJson(entries);
+  }
+
   async function inspectAuthorityCutoverBarriers() {
     const hardBlockers = [
       'all_legacy_writers_not_fenced',
@@ -3442,13 +3475,13 @@
     try {
       const pilot = await inspectMutationHandoffPrerequisites();
       const rollback = await inspectLegacyRollbackSource();
-      // Include unrelated taskpoints_* preferences/notes in the explicit
-      // audit; a valid Habit pilot can coexist with a changed legacy key.
-      const legacyNamespaceBefore = stableJson(captureLegacyNamespace());
+      // The preview writer inventory must include ALL current origin storage
+      // keys, not merely taskpoints_* checkpoint keys or the Habit pilot.
+      const fullStorageBefore = captureReadOnlyFullStorageInventory();
       const peers = await inspectPreviewWriterPeers();
       const pilotAfter = await inspectMutationHandoffPrerequisites();
       const rollbackAfter = await inspectLegacyRollbackSource();
-      const legacyNamespaceAfter = stableJson(captureLegacyNamespace());
+      const fullStorageAfter = captureReadOnlyFullStorageInventory();
       // The asynchronous peer observation is NOT a lock. Detect a new
       // generation or explicit preview switch during the report; never use
       // an earlier green preflight as evidence about a newer generation.
@@ -3458,7 +3491,7 @@
         || (rollback.generation && rollback.generation !== initialGeneration)
         || stableJson(pilot) !== stableJson(pilotAfter)
         || stableJson(rollback) !== stableJson(rollbackAfter)
-        || legacyNamespaceBefore !== legacyNamespaceAfter)
+        || fullStorageBefore !== fullStorageAfter)
         return snapshot('inventory_changed_during_check', pilot, rollback, peers,
           ['legacy_or_preview_inventory_changed_during_check']);
       return snapshot('authority_cutover_blocked', pilot, rollback, peers);
