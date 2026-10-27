@@ -3460,7 +3460,7 @@
         || stableJson(rollback) !== stableJson(rollbackAfter)
         || legacyNamespaceBefore !== legacyNamespaceAfter)
         return snapshot('inventory_changed_during_check', pilot, rollback, peers,
-          ['preview_or_generation_changed_during_check']);
+          ['legacy_or_preview_inventory_changed_during_check']);
       return snapshot('authority_cutover_blocked', pilot, rollback, peers);
     } catch (_) {
       return snapshot('inspection_unreadable', null, null, null,
