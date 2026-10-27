@@ -3374,6 +3374,91 @@
     }
   }
 
+  // Consolidated, read-only cutover inventory. This is a developer
+  // diagnostic, NOT an activation switch or proof of production writer
+  // fencing. Known writer families are a minimum inventory; discovering
+  // more legacy writers can only ADD blockers, never authorize promotion.
+  const AUTHORITY_CUTOVER_WRITER_FAMILIES = Object.freeze([
+    'scoring_core_snapshot_and_habit_journal',
+    'home_direct_keys_and_snapshot_saves',
+    'today_snapshot_and_view_state',
+    'settings_import_reset_and_direct_storage',
+    'notes_content_dirty_and_authority_flags',
+    'emergency_recovery_and_restore',
+    'task_journal_and_idle_compaction'
+  ]);
+
+  async function inspectAuthorityCutoverBarriers() {
+    const hardBlockers = [
+      'all_legacy_writers_not_fenced',
+      'nonpilot_authoritative_collections_not_migrated',
+      'independent_off_device_rollback_not_verified',
+      'physical_safari_pwa_lifecycle_not_validated',
+      'production_multi_context_handoff_not_validated'
+    ];
+    const snapshot = (reason, pilot, rollback, peers, extra = []) => {
+      // Even a completely green Habit pilot and all responsive V2 preview
+      // peers say nothing about suspended or pre-V2 legacy-only tabs.
+      const checks = {
+        pilotConsistent: pilot?.checks?.pilotConsistent === true,
+        completionIndexReady: pilot?.checks?.completionIndexReady === true,
+        legacyJournalEmpty: pilot?.checks?.legacyJournalEmpty === true,
+        mirrorQueueStable: pilot?.checks?.mirrorQueueStable === true,
+        noObservedMirrorFailures: pilot?.checks?.noObservedMirrorFailures === true,
+        noObservedBridgeFailures: pilot?.checks?.noObservedBridgeFailures === true,
+        stableLegacyRollbackSource: rollback?.sourceStable === true,
+        observedPeersOnly: peers?.respondingPreviewTabsOnly === true,
+        allLegacyWritersFenced: false,
+        allAuthoritativeCollectionsMigrated: false,
+        independentOffDeviceRollbackVerified: false,
+        physicalSafariPwaLifecycleValidated: false,
+        productionMultiContextHandoffValidated: false
+      };
+      return {
+        checked: true, reason, canPromote: false,
+        mutationAuthority: 'legacy_only', readAuthority: 'legacy_only',
+        checks, blockers: [...new Set([
+          ...(pilot?.blockers || []),
+          ...(!checks.stableLegacyRollbackSource ? ['legacy_rollback_source_unverified'] : []),
+          ...extra, ...hardBlockers
+        ])],
+        knownUnfencedWriterFamilies: [...AUTHORITY_CUTOVER_WRITER_FAMILIES],
+        pilot: pilot ? { reason: pilot.reason,
+          generation: pilot.generation || null, revision: pilot.revision ?? null } : null,
+        rollback: rollback ? { reason: rollback.reason,
+          sourceStable: rollback.sourceStable === true,
+          checkpointExists: rollback.checkpointExists === true,
+          canRestoreFromCheckpoint: rollback.canRestoreFromCheckpoint === true } : null,
+        peers: peers ? { reason: peers.reason,
+          observedPeerCount: peers.observedPeerCount,
+          respondingPreviewTabsOnly: peers.respondingPreviewTabsOnly === true } : null
+      };
+    };
+    const modeEpoch = darkMirrorModeEpoch;
+    const initialGeneration = currentGeneration({ create: false });
+    if (!isDarkEnabled() || !initialGeneration)
+      return snapshot('preview_unavailable', null, null, null,
+        ['preview_disabled_or_generation_unavailable']);
+    try {
+      const pilot = await inspectMutationHandoffPrerequisites();
+      const rollback = await inspectLegacyRollbackSource();
+      const peers = await inspectPreviewWriterPeers();
+      // The asynchronous peer observation is NOT a lock. Detect a new
+      // generation or explicit preview switch during the report; never use
+      // an earlier green preflight as evidence about a newer generation.
+      if (!isDarkEnabled() || modeEpoch !== darkMirrorModeEpoch
+        || currentGeneration({ create: false }) !== initialGeneration
+        || (pilot.generation && pilot.generation !== initialGeneration)
+        || (rollback.generation && rollback.generation !== initialGeneration))
+        return snapshot('inventory_changed_during_check', pilot, rollback, peers,
+          ['preview_or_generation_changed_during_check']);
+      return snapshot('authority_cutover_blocked', pilot, rollback, peers);
+    } catch (_) {
+      return snapshot('inspection_unreadable', null, null, null,
+        ['authority_cutover_inventory_unreadable']);
+    }
+  }
+
   // Explicit forensic inspection of an unexplained same-generation V1/V2
   // mismatch. Unlike verifyParity(), this never calls seedFromLegacy(), does
   // not refresh metadata, and cannot clear or reconcile either copy. A V2
