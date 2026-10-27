@@ -628,8 +628,8 @@ try {
     }));
     assert.equal(after.proof.lockHeldAfterReturn,false);
     assert.equal(after.proof.canPromote,false);
-    assert.equal(after.proof.productionWritersFenced,false);
-    assert.equal(after.proof.allLegacyWritersKnown,false);
+    assert.equal(after.proof.mutationAuthority,'legacy_only');
+    assert.equal(after.proof.readAuthority,'legacy_only');
     assert.equal(after.v1,originalV1);
     assert.equal(after.authority,'legacy_only');
     return {tabCloseReleasesSharedLock:true,exclusiveRehearsalRecovered:true,
