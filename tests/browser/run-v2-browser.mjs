@@ -577,6 +577,42 @@ try {
       stableRetrySafe:true,authority:'legacy_only'};
   });
 
+  await run('pending legacy journal blocks writer-lock rehearsal despite matching pilot storage',async context=>{
+    const page=await open(context);
+    const evidence=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const core=window.TaskPointsCore;
+      const originalRead=core.readPendingHabitDeltas;
+      const legacy=localStorage.getItem('taskpoints_v1');
+      let readiness,report,blocked;
+      core.readPendingHabitDeltas=()=>[{
+        id:'habit:h1:2026-10-23',habitId:'h1',dayKey:'2026-10-23',
+        source:'habit',status:'full',done:true,
+        updatedAtISO:'2026-10-23T12:00:00.000Z'
+      }];
+      try{
+        readiness=await runtime.inspectPilotReadiness();
+        report=await runtime.inspectMutationHandoffPrerequisites();
+        blocked=await runtime.rehearseExclusiveWriterLease();
+      }finally{core.readPendingHabitDeltas=originalRead;}
+      const restored=await runtime.inspectPilotReadiness();
+      return {readiness,report,blocked,restored,
+        legacyUnchanged:localStorage.getItem('taskpoints_v1')===legacy,
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(evidence.readiness.eligible,true,JSON.stringify(evidence.readiness));
+    assert.equal(evidence.report.checks.pilotConsistent,true,JSON.stringify(evidence.report));
+    assert.equal(evidence.report.checks.legacyJournalEmpty,false);
+    assert.equal(evidence.blocked.reason,'handoff_prerequisites_blocked');
+    assert.equal(evidence.blocked.lockAcquired,false);
+    assert.equal(evidence.blocked.canPromote,false);
+    assert.equal(evidence.restored.eligible,true);
+    assert.equal(evidence.legacyUnchanged,true);
+    assert.equal(evidence.authority,'legacy_only');
+    return {pilotParityStillGreen:true,uncompactedLegacyJournalDetected:true,
+      handoffRefused:true,authority:'legacy_only'};
+  });
+
   await run('independent immutable SHA-256 checkpoint survives reload and detects tampering without restore',async context=>{
     const page=await open(context);
     const created=await page.evaluate(async()=>{
