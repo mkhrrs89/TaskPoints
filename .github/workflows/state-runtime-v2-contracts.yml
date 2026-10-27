@@ -57,6 +57,9 @@ jobs:
       - name: Verify Main/V2 reconciliation and safety guards
         run: node --test tests/state_runtime_v2_main_reconciliation_contract.test.js
 
+      - name: Audit unfenced legacy writer paths and prohibit premature authority handoff
+        run: node --test tests/state_runtime_v2_legacy_writer_inventory_contract.test.js
+
       - name: Run V2 core storage contracts
         run: >-
           node --test
