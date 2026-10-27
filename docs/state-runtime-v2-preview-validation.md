@@ -350,6 +350,31 @@ The WebKit browser gate exposed an assertion issue in the new tab-close recovery
 
 A separate two-tab browser regression deliberately rotates the **synthetic fixture generation** while one developer-only cooperative shared-lock callback is suspended. The expected result is `generation_or_preview_changed_under_lock` with `canPromote:false`, release of the shared lock, unchanged V1 snapshot, and continued `legacy_only` authority. The fixture does not execute production Reset All/import or prove all legacy writers participate. Physical Safari/PWA interruption and full writer fencing remain required before authority can ever be switched.
 
+### Voluntary prewrite generation guard (developer-only)
+
+The cooperative-lock rehearsal now passes an optional frozen callback argument:
+`({ assertPreviewGenerationCurrent }) => { ... }`. A participating fixture can invoke
+`assertPreviewGenerationCurrent()` immediately before a controlled write, including
+after an asynchronous pause. It throws `STATE_RUNTIME_V2_PREVIEW_GENERATION_CHANGED`
+when the preview mode or persisted reset generation differs from that seen at
+lease acquisition. The outer diagnostic then returns
+`cooperative_operation_generation_invalidated` while releasing the shared lock
+and retaining `mutationAuthority:'legacy_only'` and `canPromote:false`.
+
+The Chromium/WebKit browser regression starts with a fresh guarded fixture
+write, then suspends a second callback, rotates the synthetic test generation
+in another tab, resumes it and requires the stale *fixture* write not to occur.
+The separate existing unguarded race test intentionally continues to show that
+post-callback validation alone can only **report** a stale generation after
+side effects may already have happened.
+
+**This is an opt-in test helper, not a storage transaction or recovery
+boundary.** It cannot roll back operations already completed, prevent another
+tab from changing generation immediately after the guard returns, control an
+uncooperative V1 tab, or promise physical Safari/PWA kill safety. Production
+writers must not be wired to this experimental helper as a shortcut to a real
+fenced handoff. All rollout blockers remain in force.
+
 ### Legacy writer inventory: initial CI guard
 
 The V2-only `tests/state_runtime_v2_legacy_writer_inventory_contract.test.js` now scans top-level JavaScript/HTML for direct browser-storage writes and core save/replacement calls. The V2 Contracts workflow hard-gates the following verified legacy write surfaces:
