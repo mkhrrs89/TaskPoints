@@ -3374,6 +3374,24 @@
     return `sha256:${hex}:${bytes.byteLength}`;
   }
 
+  // Seal both data and provenance for new checkpoints. Preserve inspection
+  // of earlier payload-only SHA-256 records rather than deleting or silently
+  // rewriting historical recovery evidence.
+  function previewRecoveryDigestPayload(record) {
+    if (record.integrityVersion === 2) {
+      return {
+        id: record.id,
+        schemaVersion: record.schemaVersion,
+        capturedAtISO: record.capturedAtISO,
+        generation: record.generation,
+        entries: record.entries
+      };
+    }
+    if (record.integrityVersion == null || record.integrityVersion === 1)
+      return record.entries;
+    return null;
+  }
+
   async function validPreviewRecoveryRecord(record) {
     if (!record || record.schemaVersion !== PREVIEW_RECOVERY_SCHEMA
       || !Array.isArray(record.entries) || !record.entries.length
@@ -3391,7 +3409,9 @@
       if (entry[0] === (core.STORAGE_KEY || 'taskpoints_v1')) hasLegacy = true;
       previous = entry[0];
     }
-    return hasLegacy && (await previewRecoveryFingerprint(record.entries)) === record.fingerprint;
+    const payload = previewRecoveryDigestPayload(record);
+    return hasLegacy && payload !== null
+      && (await previewRecoveryFingerprint(payload)) === record.fingerprint;
   }
 
   async function openPreviewRecoveryDb() {
@@ -3448,7 +3468,9 @@
         mutationAuthority: 'legacy_only', readAuthority: 'legacy_only',
         capturedGeneration: record.generation, capturedAtISO: record.capturedAtISO,
         keyCount: record.entries.length,
-        fingerprint: record.fingerprint
+        fingerprint: record.fingerprint,
+        integrityCoverage: record.integrityVersion === 2
+          ? 'metadata_and_payload' : 'legacy_payload_only'
       };
     } catch (_) { return refuse('checkpoint_unreadable'); }
     finally { try { db?.close(); } catch (_) {} }
@@ -3530,9 +3552,11 @@
       const id = `v1-preview:${global.crypto?.randomUUID?.() || `${Date.now()}:${Math.random().toString(36).slice(2)}`}`;
       const record = {
         id, schemaVersion: PREVIEW_RECOVERY_SCHEMA,
-        capturedAtISO: nowIso(), generation, entries,
-        fingerprint: await previewRecoveryFingerprint(entries)
+        integrityVersion: 2,
+        capturedAtISO: nowIso(), generation, entries
       };
+      const capturedPayloadFingerprint = await previewRecoveryFingerprint(entries);
+      record.fingerprint = await previewRecoveryFingerprint(previewRecoveryDigestPayload(record));
       db = await openPreviewRecoveryDb();
       const tx = db.transaction(PREVIEW_RECOVERY_STORE, 'readwrite');
       const completion = transactionPromise(tx);
@@ -3546,7 +3570,8 @@
       const after = await inspectLegacyRollbackSource();
       let sameInventory = false;
       try {
-        sameInventory = await previewRecoveryFingerprint(captureLegacyNamespace()) === record.fingerprint;
+        sameInventory = await previewRecoveryFingerprint(captureLegacyNamespace())
+          === capturedPayloadFingerprint;
       } catch (_) {}
       const stillCurrent = after.sourceStable && after.generation === generation && sameInventory;
       return {
