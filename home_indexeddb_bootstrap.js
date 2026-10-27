@@ -438,6 +438,13 @@
   style.textContent = `
     #createTaskSkillsEditor { display: none !important; }
 
+    /* Cached older Home editors can still render their retired Skills rows.
+       Hide the whole editor section without removing its inputs: older
+       saveTaskEdit code may still read those values on Save. */
+    .task-priority-card div:has(> label + div [data-task-skills-rows]) {
+      display: none !important;
+    }
+
     @media (max-width: 640px) {
       #addTaskModal { z-index: 70 !important; }
       #addTaskModal .addTaskModalPanel { padding-top: 72px !important; }
