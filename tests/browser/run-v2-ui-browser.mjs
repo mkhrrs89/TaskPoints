@@ -1058,7 +1058,19 @@ try{
     await card.locator('input[data-field="title"]').fill('Synthetic Task Edited');
     await card.locator('input[data-field="points"]').fill('29');
     await card.locator('select[data-field="importance"]').selectOption('Critical');
-    await card.locator('[data-task-action="task-save"]').click({force:true});
+    // WebKit iPhone emulation can leave the inline editor Save control
+    // outside the visual viewport even after Playwright scrollIntoView.
+    // Dispatch the genuine button click in the page instead of relying on
+    // force:true pointer coordinates; its delegated Home handler and
+    // persistence/journal assertions below are still exercised unchanged.
+    const clicked=await page.evaluate(id=>{
+      const row=document.querySelector('#taskList .glass[data-task-id="'+id+'"]');
+      const save=row?.querySelector('[data-task-action="task-save"]');
+      if(!(save instanceof HTMLButtonElement) || save.disabled) return false;
+      save.click();
+      return true;
+    },id);
+    assert.equal(clicked,true,'real inline Task Save control must exist and be enabled');
     // Edit Save uses the Task mutation journal rather than a synchronous
     // full-state snapshot. Either the durable journal or a completed
     // compaction may own the most recent record at this moment.
