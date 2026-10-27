@@ -3443,13 +3443,17 @@
       const pilot = await inspectMutationHandoffPrerequisites();
       const rollback = await inspectLegacyRollbackSource();
       const peers = await inspectPreviewWriterPeers();
+      const pilotAfter = await inspectMutationHandoffPrerequisites();
+      const rollbackAfter = await inspectLegacyRollbackSource();
       // The asynchronous peer observation is NOT a lock. Detect a new
       // generation or explicit preview switch during the report; never use
       // an earlier green preflight as evidence about a newer generation.
       if (!isDarkEnabled() || modeEpoch !== darkMirrorModeEpoch
         || currentGeneration({ create: false }) !== initialGeneration
         || (pilot.generation && pilot.generation !== initialGeneration)
-        || (rollback.generation && rollback.generation !== initialGeneration))
+        || (rollback.generation && rollback.generation !== initialGeneration)
+        || stableJson(pilot) !== stableJson(pilotAfter)
+        || stableJson(rollback) !== stableJson(rollbackAfter))
         return snapshot('inventory_changed_during_check', pilot, rollback, peers,
           ['preview_or_generation_changed_during_check']);
       return snapshot('authority_cutover_blocked', pilot, rollback, peers);
