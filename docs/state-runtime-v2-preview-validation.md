@@ -306,3 +306,11 @@ New checkpoints seal the **snapshot metadata and data together** under SHA-256 u
 Node tests cover changed, missing, and newer V1 keys; generation differences; storage denial; metadata corruption; compatibility of older checkpoint records; immutable V1/V2 state; and recovery without auto-restore. Browser tests cover a rollback diff after a page reload, unchanged V1 data, and a forged checkpoint generation rejected by the hash.
 
 **Remaining gaps:** This is not a production rollback mechanism. A real restoration requires independently proven external retention, whole-application collection coverage, an exclusive writer fence, consented restore, verified post-restore parity, and safe recovery after a mid-restore browser crash. None of these are implemented or enabled by the preview diagnostics. Main remains untouched and V1 remains authoritative.
+
+## October 27 — Historical checkpoint provenance safeguard
+
+Legacy preview checkpoint records with payload-only SHA-256 remain inspectable without modification, deletion or silent replacement. However, their `generation` and capture timestamp were not included in the old checksum. An `intact: true` payload verdict therefore cannot establish trusted rollback provenance.
+
+`inspectPreviewRollbackPlan()` now refuses these historical records with `checkpoint_provenance_unverified`. Modern `integrityCoverage: 'metadata_and_payload'` records remain eligible for **read-only** diff rehearsal. Neither format can be automatically applied or promoted as the live storage authority. Node contracts and Chromium/WebKit regression tests verify old-record preservation, provenance refusal and unchanged V1.
+
+This is an explicit safety boundary, not a migration that erases older recovery evidence; actual external backup and writer-fenced restoration remain separate cutover prerequisites.
