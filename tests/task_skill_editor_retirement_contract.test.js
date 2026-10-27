@@ -70,7 +70,7 @@ test('Saving a normal task edit retains existing historical Skills data', () => 
   assert.equal(task.points, 6);
   assert.equal(task.dueDateISO, '2026-10-29');
   assert.equal(task.importance, 'High');
-  assert.deepEqual(task.tags, ['work', 'errands']);
+  assert.deepEqual(Array.from(task.tags), ['work', 'errands']);
   assert.deepEqual(task.skills, [{ skill: 'Sketching', pts: '5' }]);
   assert.ok(persisted && rendered, 'Normal save and render still run');
 });
