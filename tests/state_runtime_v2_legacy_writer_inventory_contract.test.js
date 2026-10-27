@@ -117,8 +117,8 @@ test('full cutover inventory is read-only, hard-blocked, and observes legacy non
     "canPromote: false",
     "mutationAuthority: 'legacy_only'",
     "readAuthority: 'legacy_only'",
-    'legacyNamespaceBefore = stableJson(captureLegacyNamespace())',
-    'legacyNamespaceAfter = stableJson(captureLegacyNamespace())',
+    'fullStorageBefore = captureReadOnlyFullStorageInventory()',
+    'fullStorageAfter = captureReadOnlyFullStorageInventory()',
     'stableJson(pilot) !== stableJson(pilotAfter)',
     'stableJson(rollback) !== stableJson(rollbackAfter)'
   ]) {
@@ -130,4 +130,17 @@ test('full cutover inventory is read-only, hard-blocked, and observes legacy non
   assert.ok(!report.includes('createPreviewRecoveryCheckpoint('));
   assert.ok(!report.includes('safeReplaceTaskPointsStorage('));
   assert.ok(!report.includes('seedFromLegacy('));
+  const observerStart = runtime.indexOf('function captureReadOnlyFullStorageInventory()');
+  assert.ok(observerStart > 0, 'Missing complete cutover-localStorage observation');
+  const observer = runtime.slice(observerStart,first);
+  assert.match(observer, /storage\.key\(i\)/);
+  assert.match(observer, /storage\.getItem\(key\)/);
+  assert.match(observer, /storage\.length !== count/);
+  assert.match(observer, /stableJson\(entries\)/);
+  assert.doesNotMatch(observer, /storage\.(?:setItem|removeItem|clear)\(/);
+  assert.ok(read('scoring_core.js').includes("tp_projects_v1"),
+    'Non-taskpoints-prefixed legacy project key must remain in scope');
+  // Checkpoint payload collection remains unchanged: the broader inventory
+  // is a read-only safety diagnostic and cannot silently alter backups.
+  assert.match(runtime, /function captureLegacyNamespace\(\)/);
 });
