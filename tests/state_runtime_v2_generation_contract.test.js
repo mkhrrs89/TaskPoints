@@ -1571,6 +1571,66 @@ test('writer-lock rehearsal refuses legacy inventory read denial under the lock'
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
 });
 
+test('writer rehearsal refuses a pending V1 journal even when pilot parity matches',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  // This fake core returns a stable journal but has a no-op overlay replay.
+  // Pilot parity therefore remains green despite incomplete V1 compaction.
+  app.core.readPendingHabitDeltas=()=>[delta()];
+  const report=await app.runtime.inspectMutationHandoffPrerequisites();
+  assert.equal(report.checks.pilotConsistent,true,JSON.stringify(report));
+  assert.equal(report.checks.legacyJournalEmpty,false);
+  let lockRequests=0;
+  app.context.navigator={locks:{request:async()=>{lockRequests++;throw Error('lock must not be requested');}}};
+  const refused=await app.runtime.rehearseExclusiveWriterLease();
+  assert.equal(refused.lockAcquired,false);
+  assert.equal(refused.reason,'handoff_prerequisites_blocked');
+  assert.equal(refused.canPromote,false);
+  assert.equal(lockRequests,0);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
+test('writer rehearsal refuses observed bridge failures even with good pilot parity',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const originalStatus=app.bridge.getStatus;
+  app.bridge.getStatus=()=>({...originalStatus(),failures:1});
+  const report=await app.runtime.inspectMutationHandoffPrerequisites();
+  assert.equal(report.checks.pilotConsistent,true,JSON.stringify(report));
+  assert.equal(report.checks.noObservedBridgeFailures,false);
+  let lockRequests=0;
+  app.context.navigator={locks:{request:async()=>{lockRequests++;throw Error('lock must not be requested');}}};
+  const refused=await app.runtime.rehearseExclusiveWriterLease();
+  app.bridge.getStatus=originalStatus;
+  assert.equal(refused.reason,'handoff_prerequisites_blocked');
+  assert.equal(refused.canPromote,false);
+  assert.equal(lockRequests,0);
+});
+
+test('writer rehearsal refuses new bridge failures after lock acquisition',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const source=app.localStorage.getItem(LEGACY_KEY);
+  const v2=structuredClone(app.indexedDB.dump(DB_NAME));
+  const originalStatus=app.bridge.getStatus;
+  let lockEntered=false;
+  app.context.navigator={locks:{request:async(name,options,callback)=>{
+    lockEntered=true;
+    app.bridge.getStatus=()=>({...originalStatus(),failures:1});
+    return callback({name,mode:options.mode});
+  }}};
+  let refusal;
+  try{refusal=await app.runtime.rehearseExclusiveWriterLease();}
+  finally{app.bridge.getStatus=originalStatus;}
+  assert.equal(lockEntered,true);
+  assert.equal(refusal.lockAcquired,false);
+  assert.equal(refusal.reason,'handoff_prerequisites_changed_under_lock');
+  assert.equal(refusal.canPromote,false);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),source);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),v2);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
 test('legacy rollback-source audit remains read-only, reports complete V1 scope and refuses WAL denial',async()=>{
   const app=install({initialState:{...legacyState(),
     completions:[{id:'task-one',source:'task',points:1},{id:'task-two',source:'task',points:2}]}});
