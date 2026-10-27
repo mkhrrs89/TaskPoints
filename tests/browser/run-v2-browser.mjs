@@ -573,7 +573,7 @@ try {
         authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
     });
     assert.equal(after.proof.lockAcquired,true,JSON.stringify(after.proof));
-    assert.equal(after.proof.canPromote,false);
+    assert.equal(proof.canPromote,false);
     assert.equal(after.v1,original);
     assert.equal(after.one,'committed');
     assert.equal(after.two,'committed');
@@ -616,20 +616,26 @@ try {
     await pending; // A closed page may reject its outstanding evaluate promise.
     // Real browser lock ownership must end with the closed document, not
     // depend on a callback/finally running in the destroyed page.
-    await observer.waitForFunction(async()=>{
-      const proof=await window.TaskPointsStateRuntimeV2.rehearseExclusiveWriterLease();
-      window.__postClosingWriterProof=proof;
-      return proof.lockAcquired===true;
-    },null,{timeout:12000,polling:100});
+    // Run each rehearsal serially from Playwright instead of polling with
+    // overlapping async page callbacks: WebKit can replace the saved
+    // successful result with a subsequent in-flight denied result.
+    let proof;
+    for(let attempt=0;attempt<20;attempt++){
+      proof=await observer.evaluate(()=>
+        window.TaskPointsStateRuntimeV2.rehearseExclusiveWriterLease());
+      if(proof.lockAcquired===true)break;
+      assert.equal(proof.reason,'lock_held_elsewhere',JSON.stringify(proof));
+      await new Promise(resolve=>setTimeout(resolve,100));
+    }
+    assert.equal(proof.lockAcquired,true,JSON.stringify(proof));
     const after=await observer.evaluate(()=>({
-      proof:window.__postClosingWriterProof,
       v1:localStorage.getItem('taskpoints_v1'),
       authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
     }));
-    assert.equal(after.proof.lockHeldAfterReturn,false);
+    assert.equal(proof.lockHeldAfterReturn,false);
     assert.equal(after.proof.canPromote,false);
-    assert.equal(after.proof.mutationAuthority,'legacy_only');
-    assert.equal(after.proof.readAuthority,'legacy_only');
+    assert.equal(proof.mutationAuthority,'legacy_only');
+    assert.equal(proof.readAuthority,'legacy_only');
     assert.equal(after.v1,originalV1);
     assert.equal(after.authority,'legacy_only');
     return {tabCloseReleasesSharedLock:true,exclusiveRehearsalRecovered:true,
