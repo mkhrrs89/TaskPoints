@@ -3614,9 +3614,17 @@
     });
     const locks = global.navigator?.locks;
     if (typeof locks?.request !== 'function') return fail('lock_manager_unavailable');
+    // Pilot parity alone is insufficient. Pending V1 journals, an incomplete
+    // completion index, a changing mirror queue or recorded bridge/mirror
+    // failures must all block even a *rehearsal* of the writer handoff.
+    const preflightClear = report => [
+      'pilotConsistent', 'completionIndexReady', 'legacyJournalEmpty',
+      'mirrorQueueStable', 'noObservedMirrorFailures', 'noObservedBridgeFailures'
+    ].every(key => report?.checks?.[key] === true);
     const initial = await inspectMutationHandoffPrerequisites();
-    if (initial.checks?.pilotConsistent !== true)
-      return fail('pilot_not_consistent');
+    if (!preflightClear(initial))
+      return fail(initial.checks?.pilotConsistent === true
+        ? 'handoff_prerequisites_blocked' : 'pilot_not_consistent');
     // Navigator.locks only coordinates callers that participate in the lock.
     // An existing V1 tab can still write the legacy namespace independently.
     // Inspect the whole namespace on both sides of the lock acquisition,
@@ -3638,11 +3646,14 @@
           ]);
           const pilotStable = inside.checks?.pilotConsistent === true
             && inside.generation === initial.generation
-            && inside.revision === initial.revision
-            && inside.checks?.mirrorQueueStable === true;
+            && inside.revision === initial.revision;
           if (!pilotStable || rollback.sourceStable !== true) {
             result = fail(rollback.sourceStable ? 'pilot_changed_under_lock'
               : 'rollback_source_unavailable');
+            return;
+          }
+          if (!preflightClear(inside)) {
+            result = fail('handoff_prerequisites_changed_under_lock');
             return;
           }
           // A notes/settings change outside the pilot may not change V2
