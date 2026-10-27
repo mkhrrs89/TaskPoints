@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { createHash } = require('node:crypto');
+const { TextEncoder } = require('node:util');
 const { FakeIndexedDB, FakeStorage } = require('./helpers/fake_indexeddb_v2');
 
 const generationSource = fs.readFileSync(path.join(__dirname, '..', 'state_runtime_v2_generation.js'), 'utf8');
@@ -87,7 +89,17 @@ function install({ initialState = legacyState(), initialStorage = {} } = {}) {
     Set,
     Promise,
     console: { warn() {}, log() {}, error() {} },
-    crypto: { randomUUID() { uuid += 1; return `generation-test-${uuid}`; } },
+    TextEncoder,
+    crypto: {
+      randomUUID() { uuid += 1; return `generation-test-${uuid}`; },
+      subtle: {
+        async digest(algorithm, bytes) {
+          if (algorithm !== 'SHA-256') throw Error('unsupported hashing algorithm');
+          const digest = createHash('sha256').update(Buffer.from(bytes)).digest();
+          return Uint8Array.from(digest).buffer;
+        }
+      }
+    },
     TaskPointsCore: core,
     document: {
       readyState: 'loading',
