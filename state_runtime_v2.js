@@ -7,6 +7,7 @@
   const DB_NAME = 'taskpoints_state_v2';
   const DB_VERSION = 2;
   const COMPLETION_HABIT_INDEX = 'by_habit_ids';
+  const EXCLUSIVE_WRITER_REHEARSAL_LOCK = 'taskpoints_v2_writer_handoff_rehearsal_v1';
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
   const WAL_TEST_ACTIVE_GLOBAL = '__taskpointsStateV2WalKillHoldV1';
   const GENERATION_KEY = 'taskpoints_state_v2_generation_v1';
@@ -3271,6 +3272,98 @@
     }
   }
 
+  // Read-only rollback *source* inventory. It is not a checkpoint or a
+  // restore method: the existing V1 record remains the only authority. A
+  // future cutover must provide an independently durable rollback checkpoint.
+  async function inspectLegacyRollbackSource() {
+    const fail = (reason) => ({ checked: true, sourceStable: false,
+      checkpointExists: false, canRestoreFromCheckpoint: false, reason,
+      mutationAuthority: 'legacy_only', readAuthority: 'legacy_only' });
+    try {
+      const first = parseLegacyStateWithPending();
+      if (first.missing) return fail('legacy_unavailable');
+      const firstRaw = first.raw;
+      const firstFingerprint = stableJson(paritySubset(sourceSubset(first.state)));
+      const wal = global.TaskPointsStateRuntimeV2Wal;
+      const beforeWal = wal?.getPendingRows?.();
+      if (beforeWal?.ok !== true) return fail('wal_unreadable');
+      const firstGeneration = currentGeneration({ create: false });
+      if (!firstGeneration) return fail('generation_missing');
+      const journal = core.readPendingHabitDeltas?.();
+      if (!Array.isArray(journal)) return fail('journal_unreadable');
+      const journalFingerprint = stableJson(journal);
+      // Force an actual asynchronous boundary to catch changes caused by
+      // other tabs or asynchronous compaction before calling the source stable.
+      await Promise.resolve();
+      const second = parseLegacyStateWithPending();
+      const afterWal = wal?.getPendingRows?.();
+      const afterJournal = core.readPendingHabitDeltas?.();
+      if (second.missing || second.raw !== firstRaw
+        || stableJson(paritySubset(sourceSubset(second.state))) !== firstFingerprint
+        || stableJson(afterJournal) !== journalFingerprint
+        || stableJson(afterWal) !== stableJson(beforeWal)
+        || currentGeneration({ create: false }) !== firstGeneration)
+        return fail('legacy_changed_during_inventory');
+      if (afterWal?.ok !== true) return fail('wal_unreadable');
+      return {
+        checked: true, sourceStable: true, checkpointExists: false,
+        canRestoreFromCheckpoint: false, reason: 'legacy_recovery_source_stable',
+        mutationAuthority: 'legacy_only', readAuthority: 'legacy_only',
+        generation: firstGeneration,
+        counts: { habits: first.state.habits.length,
+          completions: first.state.completions.length,
+          legacyJournal: journal.length, walPending: beforeWal.rows.length }
+      };
+    } catch (_) { return fail('legacy_inventory_unreadable'); }
+  }
+
+  // Browser-native exclusive-lock *rehearsal*, never a writer handoff.
+  // Browser LockManager is shared by same-origin tabs and serializes callbacks
+  // without vulnerable localStorage time-based leases. No fallback assumes
+  // exclusivity if navigator.locks is missing or denies the request.
+  async function rehearseExclusiveWriterLease() {
+    const fail = (reason) => ({
+      checked: true, lockAcquired: false, canPromote: false, reason,
+      mutationAuthority: 'legacy_only', readAuthority: 'legacy_only'
+    });
+    const locks = global.navigator?.locks;
+    if (typeof locks?.request !== 'function') return fail('lock_manager_unavailable');
+    const initial = await inspectMutationHandoffPrerequisites();
+    if (initial.checks?.pilotConsistent !== true)
+      return fail('pilot_not_consistent');
+    let result = fail('lock_unavailable');
+    try {
+      await locks.request(EXCLUSIVE_WRITER_REHEARSAL_LOCK,
+        { mode: 'exclusive', ifAvailable: true }, async (lock) => {
+          if (!lock) { result = fail('lock_held_elsewhere'); return; }
+          const [inside, rollback] = await Promise.all([
+            inspectMutationHandoffPrerequisites(),
+            inspectLegacyRollbackSource()
+          ]);
+          const pilotStable = inside.checks?.pilotConsistent === true
+            && inside.generation === initial.generation
+            && inside.revision === initial.revision
+            && inside.checks?.mirrorQueueStable === true;
+          if (!pilotStable || rollback.sourceStable !== true) {
+            result = fail(rollback.sourceStable ? 'pilot_changed_under_lock'
+              : 'rollback_source_unavailable');
+            return;
+          }
+          // A lock proves exclusivity only while this callback is executing.
+          // Return a historical rehearsal result, not a durable lease token.
+          result = {
+            checked: true, lockAcquired: true, canPromote: false,
+            reason: 'exclusive_lock_rehearsed', lockHeldAfterReturn: false,
+            mutationAuthority: 'legacy_only', readAuthority: 'legacy_only',
+            generation: inside.generation, revision: inside.revision,
+            rollbackSourceStable: true,
+            blockers: inside.blockers
+          };
+        });
+    } catch (_) { return fail('lock_request_failed'); }
+    return result;
+  }
+
   // Stage-C *comparison harness*, not a read-authority switch. Enabling
   // this flag only allows an explicit diagnostic comparison. The selected
   // backend is ALWAYS legacy, including on an eligible V2 match.
@@ -3542,6 +3635,8 @@
     inspectPilotReadiness,
     inspectPilotCompletionIndexCoverage,
     inspectMutationHandoffPrerequisites,
+    inspectLegacyRollbackSource,
+    rehearseExclusiveWriterLease,
     readPilotHabitCandidate,
     setPilotReadProbeEnabled,
     probePilotHabitRead,
