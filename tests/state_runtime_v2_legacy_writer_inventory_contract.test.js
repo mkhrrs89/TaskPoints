@@ -160,6 +160,15 @@ test('exclusive snapshot writer rehearsal stays developer-only and cannot change
     'darkMirrorModeEpoch',
     'assertPreviewGenerationCurrent',
     'assertPreviewLegacySnapshotUnchanged',
+    'assertPreviewPrimaryJournalsUnchanged',
+    'STATE_RUNTIME_V2_PREVIEW_JOURNALS_CHANGED',
+    'STATE_RUNTIME_V2_PREVIEW_JOURNAL_UNREADABLE',
+    'STATE_RUNTIME_V2_PREVIEW_JOURNAL_TOKENS_REQUIRED',
+    'STATE_RUNTIME_V2_PREVIEW_JOURNAL_GUARD_INACTIVE',
+    'serialized_operation_primary_journals_changed',
+    'serialized_operation_primary_journal_unreadable',
+    "storage.getItem('taskpoints_pending_task_mutations_v1')",
+    "core.PENDING_HABIT_DELTAS_KEY || 'taskpoints_pending_habit_deltas_v1'",
     'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_CHANGED',
     'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_UNREADABLE',
     'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_TOKEN_REQUIRED',
@@ -187,6 +196,9 @@ test('exclusive snapshot writer rehearsal stays developer-only and cannot change
   assert.match(section, /actualRaw !== expectedRaw/);
   assert.match(section, /if \(!callbackActive\)/);
   assert.match(section, /callbackActive = true/);
+  assert.match(section, /if \(!callbackActive\)/);
+  assert.match(section, /taskRaw !== expected\.taskJournalRaw/);
+  assert.match(section, /habitRaw !== expected\.habitJournalRaw/);
   for(const file of [
     'index.html','today.html','settings.html','notes.html',
     'emergency_recovery.html','scoring_core.js','task_mutation_journal.js'
