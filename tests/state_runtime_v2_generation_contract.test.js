@@ -1847,3 +1847,59 @@ test('rollback dry run refuses storage read denial without exposing snapshot rec
   assert.equal(Object.hasOwn(blocked,'entries'),false);
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
 });
+
+test('new checkpoint SHA-256 protects generation and capture provenance, not just payload',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const saved=await app.runtime.createPreviewRecoveryCheckpoint();
+  assert.equal(saved.saved,true,JSON.stringify(saved));
+  const db=await new Promise((resolve,reject)=>{
+    const req=app.indexedDB.open('taskpoints_v2_recovery_checkpoints_preview',1);
+    req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+  });
+  const original=structuredClone(app.indexedDB.dump(db.name).snapshots[0]);
+  assert.equal(original.integrityVersion,2);
+  const verified=await app.runtime.inspectPreviewRecoveryCheckpoint(saved.checkpointId);
+  assert.equal(verified.intact,true,JSON.stringify(verified));
+  assert.equal(verified.integrityCoverage,'metadata_and_payload');
+  const modified=structuredClone(original);
+  modified.generation='fake-import-authority';
+  const tx=db.transaction('snapshots','readwrite');
+  tx.objectStore('snapshots').put(modified);
+  await new Promise((resolve,reject)=>{
+    tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);tx.onerror=()=>reject(tx.error);
+  });
+  const denied=await app.runtime.inspectPreviewRecoveryCheckpoint(saved.checkpointId);
+  assert.equal(denied.intact,false);
+  assert.equal(denied.reason,'checkpoint_integrity_failed');
+  assert.equal(denied.canAutoRestore,false);
+  assert.equal((await app.runtime.inspectPreviewRollbackPlan(saved.checkpointId)).planValid,false);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
+test('older payload-only checkpoint records remain inspectable without upgrading or erasing them',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const saved=await app.runtime.createPreviewRecoveryCheckpoint();
+  assert.equal(saved.saved,true);
+  const db=await new Promise((resolve,reject)=>{
+    const req=app.indexedDB.open('taskpoints_v2_recovery_checkpoints_preview',1);
+    req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+  });
+  const original=structuredClone(app.indexedDB.dump(db.name).snapshots[0]);
+  const older=structuredClone(original);
+  delete older.integrityVersion;
+  const bytes=Buffer.from(JSON.stringify(older.entries),'utf8');
+  older.fingerprint='sha256:'+createHash('sha256').update(bytes).digest('hex')+':'+bytes.byteLength;
+  const tx=db.transaction('snapshots','readwrite');
+  tx.objectStore('snapshots').put(older);
+  await new Promise((resolve,reject)=>{
+    tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);tx.onerror=()=>reject(tx.error);
+  });
+  const before=structuredClone(app.indexedDB.dump(db.name));
+  const verdict=await app.runtime.inspectPreviewRecoveryCheckpoint(saved.checkpointId);
+  assert.equal(verdict.intact,true,JSON.stringify(verdict));
+  assert.equal(verdict.integrityCoverage,'legacy_payload_only');
+  assert.deepEqual(app.indexedDB.dump(db.name),before);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
