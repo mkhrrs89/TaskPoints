@@ -3617,6 +3617,16 @@
     const initial = await inspectMutationHandoffPrerequisites();
     if (initial.checks?.pilotConsistent !== true)
       return fail('pilot_not_consistent');
+    // Navigator.locks only coordinates callers that participate in the lock.
+    // An existing V1 tab can still write the legacy namespace independently.
+    // Inspect the whole namespace on both sides of the lock acquisition,
+    // not only the migrated Habits/completion pilot.
+    let initialInventoryFingerprint;
+    try {
+      const initialRollback = await inspectLegacyRollbackSource();
+      if (!initialRollback.sourceStable) return fail('rollback_source_unavailable');
+      initialInventoryFingerprint = await previewRecoveryFingerprint(captureLegacyNamespace());
+    } catch (_) { return fail('legacy_inventory_unreadable'); }
     let result = fail('lock_unavailable');
     try {
       await locks.request(EXCLUSIVE_WRITER_REHEARSAL_LOCK,
@@ -3633,6 +3643,16 @@
           if (!pilotStable || rollback.sourceStable !== true) {
             result = fail(rollback.sourceStable ? 'pilot_changed_under_lock'
               : 'rollback_source_unavailable');
+            return;
+          }
+          // A notes/settings change outside the pilot may not change V2
+          // revision or pilot parity. It still invalidates the handoff proof.
+          let currentFingerprint;
+          try {
+            currentFingerprint = await previewRecoveryFingerprint(captureLegacyNamespace());
+          } catch (_) { result = fail('legacy_inventory_unreadable'); return; }
+          if (currentFingerprint !== initialInventoryFingerprint) {
+            result = fail('legacy_changed_under_lock');
             return;
           }
           // A lock proves exclusivity only while this callback is executing.
