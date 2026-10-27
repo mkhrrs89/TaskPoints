@@ -1692,6 +1692,94 @@ test('preview peer challenge detects a responding tab without Web Locks',async()
   assert.equal(report.canPromote,false);
 });
 
+test('cooperative shared writer rehearsal stays explicit and refuses unsupported/production contexts',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const original=app.localStorage.getItem(LEGACY_KEY);
+  let attempts=0,executed=0;
+  app.context.navigator={locks:{request:async()=>{attempts++;throw Error('not expected');}}};
+  const onUnknownHost=await app.runtime.exercisePreviewCooperativeWriterLease(()=>executed++);
+  assert.equal(onUnknownHost.reason,'preview_host_required');
+  app.context.location.hostname='localhost';
+  const noOperation=await app.runtime.exercisePreviewCooperativeWriterLease();
+  assert.equal(noOperation.reason,'operation_required');
+  app.context.navigator={};
+  const unsupported=await app.runtime.exercisePreviewCooperativeWriterLease(()=>executed++);
+  assert.equal(unsupported.reason,'lock_manager_unavailable');
+  assert.equal(unsupported.canPromote,false);
+  assert.equal(attempts,0);
+  assert.equal(executed,0);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),original);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
+test('cooperative writer shares the handoff lock but never promotes authority',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  app.context.location.hostname='localhost';
+  const legacy=app.localStorage.getItem(LEGACY_KEY);
+  const mirror=structuredClone(app.indexedDB.dump(DB_NAME));
+  let request=null,executions=0;
+  app.context.navigator={locks:{request:async(name,opts,callback)=>{
+    request={name,options:opts};
+    return callback({name,mode:'shared'});
+  }}};
+  const proof=await app.runtime.exercisePreviewCooperativeWriterLease(async()=>{
+    executions++;
+    // One explicit fixture operation; production V1 writes are not wrapped.
+    app.localStorage.setItem('taskpoints_cooperating_writer_fixture','written');
+    await Promise.resolve();
+  });
+  assert.equal(executions,1);
+  assert.equal(request.name,'taskpoints_v2_writer_handoff_rehearsal_v1');
+  assert.deepEqual(JSON.parse(JSON.stringify(request.options)),
+    {mode:'shared',ifAvailable:true});
+  assert.equal(proof.sharedLockAcquired,true,JSON.stringify(proof));
+  assert.equal(proof.operationRan,true);
+  assert.equal(proof.lockHeldAfterReturn,false);
+  assert.equal(proof.reason,'cooperative_shared_lock_rehearsed');
+  assert.equal(proof.canPromote,false);
+  assert.equal(proof.productionWritersFenced,false);
+  assert.equal(proof.allLegacyWritersKnown,false);
+  assert.equal(proof.mutationAuthority,'legacy_only');
+  assert.equal(proof.readAuthority,'legacy_only');
+  assert.equal(app.localStorage.getItem('taskpoints_cooperating_writer_fixture'),'written');
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),legacy);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),mirror);
+});
+
+test('cooperative writer lock conflicts, callback errors and generation changes fail closed',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  app.context.location.hostname='localhost';
+  const original=app.localStorage.getItem(LEGACY_KEY);
+  app.context.navigator={locks:{request:async(name,opts,callback)=>callback(null)}};
+  let called=0;
+  const busy=await app.runtime.exercisePreviewCooperativeWriterLease(()=>called++);
+  assert.equal(busy.reason,'lock_held_elsewhere');
+  assert.equal(busy.operationRan,false);
+  assert.equal(called,0);
+  app.context.navigator.locks.request=async(name,opts,cb)=>cb({name});
+  const failed=await app.runtime.exercisePreviewCooperativeWriterLease(()=>{
+    called++;
+    throw Error('synthetic failed cooperative operation');
+  });
+  assert.equal(failed.reason,'cooperative_operation_failed');
+  assert.equal(failed.sharedLockAcquired,true);
+  assert.equal(failed.operationRan,true);
+  assert.equal(failed.canPromote,false);
+  assert.equal(called,1);
+  const stale=await app.runtime.exercisePreviewCooperativeWriterLease(async()=>{
+    app.runtime.disableDarkMirror();
+    app.runtime.enableDarkMirror();
+  });
+  assert.equal(stale.reason,'generation_or_preview_changed_under_lock');
+  assert.equal(stale.sharedLockAcquired,true);
+  assert.equal(stale.canPromote,false);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),original);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
 test('writer-lock rehearsal refuses unsupported browsers, stays nonauthoritative, and never writes state',async()=>{
   const app=install();
   await app.runtime.startCoordinatedDarkMirror();
