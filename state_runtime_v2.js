@@ -3288,6 +3288,7 @@
     });
     if (!isDarkEnabled()) return refuse('dark_disabled');
     if (!dbPromise) return refuse('v2_not_open');
+    const startingModeEpoch = darkMirrorModeEpoch;
     try {
       const firstAudit = await inspectLegacyRollbackSource();
       if (!firstAudit.sourceStable)
@@ -3308,10 +3309,22 @@
       const collections = await readV2CollectionsFromDb(db);
       const metaAfter = await readMeta(db);
       const afterAudit = await inspectLegacyRollbackSource();
+      // A rival tab or direct IndexedDB client could alter pilot rows without
+      // advancing V2's revision metadata. Reading the stores twice detects
+      // an inconsistent observation rather than mislabeling it as durable
+      // disagreement (or a durable match). This is an explicit diagnostic
+      // only; no production read path incurs a second full-store scan.
+      const collectionsAfter = await readV2CollectionsFromDb(db);
+      const metaFinal = await readMeta(db);
+      if (!isDarkEnabled() || darkMirrorModeEpoch !== startingModeEpoch)
+        return refuse('dark_mode_changed_during_inspection');
+      if (stableJson(collectionsAfter) !== stableJson(collections))
+        return refuse('v2_collections_changed_during_inspection');
       if (!afterAudit.sourceStable
         || afterAudit.generation !== generation
         || currentGeneration({ create: false }) !== generation
         || stableJson(metaAfter) !== stableJson(metaBefore)
+        || stableJson(metaFinal) !== stableJson(metaBefore)
         || stableJson(captureLegacyNamespace()) !== stableJson(beforeNamespace))
         return refuse('inspection_window_changed');
       const expected = stableJson(paritySubset(sourceSubset(beforeSource.state)));
