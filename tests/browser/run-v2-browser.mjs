@@ -621,6 +621,70 @@ try {
       handoffRefused:true,authority:'legacy_only'};
   });
 
+  await run('separate V1 tab writing during in-lock SHA-256 is rejected without promotion',async context=>{
+    const candidate=await open(context),otherTab=await open(context);
+    const start=await candidate.evaluate(()=>({
+      legacy:localStorage.getItem('taskpoints_v1'),
+      locksSupported:typeof navigator.locks?.request==='function'
+    }));
+    if(!start.locksSupported){
+      const denied=await candidate.evaluate(()=>
+        window.TaskPointsStateRuntimeV2.rehearseExclusiveWriterLease());
+      assert.equal(denied.reason,'lock_manager_unavailable');
+      assert.equal(denied.canPromote,false);
+      return {unsupportedFailClosed:true};
+    }
+    const pending=candidate.evaluate(async()=>{
+      const original=SubtleCrypto.prototype.digest;
+      let calls=0;
+      SubtleCrypto.prototype.digest=function(){
+        const self=this,args=arguments;
+        calls++;
+        if(calls===2){
+          // The second hash is inside the lock. Delay its response while
+          // a noncooperating legacy tab changes an unrelated V1 setting.
+          localStorage.setItem('v2_writer_inside_digest_pause','ready');
+          return new Promise((resolve,reject)=>{
+            window.__resumeV2InsideDigest=()=>
+              Promise.resolve(original.apply(self,args)).then(resolve,reject);
+          });
+        }
+        return original.apply(self,args);
+      };
+      try{return {proof:await window.TaskPointsStateRuntimeV2.rehearseExclusiveWriterLease(),
+        digests:calls};}
+      finally{
+        SubtleCrypto.prototype.digest=original;
+        delete window.__resumeV2InsideDigest;
+      }
+    });
+    await otherTab.waitForFunction(()=>
+      localStorage.getItem('v2_writer_inside_digest_pause')==='ready',
+      null,{timeout:12000});
+    await otherTab.evaluate(()=>
+      localStorage.setItem('taskpoints_settings_change_inside_digest','outside V2 lock'));
+    await candidate.evaluate(()=>window.__resumeV2InsideDigest());
+    const result=await pending;
+    assert.equal(result.digests,2);
+    assert.equal(result.proof.lockAcquired,false,JSON.stringify(result));
+    assert.equal(result.proof.reason,'legacy_changed_during_lock_verification');
+    assert.equal(result.proof.canPromote,false);
+    assert.equal(result.proof.mutationAuthority,'legacy_only');
+    const final=await candidate.evaluate(async()=>{
+      const proof=await window.TaskPointsStateRuntimeV2.rehearseExclusiveWriterLease();
+      return {proof,v1:localStorage.getItem('taskpoints_v1'),
+        newSetting:localStorage.getItem('taskpoints_settings_change_inside_digest'),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(final.proof.lockAcquired,true,JSON.stringify(final.proof));
+    assert.equal(final.proof.canPromote,false);
+    assert.equal(final.v1,start.legacy);
+    assert.equal(final.newSetting,'outside V2 lock');
+    assert.equal(final.authority,'legacy_only');
+    return {crossTabInLockHashRaceBlocked:true,retrySafe:true,
+      legacyDataPreserved:true,authority:'legacy_only'};
+  });
+
   await run('independent immutable SHA-256 checkpoint survives reload and detects tampering without restore',async context=>{
     const page=await open(context);
     const created=await page.evaluate(async()=>{
