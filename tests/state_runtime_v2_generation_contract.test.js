@@ -1439,3 +1439,90 @@ test('guarded V2 readiness rejects revision-signal read denial after asynchronou
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
   assert.equal((await app.runtime.inspectPilotReadiness()).eligible,true);
 });
+
+test('writer-lock rehearsal refuses unsupported browsers, stays nonauthoritative, and never writes state',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const legacy=app.localStorage.getItem(LEGACY_KEY);
+  const v2=structuredClone(app.indexedDB.dump(DB_NAME));
+  const unsupported=await app.runtime.rehearseExclusiveWriterLease();
+  assert.equal(unsupported.lockAcquired,false);
+  assert.equal(unsupported.reason,'lock_manager_unavailable');
+  assert.equal(unsupported.canPromote,false);
+  let seen=null;
+  app.context.navigator={locks:{
+    async request(name,options,callback) {
+      seen={name,options};
+      return callback({name,mode:options.mode});
+    }
+  }};
+  const proof=await app.runtime.rehearseExclusiveWriterLease();
+  assert.equal(seen.name,'taskpoints_v2_writer_handoff_rehearsal_v1');
+  assert.deepEqual(JSON.parse(JSON.stringify(seen.options)),{mode:'exclusive',ifAvailable:true});
+  assert.equal(proof.lockAcquired,true,JSON.stringify(proof));
+  assert.equal(proof.lockHeldAfterReturn,false);
+  assert.equal(proof.rollbackSourceStable,true);
+  assert.equal(proof.canPromote,false);
+  assert.equal(proof.mutationAuthority,'legacy_only');
+  assert.ok(proof.blockers.includes('durable_authority_rollback_not_implemented'));
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),legacy);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),v2);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
+test('busy and denied cross-tab writer lock never grant mutation authority or destroy records',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const legacy=app.localStorage.getItem(LEGACY_KEY);
+  const v2=structuredClone(app.indexedDB.dump(DB_NAME));
+  app.context.navigator={locks:{request:async(name,options,callback)=>callback(null)}};
+  const busy=await app.runtime.rehearseExclusiveWriterLease();
+  assert.equal(busy.lockAcquired,false);
+  assert.equal(busy.reason,'lock_held_elsewhere');
+  app.context.navigator.locks.request=async()=>{throw Error('synthetic SecurityError')};
+  const denied=await app.runtime.rehearseExclusiveWriterLease();
+  assert.equal(denied.lockAcquired,false);
+  assert.equal(denied.reason,'lock_request_failed');
+  assert.equal(denied.canPromote,false);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),legacy);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),v2);
+});
+
+test('writer-lock rehearsal rejects V1 changes while holding exclusive lock',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  app.context.navigator={locks:{request:async(name,options,callback)=>{
+    app.localStorage.setItem(LEGACY_KEY,JSON.stringify(legacyState('h1','Concurrent external V1 edit')));
+    return callback({name});
+  }}};
+  const originalV2=structuredClone(app.indexedDB.dump(DB_NAME));
+  const failed=await app.runtime.rehearseExclusiveWriterLease();
+  assert.equal(failed.lockAcquired,false);
+  assert.equal(failed.reason,'pilot_changed_under_lock');
+  assert.equal(failed.canPromote,false);
+  assert.equal(JSON.parse(app.localStorage.getItem(LEGACY_KEY)).habits[0].name,'Concurrent external V1 edit');
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),originalV2);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
+test('legacy rollback-source audit remains read-only, reports complete V1 scope and refuses WAL denial',async()=>{
+  const app=install({initialState:{...legacyState(),
+    completions:[{id:'task-one',source:'task',points:1},{id:'task-two',source:'task',points:2}]}});
+  await app.runtime.startCoordinatedDarkMirror();
+  const raw=app.localStorage.getItem(LEGACY_KEY);
+  const mirror=structuredClone(app.indexedDB.dump(DB_NAME));
+  const report=await app.runtime.inspectLegacyRollbackSource();
+  assert.equal(report.sourceStable,true,JSON.stringify(report));
+  assert.equal(report.checkpointExists,false);
+  assert.equal(report.canRestoreFromCheckpoint,false);
+  assert.equal(report.counts.completions,2);
+  assert.equal(report.mutationAuthority,'legacy_only');
+  const orig=app.wal.getPendingRows.bind(app.wal);
+  app.wal.getPendingRows=()=>({ok:false,error:'synthetic denied WAL'});
+  const denied=await app.runtime.inspectLegacyRollbackSource();
+  app.wal.getPendingRows=orig;
+  assert.equal(denied.sourceStable,false);
+  assert.equal(denied.reason,'wal_unreadable');
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),raw);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME),mirror);
+});
