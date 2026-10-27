@@ -615,6 +615,48 @@ try {
     return {quotaFailureContained:true,existingCheckpointPreserved:true};
   });
 
+  await run('two tabs writing explicit recovery checkpoints retain both immutable copies',async context=>{
+    const left=await open(context);
+    const right=await open(context);
+    const v1=await left.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const [a,b]=await Promise.all([
+      left.evaluate(()=>window.TaskPointsStateRuntimeV2.createPreviewRecoveryCheckpoint()),
+      right.evaluate(()=>window.TaskPointsStateRuntimeV2.createPreviewRecoveryCheckpoint())
+    ]);
+    assert.equal(a.saved,true,JSON.stringify(a));
+    assert.equal(b.saved,true,JSON.stringify(b));
+    assert.notEqual(a.checkpointId,b.checkpointId);
+    const reports=await left.evaluate(async ids=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      return Promise.all(ids.map(id=>runtime.inspectPreviewRecoveryCheckpoint(id)));
+    },[a.checkpointId,b.checkpointId]);
+    assert.equal(reports.length,2);
+    assert.ok(reports.every(row=>row.intact===true));
+    assert.ok(reports.every(row=>row.canAutoRestore===false));
+    const saved=await right.evaluate(async()=>{
+      const db=await new Promise((resolve,reject)=>{
+        const request=indexedDB.open('taskpoints_v2_recovery_checkpoints_preview',1);
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      const rows=await new Promise((resolve,reject)=>{
+        const req=db.transaction('snapshots','readonly').objectStore('snapshots').getAll();
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      db.close();
+      return {ids:rows.map(row=>row.id),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority,
+        legacy:localStorage.getItem('taskpoints_v1')};
+    });
+    assert.ok(saved.ids.includes(a.checkpointId));
+    assert.ok(saved.ids.includes(b.checkpointId));
+    assert.equal(saved.ids.length,2,'neither simultaneous IndexedDB transaction may drop the other copy');
+    assert.equal(saved.legacy,v1);
+    assert.equal(saved.authority,'legacy_only');
+    return {twoDistinctImmutableSnapshots:true,crossTabWritesSerialized:true,
+      legacyDataUnchanged:true,authority:'legacy_only'};
+  });
+
   await run('mutation-handoff preflight inventories pilot readiness but cannot promote V2', async context => {
     const page=await open(context);
     const baseline=await page.evaluate(async()=>{
