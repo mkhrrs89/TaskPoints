@@ -3614,6 +3614,7 @@
     });
     const locks = global.navigator?.locks;
     if (typeof locks?.request !== 'function') return fail('lock_manager_unavailable');
+    const initialModeEpoch = darkMirrorModeEpoch;
     // Pilot parity alone is insufficient. Pending V1 journals, an incomplete
     // completion index, a changing mirror queue or recorded bridge/mirror
     // failures must all block even a *rehearsal* of the writer handoff.
@@ -3662,6 +3663,12 @@
           try {
             currentInventory = captureLegacyNamespace();
             currentFingerprint = await previewRecoveryFingerprint(currentInventory);
+            // An opt-out or off/on toggle during hashing invalidates this
+            // diagnostic, even if the stored flag ends at its old value.
+            if (!isDarkEnabled() || darkMirrorModeEpoch !== initialModeEpoch) {
+              result = fail('dark_mode_changed_during_lock_verification');
+              return;
+            }
             // SHA-256 is asynchronous. A nonparticipating V1 tab may change
             // settings, notes or another collection *while the digest is
             // pending*. Make one final synchronous read in the same turn
