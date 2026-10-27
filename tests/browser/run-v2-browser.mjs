@@ -685,6 +685,58 @@ try {
       legacyDataPreserved:true,authority:'legacy_only'};
   });
 
+  await run('read-only parity forensics inspects a V1/V2 divergence without changing either copy',async context=>{
+    const observer=await open(context);
+    const writer=await open(context);
+    const readMirror=async page=>page.evaluate(async()=>{
+      const db=await window.TaskPointsStateRuntimeV2.open();
+      const tx=db.transaction(['meta','habits','completions','mutations'],'readonly');
+      const read=name=>new Promise((resolve,reject)=>{
+        const req=tx.objectStore(name).getAll();
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      const [meta,habits,completions,mutations]=await Promise.all(
+        ['meta','habits','completions','mutations'].map(read));
+      return {meta,habits,completions,mutations};
+    });
+    const baseline=await observer.evaluate(async()=>({
+      report:await window.TaskPointsStateRuntimeV2.inspectPreservedParityMismatch(),
+      originalV1:localStorage.getItem('taskpoints_v1')
+    }));
+    assert.equal(baseline.report.stable,true,JSON.stringify(baseline.report));
+    assert.equal(baseline.report.mismatch,false);
+    const originalMirror=await readMirror(observer);
+    const newer=await writer.evaluate(()=>{
+      const state=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      state.habits.find(h=>h.id==='h1').name='Legacy-tab edit not mirrored to V2';
+      localStorage.setItem('taskpoints_v1',JSON.stringify(state));
+      return localStorage.getItem('taskpoints_v1');
+    });
+    assert.notEqual(newer,baseline.originalV1);
+    const report=await observer.evaluate(async()=>
+      window.TaskPointsStateRuntimeV2.inspectPreservedParityMismatch());
+    assert.equal(report.stable,true,JSON.stringify(report));
+    assert.equal(report.mismatch,true);
+    assert.equal(report.evidencePreserved,true);
+    assert.equal(report.canRepair,false);
+    assert.equal(report.evidence.changedHabits,1);
+    assert.equal(report.evidence.destructiveReseedBlocked,true);
+    assert.equal(report.readAuthority,'legacy_only');
+    assert.equal(await observer.evaluate(()=>localStorage.getItem('taskpoints_v1')),newer);
+    assert.deepEqual(await readMirror(observer),originalMirror,
+      'inspection must leave all V2 stores and mutation ledger untouched');
+    await writer.evaluate(raw=>localStorage.setItem('taskpoints_v1',raw),baseline.originalV1);
+    const matched=await observer.evaluate(async()=>
+      window.TaskPointsStateRuntimeV2.inspectPreservedParityMismatch());
+    assert.equal(matched.stable,true);
+    assert.equal(matched.mismatch,false);
+    assert.deepEqual(await readMirror(observer),originalMirror);
+    assert.equal((await observer.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.getStatus())).readAuthority,'legacy_only');
+    return {crossTabMismatchDetected:true,noImplicitReseed:true,
+      allFourV2StoresPreserved:true,legacyRestorationNotAutomatic:true};
+  });
+
   await run('independent immutable SHA-256 checkpoint survives reload and detects tampering without restore',async context=>{
     const page=await open(context);
     const created=await page.evaluate(async()=>{
