@@ -3803,6 +3803,20 @@
     const initialModeEpoch = darkMirrorModeEpoch;
     const initialGeneration = currentGeneration({ create: false });
     if (!initialGeneration) return refuse('generation_unavailable');
+    // A voluntary fixture callback may use this guard just before a test
+    // write, including after awaits. This narrows one known TOCTOU window,
+    // but is NOT a global fence: unfenced legacy tabs can still write and
+    // code that ignores the guard can perform side effects before rejection.
+    const assertPreviewGenerationCurrent = () => {
+      if (!isDarkEnabled() || initialModeEpoch !== darkMirrorModeEpoch
+        || currentGeneration({ create: false }) !== initialGeneration) {
+        const error = new Error('state_runtime_v2_preview_generation_changed');
+        error.code = 'STATE_RUNTIME_V2_PREVIEW_GENERATION_CHANGED';
+        throw error;
+      }
+      return true;
+    };
+    const previewGuard = Object.freeze({ assertPreviewGenerationCurrent });
     let result = refuse('shared_lock_unavailable');
     try {
       await locks.request(EXCLUSIVE_WRITER_REHEARSAL_LOCK,
@@ -3820,9 +3834,11 @@
           let ran = false;
           try {
             ran = true;
-            await operation();
-          } catch (_) {
-            result = refuse('cooperative_operation_failed',
+            await operation(previewGuard);
+          } catch (error) {
+            result = refuse(error?.code === 'STATE_RUNTIME_V2_PREVIEW_GENERATION_CHANGED'
+              ? 'cooperative_operation_generation_invalidated'
+              : 'cooperative_operation_failed',
               { sharedLockAcquired: true, operationRan: ran,
                 lockHeldAfterReturn: false });
             return;
