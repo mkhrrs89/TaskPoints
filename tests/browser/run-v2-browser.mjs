@@ -917,6 +917,206 @@ try {
       noSnapshotWrite:true,legacyAuthorityUnchanged:true};
   });
 
+  await run('serialized writer rejects a new independent Habit sidecar despite unchanged primary journals',async context=>{
+    const writer=await open(context),legacy=await open(context);
+    const hasLocks=await writer.evaluate(()=>typeof navigator.locks?.request==='function');
+    if(!hasLocks){
+      const denied=await writer.evaluate(()=>
+        window.TaskPointsStateRuntimeV2.exercisePreviewSerializedSnapshotLease(()=>{}));
+      assert.equal(denied.reason,'lock_manager_unavailable');
+      return {unsupportedFailClosed:true};
+    }
+    const source=await writer.evaluate(()=>{
+      const prefix='taskpoints_v2_habit_journal_event_v1:';
+      const sidecars=[];
+      for(let i=0;i<localStorage.length;i++){
+        const key=localStorage.key(i);
+        if(key?.startsWith(prefix))sidecars.push([key,localStorage.getItem(key)]);
+      }
+      return {raw:localStorage.getItem('taskpoints_v1'),
+        taskJournalRaw:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        habitJournalRaw:localStorage.getItem('taskpoints_pending_habit_deltas_v1'),
+        sidecars:sidecars.sort((a,b)=>a[0].localeCompare(b[0]))};
+    });
+    const pending=writer.evaluate(expected=>
+      window.TaskPointsStateRuntimeV2.exercisePreviewSerializedSnapshotLease(async guard=>{
+        localStorage.setItem('v2_independent_sidecar_writer_waiting','ready');
+        await new Promise(resolve=>window.__releaseIndependentSidecarWriter=resolve);
+        const candidate=window.TaskPointsCore.parseTaskPointsStorageJson(expected.raw,{});
+        candidate.tasks.push({id:'stale-sidecar-overwrite',title:'Do not persist'});
+        guard.assertPreviewLegacySnapshotUnchanged(expected.raw);
+        guard.assertPreviewPrimaryJournalsUnchanged(expected);
+        guard.assertPreviewHabitSidecarsUnchanged(expected.sidecars);
+        window.TaskPointsCore.saveStateSnapshot(candidate,{
+          immediateWrite:true,userInitiated:true,savePath:'v2-stale-sidecar-test'
+        });
+      }),source);
+    await legacy.waitForFunction(()=>
+      localStorage.getItem('v2_independent_sidecar_writer_waiting')==='ready',
+      null,{timeout:12000});
+    // A valid independent event is allowed to exist without a new primary
+    // journal write, e.g. following concurrent legacy RMW journal races.
+    const added=await legacy.evaluate(()=>{
+      const key='taskpoints_v2_habit_journal_event_v1:'+crypto.randomUUID();
+      const row={id:'habit:h2:2026-10-23',habitId:'h2',dayKey:'2026-10-23',
+        source:'habit',status:'full',done:true,completionPoints:4,
+        updatedAtISO:'2026-10-23T12:00:00.000Z',
+        __v2JournalGeneration:localStorage.getItem('taskpoints_state_v2_generation_v1')};
+      localStorage.setItem(key,JSON.stringify([row]));
+      return {key,value:localStorage.getItem(key),
+        merged:window.TaskPointsCore.readPendingHabitDeltas()
+          .some(delta=>delta.habitId==='h2'&&delta.dayKey==='2026-10-23')};
+    });
+    assert.equal(added.merged,true);
+    await writer.waitForFunction(pair=>
+      localStorage.getItem(pair.key)===pair.value,added,{timeout:12000});
+    await writer.evaluate(()=>window.__releaseIndependentSidecarWriter());
+    const denied=await pending;
+    assert.equal(denied.reason,'serialized_operation_habit_sidecars_changed',JSON.stringify(denied));
+    assert.equal(denied.exclusiveLockAcquired,true);
+    assert.equal(denied.operationRan,true);
+    assert.equal(denied.lockHeldAfterReturn,false);
+    assert.equal(denied.canPromote,false);
+    assert.equal(denied.productionWritersFenced,false);
+    const after=await legacy.evaluate(key=>({
+      raw:localStorage.getItem('taskpoints_v1'),
+      taskJournalRaw:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+      habitJournalRaw:localStorage.getItem('taskpoints_pending_habit_deltas_v1'),
+      sidecar:localStorage.getItem(key),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }),added.key);
+    assert.equal(after.raw,source.raw);
+    assert.equal(after.taskJournalRaw,source.taskJournalRaw);
+    assert.equal(after.habitJournalRaw,source.habitJournalRaw);
+    assert.equal(after.sidecar,added.value);
+    assert.equal(after.authority,'legacy_only');
+    return {independentEventDetected:true,staleSaveRefused:true,
+      bothPrimaryJournalsUnchanged:true,eventRetained:true};
+  });
+
+  await run('serialized writer detects Habit sidecar removal by verified-row cleanup helper',async context=>{
+    const writer=await open(context),cleaner=await open(context);
+    const hasLocks=await writer.evaluate(()=>typeof navigator.locks?.request==='function');
+    if(!hasLocks){
+      const denied=await writer.evaluate(()=>
+        window.TaskPointsStateRuntimeV2.exercisePreviewSerializedSnapshotLease(()=>{}));
+      assert.equal(denied.reason,'lock_manager_unavailable');
+      return {unsupportedFailClosed:true};
+    }
+    const setup=await cleaner.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const delta=core.writePendingHabitDelta({
+        habitId:'h3',dayKey:'2026-10-24',source:'habit',status:'full',
+        done:true,completionPoints:5,completionFraction:1,
+        completedAtISO:'2026-10-24T12:00:00.000Z',
+        updatedAtISO:'2026-10-24T12:00:00.000Z'
+      });
+      const candidate=core.readTaskPointsStoredState();
+      core.applyPendingHabitDeltas(candidate,[delta]);
+      const save=core.saveStateSnapshot(candidate,{
+        immediateWrite:true,userInitiated:true,replaceCompletions:true,
+        savePath:'v2-sidecar-compaction-prep'
+      });
+      if(save?.skipped)throw Error('sidecar_compaction_prep_save_skipped');
+      const persisted=core.readTaskPointsStoredState();
+      const verified=core.verifyPersistedHabitDeltas(persisted,[delta]);
+      if(verified.length!==1)throw Error('sidecar_row_not_verified_in_v1');
+      return {delta,verified};
+    });
+    const prefix='taskpoints_v2_habit_journal_event_v1:';
+    const expected=await writer.evaluate(prefix=>{
+      const sidecars=[];
+      for(let i=0;i<localStorage.length;i++){
+        const key=localStorage.key(i);
+        if(key?.startsWith(prefix))sidecars.push([key,localStorage.getItem(key)]);
+      }
+      return sidecars.sort((a,b)=>a[0].localeCompare(b[0]));
+    },prefix);
+    assert.ok(expected.length>=1);
+    const pending=writer.evaluate(previous=>
+      window.TaskPointsStateRuntimeV2.exercisePreviewSerializedSnapshotLease(async guard=>{
+        localStorage.setItem('v2_sidecar_compaction_guard_waiting','ready');
+        await new Promise(resolve=>window.__resumeSidecarCompactionGuard=resolve);
+        guard.assertPreviewHabitSidecarsUnchanged(previous);
+      }),expected);
+    await cleaner.waitForFunction(()=>
+      localStorage.getItem('v2_sidecar_compaction_guard_waiting')==='ready',
+      null,{timeout:12000});
+    const cleared=await cleaner.evaluate(verified=>{
+      const core=window.TaskPointsCore;
+      const count=core.clearCompactedHabitDeltas(verified);
+      const prefix='taskpoints_v2_habit_journal_event_v1:';
+      const remaining=[];
+      for(let i=0;i<localStorage.length;i++){
+        const key=localStorage.key(i);
+        if(key?.startsWith(prefix))remaining.push(key);
+      }
+      return {count,remaining};
+    },setup.verified);
+    assert.ok(cleared.count>=1,'Verified Habit cleanup should clear its primary row');
+    assert.equal(cleared.remaining.length,0,'Verified sidecar should be removed');
+    await writer.waitForFunction(old=>{
+      for(const pair of old)if(localStorage.getItem(pair[0])!==pair[1])return true;
+      return false;
+    },expected,{timeout:12000});
+    await writer.evaluate(()=>window.__resumeSidecarCompactionGuard());
+    const denied=await pending;
+    assert.equal(denied.reason,'serialized_operation_habit_sidecars_changed',JSON.stringify(denied));
+    assert.equal(denied.canPromote,false);
+    assert.equal(denied.exclusiveLockAcquired,true);
+    const after=await cleaner.evaluate(()=>({
+      done:window.TaskPointsCore.readTaskPointsStoredState()
+        .completions.some(c=>c.habitId==='h3'&&c.dayKey==='2026-10-24'),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    assert.equal(after.done,true);
+    assert.equal(after.authority,'legacy_only');
+    return {verifiedCompactionCleanupObserved:true,sidecarRemovalDetected:true,
+      persistedCompletionPreserved:true,noAuthorityChange:true};
+  });
+
+  await run('Habit sidecar guard fails closed on malformed tokens and denied reads',async context=>{
+    const page=await open(context);
+    const hasLocks=await page.evaluate(()=>typeof navigator.locks?.request==='function');
+    if(!hasLocks){
+      const denied=await page.evaluate(()=>
+        window.TaskPointsStateRuntimeV2.exercisePreviewSerializedSnapshotLease(()=>{}));
+      assert.equal(denied.reason,'lock_manager_unavailable');
+      return {unsupportedFailClosed:true};
+    }
+    const proof=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const before=localStorage.getItem('taskpoints_v1');
+      const malformed=await runtime.exercisePreviewSerializedSnapshotLease(guard=>
+        guard.assertPreviewHabitSidecarsUnchanged([['not-a-sidecar','fake']]));
+      const key='taskpoints_v2_habit_journal_event_v1:denied-test';
+      localStorage.setItem(key,'fixture-sidecar');
+      const get=Storage.prototype.getItem;
+      Storage.prototype.getItem=function(value){
+        if(this===localStorage&&value===key)
+          throw new DOMException('synthetic denied sidecar','SecurityError');
+        return get.call(this,value);
+      };
+      let unreadable;
+      try{
+        unreadable=await runtime.exercisePreviewSerializedSnapshotLease(guard=>
+          guard.assertPreviewHabitSidecarsUnchanged([[key,'fixture-sidecar']]));
+      }finally{Storage.prototype.getItem=get;}
+      return {malformed,unreadable,unchanged:localStorage.getItem('taskpoints_v1')===before,
+        sidecar:localStorage.getItem(key),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(proof.malformed.reason,'serialized_operation_habit_sidecar_token_invalid');
+    assert.equal(proof.unreadable.reason,'serialized_operation_habit_sidecars_unreadable');
+    assert.equal(proof.unreadable.exclusiveLockAcquired,true);
+    assert.equal(proof.unreadable.canPromote,false);
+    assert.equal(proof.unchanged,true);
+    assert.equal(proof.sidecar,'fixture-sidecar');
+    assert.equal(proof.authority,'legacy_only');
+    return {malformedTokenDenied:true,sidecarReadDenied:true,
+      noLegacySnapshotWrite:true,sidecarRetained:true};
+  });
+
   await run('cooperative shared writer locks coexist and block exclusive handoff while legacy tabs remain unfenced',async context=>{
     const first=await open(context),second=await open(context);
     const silent=await context.newPage();
