@@ -1718,3 +1718,39 @@ test('explicit checkpoint snapshots can coexist without overwriting older snapsh
   assert.equal((await app.runtime.inspectPreviewRecoveryCheckpoint(second.checkpointId)).intact,true);
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
 });
+
+test('immutable recovery checkpoint remains intact after V2 pilot database is cleared in isolation',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const first=await app.runtime.createPreviewRecoveryCheckpoint();
+  assert.equal(first.saved,true,JSON.stringify(first));
+  const before=structuredClone(app.indexedDB.dump('taskpoints_v2_recovery_checkpoints_preview'));
+  const source=app.localStorage.getItem(LEGACY_KEY);
+  // Simulate an independent V2 mirror failure or reinitialization. This
+  // alters only the fake V2 stores, never actual V1 or the recovery DB.
+  const db=await app.runtime.open();
+  const tx=db.transaction(['habits','completions','mutations','meta'],'readwrite');
+  for(const name of ['habits','completions','mutations','meta'])
+    tx.objectStore(name).clear();
+  await new Promise((resolve,reject)=>{
+    tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);tx.onerror=()=>reject(tx.error);
+  });
+  const after=await app.runtime.inspectPreviewRecoveryCheckpoint(first.checkpointId);
+  assert.equal(after.intact,true,JSON.stringify(after));
+  assert.deepEqual(app.indexedDB.dump('taskpoints_v2_recovery_checkpoints_preview'),before);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),source);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
+
+test('checkpoint refuses lost legacy enumeration permission without opening a recovery database',async()=>{
+  const app=install();
+  await app.runtime.startCoordinatedDarkMirror();
+  const originalKey=app.localStorage.key.bind(app.localStorage);
+  app.localStorage.key=()=>{throw Error('storage enumeration denied');};
+  const denied=await app.runtime.createPreviewRecoveryCheckpoint();
+  app.localStorage.key=originalKey;
+  assert.equal(denied.saved,false);
+  assert.equal(denied.reason,'checkpoint_write_failed');
+  assert.equal(app.indexedDB.dump('taskpoints_v2_recovery_checkpoints_preview'),null);
+  assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
+});
