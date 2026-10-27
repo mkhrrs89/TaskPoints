@@ -4322,6 +4322,7 @@
     inspectPilotReadiness,
     inspectPilotCompletionIndexCoverage,
     inspectMutationHandoffPrerequisites,
+    inspectAuthorityCutoverBarriers,
     inspectPreviewWriterPeers,
     exercisePreviewCooperativeWriterLease,
     inspectPreservedParityMismatch,
