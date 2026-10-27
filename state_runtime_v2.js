@@ -3993,6 +3993,86 @@
     return result;
   }
 
+  // Explicit, preview-host-only experiment for a *serialized* legacy
+  // snapshot write. Unlike shared cooperative leases, an exclusive Web Lock
+  // blocks all other participating shared and exclusive rehearsal callbacks.
+  // No real V1 save path calls this; normal saves remain synchronous and
+  // unchanged. A caller must still reread/rebase state inside the callback
+  // and check the supplied generation guard immediately before its write.
+  // Unfenced pre-V2 tabs, crashes and already stale application state remain
+  // unsolved. This API is never a production writer fence or cutover token.
+  async function exercisePreviewSerializedSnapshotLease(operation) {
+    const refuse = (reason, details = {}) => ({
+      checked: true, exclusiveLockAcquired: false, operationRan: false,
+      canPromote: false, reason, productionWritersFenced: false,
+      allLegacyWritersKnown: false,
+      mutationAuthority: 'legacy_only', readAuthority: 'legacy_only',
+      ...details
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    if (typeof operation !== 'function') return refuse('operation_required');
+    const locks = global.navigator?.locks;
+    if (typeof locks?.request !== 'function') return refuse('lock_manager_unavailable');
+    const initialModeEpoch = darkMirrorModeEpoch;
+    const initialGeneration = currentGeneration({ create: false });
+    if (!initialGeneration) return refuse('generation_unavailable');
+    const assertPreviewGenerationCurrent = () => {
+      if (!isDarkEnabled() || initialModeEpoch !== darkMirrorModeEpoch
+        || currentGeneration({ create: false }) !== initialGeneration) {
+        const error = new Error('state_runtime_v2_preview_generation_changed');
+        error.code = 'STATE_RUNTIME_V2_PREVIEW_GENERATION_CHANGED';
+        throw error;
+      }
+      return true;
+    };
+    const previewGuard = Object.freeze({ assertPreviewGenerationCurrent });
+    let result = refuse('exclusive_lock_unavailable');
+    try {
+      await locks.request(EXCLUSIVE_WRITER_REHEARSAL_LOCK,
+        { mode: 'exclusive', ifAvailable: true }, async lock => {
+          if (!lock) { result = refuse('lock_held_elsewhere'); return; }
+          if (!isDarkEnabled() || initialModeEpoch !== darkMirrorModeEpoch
+            || currentGeneration({ create: false }) !== initialGeneration) {
+            result = refuse('generation_or_preview_changed_under_lock');
+            return;
+          }
+          try {
+            await operation(previewGuard);
+          } catch (error) {
+            result = refuse(error?.code === 'STATE_RUNTIME_V2_PREVIEW_GENERATION_CHANGED'
+              ? 'serialized_operation_generation_invalidated'
+              : 'serialized_operation_failed', {
+              exclusiveLockAcquired: true, operationRan: true,
+              lockHeldAfterReturn: false
+            });
+            return;
+          }
+          if (!isDarkEnabled() || initialModeEpoch !== darkMirrorModeEpoch
+            || currentGeneration({ create: false }) !== initialGeneration) {
+            result = refuse('generation_or_preview_changed_under_lock', {
+              exclusiveLockAcquired: true, operationRan: true,
+              lockHeldAfterReturn: false
+            });
+            return;
+          }
+          result = {
+            checked: true, exclusiveLockAcquired: true, operationRan: true,
+            reason: 'serialized_snapshot_rehearsed',
+            lockHeldAfterReturn: false,
+            canPromote: false, productionWritersFenced: false,
+            allLegacyWritersKnown: false,
+            mutationAuthority: 'legacy_only', readAuthority: 'legacy_only'
+          };
+        });
+    } catch (_) {
+      return refuse('exclusive_lock_request_failed', {
+        operationMayHaveRun: result.operationRan === true
+      });
+    }
+    return result;
+  }
+
   // Browser-native exclusive-lock *rehearsal*, never a writer handoff.
   // Browser LockManager is shared by same-origin tabs and serializes callbacks
   // without vulnerable localStorage time-based leases. No fallback assumes
@@ -4363,6 +4443,7 @@
     inspectAuthorityCutoverBarriers,
     inspectPreviewWriterPeers,
     exercisePreviewCooperativeWriterLease,
+    exercisePreviewSerializedSnapshotLease,
     inspectPreservedParityMismatch,
     inspectLegacyRollbackSource,
     createPreviewRecoveryCheckpoint,
