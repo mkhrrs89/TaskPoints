@@ -161,6 +161,15 @@ test('exclusive snapshot writer rehearsal stays developer-only and cannot change
     'assertPreviewGenerationCurrent',
     'assertPreviewLegacySnapshotUnchanged',
     'assertPreviewPrimaryJournalsUnchanged',
+    'assertPreviewHabitSidecarsUnchanged',
+    'STATE_RUNTIME_V2_PREVIEW_SIDECARS_CHANGED',
+    'STATE_RUNTIME_V2_PREVIEW_SIDECAR_UNREADABLE',
+    'STATE_RUNTIME_V2_PREVIEW_SIDECAR_TOKEN_INVALID',
+    'STATE_RUNTIME_V2_PREVIEW_SIDECAR_GUARD_INACTIVE',
+    'serialized_operation_habit_sidecars_changed',
+    'serialized_operation_habit_sidecars_unreadable',
+    'serialized_operation_habit_sidecar_token_invalid',
+    "taskpoints_v2_habit_journal_event_v1:",
     'STATE_RUNTIME_V2_PREVIEW_JOURNALS_CHANGED',
     'STATE_RUNTIME_V2_PREVIEW_JOURNAL_UNREADABLE',
     'STATE_RUNTIME_V2_PREVIEW_JOURNAL_TOKENS_REQUIRED',
@@ -199,6 +208,13 @@ test('exclusive snapshot writer rehearsal stays developer-only and cannot change
   assert.match(section, /if \(!callbackActive\)/);
   assert.match(section, /taskRaw !== expected\.taskJournalRaw/);
   assert.match(section, /habitRaw !== expected\.habitJournalRaw/);
+  assert.match(section, /function_missing_preview_sidecar_noop|const readPreviewHabitSidecarInventory/);
+  assert.match(section, /key\.startsWith\(sidecarPrefix\)/);
+  assert.match(section, /storage\.key\(index\)/);
+  assert.match(section, /storage\.getItem\(key\)/);
+  assert.match(section, /storage\.length !== count/);
+  assert.match(section, /stableJson\(actualEntries\) !== stableJson\(expectedEntries\)/);
+  assert.doesNotMatch(section, /localStorage\.(?:setItem|removeItem|clear)\(/);
   for(const file of [
     'index.html','today.html','settings.html','notes.html',
     'emergency_recovery.html','scoring_core.js','task_mutation_journal.js'
