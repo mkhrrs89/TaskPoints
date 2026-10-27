@@ -4067,8 +4067,49 @@
       }
       return true;
     };
+    // Task and Habit edits can be durable in separate V1 journals while
+    // taskpoints_v1 remains byte-for-byte unchanged. An explicit fixture
+    // caller may compare BOTH raw primary journal values before its sync
+    // snapshot save. Real Habit event sidecars and other storage keys are
+    // deliberately not claimed as covered by this limited rehearsal.
+    const assertPreviewPrimaryJournalsUnchanged = expected => {
+      if (!callbackActive) {
+        const error = new Error('state_runtime_v2_preview_journal_guard_outside_lock');
+        error.code = 'STATE_RUNTIME_V2_PREVIEW_JOURNAL_GUARD_INACTIVE';
+        throw error;
+      }
+      assertPreviewGenerationCurrent();
+      const owns = (key) => Object.prototype.hasOwnProperty.call(expected, key);
+      if (!expected || typeof expected !== 'object' || Array.isArray(expected)
+        || !owns('taskJournalRaw') || !owns('habitJournalRaw')
+        || !(expected.taskJournalRaw === null || typeof expected.taskJournalRaw === 'string')
+        || !(expected.habitJournalRaw === null || typeof expected.habitJournalRaw === 'string')) {
+        const error = new Error('state_runtime_v2_preview_journal_tokens_required');
+        error.code = 'STATE_RUNTIME_V2_PREVIEW_JOURNAL_TOKENS_REQUIRED';
+        throw error;
+      }
+      let taskRaw, habitRaw;
+      try {
+        const storage = global.localStorage;
+        if (!storage || typeof storage.getItem !== 'function')
+          throw Error('storage_unavailable');
+        taskRaw = storage.getItem('taskpoints_pending_task_mutations_v1');
+        habitRaw = storage.getItem(core.PENDING_HABIT_DELTAS_KEY || 'taskpoints_pending_habit_deltas_v1');
+      } catch (_) {
+        const error = new Error('state_runtime_v2_preview_journal_unreadable');
+        error.code = 'STATE_RUNTIME_V2_PREVIEW_JOURNAL_UNREADABLE';
+        throw error;
+      }
+      if (taskRaw !== expected.taskJournalRaw || habitRaw !== expected.habitJournalRaw) {
+        const error = new Error('state_runtime_v2_preview_primary_journals_changed');
+        error.code = 'STATE_RUNTIME_V2_PREVIEW_JOURNALS_CHANGED';
+        throw error;
+      }
+      return true;
+    };
     const previewGuard = Object.freeze({
-      assertPreviewGenerationCurrent, assertPreviewLegacySnapshotUnchanged
+      assertPreviewGenerationCurrent, assertPreviewLegacySnapshotUnchanged,
+      assertPreviewPrimaryJournalsUnchanged
     });
     let result = refuse('exclusive_lock_unavailable');
     try {
@@ -4088,8 +4129,16 @@
               ? 'serialized_operation_generation_invalidated'
               : error?.code === 'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_CHANGED'
                 ? 'serialized_operation_snapshot_changed'
-                : error?.code === 'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_UNREADABLE'
-                  ? 'serialized_operation_snapshot_unreadable'
+                : error?.code === 'STATE_RUNTIME_V2_PREVIEW_JOURNALS_CHANGED'
+                  ? 'serialized_operation_primary_journals_changed'
+                  : error?.code === 'STATE_RUNTIME_V2_PREVIEW_JOURNAL_UNREADABLE'
+                    ? 'serialized_operation_primary_journal_unreadable'
+                    : error?.code === 'STATE_RUNTIME_V2_PREVIEW_JOURNAL_TOKENS_REQUIRED'
+                      ? 'serialized_operation_primary_journal_tokens_required'
+                      : error?.code === 'STATE_RUNTIME_V2_PREVIEW_JOURNAL_GUARD_INACTIVE'
+                        ? 'serialized_operation_primary_journal_guard_inactive'
+                        : error?.code === 'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_UNREADABLE'
+                          ? 'serialized_operation_snapshot_unreadable'
                   : error?.code === 'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_TOKEN_REQUIRED'
                     ? 'serialized_operation_snapshot_token_required'
                     : error?.code === 'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_GUARD_INACTIVE'
