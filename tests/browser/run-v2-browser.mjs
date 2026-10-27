@@ -589,6 +589,50 @@ try {
       integritySha256:true,corruptionRejected:true,authority:'legacy_only'};
   });
 
+  await run('checkpoint rollback preview survives reload and reports differences without writing V1',async context=>{
+    const page=await open(context);
+    const saved=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      localStorage.setItem('taskpoints_preview_older_note','saved');
+      localStorage.setItem('taskpoints_preview_removed_note','to be missing later');
+      const checkpoint=await runtime.createPreviewRecoveryCheckpoint();
+      return {checkpoint,v1:localStorage.getItem('taskpoints_v1')};
+    });
+    assert.equal(saved.checkpoint.saved,true,JSON.stringify(saved.checkpoint));
+    await page.evaluate(()=>{
+      localStorage.setItem('taskpoints_preview_older_note','updated');
+      localStorage.removeItem('taskpoints_preview_removed_note');
+      localStorage.setItem('taskpoints_preview_new_note','new data must remain untouched');
+    });
+    await page.reload({waitUntil:'load'});
+    await page.evaluate(()=>window.V2BrowserFixture.start());
+    const preview=await page.evaluate(async id=>{
+      const before={
+        v1:localStorage.getItem('taskpoints_v1'),
+        newer:localStorage.getItem('taskpoints_preview_new_note'),
+        edited:localStorage.getItem('taskpoints_preview_older_note'),
+        old:localStorage.getItem('taskpoints_preview_removed_note')
+      };
+      const runtime=window.TaskPointsStateRuntimeV2;
+      return {plan:await runtime.inspectPreviewRollbackPlan(id),before,
+        after:{
+          v1:localStorage.getItem('taskpoints_v1'),
+          newer:localStorage.getItem('taskpoints_preview_new_note'),
+          edited:localStorage.getItem('taskpoints_preview_older_note'),
+          old:localStorage.getItem('taskpoints_preview_removed_note')
+        },authority:runtime.getStatus().readAuthority};
+    },saved.checkpoint.checkpointId);
+    assert.equal(preview.plan.planValid,true,JSON.stringify(preview.plan));
+    assert.equal(preview.plan.canApply,false);
+    assert.equal(preview.plan.counts.replaceChanged,1);
+    assert.equal(preview.plan.counts.removeNewer,1);
+    assert.equal(preview.plan.counts.restoreMissing,1);
+    assert.deepEqual(preview.after,preview.before);
+    assert.equal(preview.after.v1,saved.v1);
+    assert.equal(preview.authority,'legacy_only');
+    return {survivedReload:true,differencesDetected:true,zeroRestoreWrites:true};
+  });
+
   await run('failed second preview checkpoint leaves first independent checkpoint intact',async context=>{
     const page=await open(context);
     const proof=await page.evaluate(async()=>{
