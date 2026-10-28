@@ -4397,18 +4397,66 @@
                 result = refuse('fence_frozen', { fence: describe(state) });
                 return;
               }
-              const next = action === 'freeze'
-                ? { ...state, frozen: true, epoch: state.epoch + 1 }
-                : { ...state, writersCommitted: state.writersCommitted + 1,
-                    lastWriterMarker: options.marker };
-              // The CAS decision and marker/freeze update belong to the
-              // same IndexedDB transaction; no await or external write can
-              // occur between the get() callback and this put().
-              store.put(next);
-              result = refuse(action === 'freeze'
-                ? 'preview_fence_frozen' : 'preview_writer_recorded', {
-                atomicPreviewTransaction: true, fence: describe(next)
-              });
+              if (action === 'freeze') {
+                if (!Number.isSafeInteger(state.epoch + 1)) {
+                  result = refuse('fence_epoch_exhausted', { fence: describe(state) });
+                  return;
+                }
+                const next = { ...state, frozen: true, epoch: state.epoch + 1 };
+                store.put(next);
+                result = refuse('preview_fence_frozen', {
+                  atomicPreviewTransaction: true, fence: describe(next)
+                });
+                return;
+              }
+              // Keep each synthetic marker in the SAME readwrite
+              // transaction as the writer count. A tab retrying a completed
+              // marker must never inflate the count or silently record it
+              // again, even after another marker was recorded in between.
+              const markerId = 'writer_marker:' + options.marker;
+              const markerRequest = store.get(markerId);
+              markerRequest.onerror = () => {
+                result = refuse('fence_writer_marker_unreadable');
+                try { tx.abort(); } catch (_) {}
+              };
+              markerRequest.onsuccess = () => {
+                try {
+                  const marker = markerRequest.result;
+                  if (marker) {
+                    if (marker.id !== markerId || marker.generation !== generation
+                      || marker.epoch !== state.epoch) {
+                      result = refuse('fence_writer_marker_conflict', {
+                        fence: describe(state)
+                      });
+                      return;
+                    }
+                    result = refuse('preview_writer_replayed', {
+                      alreadyRecorded: true, fence: describe(state)
+                    });
+                    return;
+                  }
+                  if (!Number.isSafeInteger(state.writersCommitted + 1)) {
+                    result = refuse('fence_writer_counter_exhausted', {
+                      fence: describe(state)
+                    });
+                    return;
+                  }
+                  const next = { ...state,
+                    writersCommitted: state.writersCommitted + 1,
+                    lastWriterMarker: options.marker
+                  };
+                  // Both puts commit together or neither does. Request
+                  // callbacks stay synchronous to keep the IDB tx alive.
+                  store.put({ id: markerId, generation, epoch: state.epoch });
+                  store.put(next);
+                  result = refuse('preview_writer_recorded', {
+                    atomicPreviewTransaction: true, fence: describe(next)
+                  });
+                } catch (_) {
+                  result = refuse('fence_writer_marker_write_failed');
+                  try { tx.abort(); } catch (_) {}
+                }
+              };
             } catch (_) {
               result = refuse('fence_transaction_callback_failed');
               try { tx.abort(); } catch (_) {}
