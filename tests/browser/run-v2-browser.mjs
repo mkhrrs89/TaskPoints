@@ -2992,6 +2992,149 @@ try {
       taskMutationStillDurable:true,noSnapshotReplacement:true};
   });
 
+  await run('real Task journal flush persists edits before clearing its source but cannot authorize cutover',async context=>{
+    const page=await open(context);
+    const proof=await page.evaluate(async()=>{
+      const core=window.TaskPointsCore;
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const base=localStorage.getItem('taskpoints_v1');
+      const task={id:'flush-proof-task',title:'Compacted actual Task journal',
+        updatedAtISO:'2026-10-28T12:00:00.000Z'};
+      const completion={id:'flush-proof-completion',taskId:task.id,
+        title:'Actual compaction completion',source:'task',points:7,
+        completedAtISO:'2026-10-28T12:00:00.000Z'};
+      core.journalTaskMutation({task,completionUpsert:completion});
+      const before=await runtime.inspectAuthorityCutoverBarriers();
+      const rawBefore=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const flushed=core.flushPendingTaskMutations();
+      const persisted=core.parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1'),{});
+      const journalAfter=core.readPendingTaskMutations();
+      const after=await runtime.inspectAuthorityCutoverBarriers();
+      return {base,before,rawBefore,flushed,persisted,journalAfter,after,
+        remainingRaw:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(proof.before.taskJournal.reason,'pending');
+    assert.equal(proof.before.taskJournal.pendingCount,2);
+    assert.equal(proof.flushed,true,'Real synchronous compaction should report success');
+    assert.ok(proof.persisted.tasks.some(t=>t.id==='flush-proof-task'));
+    assert.ok(proof.persisted.completions.some(c=>c.id==='flush-proof-completion'));
+    assert.equal(proof.journalAfter.malformed,false);
+    assert.equal(proof.journalAfter.record.tasks.length,0);
+    assert.equal(proof.journalAfter.record.completionUpserts.length,0);
+    assert.equal(proof.remainingRaw,null,'Only verified compacted rows can be removed');
+    assert.equal(proof.after.taskJournal.reason,'absent');
+    assert.equal(proof.after.checks.taskJournalEmpty,true);
+    assert.equal(proof.after.canPromote,false);
+    assert.equal(proof.after.checks.allLegacyWritersFenced,false);
+    assert.ok(proof.after.blockers.includes('all_legacy_writers_not_fenced'));
+    assert.equal(proof.authority,'legacy_only');
+    return {taskAndCompletionPersisted:true,verifiedJournalCleared:true,
+      journalEmptyNotWriterFencing:true,cutoverBlocked:true};
+  });
+
+  await run('failed real Task journal compaction keeps pending mutation and blocks cutover',async context=>{
+    const page=await open(context);
+    const proof=await page.evaluate(async()=>{
+      const core=window.TaskPointsCore;
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const initial=localStorage.getItem('taskpoints_v1');
+      core.journalTaskMutation({task:{
+        id:'failed-compaction-task',title:'Keep after blocked save',
+        updatedAtISO:'2026-10-28T12:00:00.000Z'
+      }});
+      const raw=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const originalSet=Storage.prototype.setItem;
+      let rejected=0,flushed;
+      Storage.prototype.setItem=function(key,value){
+        if(this===localStorage&&key==='taskpoints_v1'){
+          rejected++;
+          throw new DOMException('Injected snapshot quota denial','QuotaExceededError');
+        }
+        return originalSet.call(this,key,value);
+      };
+      try{flushed=core.flushPendingTaskMutations();}
+      finally{Storage.prototype.setItem=originalSet;}
+      const report=await runtime.inspectAuthorityCutoverBarriers();
+      return {initial,raw,flushed,rejected,report,
+        after:localStorage.getItem('taskpoints_v1'),
+        pending:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        visible:core.readPendingTaskMutations(),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(proof.flushed,false,'Injected quota failure must not count as compaction');
+    assert.ok(proof.rejected>=1,'The real V1 snapshot writer must have been exercised');
+    assert.equal(proof.after,proof.initial);
+    assert.equal(proof.pending,proof.raw);
+    assert.equal(proof.visible.malformed,false);
+    assert.equal(proof.visible.record.tasks.length,1);
+    assert.equal(proof.report.taskJournal.reason,'pending');
+    assert.equal(proof.report.taskJournal.pendingCount,1);
+    assert.equal(proof.report.checks.taskJournalEmpty,false);
+    assert.ok(proof.report.blockers.includes('task_mutation_journal_pending'));
+    assert.equal(proof.report.canPromote,false);
+    assert.equal(proof.authority,'legacy_only');
+    return {quotaDeniedCompaction:true,pendingTaskPreserved:true,
+      snapshotNotOverwritten:true,cutoverBlocked:true};
+  });
+
+  await run('stale Home-like Task save after other tab compacted a newer Task edit preserves that row',async context=>{
+    const stale=await open(context),writer=await open(context);
+    const seed=await stale.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const current=core.readTaskPointsStoredState();
+      current.tasks=current.tasks.map(t=>t.id==='synthetic-task'
+        ? {...t,updatedAtISO:'2026-10-20T10:00:00.000Z'}:t);
+      const saved=core.saveStateSnapshot(current,{
+        immediateWrite:true,userInitiated:true,savePath:'v2-stale-task-base'});
+      if(saved?.skipped)throw Error('Base snapshot write skipped');
+      return {raw:localStorage.getItem('taskpoints_v1'),
+        state:core.parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1'),{})};
+    });
+    const fresh=await writer.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      core.journalTaskMutation({task:{
+        id:'synthetic-task',title:'NEWER JOURNAL TASK EDIT',
+        updatedAtISO:'2026-10-28T12:00:00.000Z'
+      }});
+      const flushed=core.flushPendingTaskMutations();
+      return {flushed,raw:localStorage.getItem('taskpoints_v1'),
+        journal:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        task:core.parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1'),{})
+          .tasks.find(t=>t.id==='synthetic-task')};
+    });
+    assert.equal(fresh.flushed,true);
+    assert.equal(fresh.journal,null);
+    assert.equal(fresh.task.title,'NEWER JOURNAL TASK EDIT');
+    await stale.waitForFunction(raw=>localStorage.getItem('taskpoints_v1')===raw,
+      fresh.raw,{timeout:12000});
+    const attempted=await stale.evaluate(oldState=>{
+      const core=window.TaskPointsCore;
+      const prior=oldState.tasks.find(t=>t.id==='synthetic-task');
+      const result=core.saveStateSnapshot(oldState,{
+        immediateWrite:true,userInitiated:true,savePath:'home-stale-task-fixture'});
+      const after=core.parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1'),{});
+      return {oldTitle:prior.title,afterTask:after.tasks.find(t=>t.id==='synthetic-task'),
+        completionIds:after.completions.map(c=>c.id),
+        resultSkipped:result?.skipped===true,
+        journal:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    },seed.state);
+    assert.equal(attempted.oldTitle,'Synthetic task');
+    assert.equal(attempted.afterTask.title,'NEWER JOURNAL TASK EDIT',
+      'A previously compacted Task edit must survive a stale tab save');
+    assert.equal(attempted.journal,null);
+    assert.ok(attempted.completionIds.includes('synthetic-task-completion'));
+    assert.equal(attempted.authority,'legacy_only');
+    const gate=await stale.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.inspectAuthorityCutoverBarriers());
+    assert.equal(gate.checks.taskJournalEmpty,true);
+    assert.equal(gate.canPromote,false);
+    assert.ok(gate.blockers.includes('all_legacy_writers_not_fenced'));
+    return {newerTaskRowSurvivedStaleWriter:true,existingCompletionPreserved:true,
+      journalAlreadyEmpty:true,oldTabsStillBlockCutover:true};
+  });
+
   await run('full cutover inventory refuses a green pilot and silent legacy writer',async context=>{
     const inspector=await open(context),participant=await open(context);
     const silent=await context.newPage();
