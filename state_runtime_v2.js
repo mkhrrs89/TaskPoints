@@ -4294,13 +4294,14 @@
     });
     if (!isWalTestPreviewHost()) return refuse('preview_host_required');
     if (!isDarkEnabled()) return refuse('dark_disabled');
-    if (!['read', 'writer', 'freeze'].includes(action))
+    if (!['read', 'writer', 'freeze', 'inspect_marker'].includes(action))
       return refuse('invalid_fence_action');
     if (!global.indexedDB?.open) return refuse('indexeddb_unavailable');
     const expectedEpoch = options?.expectedEpoch;
-    if (action !== 'read' && (!Number.isSafeInteger(expectedEpoch) || expectedEpoch < 0))
+    if (action !== 'read' && action !== 'inspect_marker'
+      && (!Number.isSafeInteger(expectedEpoch) || expectedEpoch < 0))
       return refuse('expected_epoch_required');
-    if (action === 'writer'
+    if ((action === 'writer' || action === 'inspect_marker')
       && (typeof options?.marker !== 'string' || !options.marker
         || options.marker.length > 128))
       return refuse('writer_marker_required');
@@ -4341,7 +4342,8 @@
             finish(refuse('preview_or_generation_changed_before_transaction'));
             return;
           }
-          const tx = db.transaction(STORE, action === 'read' ? 'readonly' : 'readwrite');
+          const tx = db.transaction(STORE,
+            (action === 'read' || action === 'inspect_marker') ? 'readonly' : 'readwrite');
           tx.onabort = () => finish(refuse('fence_transaction_aborted'));
           tx.onerror = () => {}; // The abort handler remains authoritative.
           tx.oncomplete = () => finish(result);
@@ -4387,6 +4389,47 @@
                 result = refuse('fence_read_only', {
                   initialized: !!prior, fence: describe(state)
                 });
+                return;
+              }
+              if (action === 'inspect_marker') {
+                // Read-only recovery evidence after a test caller lost the
+                // response to its writer transaction. This does not retry,
+                // reconcile, unfreeze, or mutate any underlying app state.
+                const markerId = 'writer_marker:' + options.marker;
+                const lookup = store.get(markerId);
+                lookup.onerror = () => {
+                  result = refuse('fence_writer_marker_unreadable');
+                  try { tx.abort(); } catch (_) {}
+                };
+                lookup.onsuccess = () => {
+                  try {
+                    if (!isDarkEnabled() || darkMirrorModeEpoch !== initialModeEpoch
+                      || currentGeneration({ create: false }) !== generation) {
+                      result = refuse('preview_or_generation_changed_in_transaction');
+                      return;
+                    }
+                    const item = lookup.result;
+                    if (item && (item.id !== markerId
+                      || item.generation !== generation
+                      || !Number.isSafeInteger(item.epoch) || item.epoch < 0
+                      || item.epoch > state.epoch)) {
+                      result = refuse('fence_writer_marker_conflict', {
+                        fence: describe(state)
+                      });
+                      return;
+                    }
+                    result = refuse(item
+                      ? 'preview_writer_marker_present'
+                      : 'preview_writer_marker_absent', {
+                      readOnlyMarkerInspection: true,
+                      markerEpoch: item ? item.epoch : null,
+                      fence: describe(state)
+                    });
+                  } catch (_) {
+                    result = refuse('fence_writer_marker_inspection_failed');
+                    try { tx.abort(); } catch (_) {}
+                  }
+                };
                 return;
               }
               if (expectedEpoch !== state.epoch) {
