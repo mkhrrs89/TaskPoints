@@ -2883,6 +2883,115 @@ try {
       journalBlockerObserved:true,authority:'legacy_only'};
   });
 
+  await run('Task journal with pending task and completion changes explicitly blocks cutover',async context=>{
+    const page=await open(context);
+    const originalV1=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const before=await page.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.inspectAuthorityCutoverBarriers());
+    assert.equal(before.taskJournal.reason,'absent',JSON.stringify(before));
+    assert.equal(before.checks.taskJournalEmpty,true);
+    const added=await page.evaluate(()=>{
+      const task={id:'pending-cutover-task',title:'Must be replayed',
+        updatedAtISO:'2026-10-28T12:00:00.000Z'};
+      const completion={id:'pending-cutover-completion',taskId:task.id,
+        source:'task',points:8,completedAtISO:'2026-10-28T12:00:00.000Z'};
+      window.TaskPointsCore.journalTaskMutation({
+        task,completionUpsert:completion,completionDeleteId:'removed-completion'
+      });
+      return window.TaskPointsCore.readPendingTaskMutations();
+    });
+    assert.equal(added.malformed,false);
+    assert.equal(added.record.tasks.length,1);
+    assert.equal(added.record.completionUpserts.length,1);
+    assert.equal(added.record.completionDeletes.length,1);
+    const blocked=await page.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.inspectAuthorityCutoverBarriers());
+    assert.equal(blocked.reason,'authority_cutover_blocked',JSON.stringify(blocked));
+    assert.equal(blocked.taskJournal.reason,'pending');
+    assert.equal(blocked.taskJournal.pendingCount,3);
+    assert.equal(blocked.taskJournal.tasks,1);
+    assert.equal(blocked.taskJournal.completionUpserts,1);
+    assert.equal(blocked.taskJournal.completionDeletes,1);
+    assert.equal(blocked.checks.taskJournalEmpty,false);
+    assert.ok(blocked.blockers.includes('task_mutation_journal_pending'));
+    assert.ok(blocked.blockers.includes('all_legacy_writers_not_fenced'));
+    assert.equal(blocked.canPromote,false);
+    const after=await page.evaluate(()=>({
+      v1:localStorage.getItem('taskpoints_v1'),
+      raw:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    assert.equal(after.v1,originalV1);
+    assert.equal(after.raw,added.raw);
+    assert.equal(after.authority,'legacy_only');
+    return {pendingTaskJournalVisible:true,allThreeMutationKindsCounted:true,
+      pendingJournalRetained:true,cutoverStillBlocked:true};
+  });
+
+  await run('malformed Task journal blocks handoff without repair or stale snapshot overwrite',async context=>{
+    const page=await open(context);
+    const proof=await page.evaluate(async()=>{
+      const previous=localStorage.getItem('taskpoints_v1');
+      const raw='{"schemaVersion":1,"tasks":[null],"completionUpserts":[],"completionDeletes":[]}';
+      localStorage.setItem('taskpoints_pending_task_mutations_v1',raw);
+      const report=await window.TaskPointsStateRuntimeV2.inspectAuthorityCutoverBarriers();
+      return {report,raw,
+        currentJournal:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        snapshotBefore:previous,snapshotAfter:localStorage.getItem('taskpoints_v1'),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(proof.report.reason,'authority_cutover_blocked',JSON.stringify(proof.report));
+    assert.equal(proof.report.taskJournal.reason,'malformed');
+    assert.equal(proof.report.taskJournal.pendingCount,null);
+    assert.equal(proof.report.checks.taskJournalEmpty,false);
+    assert.ok(proof.report.blockers.includes('task_mutation_journal_malformed'));
+    assert.equal(proof.report.canPromote,false);
+    assert.equal(proof.currentJournal,proof.raw);
+    assert.equal(proof.snapshotBefore,proof.snapshotAfter);
+    assert.equal(proof.authority,'legacy_only');
+    return {malformedJournalNotMisreadAsEmpty:true,
+      corruptEvidenceUnchanged:true,legacySnapshotPreserved:true};
+  });
+
+  await run('unfenced Task mutation during cutover peer probe invalidates inspection',async context=>{
+    const observer=await open(context),writer=await open(context);
+    const originalV1=await observer.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const pending=observer.evaluate(async()=>{
+      const original=BroadcastChannel.prototype.postMessage;
+      BroadcastChannel.prototype.postMessage=function(message){
+        if(message?.type==='writer_probe_v1')
+          window.__taskJournalCutoverProbeActive=true;
+        return original.apply(this,arguments);
+      };
+      try{return await window.TaskPointsStateRuntimeV2.inspectAuthorityCutoverBarriers();}
+      finally{BroadcastChannel.prototype.postMessage=original;}
+    });
+    await observer.waitForFunction(()=>
+      window.__taskJournalCutoverProbeActive===true,null,{timeout:12000});
+    const source=await writer.evaluate(()=>{
+      window.TaskPointsCore.journalTaskMutation({
+        task:{id:'racing-task-cutover',title:'From unfenced V1 tab',
+          updatedAtISO:'2026-10-28T12:00:00.000Z'}
+      });
+      return localStorage.getItem('taskpoints_pending_task_mutations_v1');
+    });
+    const report=await pending;
+    assert.equal(report.reason,'inventory_changed_during_check',JSON.stringify(report));
+    assert.equal(report.canPromote,false);
+    assert.ok(report.blockers.includes('legacy_or_preview_inventory_changed_during_check'));
+    assert.equal(report.checks.allLegacyWritersFenced,false);
+    const after=await writer.evaluate(()=>({
+      snapshot:localStorage.getItem('taskpoints_v1'),
+      journal:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    assert.equal(after.snapshot,originalV1);
+    assert.equal(after.journal,source);
+    assert.equal(after.authority,'legacy_only');
+    return {realTaskJournalCrossTabRaceObserved:true,
+      taskMutationStillDurable:true,noSnapshotReplacement:true};
+  });
+
   await run('full cutover inventory refuses a green pilot and silent legacy writer',async context=>{
     const inspector=await open(context),participant=await open(context);
     const silent=await context.newPage();
