@@ -237,3 +237,42 @@ test('exclusive snapshot writer rehearsal stays developer-only and cannot change
   ]) assert.ok(!read(file).includes('exercisePreviewSerializedSnapshotLease('),
     'Normal legacy writer was silently made asynchronous: '+file);
 });
+
+test('durable writer fence remains confined to preview IDB markers, not production V1 writers', () => {
+  const runtime = read('state_runtime_v2.js');
+  const start = runtime.indexOf('async function rehearsePreviewDurableWriterFence(action, options = {})');
+  const end = runtime.indexOf('// Browser-native exclusive-lock *rehearsal*',start);
+  assert.ok(start > 0 && end > start, 'Preview durable writer fence implementation missing');
+  const fence = runtime.slice(start,end);
+  for (const requirement of [
+    'isWalTestPreviewHost()',
+    'isDarkEnabled()',
+    "taskpoints_v2_writer_fence_preview_v1",
+    "indexedDB.open(DB, 1)",
+    "action === 'read' ? 'readonly' : 'readwrite'",
+    "store.get('writer_fence')",
+    'expectedEpoch !== state.epoch',
+    "state.generation !== generation",
+    "reason, previewOnly: true, canPromote: false",
+    "productionWritersFenced: false, allLegacyWritersKnown: false",
+    "'legacy_only'",
+    'frozen: true, epoch: state.epoch + 1',
+    'store.put(next)',
+    "tx.oncomplete = () => finish(result)"
+  ]) assert.ok(fence.includes(requirement), 'Missing durable preview fence safety: '+requirement);
+  assert.match(fence, /if \(state\.frozen\)/);
+  assert.match(fence, /fence_transaction_aborted/);
+  assert.match(fence, /fence_generation_mismatch/);
+  assert.match(fence, /fence_epoch_stale/);
+  assert.match(fence, /fence_frozen/);
+  assert.ok(runtime.includes('    rehearsePreviewDurableWriterFence,'),
+    'Test-only protocol must require an explicit preview API call');
+  assert.doesNotMatch(fence, /localStorage\.(?:setItem|removeItem|clear)\(/);
+  assert.doesNotMatch(fence, /saveStateSnapshot\(/);
+  assert.doesNotMatch(fence, /canPromote: true/);
+  for (const path of [
+    'index.html','today.html','settings.html','notes.html',
+    'emergency_recovery.html','scoring_core.js','task_mutation_journal.js'
+  ]) assert.ok(!read(path).includes('rehearsePreviewDurableWriterFence('),
+    'An existing V1 writer was inadvertently wired to preview-only IDB fencing: '+path);
+});
