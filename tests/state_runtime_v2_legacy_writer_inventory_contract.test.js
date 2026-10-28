@@ -102,6 +102,41 @@ test('shared writer rehearsal cannot be mistaken for a production writer lease o
   }
 });
 
+test('authority cutover inspector treats a separate Task journal as durable unresolved writer evidence', () => {
+  const runtime=read('state_runtime_v2.js');
+  const begin=runtime.indexOf('function inspectReadOnlyTaskJournalForCutover()');
+  const end=runtime.indexOf('async function inspectAuthorityCutoverBarriers()',begin);
+  assert.ok(begin>0&&end>begin,'Read-only Task journal observer missing');
+  const observer=runtime.slice(begin,end);
+  for(const fragment of [
+    "global.localStorage.getItem('taskpoints_pending_task_mutations_v1')",
+    "reason: 'absent'", "reason: 'malformed'",
+    "reason: pendingCount ? 'pending' : 'empty'",
+    "record.schemaVersion !== 1",
+    "!Array.isArray(record.tasks)",
+    "!Array.isArray(record.completionUpserts)",
+    "!Array.isArray(record.completionDeletes)"
+  ])assert.ok(observer.includes(fragment),'Missing Task journal cutover evidence: '+fragment);
+  assert.doesNotMatch(observer, /(?:setItem|removeItem|clear)\s*\(/);
+  assert.doesNotMatch(observer, /(?:journalTaskMutation|saveStateSnapshot|flushPendingTaskMutations)\s*\(/);
+  const start=runtime.indexOf('async function inspectAuthorityCutoverBarriers()');
+  const stop=runtime.indexOf('// Explicit forensic inspection',start);
+  assert.ok(start>0&&stop>start);
+  const gate=runtime.slice(start,stop);
+  for(const fragment of [
+    "taskJournalEmpty: taskJournal?.reason === 'empty'",
+    "'task_mutation_journal_pending'",
+    "'task_mutation_journal_malformed'",
+    'taskJournalBefore = inspectReadOnlyTaskJournalForCutover()',
+    'taskJournalAfter = inspectReadOnlyTaskJournalForCutover()',
+    'stableJson(taskJournalBefore) !== stableJson(taskJournalAfter)',
+    'fullStorageBefore !== fullStorageAfter',
+    'canPromote: false',
+    'allLegacyWritersFenced: false'
+  ])assert.ok(gate.includes(fragment),'Cutover inspector lost Task journal blocker: '+fragment);
+  assert.doesNotMatch(gate, /(?:setItem|removeItem|clear)\s*\(/);
+});
+
 test('full cutover inventory is read-only, hard-blocked, and observes legacy nonpilot races', () => {
   const runtime = read('state_runtime_v2.js');
   const first = runtime.indexOf('  async function inspectAuthorityCutoverBarriers()');
