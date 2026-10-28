@@ -7779,7 +7779,7 @@ body.tp-player-profile-open #cropModal:not(.hidden) { z-index: 1900 !important; 
 .tp-profile-inline-edit { min-height: 32px; padding: 5px 9px; }
 .tp-profile-ratings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
 .tp-profile-rating { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 8px; background: var(--tp-profile-metric); font-size: 12px; }
-.tp-profile-rating span { color: #b4cecd; }
+.tp-profile-rating span { color: var(--tp-profile-accent-secondary); }
 .tp-profile-rating strong { font-variant-numeric: tabular-nums; }
 .tp-profile-note { font-size: 13px; color: #b9d4d2; line-height: 1.6; }
 .tp-profile-gallery-name { border: 0; background: none; color: inherit; padding: 3px; cursor: pointer; }
