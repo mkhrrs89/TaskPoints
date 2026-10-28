@@ -1514,6 +1514,7 @@ console.log("state.players =", state.players, "count =", (state.players || []).l
 const imageUrlCache = new Map();
 const imageLoadPromises = new Map();
 let renderPlayersNonce = 0;
+let canonicalPlayerSummaryCache = new Map(); // Reuse roster statistics in individual profiles.
 let youImagePreviewUrl = "";
 function logBootPersistenceSkip(pathName) {
   if (window.TP_DEBUG_PERF) {
@@ -2821,6 +2822,7 @@ const canonicalStatsByPlayerId = new Map(
     row
   ])
 );
+canonicalPlayerSummaryCache = canonicalStatsByPlayerId;
 
 const rankingByPlayerId = new Map(
   canonicalRankingRows.map((row) => [
@@ -4313,6 +4315,7 @@ const playerProfiles = window.TaskPointsPlayerProfiles.create({
   getYouColors: () => getYouPlayerColors(),
   getYouStats: () => calcYouStats(),
   getRecord: (id) => TaskPointsCore?.computeRecord?.(state, id, { includeToday: false, allowFallback: false }),
+  getCanonicalStat: (id) => canonicalPlayerSummaryCache.get(String(id)),
   getPlayerPid: (currentState, id) => TaskPointsCore?.getPlayerPid?.(currentState, id),
   todayKey: () => getGameDayKey(),
   cachedImageUrl: getCachedImageUrl,
