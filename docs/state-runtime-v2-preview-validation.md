@@ -558,4 +558,31 @@ comprehensive writer integration, journal handling, stale-generation
 semantics, crash/termination recovery, physical Safari/PWA testing, and
 independent rollback evidence. No path in this prototype grants promotion.
 
+### Idempotent transactional writer marker rehearsal (October 28)
+
+The isolated developer-only IndexedDB fence rehearsal now keeps a separate
+`writer_marker:<marker>` record for each synthetic participating write in
+the **same readwrite transaction** as the aggregate writer-count update.
+Concurrent same-marker requests from two tabs serialize: one may commit the
+marker and increment the count, while the other returns
+`preview_writer_replayed` without incrementing it. A nonadjacent retry
+after another writer has committed, or after a tab reload, remains
+idempotent. A frozen or stale epoch takes priority over the replay result
+and continues to reject the request.
+
+The guard also refuses an overflowing epoch or writer counter rather than
+storing an imprecise integer. Tests race a writer against a freeze, accepting
+only the serializable outcomes (writer committed before freeze, or writer
+refused after freeze). A quota-style failure on the **second** put deliberately
+aborts the transaction; the test reads the raw preview database to prove
+neither the first marker put nor the control count survived, and then confirms
+a clean retry can succeed.
+
+The record is still a **synthetic protocol marker**: it is not a V1 task or
+Habit mutation, does not fence the old localStorage save paths, does not
+prove physical device crash durability, and has no production rollback
+semantics. Marker history in this preview database is intentionally not
+garbage-collected, and the frozen state is not automatically reset. No
+promotion is available.
+
 **Cutover remains prohibited.** Before a production lease can replace this prototype: audit and integrate every V1 writer with abort/fencing semantics, preserve urgent writes and crash-recovery behavior, verify an off-device rollback source, migrate all nonpilot collections, and run full physical Safari/PWA lifecycle testing. This test API must never be mistaken for production writer fencing.
