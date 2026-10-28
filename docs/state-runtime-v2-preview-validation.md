@@ -519,4 +519,43 @@ writes, leaves V1 authoritative, and never grants V2 cutover approval.
 Moving from this evidence to production requires a genuine writer-fencing
 protocol plus a crash-safe recovery/rollback design.
 
+### Transactional, preview-only writer fencing prototype (October 28)
+
+An explicit preview-host-only API, `rehearsePreviewDurableWriterFence(action, options)`,
+now provides a small, **isolated IndexedDB transaction** experiment with
+`read`, `writer`, and `freeze` actions. It uses its own
+`taskpoints_v2_writer_fence_preview_v1` database and `control` store, not
+the V1 snapshot, V2 state database, or emergency recovery checkpoints.
+All responses retain `canPromote:false`, `productionWritersFenced:false`,
+`allLegacyWritersKnown:false`, and `legacy_only` read/write authority.
+
+The `writer` and `freeze` actions require a caller-supplied exact
+`expectedEpoch`. Inside one IndexedDB readwrite transaction, each request
+reads the current fence control record, checks the stored generation and epoch,
+rejects a frozen/stale participant, and records either a synthetic writer
+marker or a freeze with an incremented epoch. The transaction completion,
+not the initial request callback, is used as the reported success boundary.
+No asynchronous network/UI work or localStorage write occurs inside the
+transaction. The `read` action is observational and never creates a
+control record.
+
+Browser tests on Chromium/WebKit simulate two tabs attempting the same-epoch
+freeze simultaneously: exactly one freeze should commit. Both stale-epoch
+and correct-epoch-but-frozen writer attempts must then fail. The frozen
+decision survives a tab close/reopen. Another test rotates V2's preview
+generation and verifies that the previous generation's stored control
+record cannot be reused. An explicitly **nonparticipating legacy tab is
+still able to modify localStorage** despite the preview freeze, and the
+original V1 snapshot must remain byte-identical throughout the rehearsal.
+
+**Critical limits:** This prototype records only synthetic markers in an
+independent test database. It is **not attached to production save callers**,
+does not fence offline/pre-V2 pages, and does not move a real V1 mutation into
+the same IndexedDB transaction. A Web Lock or IDB control record cannot make
+an old synchronous localStorage writer transactional without a complete
+protocol migration. A genuinely safe authority transfer still requires
+comprehensive writer integration, journal handling, stale-generation
+semantics, crash/termination recovery, physical Safari/PWA testing, and
+independent rollback evidence. No path in this prototype grants promotion.
+
 **Cutover remains prohibited.** Before a production lease can replace this prototype: audit and integrate every V1 writer with abort/fencing semantics, preserve urgent writes and crash-recovery behavior, verify an off-device rollback source, migrate all nonpilot collections, and run full physical Safari/PWA lifecycle testing. This test API must never be mistaken for production writer fencing.
