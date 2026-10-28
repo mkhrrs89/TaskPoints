@@ -228,23 +228,6 @@ function buildMobileBottomNavLinks() {
   <span class="uppercase tracking-wide text-[10px]">Inbox</span>
 </a>
 
-    <div class="mobile-task-dropdown">
-      <button
-        id="mobileTasksToggle"
-        type="button"
-        class="mobile-bottom-nav-btn mobile-task-toggle flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100"
-        aria-expanded="false"
-        aria-haspopup="true">
-        <img src="assets/tasks.png" class="tp-nav-icon" alt="" aria-hidden="true">
-        <span class="uppercase tracking-wide text-[10px]">Tasks</span>
-      </button>
-
-      <div id="mobileTasksMenu" class="mobile-task-menu hidden">
-        <button type="button" id="mobileAddTaskBtn" class="btn btn-teal btn-toolbar w-full">Add a Task</button>
-        <button type="button" id="mobileGoTasksBtn" class="btn btn-teal btn-toolbar w-full">Go To Tasks</button>
-      </div>
-    </div>
-
     <div class="dropdown mobile-bottom-dropdown">
       <button
         type="button"
@@ -368,84 +351,6 @@ function renderBottomToolbar() {
   }
 }
 
-function setupMobileTasksMenu() {
-  const toggle = document.getElementById('mobileTasksToggle');
-  const menu = document.getElementById('mobileTasksMenu');
-  const addBtn = document.getElementById('mobileAddTaskBtn');
-  const goBtn = document.getElementById('mobileGoTasksBtn');
-
-  if (!toggle || !menu) return;
-  if (toggle.dataset.tpTasksReady) return;
-  toggle.dataset.tpTasksReady = 'true';
-
-  const onIndex = /(^|\/)index\.html$/.test(window.location.pathname) || window.location.pathname === '/' || window.location.pathname === '';
-  const tasksLink = onIndex ? '#tasksAnchor' : 'index.html#tasksAnchor';
-
-  const closeMenu = () => {
-    menu.classList.add('hidden');
-    toggle.setAttribute('aria-expanded', 'false');
-  };
-
-  const toggleMenu = () => {
-    menu.classList.toggle('hidden');
-    toggle.setAttribute('aria-expanded', String(!menu.classList.contains('hidden')));
-  };
-
-  toggle.addEventListener('click', (e) => {
-    const nav = toggle.closest('#mobileBottomNav');
-    if (nav?.dataset.ignoreClick) return;
-    e.preventDefault();
-    e.stopPropagation();
-    toggleMenu();
-  });
-
-  if (!window.__tpTasksMenuPointerListener) {
-    window.__tpTasksMenuPointerListener = true;
-    document.addEventListener('pointerdown', (e) => {
-      if (menu.classList.contains('hidden')) return;
-      if (e.target.closest('.mobile-task-dropdown')) return;
-      closeMenu();
-    });
-  }
-
-  addBtn?.addEventListener('click', () => {
-    closeMenu();
-    if (typeof window.openAddTaskModal === 'function') {
-      window.openAddTaskModal();
-      return;
-    }
-    window.location.href = tasksLink;
-  });
-
-  goBtn?.addEventListener('click', () => {
-    closeMenu();
-    if (typeof window.scrollToTasks === 'function') {
-      window.scrollToTasks();
-      return;
-    }
-    const tasksAnchor = document.getElementById('tasksAnchor');
-    if (tasksAnchor) {
-      tasksAnchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      return;
-    }
-    window.location.href = tasksLink;
-  });
-
-  if (!window.__tpTasksMenuResizeListener) {
-    window.__tpTasksMenuResizeListener = true;
-    window.addEventListener('resize', () => {
-      if (window.innerWidth >= 768) closeMenu();
-    });
-  }
-
-  toggle.addEventListener('keyup', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      toggleMenu();
-    }
-  });
-}
-
 function setupBottomNavPressAnimation(root = document) {
   const navRows = root.querySelectorAll('.mobile-bottom-nav');
   if (!navRows.length) return;
@@ -469,8 +374,8 @@ function setupPopupMenuPressAnimation() {
   if (window.__tpPopupPressReady) return;
   window.__tpPopupPressReady = true;
 
-  // Only the mobile bottom toolbar popup menus:
-  const selector = '.mobile-task-menu .btn, .mobile-bottom-dropdown .dropdown-menu .btn';
+  // Animate the remaining Game dropdown buttons in the bottom toolbar.
+  const selector = '.mobile-bottom-dropdown .dropdown-menu .btn';
 
   const press = (el) => {
     el.classList.remove('is-pressed');
@@ -684,7 +589,6 @@ rafId = requestAnimationFrame(() => {
 
       // If user is interacting with an open popup menu, don't start a drag.
       if (event.target.closest('.dropdown-menu')) return;
-      if (event.target.closest('#mobileTasksMenu')) return;
 
 
       
@@ -1406,7 +1310,6 @@ function scheduleTaskPointsToolbarMaintenance() {
 
 function initToolbarNow() {
   renderBottomToolbar();
-  setupMobileTasksMenu();
   setupPopupMenuPressAnimation();
   scheduleTaskPointsToolbarMaintenance();
 }
