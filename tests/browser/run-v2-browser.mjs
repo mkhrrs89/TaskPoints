@@ -3025,6 +3025,8 @@ try {
     assert.equal(proof.remainingRaw,null,'Only verified compacted rows can be removed');
     assert.equal(proof.after.taskJournal.reason,'absent');
     assert.equal(proof.after.checks.taskJournalEmpty,true);
+    assert.equal(proof.after.checks.taskJournalCompactionHandoffValidated,false);
+    assert.ok(proof.after.blockers.includes('task_journal_compaction_handoff_not_validated'));
     assert.equal(proof.after.canPromote,false);
     assert.equal(proof.after.checks.allLegacyWritersFenced,false);
     assert.ok(proof.after.blockers.includes('all_legacy_writers_not_fenced'));
@@ -3129,6 +3131,8 @@ try {
     const gate=await stale.evaluate(()=>
       window.TaskPointsStateRuntimeV2.inspectAuthorityCutoverBarriers());
     assert.equal(gate.checks.taskJournalEmpty,true);
+    assert.equal(gate.checks.taskJournalCompactionHandoffValidated,false);
+    assert.ok(gate.blockers.includes('task_journal_compaction_handoff_not_validated'));
     assert.equal(gate.canPromote,false);
     assert.ok(gate.blockers.includes('all_legacy_writers_not_fenced'));
     return {newerTaskRowSurvivedStaleWriter:true,existingCompletionPreserved:true,
@@ -3150,6 +3154,8 @@ try {
     assert.equal(report.readAuthority,'legacy_only');
     assert.equal(report.checks.pilotConsistent,true,JSON.stringify(report));
     assert.equal(report.checks.allLegacyWritersFenced,false);
+    assert.equal(report.checks.taskJournalCompactionHandoffValidated,false);
+    assert.ok(report.blockers.includes('task_journal_compaction_handoff_not_validated'));
     assert.equal(report.checks.allAuthoritativeCollectionsMigrated,false);
     assert.equal(report.checks.independentOffDeviceRollbackVerified,false);
     assert.equal(report.checks.physicalSafariPwaLifecycleValidated,false);
