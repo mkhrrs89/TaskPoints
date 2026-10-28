@@ -280,6 +280,13 @@ test('durable writer fence remains confined to preview IDB markers, not producti
     'Dedup marker and aggregate count must be written in one IDB transaction');
   assert.match(fence, /marker\.generation !== generation/);
   assert.match(fence, /marker\.epoch !== state\.epoch/);
+  const lookupCallback=fence.slice(
+    fence.indexOf('markerRequest.onsuccess = () => {'),
+    fence.indexOf('const marker = markerRequest.result')
+  );
+  assert.match(lookupCallback, /darkMirrorModeEpoch !== initialModeEpoch/);
+  assert.match(lookupCallback, /currentGeneration\(\{ create: false \}\) !== generation/);
+  assert.match(lookupCallback, /preview_or_generation_changed_in_transaction/);
   assert.ok(runtime.includes('    rehearsePreviewDurableWriterFence,'),
     'Test-only protocol must require an explicit preview API call');
   assert.doesNotMatch(fence, /localStorage\.(?:setItem|removeItem|clear)\(/);
