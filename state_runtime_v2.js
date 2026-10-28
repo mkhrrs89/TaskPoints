@@ -4421,6 +4421,14 @@
               };
               markerRequest.onsuccess = () => {
                 try {
+                  // Another same-origin tab can rotate the preview
+                  // generation between the first control read and this
+                  // independent marker lookup. Refuse before either put.
+                  if (!isDarkEnabled() || darkMirrorModeEpoch !== initialModeEpoch
+                    || currentGeneration({ create: false }) !== generation) {
+                    result = refuse('preview_or_generation_changed_in_transaction');
+                    return;
+                  }
                   const marker = markerRequest.result;
                   if (marker) {
                     if (marker.id !== markerId || marker.generation !== generation
