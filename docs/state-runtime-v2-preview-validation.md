@@ -585,4 +585,16 @@ semantics. Marker history in this preview database is intentionally not
 garbage-collected, and the frozen state is not automatically reset. No
 promotion is available.
 
+### Two-stage generation validation in preview IDB marker lookup
+
+The idempotent synthetic writer now checks the preview generation both on
+reading the fence control record and **again** after the separate asynchronous
+marker lookup, immediately before writing either marker or aggregate count.
+A browser regression forces a generation rotation from inside the marker
+request interception. It verifies that the transaction records neither
+marker nor aggregate control, while the original V1 snapshot stays intact.
+This closes a test-protocol observation gap but is **not a production
+writer fence**: browser-local storage visibility is not transactional with
+IndexedDB, and an old V1 tab can still mutate localStorage independently.
+
 **Cutover remains prohibited.** Before a production lease can replace this prototype: audit and integrate every V1 writer with abort/fencing semantics, preserve urgent writes and crash-recovery behavior, verify an off-device rollback source, migrate all nonpilot collections, and run full physical Safari/PWA lifecycle testing. This test API must never be mistaken for production writer fencing.
