@@ -94,6 +94,136 @@ try {
     return p.actualCounts;
   });
 
+  await run('real Habit ledger checks full mutation identity before accepting a duplicate or WAL confirmation',async context=>{
+    const first=await open(context),second=await open(context);
+    const oldV1=await first.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const delta={
+      id:'habit:h1:2026-10-17',habitId:'h1',dayKey:'2026-10-17',
+      source:'habit',status:'full',done:true,failed:false,icy:false,
+      completionFraction:1,completionPoints:3,clientMemo:'original-intent',
+      updatedAtISO:'2026-10-17T12:00:00.000Z',
+      completedAtISO:'2026-10-17T12:00:00.000Z'
+    };
+    const saved=await first.evaluate(async d=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const generation=runtime.getStatus().currentGeneration;
+      const result=await runtime.applyHabitDelta(d,{expectedGeneration:generation});
+      return {result,generation,
+        confirmed:await runtime.hasCommittedHabitMutation(result.mutationId,generation,d),
+        unbound:await runtime.hasCommittedHabitMutation(result.mutationId,generation)};
+    },delta);
+    assert.equal(saved.result.committed,true,JSON.stringify(saved));
+    assert.equal(saved.confirmed,true);
+    assert.equal(saved.unbound,false,'A short ID alone cannot certify WAL cleanup');
+    const snapshot=async page=>page.evaluate(async()=>{
+      const db=await window.TaskPointsStateRuntimeV2.open();
+      const tx=db.transaction(['mutations','meta','habits','completions'],'readonly');
+      const read=store=>new Promise((resolve,reject)=>{
+        const r=tx.objectStore(store).getAll();
+        r.onsuccess=()=>resolve(r.result);
+        r.onerror=()=>reject(r.error);
+      });
+      return Promise.all(['mutations','meta','habits','completions'].map(read));
+    });
+    const before=await snapshot(first);
+    const wrong={...delta,clientMemo:'different-payload-same-hash'};
+    const refusal=await second.evaluate(async({wrong,id,generation})=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      let readError=null,writeError=null;
+      try{await runtime.hasCommittedHabitMutation(id,generation,wrong);}
+      catch(e){readError=String(e.message||e);}
+      try{await runtime.applyHabitDelta(wrong,{
+        expectedGeneration:generation,skipInitialSeedForVerifiedReplay:true
+      });}catch(e){writeError=String(e.message||e);}
+      return {readError,writeError,authority:runtime.getStatus().readAuthority};
+    },{wrong,id:saved.result.mutationId,generation:saved.generation});
+    assert.match(refusal.readError,/state_runtime_v2_mutation_identity_mismatch/);
+    assert.match(refusal.writeError,/state_runtime_v2_mutation_identity_mismatch/);
+    assert.equal(refusal.authority,'legacy_only');
+    assert.deepEqual(await snapshot(second),before,
+      'A conflicting same-ID retry must leave all four IndexedDB stores unchanged');
+    const exact=await second.evaluate(async({delta,generation})=>
+      window.TaskPointsStateRuntimeV2.applyHabitDelta(delta,{
+        expectedGeneration:generation,skipInitialSeedForVerifiedReplay:true
+      }),{delta,generation:saved.generation});
+    assert.equal(exact.committed,false);
+    assert.equal(exact.duplicate,true,JSON.stringify(exact));
+    assert.deepEqual(await snapshot(second),before);
+    await first.close();
+    const reopened=await open(context);
+    const persisted=await reopened.evaluate(async({delta,id,generation})=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const correct=await runtime.hasCommittedHabitMutation(id,generation,delta);
+      let different=null;
+      try{await runtime.hasCommittedHabitMutation(id,generation,{
+        ...delta,clientMemo:'not-the-original'
+      });}catch(e){different=String(e.message||e);}
+      return {correct,different,authority:runtime.getStatus().readAuthority};
+    },{delta,id:saved.result.mutationId,generation:saved.generation});
+    assert.equal(persisted.correct,true);
+    assert.match(persisted.different,/state_runtime_v2_mutation_identity_mismatch/);
+    assert.deepEqual(await snapshot(reopened),before);
+    assert.equal(await reopened.evaluate(()=>localStorage.getItem('taskpoints_v1')),oldV1);
+    assert.equal(persisted.authority,'legacy_only');
+    return {realLedgerCollisionRejected:true,walConfirmationPayloadBound:true,
+      identicalRetryIdempotent:true,crossTabReloadVerified:true,
+      noV1OrV2DataLoss:true};
+  });
+
+  await run('corrupted durable Habit mutation ledger entry is never silently accepted or repaired',async context=>{
+    const page=await open(context);
+    const rawBefore=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const proof=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const delta={
+        id:'habit:h2:2026-10-16',habitId:'h2',dayKey:'2026-10-16',
+        source:'habit',status:'full',done:true,failed:false,icy:false,
+        completionFraction:1,completionPoints:4,
+        updatedAtISO:'2026-10-16T13:00:00.000Z',
+        completedAtISO:'2026-10-16T13:00:00.000Z'
+      };
+      const generation=runtime.getStatus().currentGeneration;
+      const recorded=await runtime.applyHabitDelta(delta,{expectedGeneration:generation});
+      const db=await runtime.open();
+      await new Promise((resolve,reject)=>{
+        const tx=db.transaction('mutations','readwrite'),store=tx.objectStore('mutations');
+        const req=store.get(recorded.mutationId);
+        req.onsuccess=()=>store.put({...req.result,
+          delta:{...req.result.delta,completionPoints:999}});
+        req.onerror=()=>{try{tx.abort();}catch(_){}};
+        tx.oncomplete=()=>resolve();
+        tx.onabort=()=>reject(tx.error||Error('Test corruption failed'));
+      });
+      let readError=null,writeError=null;
+      try{await runtime.hasCommittedHabitMutation(recorded.mutationId,generation,delta);}
+      catch(e){readError=String(e.message||e);}
+      try{await runtime.applyHabitDelta(delta,{
+        expectedGeneration:generation,skipInitialSeedForVerifiedReplay:true
+      });}catch(e){writeError=String(e.message||e);}
+      const tx=db.transaction(['mutations','meta'],'readonly');
+      const rows=name=>new Promise((resolve,reject)=>{
+        const req=tx.objectStore(name).getAll();
+        req.onsuccess=()=>resolve(req.result);
+        req.onerror=()=>reject(req.error);
+      });
+      const [mutations,meta]=await Promise.all([rows('mutations'),rows('meta')]);
+      return {readError,writeError,mutations:mutations.length,
+        damagedPoints:mutations[0]?.delta?.completionPoints,
+        revision:meta[0]?.revision,
+        source:localStorage.getItem('taskpoints_v1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.match(proof.readError,/state_runtime_v2_mutation_identity_mismatch/);
+    assert.match(proof.writeError,/state_runtime_v2_mutation_identity_mismatch/);
+    assert.equal(proof.mutations,1);
+    assert.equal(proof.damagedPoints,999,'Retain corruption evidence, do not silently overwrite');
+    assert.equal(proof.revision,1);
+    assert.equal(proof.source,rawBefore);
+    assert.equal(proof.authority,'legacy_only');
+    return {durablePayloadCorruptionRejected:true,unchangedRevision:true,
+      corruptedEvidencePreserved:true,legacyAuthority:true};
+  });
+
   await run('blocked V2 upgrade safely refuses stale open and retries after other tab releases v1', async context => {
     const legacyPage=await context.newPage();
     const seedUrl=url.replace('v2-storage-fixture.html','v2-upgrade-seed.html');
