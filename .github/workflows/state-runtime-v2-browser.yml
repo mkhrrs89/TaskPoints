@@ -15,7 +15,9 @@ concurrency:
 
 jobs:
   chromium-storage-safety:
-    runs-on: ubuntu-latest
+    # Keep the pinned Playwright binary compatible with the runner image;
+    # ubuntu-latest may advance to an unsupported 26.04 image.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Check out V2
