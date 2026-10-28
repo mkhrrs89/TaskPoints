@@ -15,7 +15,7 @@ function loadRecentCoverageAudit() {
   const core = {
     todayKey: () => '2026-10-28',
     fromKey: key => new Date(key + 'T12:00:00'),
-    dateKey: input => input instanceof Date
+    dateKey: input => input && typeof input.getFullYear === 'function'
       ? [input.getFullYear(), String(input.getMonth() + 1).padStart(2, '0'), String(input.getDate()).padStart(2, '0')].join('-')
       : String(input || '').slice(0, 10),
     getScoringSettings: () => ({}),
@@ -34,7 +34,7 @@ const WEEKDAYS = DAYS.filter(day => !['2026-10-24', '2026-10-25'].includes(day))
 function metric(day, source) {
   return { dateKey: day, source, title: source === 'mood' ? 'Mood Score (7)' : 'Calories (2000)' };
 }
-function work(day, score, hours = 8) {
+function work(day, score, hours) {
   return {
     dateKey: day,
     source: 'work',
