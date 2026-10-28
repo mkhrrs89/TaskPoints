@@ -131,8 +131,8 @@
         (player.active !== false ? ' checked' : '') + '> Active player</label>';
       node.innerHTML = [
         '<div class="tp-profile-inner"><div class="tp-profile-topbar">',
+        '<span class="tp-profile-topbar-spacer" aria-hidden="true"></span>',
         '<button type="button" ' + ACTION + '="back" class="tp-profile-back" aria-label="Back to players">← Players</button>',
-        '<span class="tp-profile-eyebrow">PLAYER PROFILE</span>',
         '<button type="button" ' + ACTION + '="advanced" class="tp-profile-advanced">' +
           (player.isYou ? 'Edit photo' : 'Ratings & photo') + '</button></div>',
         '<div class="tp-profile-hero">', photo, '<div class="tp-profile-identity">',
