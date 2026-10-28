@@ -2151,21 +2151,18 @@ header,
   animation: mobile-bottom-nav-press 240ms cubic-bezier(.34,1.56,.64,1);
 }
 
-/* Mobile popup menu items (Tasks menu + Game dropdown): subtle click-in animation */
+/* Mobile Game dropdown: subtle click-in animation */
 @media (max-width: 640px) {
-  .mobile-task-menu .btn,
   .mobile-bottom-dropdown .dropdown-menu .btn{
     transform-origin: center;
     will-change: transform, filter;
   }
 
-  .mobile-task-menu .btn.is-pressed,
   .mobile-bottom-dropdown .dropdown-menu .btn.is-pressed{
     animation: mobile-popup-menu-press 180ms cubic-bezier(.34,1.56,.64,1);
   }
 
   /* Fallback for iOS/tap edge cases */
-  .mobile-task-menu .btn:active,
   .mobile-bottom-dropdown .dropdown-menu .btn:active{
     transform: scale(0.965);
     filter: brightness(0.96);
@@ -2244,13 +2241,6 @@ header,
   border-left: 1px solid rgba(15,23,42,0.7);
 }
 
-.mobile-task-dropdown{
-  position: relative;
-  flex: 1;
-  display: flex;
-  justify-content: center;
-}
-
 .mobile-bottom-dropdown{
   position: relative;
   flex: 1;
@@ -2260,23 +2250,6 @@ header,
 
 .mobile-bottom-dropdown .dropdown-toggle{
   position: relative;
-}
-
-.mobile-task-toggle{
-  position: relative;
-}
-
-.mobile-task-toggle::before{
-  content: "";
-  position: absolute;
-  top: -6px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 0;
-  height: 0;
-  border-left: 6px solid transparent;
-  border-right: 6px solid transparent;
-  border-bottom: 5px solid rgba(226,232,240,0.6);
 }
 
 .mobile-bottom-dropdown .dropdown-toggle::before{
@@ -2290,27 +2263,6 @@ header,
   border-left: 6px solid transparent;
   border-right: 6px solid transparent;
   border-bottom: 5px solid rgba(226,232,240,0.6);
-}
-
-.mobile-task-menu{
-  position: absolute;
-  bottom: calc(100% + var(--tp-menu-gap) + var(--tp-bottom-nav-pad-top));
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--tp-teal-grad);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 180px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
-  z-index: var(--tp-z-toolbar-popup-layer);
-}
-
-.mobile-task-menu.hidden{
-  display: none !important;
 }
 
 .mobile-bottom-dropdown .dropdown-menu{
@@ -2330,10 +2282,6 @@ header,
 
   .mobile-bottom-nav-secondary > * + *{
     border-color: rgba(148,163,184,0.7);
-  }
-
-  .mobile-task-toggle::before{
-    border-bottom-color: rgba(15,23,42,0.45);
   }
 
   .mobile-bottom-dropdown .dropdown-toggle::before{
