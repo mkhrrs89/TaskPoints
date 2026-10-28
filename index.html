@@ -1211,7 +1211,10 @@ Nothing visible on the page is built here. === -->
   <div id="homeWorkHoursProgressTrack" class="home-work-hours-progress-track" role="progressbar" aria-label="Work hours toward 40 this week" aria-valuemin="0" aria-valuemax="40" aria-valuenow="0">
     <div id="homeWorkHoursProgress" class="home-work-hours-progress-fill" style="width:0%"></div>
   </div>
-  <div id="homeWorkHoursStatus" class="home-work-hours-status" aria-live="polite">0 of 40 hours this week</div>
+  <div class="home-work-hours-footer">
+    <div id="homeWorkHoursStatus" class="home-work-hours-status" aria-live="polite">0 of 40 hours this week</div>
+    <div id="homeWorkHoursAverage" class="home-work-hours-average" aria-label="Average work hours per logged day this week">Avg — hrs/day</div>
+  </div>
 </section>
 
 <div class="home-reminders-row mb-6">
@@ -10938,6 +10941,7 @@ function calculateHomeWeeklyWorkHours(workEntries, now = new Date()) {
   const endKey = dateKey(end);
   const seenDays = new Set();
   let total = 0;
+  let loggedDays = 0;
 
   (Array.isArray(workEntries) ? workEntries : []).forEach(entry => {
     if (!entry || (entry.source !== 'work' && !String(entry.title || '').startsWith('Work Score'))) return;
@@ -10962,6 +10966,10 @@ function calculateHomeWeeklyWorkHours(workEntries, now = new Date()) {
     // One Work SCWM entry per calendar day; duplicates must not add extra hours.
     seenDays.add(dayKey);
     total += hours;
+    // Only days with positive recorded hours contribute to the daily average.
+    // Weekend auto-zero entries and unfilled days are not worked days.
+    // PTO recorded as Work Score 0 + Hours 8 still counts as a logged day.
+    if (hours > 0) loggedDays += 1;
   });
 
   const logged = Math.round((total + Number.EPSILON) * 100) / 100;
@@ -10969,6 +10977,8 @@ function calculateHomeWeeklyWorkHours(workEntries, now = new Date()) {
     weekStart: start,
     weekEnd: end,
     logged,
+    loggedDays,
+    averagePerLoggedDay: loggedDays > 0 ? Math.round(((total / loggedDays) + Number.EPSILON) * 100) / 100 : null,
     remaining: Math.max(0, Math.round((HOME_WORK_HOURS_GOAL - logged + Number.EPSILON) * 100) / 100),
     over: Math.max(0, Math.round((logged - HOME_WORK_HOURS_GOAL + Number.EPSILON) * 100) / 100),
     progress: Math.min(100, Math.max(0, logged / HOME_WORK_HOURS_GOAL * 100))
@@ -10987,6 +10997,7 @@ function renderHomeWorkHours() {
   const progressEl = $('homeWorkHoursProgress');
   const trackEl = $('homeWorkHoursProgressTrack');
   const statusEl = $('homeWorkHoursStatus');
+  const averageEl = $('homeWorkHoursAverage');
   const summary = calculateHomeWeeklyWorkHours(getDerived().workEntries, new Date());
   const dateOptions = { month: 'short', day: 'numeric' };
   const startText = summary.weekStart.toLocaleDateString(undefined, dateOptions);
@@ -10996,6 +11007,9 @@ function renderHomeWorkHours() {
   if (remainingEl) remainingEl.textContent = formatHomeWorkHours(summary.remaining);
   if (progressEl) progressEl.style.width = String(summary.progress) + '%';
   if (trackEl) trackEl.setAttribute('aria-valuenow', String(Math.min(40, summary.logged)));
+  if (averageEl) averageEl.textContent = summary.loggedDays
+    ? 'Avg ' + formatHomeWorkHours(summary.averagePerLoggedDay) + ' hrs/day · ' + summary.loggedDays + (summary.loggedDays === 1 ? ' day' : ' days')
+    : 'Avg — hrs/day';
   if (statusEl) {
     statusEl.textContent = summary.over > 0
       ? formatHomeWorkHours(summary.over) + ' hours over your 40-hour goal'
