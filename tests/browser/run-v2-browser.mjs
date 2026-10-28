@@ -1435,12 +1435,12 @@ try {
       window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('writer',{
         expectedEpoch:1,marker:'shared-stable-marker'}));
     assert.equal(currentReplay.reason,'fence_frozen');
-    const final=await restarted.evaluate(()=>({
-      control:window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('read'),
+    const final=await restarted.evaluate(async()=>({
+      control:await window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('read'),
       legacy:localStorage.getItem('taskpoints_v1'),
       authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
     }));
-    const current=await final.control;
+    const current=final.control;
     assert.equal(current.fence.writersCommitted,2);
     assert.equal(current.fence.epoch,1);
     assert.equal(current.fence.frozen,true);
