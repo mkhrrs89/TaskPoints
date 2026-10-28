@@ -88,6 +88,30 @@ Cross-tab browser tests are not equivalent to killing an installed iOS PWA.
 This incremental audit changes no V1 save timing, journals, recovery
 procedures, or writable storage.
 
+## Task completion replay and cleanup interleavings (V2 safety regressions)
+
+The V2 browser suite now exercises the existing **synchronous V1** Task journal's
+completion-delete overlay against a stale full-state save. An older tab
+captures an entry, a second tab writes a durable `completionDeleteId`, and
+the first attempts a stale `saveStateSnapshot()`. The journal wrapper must
+apply the delete before persistence so an old completion cannot resurrect
+while the delete is pending. The cutover inspector still refuses promotion.
+
+A separate controlled reentrant interruption tests **the cleanup boundary**:
+the first completion upsert is saved to the V1 snapshot, then an updated
+same-ID completion arrives before the journal clears verified entries.
+`clearVerifiedSnapshot()` must retain the newer row rather than deleting
+it based solely on ID. A subsequent explicit flush must persist the new
+completion exactly once, with the final journal empty. This models a
+mutation interleaving during one JS call stack; it **does not simulate a
+simultaneously executing process or guarantee cross-tab atomicity**.
+
+Both regressions exercise real V1 journal functions inside disposable
+localhost browser fixtures, without switching V2 primary storage or
+changing TaskPoints' live save code. Unfenced paused legacy tabs,
+destructive imports, after-compaction stale deletes, physical Safari/PWA
+lifecycle and independent rollback are still blockers.
+
 ## Writer ordering and race classes to solve
 
 1. **Immediate user action:** Task and Habit taps must remain durable before
