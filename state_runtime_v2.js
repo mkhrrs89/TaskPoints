@@ -3421,6 +3421,44 @@
     return stableJson(entries);
   }
 
+  // Read-only observation of the *actual* V1 Task mutation journal.
+  // Parsing this journal is not replaying it. A malformed row/shape is
+  // unresolved evidence, not an empty journal, even if readRecord() on the
+  // production path can normalize some legacy entries. No cleanup or writes.
+  function inspectReadOnlyTaskJournalForCutover() {
+    const raw = global.localStorage.getItem('taskpoints_pending_task_mutations_v1');
+    if (raw === null) {
+      return { raw: null, reason: 'absent', pendingCount: 0,
+        tasks: 0, completionUpserts: 0, completionDeletes: 0 };
+    }
+    if (typeof raw !== 'string') throw Error('cutover_task_journal_unreadable');
+    let record;
+    try { record = JSON.parse(raw); }
+    catch (_) {
+      return { raw, reason: 'malformed', pendingCount: null,
+        tasks: null, completionUpserts: null, completionDeletes: null };
+    }
+    if (!record || typeof record !== 'object' || Array.isArray(record)
+      || record.schemaVersion !== 1
+      || !Array.isArray(record.tasks)
+      || !Array.isArray(record.completionUpserts)
+      || !Array.isArray(record.completionDeletes)
+      || record.tasks.some(item => !item || typeof item !== 'object'
+        || Array.isArray(item) || !item.id)
+      || record.completionUpserts.some(item => !item
+        || typeof item !== 'object' || Array.isArray(item) || !item.id)
+      || record.completionDeletes.some(id => typeof id !== 'string' || !id)) {
+      return { raw, reason: 'malformed', pendingCount: null,
+        tasks: null, completionUpserts: null, completionDeletes: null };
+    }
+    const tasks = record.tasks.length;
+    const completionUpserts = record.completionUpserts.length;
+    const completionDeletes = record.completionDeletes.length;
+    const pendingCount = tasks + completionUpserts + completionDeletes;
+    return { raw, reason: pendingCount ? 'pending' : 'empty',
+      pendingCount, tasks, completionUpserts, completionDeletes };
+  }
+
   async function inspectAuthorityCutoverBarriers() {
     const hardBlockers = [
       'all_legacy_writers_not_fenced',
@@ -3429,13 +3467,16 @@
       'physical_safari_pwa_lifecycle_not_validated',
       'production_multi_context_handoff_not_validated'
     ];
-    const snapshot = (reason, pilot, rollback, peers, extra = []) => {
+    const snapshot = (reason, pilot, rollback, peers, extra = [], taskJournal = null) => {
       // Even a completely green Habit pilot and all responsive V2 preview
       // peers say nothing about suspended or pre-V2 legacy-only tabs.
       const checks = {
         pilotConsistent: pilot?.checks?.pilotConsistent === true,
         completionIndexReady: pilot?.checks?.completionIndexReady === true,
         legacyJournalEmpty: pilot?.checks?.legacyJournalEmpty === true,
+        // This is a separate V1 Task journal, NOT the Habit/WAL check above.
+        taskJournalEmpty: taskJournal?.reason === 'empty'
+          || taskJournal?.reason === 'absent',
         mirrorQueueStable: pilot?.checks?.mirrorQueueStable === true,
         noObservedMirrorFailures: pilot?.checks?.noObservedMirrorFailures === true,
         noObservedBridgeFailures: pilot?.checks?.noObservedBridgeFailures === true,
@@ -3453,9 +3494,17 @@
         checks, blockers: [...new Set([
           ...(pilot?.blockers || []),
           ...(!checks.stableLegacyRollbackSource ? ['legacy_rollback_source_unverified'] : []),
+          ...(taskJournal?.reason === 'pending' ? ['task_mutation_journal_pending'] : []),
+          ...(taskJournal?.reason === 'malformed' ? ['task_mutation_journal_malformed'] : []),
           ...extra, ...hardBlockers
         ])],
         knownUnfencedWriterFamilies: [...AUTHORITY_CUTOVER_WRITER_FAMILIES],
+        taskJournal: taskJournal ? {
+          reason: taskJournal.reason, pendingCount: taskJournal.pendingCount,
+          tasks: taskJournal.tasks,
+          completionUpserts: taskJournal.completionUpserts,
+          completionDeletes: taskJournal.completionDeletes
+        } : null,
         pilot: pilot ? { reason: pilot.reason,
           generation: pilot.generation || null, revision: pilot.revision ?? null } : null,
         rollback: rollback ? { reason: rollback.reason,
@@ -3475,12 +3524,14 @@
     try {
       const pilot = await inspectMutationHandoffPrerequisites();
       const rollback = await inspectLegacyRollbackSource();
+      const taskJournalBefore = inspectReadOnlyTaskJournalForCutover();
       // The preview writer inventory must include ALL current origin storage
       // keys, not merely taskpoints_* checkpoint keys or the Habit pilot.
       const fullStorageBefore = captureReadOnlyFullStorageInventory();
       const peers = await inspectPreviewWriterPeers();
       const pilotAfter = await inspectMutationHandoffPrerequisites();
       const rollbackAfter = await inspectLegacyRollbackSource();
+      const taskJournalAfter = inspectReadOnlyTaskJournalForCutover();
       const fullStorageAfter = captureReadOnlyFullStorageInventory();
       // The asynchronous peer observation is NOT a lock. Detect a new
       // generation or explicit preview switch during the report; never use
@@ -3491,10 +3542,12 @@
         || (rollback.generation && rollback.generation !== initialGeneration)
         || stableJson(pilot) !== stableJson(pilotAfter)
         || stableJson(rollback) !== stableJson(rollbackAfter)
+        || stableJson(taskJournalBefore) !== stableJson(taskJournalAfter)
         || fullStorageBefore !== fullStorageAfter)
         return snapshot('inventory_changed_during_check', pilot, rollback, peers,
-          ['legacy_or_preview_inventory_changed_during_check']);
-      return snapshot('authority_cutover_blocked', pilot, rollback, peers);
+          ['legacy_or_preview_inventory_changed_during_check'], taskJournalAfter);
+      return snapshot('authority_cutover_blocked', pilot, rollback, peers,
+        [], taskJournalAfter);
     } catch (_) {
       return snapshot('inspection_unreadable', null, null, null,
         ['authority_cutover_inventory_unreadable']);
