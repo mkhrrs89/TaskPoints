@@ -3465,7 +3465,8 @@
       'nonpilot_authoritative_collections_not_migrated',
       'independent_off_device_rollback_not_verified',
       'physical_safari_pwa_lifecycle_not_validated',
-      'production_multi_context_handoff_not_validated'
+      'production_multi_context_handoff_not_validated',
+      'task_journal_compaction_handoff_not_validated'
     ];
     const snapshot = (reason, pilot, rollback, peers, extra = [], taskJournal = null) => {
       // Even a completely green Habit pilot and all responsive V2 preview
@@ -3477,6 +3478,9 @@
         // This is a separate V1 Task journal, NOT the Habit/WAL check above.
         taskJournalEmpty: taskJournal?.reason === 'empty'
           || taskJournal?.reason === 'absent',
+        // Empty after verified compaction is necessary, NOT an admission
+        // guarantee against a paused old tab or an idle callback resuming.
+        taskJournalCompactionHandoffValidated: false,
         mirrorQueueStable: pilot?.checks?.mirrorQueueStable === true,
         noObservedMirrorFailures: pilot?.checks?.noObservedMirrorFailures === true,
         noObservedBridgeFailures: pilot?.checks?.noObservedBridgeFailures === true,
