@@ -199,3 +199,14 @@ test('a single read-only week rollover timer is scheduled on boot', () => {
   assert.ok(scheduled[0].delay >= 1000);
   assert.ok(scheduled[0].delay <= 7 * 24 * 60 * 60 * 1000 + 2000);
 });
+
+test('Work Hours card uses exactly the same teal gradient as Inertia and Reminders', () => {
+  const sharedGradient = /--tp-btn-teal-grad:\s*linear-gradient\(180deg,\s*#254C52,\s*#1A383B\)/;
+  const workCard = styles.match(/\.home-work-hours-card\s*\{([^}]+)\}/)?.[1] || '';
+  const inertiaCard = styles.match(/\.inertiaPanelLeft\s*\{([^}]+)\}/)?.[1] || '';
+  const remindersHeader = styles.match(/\.sectionCard--teal\s+\.sectionHeader--teal\s*\{([^}]+)\}/)?.[1] || '';
+  assert.match(styles, sharedGradient);
+  for (const block of [workCard, inertiaCard, remindersHeader]) {
+    assert.match(block, /background:\s*var\(--tp-btn-teal-grad\);/);
+  }
+});
