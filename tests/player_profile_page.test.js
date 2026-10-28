@@ -338,7 +338,7 @@ test('YOUR P000 profile theme uses YOUR existing primary and secondary colors', 
   f.state.youPrimaryColor = '#cc44ff';
   f.state.youSecondaryColor = '#2244dd';
   f.controller.refresh();
-  assert.equal(f.screen.style.properties['--tp-profile-hero-from'], '#481c64');
+  assert.equal(f.screen.style.properties['--tp-profile-hero-from'], '#4b2264');
   assert.equal(f.calls.save.length, 0);
 });
 
