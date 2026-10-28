@@ -576,6 +576,13 @@ try{
     assert.notEqual(imported.epoch,epoch);
     await importer.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
     await sleeping.bringToFront();
+    // Storage events and old-tab activation are asynchronous in real
+    // browsers. Wait for the imported durable epoch to become visible before
+    // testing that the stale in-memory page refuses a Habit tap. A persistent
+    // cross-tab generation failure still fails this bounded check.
+    await sleeping.waitForFunction(expected=>
+      window.TaskPointsStateRuntimeV2Generation?.read?.()===expected,
+      imported.epoch,{timeout:12000,polling:75});
     const baseline=await sleeping.evaluate(day=>({
       journal:window.TaskPointsCore.readPendingHabitDeltas()
         .filter(d=>d.habitId==='h2'&&d.dayKey===day).length,
