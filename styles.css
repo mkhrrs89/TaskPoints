@@ -7654,3 +7654,35 @@ metal background attached only to the day-bubble row.
     padding-right:8px;
   }
 }
+
+/* Main Home mobile section rhythm: 16px between adjacent cards.
+   Keep the desktop layout untouched. In particular, the Featured Matchup
+   mount's mb-3 and Reminders' -8px offsets must not distort mobile spacing. */
+@media (max-width: 767px) {
+  #homeTopCardStack {
+    margin-bottom: 16px !important; /* Trend graph → Work Hours (or breakdown) */
+  }
+
+  #homeTopCardStack > #homeSeasonChampionshipMount,
+  #homeTopCardStack > .inertiaTrendRow {
+    margin-top: 16px !important;    /* Scoreboard → Featured → Inertia */
+    margin-bottom: 0 !important;    /* Cancel Featured's extra mb-3 */
+  }
+
+  #homeTopCardStack > .inertiaTrendRow {
+    row-gap: 16px;                 /* Inertia/Streak/Yesterday → Score Trend */
+  }
+
+  #todayBreakdownCard {
+    margin-bottom: 16px !important; /* If visible, give its own 16px gap */
+  }
+
+  #homeWorkHoursSection {
+    margin-bottom: 16px !important; /* Work Hours → Reminders/Streak Bonus */
+  }
+
+  .home-reminders-row #remindersSection,
+  .home-reminders-row .home-reminders-sidecar {
+    margin-top: 0 !important;      /* Remove existing mobile -8px pull-up */
+  }
+}
