@@ -127,6 +127,8 @@ test('authority cutover inspector treats a separate Task journal as durable unre
     "taskJournalEmpty: taskJournal?.reason === 'empty'",
     "'task_mutation_journal_pending'",
     "'task_mutation_journal_malformed'",
+    "'task_journal_compaction_handoff_not_validated'",
+    'taskJournalCompactionHandoffValidated: false',
     'taskJournalBefore = inspectReadOnlyTaskJournalForCutover()',
     'taskJournalAfter = inspectReadOnlyTaskJournalForCutover()',
     'stableJson(taskJournalBefore) !== stableJson(taskJournalAfter)',
