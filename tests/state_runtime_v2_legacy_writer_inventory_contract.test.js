@@ -248,6 +248,12 @@ test('durable writer fence remains confined to preview IDB markers, not producti
     'isWalTestPreviewHost()',
     'isDarkEnabled()',
     "taskpoints_v2_writer_fence_preview_v1",
+    "['read', 'writer', 'freeze', 'inspect_marker']",
+    "action === 'read' || action === 'inspect_marker'",
+    "'preview_writer_marker_present'",
+    "'preview_writer_marker_absent'",
+    'readOnlyMarkerInspection: true',
+    'item && (!prior || item.id !== markerId',
     "indexedDB.open(DB, 1)",
     "action === 'read' ? 'readonly' : 'readwrite'",
     "store.get('writer_fence')",
@@ -269,6 +275,13 @@ test('durable writer fence remains confined to preview IDB markers, not producti
     "tx.oncomplete = () => finish(result)"
   ]) assert.ok(fence.includes(requirement), 'Missing durable preview fence safety: '+requirement);
   assert.match(fence, /if \(state\.frozen\)/);
+  const inspectBranch=fence.slice(fence.indexOf("if (action === 'inspect_marker')"),
+    fence.indexOf('if (expectedEpoch !== state.epoch)'));
+  assert.match(inspectBranch, /store.get\(markerId\)/);
+  assert.match(inspectBranch, /currentGeneration\(\{ create: false \}\) !== generation/);
+  assert.match(inspectBranch, /!prior \|\| item.id !== markerId/);
+  assert.doesNotMatch(inspectBranch, /store.put\(/);
+  assert.doesNotMatch(inspectBranch, /(?:setItem|removeItem|clear)\(/);
   assert.match(fence, /fence_transaction_aborted/);
   assert.match(fence, /fence_generation_mismatch/);
   assert.match(fence, /fence_epoch_stale/);
