@@ -3183,6 +3183,69 @@ try {
       deletedCompletionAbsent:true,noAuthorityPromotion:true};
   });
 
+  await run('pending Task deletion retains unrelated newer completion from another tab',async context=>{
+    const stale=await open(context),writer=await open(context);
+    const old=await stale.evaluate(()=>window.TaskPointsCore
+      .parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1'),{}));
+    const fresh=await writer.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const data=core.parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1'),{});
+      data.completions.push({id:'unrelated-newer-completion',source:'task',
+        taskId:'independent-task',title:'Must survive stale deletion save',
+        points:12,completedAtISO:'2026-10-28T12:02:00.000Z'});
+      const saved=core.saveStateSnapshot(data,{
+        immediateWrite:true,userInitiated:true,savePath:'v2-unrelated-completion-before-delete'});
+      if(saved?.skipped)throw Error('Unrelated completion did not persist');
+      core.journalTaskMutation({completionDeleteId:'synthetic-task-completion'});
+      return {raw:localStorage.getItem('taskpoints_v1'),
+        journal:localStorage.getItem('taskpoints_pending_task_mutations_v1')};
+    });
+    await stale.waitForFunction(e=>localStorage.getItem('taskpoints_v1')===e.raw
+      && localStorage.getItem('taskpoints_pending_task_mutations_v1')===e.journal,
+      fresh,{timeout:12000});
+    const after=await stale.evaluate(oldState=>{
+      const core=window.TaskPointsCore;
+      const result=core.saveStateSnapshot(oldState,{
+        immediateWrite:true,userInitiated:true,savePath:'v2-stale-delete-keeps-newer-completions'});
+      const current=core.parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1'),{});
+      return {skipped:result?.skipped===true,
+        ids:current.completions.map(c=>c.id),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    },old);
+    assert.equal(after.skipped,false);
+    assert.equal(after.ids.includes('synthetic-task-completion'),false,
+      'Journaled deletion must remain absent');
+    assert.equal(after.ids.includes('unrelated-newer-completion'),true,
+      'Stale tab must not discard a newer unrelated completion');
+    assert.equal(after.authority,'legacy_only');
+    return {journalDeleteWins:true,newerUnrelatedCompletionRetained:true,
+      currentAuthorityUnchanged:true};
+  });
+
+  await run('ordinary V1 save without Task tombstones retains nonempty completion history',async context=>{
+    const page=await open(context);
+    const proof=await page.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const original=core.parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1'),{});
+      const countBefore=original.completions.length;
+      const candidate={...original,completions:[]};
+      const result=core.saveStateSnapshot(candidate,{
+        immediateWrite:true,userInitiated:true,
+        savePath:'v2-ordinary-history-safety-no-task-tombstone'});
+      const after=core.parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1'),{});
+      return {countBefore,countAfter:after.completions.length,
+        ids:after.completions.map(c=>c.id),skipped:result?.skipped===true,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(proof.skipped,false);
+    assert.equal(proof.countBefore,1);
+    assert.ok(proof.countAfter>=proof.countBefore,
+      'Existing no-accidental-history-wipe protection must stay active');
+    assert.ok(proof.ids.includes('synthetic-task-completion'));
+    assert.equal(proof.authority,'legacy_only');
+    return {ordinaryHistoryWipeGuardPreserved:true,noV2Authority:true};
+  });
+
   await run('newer Task completion edit during verified journal compaction survives cleanup and retry',async context=>{
     const page=await open(context);
     const proof=await page.evaluate(()=>{
