@@ -1392,6 +1392,98 @@ try {
       originalV1Unchanged:true,noProductionAuthority:true};
   });
 
+  await run('preview durable IDB markers commit exactly once across concurrent tabs and reload',async context=>{
+    const first=await open(context),second=await open(context);
+    const oldV1=await first.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const attempt=()=>({expectedEpoch:0,marker:'shared-stable-marker'});
+    const [one,two]=await Promise.all([
+      first.evaluate(options=>window.TaskPointsStateRuntimeV2
+        .rehearsePreviewDurableWriterFence('writer',options),attempt()),
+      second.evaluate(options=>window.TaskPointsStateRuntimeV2
+        .rehearsePreviewDurableWriterFence('writer',options),attempt())
+    ]);
+    assert.deepEqual([one.reason,two.reason].sort(),
+      ['preview_writer_recorded','preview_writer_replayed'],JSON.stringify([one,two]));
+    assert.ok([one,two].every(report=>report.canPromote===false));
+    const firstRead=await second.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('read'));
+    assert.equal(firstRead.fence.writersCommitted,1);
+    assert.equal(firstRead.fence.lastWriterMarker,'shared-stable-marker');
+    const different=await second.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'different-marker'}));
+    assert.equal(different.reason,'preview_writer_recorded');
+    assert.equal(different.fence.writersCommitted,2);
+    await first.close();
+    const restarted=await open(context);
+    const replay=await restarted.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'shared-stable-marker'}));
+    assert.equal(replay.reason,'preview_writer_replayed',JSON.stringify(replay));
+    assert.equal(replay.alreadyRecorded,true);
+    assert.equal(replay.fence.writersCommitted,2);
+    assert.equal(replay.fence.lastWriterMarker,'different-marker');
+    const frozen=await restarted.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('freeze',{
+        expectedEpoch:0}));
+    assert.equal(frozen.reason,'preview_fence_frozen');
+    const oldReplay=await second.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'shared-stable-marker'}));
+    assert.equal(oldReplay.reason,'fence_epoch_stale');
+    const currentReplay=await second.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:1,marker:'shared-stable-marker'}));
+    assert.equal(currentReplay.reason,'fence_frozen');
+    const final=await restarted.evaluate(()=>({
+      control:window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('read'),
+      legacy:localStorage.getItem('taskpoints_v1'),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    const current=await final.control;
+    assert.equal(current.fence.writersCommitted,2);
+    assert.equal(current.fence.epoch,1);
+    assert.equal(current.fence.frozen,true);
+    assert.equal(final.legacy,oldV1);
+    assert.equal(final.authority,'legacy_only');
+    return {sameMarkerExactlyOnce:true,nonAdjacentReplayExactlyOnce:true,
+      replaySurvivesTabRestart:true,frozenEpochRejectsReplays:true,
+      legacySnapshotUnchanged:true};
+  });
+
+  await run('preview durable IDB writer-versus-freeze race has a single serial order',async context=>{
+    const writer=await open(context),freezer=await open(context);
+    const oldV1=await writer.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const [write,freeze]=await Promise.all([
+      writer.evaluate(()=>window.TaskPointsStateRuntimeV2
+        .rehearsePreviewDurableWriterFence('writer',{
+          expectedEpoch:0,marker:'racing-writer'})),
+      freezer.evaluate(()=>window.TaskPointsStateRuntimeV2
+        .rehearsePreviewDurableWriterFence('freeze',{expectedEpoch:0}))
+    ]);
+    assert.equal(freeze.reason,'preview_fence_frozen',JSON.stringify(freeze));
+    assert.ok(['preview_writer_recorded','fence_epoch_stale']
+      .includes(write.reason),JSON.stringify(write));
+    const after=await freezer.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('read'));
+    assert.equal(after.fence.epoch,1);
+    assert.equal(after.fence.frozen,true);
+    assert.equal(after.fence.writersCommitted,
+      write.reason==='preview_writer_recorded'?1:0);
+    const late=await writer.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:1,marker:'late-writer'}));
+    assert.equal(late.reason,'fence_frozen');
+    const v1After=await writer.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    assert.equal(v1After,oldV1);
+    assert.equal(write.canPromote,false);
+    assert.equal(freeze.canPromote,false);
+    assert.equal(late.productionWritersFenced,false);
+    return {singleSerializedWriterFreezeOrder:true,
+      writerWon:write.reason==='preview_writer_recorded',
+      committedWriters:after.fence.writersCommitted,legacyV1Unchanged:true};
+  });
+
   await run('cooperative shared writer locks coexist and block exclusive handoff while legacy tabs remain unfenced',async context=>{
     const first=await open(context),second=await open(context);
     const silent=await context.newPage();
