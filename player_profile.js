@@ -198,8 +198,9 @@
         target.primaryColor = primary;
         target.secondaryColor = secondary;
         var active = Boolean(form.elements.namedItem('active')?.checked);
-        if ((target.active !== false) !== active) deps.onActiveChange();
+        var wasActive = target.active !== false;
         target.active = active;
+        if (wasActive !== active) deps.onActiveChange();
       }
       deps.save(st, options);
       deps.renderRoster();
