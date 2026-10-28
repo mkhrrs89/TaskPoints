@@ -2687,6 +2687,23 @@ function applyPlayersGridLayout(grid) {
 }
 
 
+function wireViewCardProfileLinks(card, playerId, playerName) {
+  // Player portraits/names open the profile in Card view; existing Edit buttons
+  // retain their original behavior. This is also keyboard accessible.
+  card.querySelectorAll(".player-img-inner, h3").forEach((element) => {
+    element.style.cursor = "pointer";
+    element.tabIndex = 0;
+    element.setAttribute("role", "button");
+    element.setAttribute("aria-label", "View " + playerName + " profile");
+    element.addEventListener("click", () => playerProfiles?.open(playerId));
+    element.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      playerProfiles?.open(playerId);
+    });
+  });
+}
+
 async function renderPlayers() {
   const container = $("playersList");
   if (!container) return;
@@ -3175,6 +3192,7 @@ card.innerHTML = `
 `;
 
 
+  wireViewCardProfileLinks(card, "YOU", youName);
   targetContainer.appendChild(card);
   return;
 }
@@ -3288,6 +3306,7 @@ card.innerHTML = `
   </div>
 `;
 
+    wireViewCardProfileLinks(card, p.id, p.name || "Player");
     targetContainer.appendChild(card);
   };
 
@@ -3660,6 +3679,7 @@ function wirePlayerColorEditors(root = document) {
           refreshScheduleAfterRosterChange();
           state = saveState(state);
         }
+        if (playerProfiles?.activeId() === id) playerProfiles.close({ immediate: true });
         if (editingPlayerId === id) editingPlayerId = null;
         renderPlayers();
         return;
@@ -3682,6 +3702,7 @@ function wirePlayerColorEditors(root = document) {
             openPlayerEditor(id);
           }
           renderPlayers();
+          if (playerProfiles?.activeId() === id) playerProfiles.refresh();
         }, {
           onOpen: suspendPlayerEditorForCrop,
           onClose: resumePlayerEditorAfterCrop
@@ -3702,6 +3723,7 @@ function wirePlayerColorEditors(root = document) {
           openPlayerEditor(id);
         }
         renderPlayers();
+        if (playerProfiles?.activeId() === id) playerProfiles.refresh();
         return;
       } 
 
@@ -3862,6 +3884,7 @@ player.rivalId = rivalId && rivalId !== player.id ? rivalId : "";
     }
     editingPlayerId = null;
     renderPlayers();
+    if (playerProfiles?.activeId() === id) playerProfiles.refresh();
   };
 
 
