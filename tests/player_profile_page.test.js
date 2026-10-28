@@ -31,6 +31,11 @@ function fixture(count = 2, directHash = '') {
   const calls = { save: [], rerender: 0, schedule: 0, editNpc: [], editSelf: 0, photos: [] };
   const screen = {
     innerHTML: '', hidden: true, scrollTop: -1,
+    style: {
+      properties: {},
+      setProperty(key, value) { this.properties[key] = value; },
+      getPropertyValue(key) { return this.properties[key] || ''; }
+    },
     setAttribute(key, value) { this[key] = value; },
     addEventListener(name, fn) { this[name] = fn; },
     querySelector(sel) {
@@ -274,4 +279,119 @@ test('centered back control works for P000 without changing the existing photo e
   assert.equal(f.controller.activeId(), 'YOU');
   f.controller.close();
   assert.equal(f.screen.hidden, true);
+});
+
+
+function themeContrast(light, dark) {
+  const luminance = hex => {
+    const rgb = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+    const linear = rgb.map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+    return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+  };
+  const a = luminance(light), b = luminance(dark);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
+test('profile theme uses both player colors for backgrounds, panels, controls and accents', () => {
+  const f = fixture();
+  f.controller.open('npc1');
+  const props = f.screen.style.properties;
+  const primary = f.state.players[0].primaryColor;
+  const secondary = f.state.players[0].secondaryColor;
+  assert.ok(primary !== secondary);
+  for (const prop of [
+    '--tp-profile-canvas-from', '--tp-profile-canvas-to',
+    '--tp-profile-hero-from', '--tp-profile-hero-to',
+    '--tp-profile-panel-from', '--tp-profile-panel-to',
+    '--tp-profile-button-from', '--tp-profile-button-to',
+    '--tp-profile-field', '--tp-profile-metric',
+    '--tp-profile-accent', '--tp-profile-accent-secondary',
+    '--tp-profile-border', '--tp-profile-focus'
+  ]) {
+    assert.match(props[prop] || '', /^#[0-9a-f]{6}$/, 'Missing CSS variable: ' + prop);
+    assert.match(css, new RegExp('var\\(' + prop + '\\)'), 'CSS does not use ' + prop);
+  }
+  assert.notEqual(props['--tp-profile-hero-from'], props['--tp-profile-hero-to']);
+  assert.notEqual(props['--tp-profile-panel-from'], props['--tp-profile-panel-to']);
+  assert.equal(f.calls.save.length, 0, 'Changing appearance must not write to storage');
+});
+
+test('switching profiles changes theme without creating another screen or saved copy', () => {
+  const f = fixture();
+  f.state.players[1].primaryColor = '#ff7700';
+  f.state.players[1].secondaryColor = '#3344cc';
+  f.controller.open('npc1');
+  const original = { ...f.screen.style.properties };
+  f.controller.open('npc2');
+  const updated = f.screen.style.properties;
+  assert.notEqual(updated['--tp-profile-hero-from'], original['--tp-profile-hero-from']);
+  assert.notEqual(updated['--tp-profile-hero-to'], original['--tp-profile-hero-to']);
+  assert.equal(f.body.children.length, 1);
+  assert.equal(f.calls.save.length, 0);
+});
+
+test('YOUR P000 profile theme uses YOUR existing primary and secondary colors', () => {
+  const f = fixture();
+  f.controller.open('YOU');
+  const params = f.screen.style.properties;
+  assert.match(params['--tp-profile-hero-from'], /^#[0-9a-f]{6}$/);
+  f.state.youPrimaryColor = '#cc44ff';
+  f.state.youSecondaryColor = '#2244dd';
+  f.controller.refresh();
+  assert.equal(f.screen.style.properties['--tp-profile-hero-from'], '#481c64');
+  assert.equal(f.calls.save.length, 0);
+});
+
+test('saving profile colors immediately updates this profile theme and preserved fields', () => {
+  const f = fixture();
+  f.controller.open('npc1');
+  const before = { ...f.screen.style.properties };
+  const saved = f.controller.saveForm(f.makeForm({
+    name: 'NPC 1', notes: 'Old notes', style: 'grinder',
+    rivalId: '', primaryColor: '#ffcc00', secondaryColor: '#990099', active: true
+  }));
+  assert.equal(saved, true);
+  assert.equal(f.state.players[0].primaryColor, '#ffcc00');
+  assert.equal(f.state.players[0].secondaryColor, '#990099');
+  assert.notEqual(f.screen.style.properties['--tp-profile-hero-from'], before['--tp-profile-hero-from']);
+  assert.notEqual(f.screen.style.properties['--tp-profile-hero-to'], before['--tp-profile-hero-to']);
+  assert.equal(f.calls.save.length, 1);
+  assert.equal(f.state.players[0].baseline, 51);
+  assert.equal(f.state.players[1].primaryColor, '#112233');
+});
+
+test('white typography has >= 4.5:1 contrast on hero gradients for very bright and dark player colors', () => {
+  const f = fixture();
+  const original = f.state.players[0];
+  const colors = [
+    ['#ffffff', '#ffffff'], ['#000000', '#000000'],
+    ['#ffff00', '#ffffff'], ['#ff0000', '#ffff00'],
+    ['#ff7700', '#ff2200'], ['#0000ff', '#00ffff'],
+    ['#00ff00', '#00ff00'], ['#c0c0c0', '#333333']
+  ];
+  for (const [primary, secondary] of colors) {
+    original.primaryColor = primary;
+    original.secondaryColor = secondary;
+    f.controller.open('npc1');
+    for (const surface of [
+      '--tp-profile-hero-from', '--tp-profile-hero-to',
+      '--tp-profile-panel-from', '--tp-profile-panel-to',
+      '--tp-profile-button-from', '--tp-profile-button-to',
+      '--tp-profile-canvas-from', '--tp-profile-canvas-to'
+    ]) {
+      const hex = f.screen.style.properties[surface];
+      assert.ok(themeContrast('#ffffff', hex) >= 4.5,
+        surface + ' insufficient contrast for ' + primary + ' / ' + secondary + ': ' + hex);
+    }
+  }
+});
+
+test('color theme remains scoped to player profiles and does not affect game cards or editors', () => {
+  assert.match(css, /\.tp-player-profile-screen\s*\{/);
+  assert.match(css, /\.tp-profile-hero\s*\{[^}]*--tp-profile-hero-from/);
+  assert.match(css, /\.tp-profile-panel\s*\{[^}]*--tp-profile-panel-from/);
+  assert.match(css, /\.tp-profile-form input:not\(\[type="checkbox"\]\)[\s\S]*?--tp-profile-field/);
+  assert.match(game, /function buildPlayerEditorContent\(player\)/);
+  assert.match(game, /function wireViewCardProfileLinks/);
+  assert.match(game, /id="playersList"/);
 });
