@@ -55,6 +55,7 @@
     var activeId = '';
     var returnHash = '';
     var started = false;
+    var editingRatings = false;
     function esc(value) { return deps.escapeHtml(String(value == null ? '' : value)); }
     function att(value) { return deps.escapeHtmlAttr(String(value == null ? '' : value)); }
     function roster() { return Array.isArray(deps.getState().players) ? deps.getState().players : []; }
@@ -86,6 +87,18 @@
         if (!target) return;
         var action = target.getAttribute(ACTION);
         if (action === 'back') close();
+        if (action === 'edit-ratings' && activeId !== 'YOU') {
+          editingRatings = true;
+          refreshRatingsSection();
+          screen.querySelector('[name="baseline"]')?.focus?.({ preventScroll: true });
+          return;
+        }
+        if (action === 'cancel-ratings') {
+          editingRatings = false;
+          refreshRatingsSection();
+          screen.querySelector('#tpProfileEditRatings')?.focus?.({ preventScroll: true });
+          return;
+        }
         if (action === 'advanced') {
           var id = activeId;
           if (id === 'YOU') { close({ immediate: true }); deps.editSelf(); }
@@ -97,6 +110,11 @@
         }
       });
       screen.addEventListener('submit', function(event) {
+        if (event.target.id === 'tpPlayerRatingsForm') {
+          event.preventDefault();
+          saveRatingsForm(event.target);
+          return;
+        }
         if (event.target.id !== 'tpPlayerProfileForm') return;
         event.preventDefault();
         saveForm(event.target);
@@ -148,6 +166,100 @@
           '</span><strong>' + esc(pair[1] == null ? '—' : pair[1]) + '</strong></div>';
       }).join('') + '</div>';
     }
+    // Match the existing NPC editor's numeric fields and risky conversion.
+    // Changes are written to the SAME player record only after validation.
+    function ratingFields(player) {
+      var fields = [
+        { key: 'baseline', label: 'Baseline', fallback: 60 },
+        { key: 'variance', label: 'Variance', fallback: 40 },
+        { key: 'varianceTilt', label: 'Variance Tilt', fallback: 50 },
+        { key: 'momentum', label: 'Momentum', fallback: 50 },
+        { key: 'risky', label: 'Risky', fallback: 3 },
+        { key: 'intimidation', label: 'INT', fallback: 0 },
+        { key: 'poise', label: 'Poise', fallback: 0 },
+        { key: 'greed', label: 'Greed', fallback: 0 },
+        { key: 'streaky', label: 'Streaky', fallback: 0 }
+      ];
+      return fields.map(function(field) {
+        var stored = Number(player[field.key]);
+        var value = player[field.key] == null || !Number.isFinite(stored)
+          ? field.fallback : stored;
+        if (field.key === 'risky') value = value <= 10 ? value * 10 : value;
+        return { key: field.key, label: field.label, value: value };
+      });
+    }
+
+    function ratingsEditorFor(player) {
+      return '<form id="tpPlayerRatingsForm" class="tp-profile-ratings-form">' +
+        '<div class="tp-profile-ratings tp-profile-ratings-edit">' +
+        ratingFields(player).map(function(field) {
+          return '<label class="tp-profile-rating tp-profile-rating-edit">' +
+            '<span>' + esc(field.label) + '</span>' +
+            '<input name="' + att(field.key) + '" aria-label="' + att(field.label) +
+            '" type="number" inputmode="decimal" min="0" max="100" step="any" required value="' +
+            att(field.value) + '"></label>';
+        }).join('') + '</div>' +
+        '<p class="tp-profile-rating-help">Risky is entered from 0–100, matching the existing player editor.</p>' +
+        '<p id="tpProfileRatingsError" role="alert" class="tp-profile-rating-error"></p>' +
+        '<div class="tp-profile-rating-actions">' +
+        '<button type="button" ' + ACTION + '="cancel-ratings" class="tp-profile-secondary-action">Cancel</button>' +
+        '<button type="submit" class="tp-profile-primary-action">Save ratings</button>' +
+        '</div></form>';
+    }
+
+    function refreshRatingsSection() {
+      if (!screen || !activeId || activeId === 'YOU') return;
+      var player = playerFor(activeId);
+      if (!player) return;
+      var content = screen.querySelector('#tpProfileRatingsContent');
+      if (content) content.innerHTML = editingRatings ? ratingsEditorFor(player) : ratingsFor(player);
+      var edit = screen.querySelector('#tpProfileEditRatings');
+      if (edit) {
+        edit.hidden = editingRatings;
+        edit.setAttribute('aria-expanded', String(editingRatings));
+      }
+    }
+
+    function parseRatings(form) {
+      var values = {};
+      for (var field of ratingFields({})) {
+        var input = form.elements.namedItem(field.key);
+        var raw = String(input?.value == null ? '' : input.value).trim();
+        var number = raw === '' ? NaN : Number(raw);
+        if (!Number.isFinite(number) || number < 0 || number > 100) {
+          return { valid: false, field: field.key };
+        }
+        values[field.key] = field.key === 'risky' ? number / 10 : number;
+      }
+      return { valid: true, values: values };
+    }
+
+    function reportInvalidRating(form, fieldName) {
+      var input = form.elements.namedItem(fieldName);
+      var error = screen?.querySelector('#tpProfileRatingsError');
+      if (error) error.textContent = 'Enter a number from 0 to 100 for every rating.';
+      input?.focus?.({ preventScroll: true });
+    }
+
+    function applyRatings(player, values) {
+      Object.keys(values).forEach(function(key) { player[key] = values[key]; });
+    }
+
+    function saveRatingsForm(form) {
+      var id = activeId;
+      if (!id || id === 'YOU' || !editingRatings) return false;
+      var target = playerFor(id);
+      if (!target) return false;
+      var parsed = parseRatings(form);
+      if (!parsed.valid) { reportInvalidRating(form, parsed.field); return false; }
+      applyRatings(target, parsed.values);
+      deps.save(deps.getState(), {});
+      deps.renderRoster();
+      editingRatings = false;
+      refreshRatingsSection();
+      return true;
+    }
+
     function render() {
       var player = playerFor(activeId);
       if (!player) { hide(); return false; }
@@ -167,8 +279,10 @@
         '><span data-profile-photo-placeholder ' + (image ? 'hidden' : '') + '>No photo</span></div>';
       var rivalLink = rival ? '<button type="button" ' + ACTION + '="rival" data-rival-id="' +
         att(rival.id) + '" class="tp-profile-rival">Rival: ' + esc(rival.name) + ' ↗</button>' : '';
-      var ratingButton = player.isYou ? '' : '<button type="button" ' + ACTION +
-        '="advanced" class="tp-profile-inline-edit">Edit ratings</button>';
+      var ratingButton = player.isYou ? '' : '<button type="button" id="tpProfileEditRatings" ' + ACTION +
+        '="edit-ratings" aria-controls="tpProfileRatingsContent" aria-expanded="' +
+        String(editingRatings) + '" class="tp-profile-inline-edit" ' +
+        (editingRatings ? 'hidden' : '') + '>Edit ratings</button>';
       var extraFields = player.isYou ? '' :
         '<label>Playing style<input name="style" value="' + att(player.style || '') + '"></label>';
       var activeField = player.isYou ? '' :
@@ -189,7 +303,7 @@
         '<div class="tp-profile-stats">',
         '<div><small>RECORD</small><strong>' + esc(stats.record) + '</strong></div>',
         '<div><small>PPD</small><strong>' + esc(stats.ppd) + '</strong></div>',
-        '<div><small>GAMES</small><strong>' + esc(stats.games) + '</strong></div></div>',
+        '<div><small>MATCHUPS</small><strong>' + esc(stats.games) + '</strong></div></div>',
         rivalLink, '</div></div>',
         '<div class="tp-profile-columns"><section class="tp-profile-panel"><h2>Player details</h2>',
         '<form id="tpPlayerProfileForm" class="tp-profile-form">',
@@ -209,7 +323,9 @@
         '<span id="tpPlayerProfileSaved" role="status" aria-live="polite"></span></div></form></section>',
         '<section class="tp-profile-panel"><div class="tp-profile-section-title"><h2>' +
           (player.isYou ? 'Your performance' : 'Ratings') + '</h2>' + ratingButton + '</div>',
-        ratingsFor(player), '</section></div></div>'
+        '<div id="tpProfileRatingsContent">' +
+          (editingRatings && !player.isYou ? ratingsEditorFor(player) : ratingsFor(player)) +
+          '</div></section></div></div>'
       ].join('');
       node.hidden = false;
       doc.body.classList.add('tp-player-profile-open');
@@ -232,6 +348,19 @@
       if (!name && id !== 'YOU') { form.elements.namedItem('name')?.focus(); return false; }
       var rivalId = value('rivalId');
       if (rivalId && (rivalId === id || !playerFor(rivalId))) return false;
+      // Saving Player details also commits any open ratings edits. Never
+      // silently discard an unsaved ratings form during a profile re-render.
+      var pendingRatings = null;
+      if (id !== 'YOU' && editingRatings) {
+        var ratingsForm = screen?.querySelector('#tpPlayerRatingsForm');
+        if (ratingsForm) {
+          pendingRatings = parseRatings(ratingsForm);
+          if (!pendingRatings.valid) {
+            reportInvalidRating(ratingsForm, pendingRatings.field);
+            return false;
+          }
+        }
+      }
       var st = deps.getState();
       var primary = deps.normalizeColor(value('primaryColor'), '#FFFFFF');
       var secondary = deps.normalizeColor(value('secondaryColor'), '#808080');
@@ -247,6 +376,7 @@
       } else {
         var target = st.players.find(function(row) { return String(row?.id || '') === id; });
         if (!target) return false;
+        if (pendingRatings) applyRatings(target, pendingRatings.values);
         target.name = name;
         target.notes = value('notes');
         target.style = value('style');
@@ -260,6 +390,7 @@
       }
       deps.save(deps.getState(), options);
       deps.renderRoster();
+      editingRatings = false;
       render();
       var status = screen.querySelector('#tpPlayerProfileSaved');
       if (status) status.textContent = 'Saved';
@@ -271,11 +402,13 @@
       screen.innerHTML = '';
       doc.body.classList.remove('tp-player-profile-open');
       activeId = '';
+      editingRatings = false;
     }
     function syncRoute() {
       var id = readRoute();
       if (!id || !playerFor(id)) { hide(); return; }
       var changed = id !== activeId;
+      if (changed) editingRatings = false;
       activeId = id;
       if (render() && changed) screen.scrollTop = 0;
     }
@@ -284,6 +417,7 @@
       if (!playerFor(id)) return false;
       if (!activeId) returnHash = String(win.location.hash || '').indexOf(ROUTE) === 0
         ? '' : (win.location.hash || '');
+      if (id !== activeId) editingRatings = false;
       var hash = ROUTE + encodeURIComponent(id);
       if (win.location.hash !== hash && win.history?.pushState) {
         win.history.pushState({ tpProfileSession: token }, '', hash);
@@ -314,7 +448,16 @@
     return { init: init, open: open, close: close,
       refresh: function() { return activeId ? render() : false; },
       isOpen: function() { return Boolean(activeId); },
-      activeId: function() { return activeId; }, saveForm: saveForm, statsFor: statsFor };
+      activeId: function() { return activeId; }, saveForm: saveForm, statsFor: statsFor,
+      saveRatingsForm: saveRatingsForm, editRatings: function() {
+        if (!activeId || activeId === 'YOU') return false;
+        editingRatings = true;
+        refreshRatingsSection();
+        return true;
+      }, cancelRatings: function() {
+        editingRatings = false;
+        refreshRatingsSection();
+      } };
   }
   global.TaskPointsPlayerProfiles = { create: create, profileThemeForColors: profileThemeForColors };
 })(typeof window !== 'undefined' ? window : globalThis);
