@@ -1244,6 +1244,7 @@ textarea{
   </div>
 
 <script src="scoring_core.js"></script>
+<script src="player_profile.js"></script>
 <script>
 const STORAGE_KEY = "taskpoints_v1";
 const DEFAULT_PRIMARY_COLOR = "#FFFFFF";
@@ -1287,6 +1288,7 @@ function buildBaseState() {
     workHistory: [],
     youImageId: "",
     youName: "",
+    youNotes: "",
     youPrimaryColor: DEFAULT_PRIMARY_COLOR,
     youSecondaryColor: DEFAULT_SECONDARY_COLOR,
     projects: [],
@@ -1419,6 +1421,7 @@ function normalizeState(s) {
     opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
     youImageId:  typeof s.youImageId === "string" ? s.youImageId : "",
     youName: typeof s.youName === "string" ? s.youName : "",
+    youNotes: typeof s.youNotes === "string" ? s.youNotes : "",
     youRivalId: typeof s.youRivalId === "string" ? s.youRivalId : "",
     youPrimaryColor: normalizePlayerColor(s.youPrimaryColor, DEFAULT_PRIMARY_COLOR),
     youSecondaryColor: normalizePlayerColor(s.youSecondaryColor, DEFAULT_SECONDARY_COLOR),
@@ -2974,30 +2977,28 @@ const rankingByPlayerId = new Map(
             }
           </div>
         </div>
-        <p class="mt-1 text-xs sm:text-sm font-medium text-center break-words leading-snug ${!isActive ? "player-inactive-text" : ""}">
+        <button type="button" data-profile-open="${escapeHtmlAttr(p.id)}" class="tp-profile-gallery-name mt-1 text-xs sm:text-sm font-medium text-center break-words leading-snug ${!isActive ? "player-inactive-text" : ""}">
           ${escapeHtml(displayName)}
-        </p>
+        </button>
         <p class="text-[10px] opacity-60 text-center">
           PID ${escapeHtml(p.isYou ? "P000" : (TaskPointsCore?.getPlayerPid?.(state, p.id) || "Unassigned"))}
         </p>
       `;
 
-      // clicking the image in gallery view opens the appropriate editor
+      // Gallery portraits now open the player's dedicated in-app profile.
+      // The existing editor remains accessible via the profile or Card view.
       const imgArea = card.querySelector(".player-img-inner");
       if (imgArea) {
         imgArea.style.cursor = "pointer";
-        imgArea.addEventListener("click", () => {
-          if (p.isYou) {
-            // YOU is a virtual player and does not live in state.players, so the
-            // NPC modal lookup cannot resolve it. Reuse the existing self-profile
-            // editor by switching to card view and entering YOU edit mode.
-            editingPlayerId = "YOU";
-            viewMode = "card";
-            renderPlayers();
-            updateViewToggleUI();
-            return;
+        imgArea.tabIndex = 0;
+        imgArea.setAttribute("role", "button");
+        imgArea.setAttribute("aria-label", "View " + displayName + " profile");
+        imgArea.addEventListener("click", () => playerProfiles?.open(p.id));
+        imgArea.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            playerProfiles?.open(p.id);
           }
-          openPlayerEditor(p.id);
         });
       }
 
@@ -3160,7 +3161,10 @@ card.innerHTML = `
         </div>
       </div>
 
-      <div class="flex w-full md:w-auto justify-end md:justify-start">
+      <div class="flex w-full md:w-auto justify-end md:justify-start flex-wrap gap-2">
+        <button type="button" data-profile-open="YOU" class="rounded-xl border px-3 py-1.5 text-sm">
+          Profile
+        </button>
         <button data-act="edit" data-id="YOU"
           class="rounded-xl border px-3 py-1.5 text-sm">
           Edit
@@ -3271,7 +3275,10 @@ card.innerHTML = `
         </p>
       </div>
 
-      <div class="flex w-full md:w-auto justify-end md:justify-start">
+      <div class="flex w-full md:w-auto justify-end md:justify-start flex-wrap gap-2">
+        <button type="button" data-profile-open="${escapeHtmlAttr(p.id)}" class="rounded-xl border px-3 py-1.5 text-sm">
+          Profile
+        </button>
         <button data-act="edit" data-id="${p.id}"
           class="rounded-xl border px-3 py-1.5 text-sm">
           Edit
@@ -3314,6 +3321,9 @@ card.innerHTML = `
 
   container.querySelectorAll("button[data-act]").forEach(btn => {
     btn.addEventListener("click", handlePlayerAction);
+  });
+  container.querySelectorAll("button[data-profile-open]").forEach(btn => {
+    btn.addEventListener("click", () => playerProfiles?.open(btn.getAttribute("data-profile-open")));
   });
   wirePlayerColorEditors(container);
   syncPlayerEditorModalState();
@@ -4269,6 +4279,38 @@ function setupMobileCollapsibles() {
   window.addEventListener("resize", syncForViewport);
 }
 
+
+// The profile view is a single on-demand screen that reuses existing records,
+// photos and editor actions. Nothing is added to storage until Save is pressed.
+const playerProfiles = window.TaskPointsPlayerProfiles.create({
+  getState: () => state,
+  save: (updated, options) => { state = saveState(updated, options); return state; },
+  renderRoster: () => renderPlayers(),
+  getYouName,
+  getYouColors: () => getYouPlayerColors(),
+  getYouStats: () => calcYouStats(),
+  getRecord: (id) => TaskPointsCore?.computeRecord?.(state, id, { includeToday: false, allowFallback: false }),
+  getPlayerPid: (currentState, id) => TaskPointsCore?.getPlayerPid?.(currentState, id),
+  todayKey: () => getGameDayKey(),
+  cachedImageUrl: getCachedImageUrl,
+  loadImageUrl,
+  buildRivalOptions: buildPlayerRivalOptions,
+  escapeHtml,
+  escapeHtmlAttr,
+  normalizeColor: normalizePlayerColor,
+  onActiveChange: () => refreshScheduleAfterRosterChange(),
+  editNpc: (id) => openPlayerEditor(id),
+  editSelf: () => {
+    editingPlayerId = "YOU";
+    viewMode = "card";
+    updateViewToggleUI();
+    renderPlayers();
+    window.requestAnimationFrame(() => {
+      document.querySelector('[data-player-id="YOU"]')?.scrollIntoView({ block: "start" });
+    });
+  }
+});
+playerProfiles.init();
 
 setupPlayerEditorModal();
 setupCreatePlayerModal();
