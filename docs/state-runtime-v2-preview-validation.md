@@ -622,4 +622,33 @@ physical app termination, filesystem failure, multi-origin storage, all
 V1 writer entry points, and off-device rollback are not validated by it.
 V1 remains the only authority and the protocol cannot promote V2.
 
+### Two-put abort, reload recovery, and contradictory marker evidence (October 28)
+
+The preview-only transactional writer-fence rehearsal now rejects additional
+inconsistent durable evidence before authorizing even a synthetic marker.
+A control record is invalid if a zero writer count claims a last marker, a
+positive count lacks a valid last marker, or a frozen epoch is zero. A
+separate writer marker without a matching control or with zero committed
+writers is an **orphan**, not proof of a completed transaction. Both replay
+and read-only inspection refuse such records; no runtime method erases,
+silently repairs, or substitutes a newly initialized control.
+
+The new Chromium/WebKit regressions exercise two distinct interruption
+outcomes. First, a transaction has **both its marker put and control-count
+put queued**, then an injected abort fires before commit. The independent
+read-only inspector must observe an absent marker and uninitialized control,
+even after the originating tab closes. A clean retry then commits once,
+and subsequent retries remain idempotent. Second, a test fixture directly
+plants an orphan marker and a contradictory control record into the
+**isolated preview test database**. Neither a new writer attempt nor the
+inspector may accept the corruption as a valid commit. The original V1
+snapshot is checked unchanged in both scenarios.
+
+These are browser-observed logical transaction and record-consistency
+checks, not a demonstration of physical process-kill durability or storage
+persistence after OS eviction. Old tabs and synchronous production
+localStorage writers still bypass this preview fence. Actual cutover still
+requires V1 writer coverage, full-collection migration, off-device recovery,
+and physical Safari/PWA tests.
+
 **Cutover remains prohibited.** Before a production lease can replace this prototype: audit and integrate every V1 writer with abort/fencing semantics, preserve urgent writes and crash-recovery behavior, verify an off-device rollback source, migrate all nonpilot collections, and run full physical Safari/PWA lifecycle testing. This test API must never be mistaken for production writer fencing.
