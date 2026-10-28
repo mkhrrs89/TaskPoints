@@ -4170,9 +4170,37 @@
       }
       return true;
     };
+    // One voluntary prewrite check that does not let a test caller silently
+    // skip the source snapshot, either primary journal, or Habit sidecars.
+    // The second snapshot/journal read narrows a compaction race during
+    // sidecar enumeration. This is NOT atomic across tabs or a production
+    // fence: an unfenced tab may still write immediately after this returns.
+    const assertPreviewCompleteWriterSourcesUnchanged = expected => {
+      if (!callbackActive) {
+        const error = new Error('state_runtime_v2_preview_complete_guard_outside_lock');
+        error.code = 'STATE_RUNTIME_V2_PREVIEW_COMPLETE_GUARD_INACTIVE';
+        throw error;
+      }
+      if (!expected || typeof expected !== 'object' || Array.isArray(expected)
+        || expected.schemaVersion !== 1
+        || typeof expected.snapshotRaw !== 'string' || !expected.snapshotRaw.length
+        || !Array.isArray(expected.sidecarEntries)) {
+        const error = new Error('state_runtime_v2_preview_complete_tokens_required');
+        error.code = 'STATE_RUNTIME_V2_PREVIEW_COMPLETE_TOKENS_REQUIRED';
+        throw error;
+      }
+      assertPreviewLegacySnapshotUnchanged(expected.snapshotRaw);
+      assertPreviewPrimaryJournalsUnchanged(expected);
+      assertPreviewHabitSidecarsUnchanged(expected.sidecarEntries);
+      assertPreviewLegacySnapshotUnchanged(expected.snapshotRaw);
+      assertPreviewPrimaryJournalsUnchanged(expected);
+      assertPreviewGenerationCurrent();
+      return true;
+    };
     const previewGuard = Object.freeze({
       assertPreviewGenerationCurrent, assertPreviewLegacySnapshotUnchanged,
-      assertPreviewPrimaryJournalsUnchanged, assertPreviewHabitSidecarsUnchanged
+      assertPreviewPrimaryJournalsUnchanged, assertPreviewHabitSidecarsUnchanged,
+      assertPreviewCompleteWriterSourcesUnchanged
     });
     let result = refuse('exclusive_lock_unavailable');
     try {
@@ -4190,8 +4218,12 @@
           } catch (error) {
             const reason = error?.code === 'STATE_RUNTIME_V2_PREVIEW_GENERATION_CHANGED'
               ? 'serialized_operation_generation_invalidated'
-              : error?.code === 'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_CHANGED'
-                ? 'serialized_operation_snapshot_changed'
+              : error?.code === 'STATE_RUNTIME_V2_PREVIEW_COMPLETE_TOKENS_REQUIRED'
+                ? 'serialized_operation_complete_tokens_required'
+                : error?.code === 'STATE_RUNTIME_V2_PREVIEW_COMPLETE_GUARD_INACTIVE'
+                  ? 'serialized_operation_complete_guard_inactive'
+                  : error?.code === 'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_CHANGED'
+                    ? 'serialized_operation_snapshot_changed'
                 : error?.code === 'STATE_RUNTIME_V2_PREVIEW_SIDECARS_CHANGED'
                   ? 'serialized_operation_habit_sidecars_changed'
                   : error?.code === 'STATE_RUNTIME_V2_PREVIEW_SIDECAR_UNREADABLE'
