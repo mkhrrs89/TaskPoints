@@ -255,7 +255,7 @@ test('durable writer fence remains confined to preview IDB markers, not producti
     'readOnlyMarkerInspection: true',
     'item && (!prior || item.id !== markerId',
     "indexedDB.open(DB, 1)",
-    "action === 'read' ? 'readonly' : 'readwrite'",
+    "(action === 'read' || action === 'inspect_marker') ? 'readonly' : 'readwrite'",
     "store.get('writer_fence')",
     'expectedEpoch !== state.epoch',
     "state.generation !== generation",
