@@ -112,6 +112,38 @@ changing TaskPoints' live save code. Unfenced paused legacy tabs,
 destructive imports, after-compaction stale deletes, physical Safari/PWA
 lifecycle and independent rollback are still blockers.
 
+## V2-branch Task completion tombstone protection (October 28)
+
+An expanded synthetic browser regression exposed a real edge in the V1
+snapshot writer: an **explicit pending Task completion deletion** could leave
+the candidate `completions` array empty, and the protective
+`preserveStickyFieldsBeforeSave()` logic would mistakenly replace it
+with previously stored nonempty completions. A stale full-state save could
+therefore resurrect the journaled deletion.
+
+The V2 branch now passes a narrowly scoped
+`pendingTaskCompletionDeleteIds` option **only when the existing V1 Task
+journal actually holds deletion IDs**. The core's ordinary sticky-array guard
+honors those specific tombstones while merging other, newly persisted
+completion records from another tab. It never sets
+`allowDestructiveOverwrite:true` or blanket
+`replaceCompletions:true` to work around the issue, because either would
+risk deleting unrelated history. Without actual Task tombstones, the normal
+nonempty-completions protection is unchanged.
+
+Browser regressions verify three separate outcomes: a pending delete beats
+an old snapshot even when it is the **last remaining completion**; an
+unrelated newer completion from another tab survives alongside the
+tombstone; and an ordinary full-state save **without** Task tombstones
+cannot wipe a nonempty completion array. The interrupted cleanup tests
+still cover same-ID upserts and idempotent retry.
+
+These are limited **V2-branch safeguards**, not Main changes and not
+proof of complete multi-tab authority fencing. After compaction drains,
+an old tab that never participated can still write a stale completion;
+the cutover diagnostic continues reporting
+`task_journal_compaction_handoff_not_validated`, and V1 remains primary.
+
 ## Writer ordering and race classes to solve
 
 1. **Immediate user action:** Task and Habit taps must remain durable before
