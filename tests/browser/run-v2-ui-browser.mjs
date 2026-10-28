@@ -995,7 +995,16 @@ try{
     await page.waitForFunction(()=>window.TaskPointsCore.readTaskPointsStoredState()
       .tasks.some(t=>String(t.title||'').toLowerCase()==='synthetic interleaved task'),
       null,{timeout:15000});
-    await page.locator('[data-home-tab="scwm"]').click({force:true});
+    // A forced coordinate tap can land on the just-dismissed Add Task
+    // modal's overlay in mobile emulation. Exercise the SCWM tab's real
+    // DOM click handler after the modal is genuinely hidden; then assert
+    // the active panel, not just the existence of its hidden Sleep card.
+    await page.locator('#addTaskModal').waitFor({state:'hidden',timeout:12000});
+    await page.locator('[data-home-tab="scwm"]').evaluate(button=>button.click());
+    await page.waitForFunction(()=>
+      document.querySelector('[data-home-tab="scwm"]')?.getAttribute('aria-selected')==='true'
+        && document.querySelector('[data-home-panel="scwm"]')?.hidden===false,
+      null,{timeout:12000});
     await page.locator('#scoreV2Row .scoreV2-card[data-scorev2="sleep"]')
       .waitFor({state:'visible',timeout:12000});
     await page.locator('#scoreV2Row .scoreV2-card[data-scorev2="sleep"]').click();
