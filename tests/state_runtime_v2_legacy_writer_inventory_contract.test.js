@@ -308,7 +308,7 @@ test('durable writer fence remains confined to preview IDB markers, not producti
     'store.put(next)',
     "store.get(markerId)",
     "'writer_marker:' + options.marker",
-    "store.put({ id: markerId, generation, epoch: state.epoch })",
+    "store.put({ id: markerId, generation, epoch: state.epoch,",
     "result = refuse('preview_writer_replayed'",
     "result = refuse('fence_writer_marker_conflict'",
     "result = refuse('fence_writer_marker_unreadable'",
@@ -330,12 +330,16 @@ test('durable writer fence remains confined to preview IDB markers, not producti
   assert.match(fence, /fence_epoch_stale/);
   assert.match(fence, /fence_frozen/);
   const markerCheck=fence.indexOf("const markerRequest = store.get(markerId)");
-  const markerPut=fence.indexOf("store.put({ id: markerId, generation, epoch: state.epoch })");
+  const markerPut=fence.indexOf("store.put({ id: markerId, generation, epoch: state.epoch,");
   const counterPut=fence.indexOf("store.put(next)",markerPut);
   assert.ok(markerCheck > 0 && markerPut > markerCheck && counterPut > markerPut,
     'Dedup marker and aggregate count must be written in one IDB transaction');
   assert.match(fence, /marker\.generation !== generation/);
   assert.match(fence, /marker\.epoch !== state\.epoch/);
+  assert.match(fence, /payloadFingerprint \}\);/);
+  assert.match(fence, /fence_writer_payload_mismatch/);
+  assert.match(fence, /!validPayloadFingerprint\(marker\.payloadFingerprint\)/);
+  assert.match(fence, /marker\.payloadFingerprint !== payloadFingerprint/);
   const lookupCallback=fence.slice(
     fence.indexOf('markerRequest.onsuccess = () => {'),
     fence.indexOf('const marker = markerRequest.result')
