@@ -58,7 +58,10 @@ jobs:
         run: node --test tests/state_runtime_v2_main_reconciliation_contract.test.js
 
       - name: Audit unfenced legacy writer paths and prohibit premature authority handoff
-        run: node --test tests/state_runtime_v2_legacy_writer_inventory_contract.test.js
+        run: >-
+          node --test
+          tests/state_runtime_v2_legacy_writer_inventory_contract.test.js
+          tests/state_runtime_v2_writer_handoff_matrix_contract.test.js
 
       - name: Run V2 core storage contracts
         run: >-
