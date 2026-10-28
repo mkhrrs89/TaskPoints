@@ -289,7 +289,7 @@
       await runtime.waitForHabitMirrorIdle();
     }
     const alreadyCommitted = typeof runtime.hasCommittedHabitMutation === 'function'
-      ? await runtime.hasCommittedHabitMutation(mutationId, generation)
+      ? await runtime.hasCommittedHabitMutation(mutationId, generation, delta)
       : false;
     const result = alreadyCommitted
       ? { committed: false, duplicate: true, mutationId, durableVerified: true }
