@@ -12,7 +12,7 @@ const mobileRules = css.slice(cssStart);
 
 function rule(selector) {
   const marker = selector + ' {';
-  const start = mobileRules.indexOf(marker);
+  const start = mobileRules.lastIndexOf(marker);
   assert.ok(start >= 0, 'Missing mobile rule for ' + selector);
   return mobileRules.slice(start + marker.length, mobileRules.indexOf('}', start));
 }
