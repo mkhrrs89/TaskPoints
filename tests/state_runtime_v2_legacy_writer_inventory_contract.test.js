@@ -162,6 +162,10 @@ test('exclusive snapshot writer rehearsal stays developer-only and cannot change
     'assertPreviewLegacySnapshotUnchanged',
     'assertPreviewPrimaryJournalsUnchanged',
     'assertPreviewHabitSidecarsUnchanged',
+    'assertPreviewCompleteWriterSourcesUnchanged',
+    'STATE_RUNTIME_V2_PREVIEW_COMPLETE_TOKENS_REQUIRED',
+    'STATE_RUNTIME_V2_PREVIEW_COMPLETE_GUARD_INACTIVE',
+    'serialized_operation_complete_tokens_required',
     'STATE_RUNTIME_V2_PREVIEW_SIDECARS_CHANGED',
     'STATE_RUNTIME_V2_PREVIEW_SIDECAR_UNREADABLE',
     'STATE_RUNTIME_V2_PREVIEW_SIDECAR_TOKEN_INVALID',
@@ -214,6 +218,18 @@ test('exclusive snapshot writer rehearsal stays developer-only and cannot change
   assert.match(section, /storage\.getItem\(key\)/);
   assert.match(section, /storage\.length !== count/);
   assert.match(section, /stableJson\(actualEntries\) !== stableJson\(expectedEntries\)/);
+  const fullGuard = section.slice(
+    section.indexOf('const assertPreviewCompleteWriterSourcesUnchanged'),
+    section.indexOf('const previewGuard = Object.freeze',section.indexOf('const assertPreviewCompleteWriterSourcesUnchanged'))
+  );
+  assert.match(fullGuard, /expected\.schemaVersion !== 1/);
+  assert.equal((fullGuard.match(/assertPreviewLegacySnapshotUnchanged\(expected\.snapshotRaw\)/g)||[]).length,2);
+  assert.equal((fullGuard.match(/assertPreviewPrimaryJournalsUnchanged\(expected\)/g)||[]).length,2);
+  assert.equal((fullGuard.match(/assertPreviewHabitSidecarsUnchanged\(expected\.sidecarEntries\)/g)||[]).length,1);
+  assert.match(fullGuard, /assertPreviewGenerationCurrent\(\)/);
+  assert.ok(fullGuard.indexOf('assertPreviewHabitSidecarsUnchanged') <
+    fullGuard.lastIndexOf('assertPreviewLegacySnapshotUnchanged'));
+
   assert.doesNotMatch(section, /localStorage\.(?:setItem|removeItem|clear)\(/);
   for(const file of [
     'index.html','today.html','settings.html','notes.html',
