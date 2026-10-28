@@ -661,7 +661,17 @@
       const candidate = current.malformed || isEmpty(current.record)
         ? habitSafeState
         : applyRecord(habitSafeState, current.record);
-      const result = originalSaveStateSnapshot(candidate, options);
+      // Keep deletion intent attached to this *specific*, already-read
+      // durable Task journal. The core's ordinary sticky-array rescue must
+      // not reinterpret a valid final empty completions array as accidental
+      // corruption, nor drop unrelated completions from newer tabs.
+      const pendingTaskCompletionDeleteIds = !current.malformed
+        && current.record.completionDeletes.length
+        ? [...current.record.completionDeletes] : null;
+      const protectedSaveOptions = pendingTaskCompletionDeleteIds
+        ? { ...options, pendingTaskCompletionDeleteIds }
+        : options;
+      const result = originalSaveStateSnapshot(candidate, protectedSaveOptions);
       if (!current.malformed && !isEmpty(current.record) && !result?.skipped && !result?.blockedByQuotaCircuit && result?.state) {
         try {
           const saved = persistedState();
