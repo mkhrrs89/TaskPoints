@@ -1192,6 +1192,28 @@ Nothing visible on the page is built here. === -->
     </div>
   </div>
 
+<!-- Live weekly Work SCWM hours. Derived from existing entries; no new saved data. -->
+<section id="homeWorkHoursSection" class="glass home-work-hours-card mb-6" aria-labelledby="homeWorkHoursTitle">
+  <div class="home-work-hours-heading">
+    <h2 id="homeWorkHoursTitle" class="home-work-hours-title">Work Hours</h2>
+    <span id="homeWorkHoursWeek" class="home-work-hours-week">This week · Mon–Sun</span>
+  </div>
+  <div class="home-work-hours-totals">
+    <div class="home-work-hours-total">
+      <span class="home-work-hours-caption">Logged</span>
+      <div><span id="homeWorkHoursLogged" class="home-work-hours-number">0</span><span class="home-work-hours-unit"> hrs</span></div>
+    </div>
+    <div class="home-work-hours-total home-work-hours-remaining">
+      <span class="home-work-hours-caption">Until 40</span>
+      <div><span id="homeWorkHoursRemaining" class="home-work-hours-number">40</span><span class="home-work-hours-unit"> hrs left</span></div>
+    </div>
+  </div>
+  <div id="homeWorkHoursProgressTrack" class="home-work-hours-progress-track" role="progressbar" aria-label="Work hours toward 40 this week" aria-valuemin="0" aria-valuemax="40" aria-valuenow="0">
+    <div id="homeWorkHoursProgress" class="home-work-hours-progress-fill" style="width:0%"></div>
+  </div>
+  <div id="homeWorkHoursStatus" class="home-work-hours-status" aria-live="polite">0 of 40 hours this week</div>
+</section>
+
 <div class="home-reminders-row mb-6">
   <div id="remindersSection" class="glass reminders-card sectionCard sectionCard--teal">
     <div class="sectionHeader sectionHeader--teal">
@@ -10903,6 +10925,103 @@ function computeTodayStreakMultiplierBonusTotal() {
   return Math.round((total + Number.EPSILON) * 100) / 100;
 }
 
+const HOME_WORK_HOURS_GOAL = 40;
+
+// Calculate from the Work SCWM "Hours" value, not points/Work Score.
+// The input is getDerived().workEntries, sorted newest-first by completedAtISO.
+function calculateHomeWeeklyWorkHours(workEntries, now = new Date()) {
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  const startKey = dateKey(start);
+  const endKey = dateKey(end);
+  const seenDays = new Set();
+  let total = 0;
+
+  (Array.isArray(workEntries) ? workEntries : []).forEach(entry => {
+    if (!entry || (entry.source !== 'work' && !String(entry.title || '').startsWith('Work Score'))) return;
+    // Work SCWM edits use completedAtISO as their canonical selected day.
+    const when = entry.completedAtISO ? new Date(entry.completedAtISO) : null;
+    const dayKey = when && Number.isFinite(when.getTime())
+      ? dateKey(when)
+      : (typeof entry.dateKey === 'string' ? entry.dateKey : '');
+    if (dayKey < startKey || dayKey > endKey || seenDays.has(dayKey)) return;
+
+    const storedHours = Object.prototype.hasOwnProperty.call(entry, 'workHours')
+      ? entry.workHours
+      : (() => {
+          // Old imports may have only "Hours 8" in their Work title.
+          const match = String(entry.title || '').match(/\bHours?\s*[:=]?\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))/i);
+          return match ? match[1] : null;
+        })();
+    if (storedHours == null || String(storedHours).trim() === '') return;
+    const hours = Number(storedHours);
+    if (!Number.isFinite(hours) || hours < 0) return;
+
+    // One Work SCWM entry per calendar day; duplicates must not add extra hours.
+    seenDays.add(dayKey);
+    total += hours;
+  });
+
+  const logged = Math.round((total + Number.EPSILON) * 100) / 100;
+  return {
+    weekStart: start,
+    weekEnd: end,
+    logged,
+    remaining: Math.max(0, Math.round((HOME_WORK_HOURS_GOAL - logged + Number.EPSILON) * 100) / 100),
+    over: Math.max(0, Math.round((logged - HOME_WORK_HOURS_GOAL + Number.EPSILON) * 100) / 100),
+    progress: Math.min(100, Math.max(0, logged / HOME_WORK_HOURS_GOAL * 100))
+  };
+}
+
+function formatHomeWorkHours(value) {
+  return Number(value.toFixed(2)).toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function renderHomeWorkHours() {
+  const loggedEl = $('homeWorkHoursLogged');
+  if (!loggedEl) return;
+  const remainingEl = $('homeWorkHoursRemaining');
+  const weekEl = $('homeWorkHoursWeek');
+  const progressEl = $('homeWorkHoursProgress');
+  const trackEl = $('homeWorkHoursProgressTrack');
+  const statusEl = $('homeWorkHoursStatus');
+  const summary = calculateHomeWeeklyWorkHours(getDerived().workEntries, new Date());
+  const dateOptions = { month: 'short', day: 'numeric' };
+  const startText = summary.weekStart.toLocaleDateString(undefined, dateOptions);
+  const endText = summary.weekEnd.toLocaleDateString(undefined, dateOptions);
+  if (weekEl) weekEl.textContent = 'This week · ' + startText + ' – ' + endText;
+  loggedEl.textContent = formatHomeWorkHours(summary.logged);
+  if (remainingEl) remainingEl.textContent = formatHomeWorkHours(summary.remaining);
+  if (progressEl) progressEl.style.width = String(summary.progress) + '%';
+  if (trackEl) trackEl.setAttribute('aria-valuenow', String(Math.min(40, summary.logged)));
+  if (statusEl) {
+    statusEl.textContent = summary.over > 0
+      ? formatHomeWorkHours(summary.over) + ' hours over your 40-hour goal'
+      : summary.remaining === 0
+        ? '40-hour goal reached!'
+        : formatHomeWorkHours(summary.logged) + ' of 40 hours this week';
+  }
+}
+
+// A read-only timer refreshes the card if TaskPoints stays open across Sunday
+// night. On suspended iPhones, pageshow/visibilitychange refresh it instead.
+function startHomeWorkHoursWeekRollover() {
+  const scheduleNext = () => {
+    const now = new Date();
+    const nextMonday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    nextMonday.setDate(nextMonday.getDate() + (((8 - nextMonday.getDay()) % 7) || 7));
+    nextMonday.setHours(0, 0, 1, 0);
+    const delay = Math.max(1000, nextMonday.getTime() - now.getTime());
+    setTimeout(() => {
+      renderHomeWorkHours();
+      scheduleNext();
+    }, delay);
+  };
+  scheduleNext();
+}
+
 function renderHomeStreakBonusSidecar() {
   const valueEl = $('homeStreakBonusValue');
   if (!valueEl) return;
@@ -14080,6 +14199,7 @@ function renderAll() {
     try {
 try { tpPerfTime('renderStats (call)', () => renderStats()); } catch (e) { console.error('renderStats error:', e); }
 try { tpPerfTime('renderTasks', () => renderTasks()); } catch (e) { console.error('renderTasks error:', e); }
+try { tpPerfTime('renderHomeWorkHours', () => renderHomeWorkHours()); } catch (e) { console.error('renderHomeWorkHours error:', e); }
 try { tpPerfTime('renderReminders', () => renderReminders()); } catch (e) { console.error('renderReminders error:', e); }
 try { tpPerfTime('renderHomeStreakBonusSidecar', () => renderHomeStreakBonusSidecar()); } catch (e) { console.error('renderHomeStreakBonusSidecar error:', e); }
 try { tpPerfTime('renderScoreDashboardV2_Skeleton', () => renderScoreDashboardV2_Skeleton()); } catch (e) { console.error('renderScoreDashboardV2_Skeleton error:', e); }
@@ -14269,6 +14389,7 @@ renderFlexActions();
 
 // paint ASAP
 scheduleRender(renderAll);
+startHomeWorkHoursWeekRollover();
 scheduleHomeSeasonMaterializationAfterFirstPaint();
 scheduleInitialHomeLiveDiffCapture();
 
@@ -14346,10 +14467,14 @@ window.addEventListener('pageshow', (event) => {
   }
 
   refreshMainPageIfChanged('pageshow');
+  renderHomeWorkHours();
 });
 
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) refreshMainPageIfChanged('visibilitychange');
+  if (!document.hidden) {
+    refreshMainPageIfChanged('visibilitychange');
+    renderHomeWorkHours();
+  }
 });
   
   startOpponentDripTicker();
