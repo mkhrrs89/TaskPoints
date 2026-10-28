@@ -208,7 +208,7 @@ test('two independent browser contexts preserve WAL events when a stale shared a
   assert.equal(tabA.getPendingRows().rows.length, 0);
 });
 
-test('quota-denied independent WAL append does not create a shared-only mutation', () => {
+test('quota-denied legacy WAL sidecar leaves a unique admission claim without changing shared WAL', () => {
   const { api, localStorage } = install({ [DARK]: '1' });
   const before = localStorage.getItem(KEY);
   const original = localStorage.setItem.bind(localStorage);
@@ -222,8 +222,15 @@ test('quota-denied independent WAL append does not create a shared-only mutation
   localStorage.setItem = original;
   assert.equal(localStorage.getItem(KEY), before,
     'shared WAL must never claim durability when the independent record failed');
-  assert.equal(api.getPendingRows().rows.length, 0);
+  assert.equal(api.getPendingRows().rows.length, 1,
+    'the unique claim independently preserves the rejected sidecar event');
+  assert.equal(api.getStatus().admissionClaimCount, 1);
   assert.equal(api.getStatus().independentEventCount, 0);
+  assert.equal(api.appendHabitDelta(deltaA).duplicate, true);
+  assert.equal(api.getStatus().independentEventCount, 1,
+    'a retry may repair the missing legacy per-ID sidecar');
+  assert.equal(api.removeMutation(api.getPendingRows().rows[0].id).removed, true);
+  assert.equal(api.getStatus().admissionClaimCount, 0);
 });
 
 test('interrupted shared WAL cleanup retains independent evidence and can retry', () => {
@@ -484,7 +491,7 @@ test('WAL never bypasses an installed generation authority that declines to prov
   assert.equal(api.appendHabitDelta(deltaA).written, true);
 });
 
-test('silent sidecar write refusal never claims a durable WAL mutation', () => {
+test('silent legacy sidecar refusal preserves a verified unique claim for safe retry', () => {
   const { api, localStorage } = install({ [DARK]: '1' });
   const before = localStorage.getItem(KEY);
   const original = localStorage.setItem.bind(localStorage);
@@ -495,10 +502,15 @@ test('silent sidecar write refusal never claims a durable WAL mutation', () => {
   try {
     assert.throws(() => api.appendHabitDelta(deltaA), /wal_independent_write_failed:unverified_write/);
     assert.equal(localStorage.getItem(KEY), before);
-    assert.equal(api.getPendingRows().rows.length, 0);
+    assert.equal(api.getPendingRows().rows.length, 1);
+    assert.equal(api.getStatus().admissionClaimCount, 1);
+    assert.equal(api.getStatus().independentEventCount, 0);
   } finally { localStorage.setItem = original; }
-  assert.equal(api.appendHabitDelta(deltaA).written, true);
+  assert.equal(api.appendHabitDelta(deltaA).duplicate, true);
   assert.equal(api.getPendingRows().rows.length, 1);
+  assert.equal(api.getStatus().independentEventCount, 1);
+  assert.equal(api.removeMutation(api.getPendingRows().rows[0].id).removed, true);
+  assert.equal(api.getStatus().admissionClaimCount, 0);
 });
 
 test('silent shared WAL write retains the verified sidecar for later recovery', () => {
