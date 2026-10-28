@@ -597,4 +597,29 @@ This closes a test-protocol observation gap but is **not a production
 writer fence**: browser-local storage visibility is not transactional with
 IndexedDB, and an old V1 tab can still mutate localStorage independently.
 
+### Read-only recovery of ambiguous preview writer outcomes (October 28)
+
+The isolated IndexedDB fence now supports
+`rehearsePreviewDurableWriterFence('inspect_marker', {marker})`. This is a
+strict **read-only** IndexedDB transaction that checks whether a synthetic
+writer marker survived a lost callback response. It reports
+`preview_writer_marker_present` or `preview_writer_marker_absent`, the
+recorded marker epoch, and the current frozen/writer-count control state.
+It refuses inconsistent or orphan marker records, different generations,
+and unreadable transactions rather than inventing a successful commit.
+It does not retry, restore, unfreeze, delete, or write any data.
+
+A browser test intentionally starts a synthetic writer without awaiting its
+result, verifies the commit from a second tab, closes the originating tab,
+and then inspects and retries the marker after reopening another tab. The
+marker remains present after an epoch freeze, and the retry cannot increase
+the writer count. The existing injected-transaction-abort test additionally
+checks that a failed marker reports **absent** through this read-only API.
+
+This addresses **ambiguous synthetic acknowledgement**, not durable
+TaskPoints writes. The control store is an isolated preview database;
+physical app termination, filesystem failure, multi-origin storage, all
+V1 writer entry points, and off-device rollback are not validated by it.
+V1 remains the only authority and the protocol cannot promote V2.
+
 **Cutover remains prohibited.** Before a production lease can replace this prototype: audit and integrate every V1 writer with abort/fencing semantics, preserve urgent writes and crash-recovery behavior, verify an off-device rollback source, migrate all nonpilot collections, and run full physical Safari/PWA lifecycle testing. This test API must never be mistaken for production writer fencing.
