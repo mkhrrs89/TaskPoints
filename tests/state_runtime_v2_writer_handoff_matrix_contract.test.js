@@ -469,6 +469,33 @@ test('WAL append and shared inventory refuse conflicting short mutation ID paylo
   assert.ok(bridge.includes('hasCommittedHabitMutation(mutationId, generation, delta)'));
 });
 
+test('verified V2 Habit WAL cleanup must recheck exact payload and both localStorage copies',()=>{
+  const wal=read('state_runtime_v2_wal.js');
+  const begin=wal.indexOf('function removeMutation(mutationId, expected = null)');
+  const end=wal.indexOf('function getPendingRows()',begin);
+  assert.ok(begin>0&&end>begin);
+  const cleanup=wal.slice(begin,end);
+  for(const evidence of [
+    'state_runtime_v2_wal_cleanup_identity_required',
+    'state_runtime_v2_wal_cleanup_identity_mismatch',
+    'state_runtime_v2_wal_cleanup_payload_changed',
+    'state_runtime_v2_wal_cleanup_shared_changed',
+    'state_runtime_v2_wal_cleanup_sidecar_changed',
+    'stableJson(target.delta) !== stableJson(verifiedIdentity.delta)',
+    'readWalStorage(KEY) !== current.raw',
+    'readWalStorage(sidecarKey) !== originalSidecar'
+  ])assert.ok(cleanup.includes(evidence),'WAL cleanup guard missing: '+evidence);
+  const sharedWrite=cleanup.indexOf("if (next.length) writeRows(next)");
+  const sidecarDelete=cleanup.indexOf("removeWalStorageVerified(sidecarKey,");
+  const sidecarRecheck=cleanup.lastIndexOf("readWalStorage(sidecarKey) !== originalSidecar");
+  assert.ok(sharedWrite>0&&sidecarDelete>sharedWrite&&sidecarRecheck>sharedWrite
+    &&sidecarRecheck<sidecarDelete,'Independent WAL must be checked again after shared cleanup');
+  const bridge=read('state_runtime_v2_wal_bridge.js');
+  const verified=bridge.indexOf('await runtime.hasCommittedHabitMutation(mutationId, generation, delta)');
+  const removed=bridge.indexOf('wal.removeMutation(mutationId, { generation, delta })');
+  assert.ok(verified>0&&removed>verified,'WAL cannot clear without matching V2 ledger verification');
+});
+
 test('Task completion cleanup protects changed same-ID patches and preserves failed compaction',()=>{
   const journal=read('task_mutation_journal.js');
   const begin=journal.indexOf('function clearVerifiedSnapshot(snapshot)');

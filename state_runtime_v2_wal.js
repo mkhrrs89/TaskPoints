@@ -306,23 +306,72 @@
     return { written: true, duplicate: false, mutationId, generation, row: clone(row) };
   }
 
-  function removeMutation(mutationId) {
+  function removeMutation(mutationId, expected = null) {
     if (!mutationId) return { removed: false, reason: 'missing_mutation_id' };
+    const id = String(mutationId);
+    // The WAL recovery bridge always supplies the exact payload it verified
+    // in the actual V2 ledger. Keep the older one-argument helper available
+    // for existing diagnostic and manual recovery callers.
+    let verifiedIdentity = null;
+    if (expected !== null) {
+      if (!expected || !expected.delta || !expected.generation)
+        throw new Error('state_runtime_v2_wal_cleanup_identity_required');
+      verifiedIdentity = {
+        generation: String(expected.generation),
+        delta: normalizeDelta(expected.delta)
+      };
+      if (mutationIdForDelta(verifiedIdentity.delta, verifiedIdentity.generation) !== id)
+        throw new Error('state_runtime_v2_wal_cleanup_identity_mismatch');
+    }
     const current = read();
     if (!current.ok) throw new Error(current.error || 'state_runtime_v2_wal_unreadable');
-    const next = current.rows.filter((row) => row.id !== String(mutationId));
-    if (next.length === current.rows.length) return { removed: false, reason: 'not_found', mutationId: String(mutationId) };
+    const target = current.rows.find(row => row.id === id);
+    if (target && verifiedIdentity
+      && (target.generation !== verifiedIdentity.generation
+        || target.type !== 'habit-completion-set'
+        || stableJson(target.delta) !== stableJson(verifiedIdentity.delta))) {
+      throw new Error('state_runtime_v2_wal_cleanup_payload_changed');
+    }
+
+    // A second read detects another tab changing the shared array after the
+    // inventory snapshot. Never rewrite that newer array from a stale copy.
+    if (readWalStorage(KEY) !== current.raw)
+      throw new Error('state_runtime_v2_wal_cleanup_shared_changed');
+    const sidecarKey = independentKey(id);
+    const hasSidecars = supportsIndependentRows();
+    const originalSidecar = hasSidecars ? readWalStorage(sidecarKey) : null;
+    if (originalSidecar !== null) {
+      let sidecar;
+      try { sidecar = JSON.parse(originalSidecar); }
+      catch (_) { throw new Error('state_runtime_v2_wal_cleanup_sidecar_changed'); }
+      if (!target || !validateRow(sidecar) || sidecar.id !== id
+        || sidecar.generation !== target.generation
+        || sidecar.type !== target.type
+        || stableJson(sidecar.delta) !== stableJson(target.delta)) {
+        throw new Error('state_runtime_v2_wal_cleanup_sidecar_changed');
+      }
+    }
+    if (!target) return { removed: false, reason: 'not_found', mutationId: id };
+
+    const next = current.rows.filter(row => row.id !== id);
+    // Another tab could update the shared key while the sidecar was being
+    // inspected. Recheck it immediately before the destructive shared write.
+    if (readWalStorage(KEY) !== current.raw)
+      throw new Error('state_runtime_v2_wal_cleanup_shared_changed');
     if (next.length) writeRows(next);
     else removeWalStorageVerified(KEY, 'state_runtime_v2_wal_remove_failed');
-    // A confirmed mutation may be removed only after the shared WAL update;
-    // a failed sidecar deletion keeps recoverable evidence for safe replay.
-    if (supportsIndependentRows()) {
-      removeWalStorageVerified(independentKey(mutationId),
+    // The shared cleanup may run concurrently with an independent append.
+    // Refuse to delete a replaced sidecar; it remains independently durable
+    // even if the old shared entry was already removed.
+    if (hasSidecars) {
+      if (readWalStorage(sidecarKey) !== originalSidecar)
+        throw new Error('state_runtime_v2_wal_cleanup_sidecar_changed');
+      removeWalStorageVerified(sidecarKey,
         'state_runtime_v2_wal_independent_remove_failed');
     }
     removeCount += 1;
-    try { global.TaskPointsPerf?.mark?.('stateV2.walCleared', { mutationId: String(mutationId) }); } catch (_) {}
-    return { removed: true, mutationId: String(mutationId), remaining: next.length };
+    try { global.TaskPointsPerf?.mark?.('stateV2.walCleared', { mutationId: id }); } catch (_) {}
+    return { removed: true, mutationId: id, remaining: next.length };
   }
 
   function getPendingRows() {

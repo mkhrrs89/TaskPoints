@@ -725,3 +725,23 @@ after removing only test-injected corruption.
 This protects V2's WAL append boundary but is **not** atomic cross-tab writer
 admission. Two non-cooperating tabs can still race on localStorage, and no
 V1 production save behavior or V2 cutover gate has changed.
+
+### Payload-bound WAL cleanup with second-read race guards (October 28)
+
+The V2-only Habit WAL cleanup API now accepts the expected generation and
+full delta verified in the committed V2 ledger. The WAL bridge passes these
+values to removal, which refuses a different pending payload or a mismatched
+mutation ID before touching either localStorage copy.
+
+Cleanup also rechecks the original shared WAL array just before rewriting it
+and verifies that the independent same-ID event has not been replaced after
+the shared update, before deleting that event. A changed sidecar remains
+durable even if the older shared entry has been cleared. Existing one-argument
+diagnostic/legacy removal calls remain supported; no V1 hot-path behavior
+changes. Recovery still retains the original rows on failed verification.
+
+These checks are **best-effort localStorage race detection, not atomic
+cross-tab compare-and-swap**. A noncooperating tab can still modify keys
+between the last read and write, so this does not establish production
+writer fencing or authorize a V2 cutover. Only V2-scoped browser and
+source-contract coverage has been changed.

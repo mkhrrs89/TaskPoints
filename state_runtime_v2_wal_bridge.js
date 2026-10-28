@@ -302,7 +302,7 @@
       return { cleared: false, stale: true, reason: 'generation_changed_after_commit', result };
     }
 
-    const removal = wal.removeMutation(mutationId);
+    const removal = wal.removeMutation(mutationId, { generation, delta });
     if (removal?.removed === true || removal?.reason === 'not_found') {
       lastMutationId = mutationId;
       if (phase === 'replay') replayCleared += 1;

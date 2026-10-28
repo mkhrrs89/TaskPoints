@@ -5015,6 +5015,213 @@ try {
       eventRecoveredAfterRestart:true,parity:p.match};
   });
 
+  await run('verified WAL removal rejects a changed same-ID payload before deleting recovery records',async context=>{
+    const page=await open(context);
+    const outcome=await page.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const original=wal.getPendingRows().rows[0];
+      if(!original) throw Error('Expected one held WAL event');
+      const sharedKey='taskpoints_v2_pending_mutations_v1';
+      const sidecarKey='taskpoints_v2_pending_mutation_event_v1:'+original.id;
+      const before={shared:localStorage.getItem(sharedKey),
+        sidecar:localStorage.getItem(sidecarKey),v1:localStorage.getItem('taskpoints_v1')};
+      const changed={...original.delta,clientMemo:'different-payload'};
+      let changedError=null,changedIdentityError=null;
+      try{wal.removeMutation(original.id,{generation:original.generation,delta:changed});}
+      catch(e){changedError=String(e.message||e);}
+      try{wal.removeMutation(original.id,{
+        generation:original.generation,delta:{...original.delta,status:'off'}
+      });}catch(e){changedIdentityError=String(e.message||e);}
+      return {changedError,changedIdentityError,
+        sharedSame:before.shared===localStorage.getItem(sharedKey),
+        sidecarSame:before.sidecar===localStorage.getItem(sidecarKey),
+        v1Same:before.v1===localStorage.getItem('taskpoints_v1'),
+        pending:wal.getPendingRows().rows.length,
+        journal:window.TaskPointsCore.readPendingHabitDeltas().length,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.match(outcome.changedError,/state_runtime_v2_wal_cleanup_payload_changed/);
+    assert.match(outcome.changedIdentityError,/state_runtime_v2_wal_cleanup_identity_mismatch/);
+    assert.equal(outcome.sharedSame,true);
+    assert.equal(outcome.sidecarSame,true);
+    assert.equal(outcome.v1Same,true);
+    assert.equal(outcome.pending,1);
+    assert.equal(outcome.journal,1);
+    assert.equal(outcome.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.wal.pendingCount===0 && s.bridge.replayCleared>=1;
+    },null,{timeout:25000});
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,1);
+    return {sameIdChangedPayloadBlocked:true,forgedIdentityBlocked:true,
+      bothWalCopiesUntouched:true,replayedAfterRestart:true,parity:p.match};
+  });
+
+  await run('WAL cleanup refuses changed shared array observed after initial inventory',async context=>{
+    const page=await open(context);
+    const outcome=await page.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const original=wal.getPendingRows().rows[0];
+      if(!original) throw Error('Expected held WAL event');
+      const sharedKey='taskpoints_v2_pending_mutations_v1';
+      const independentKey='taskpoints_v2_pending_mutation_event_v1:'+original.id;
+      const oldShared=localStorage.getItem(sharedKey);
+      const oldSidecar=localStorage.getItem(independentKey);
+      const oldV1=localStorage.getItem('taskpoints_v1');
+      const competingDelta={...original.delta,id:'habit:h2:2026-10-21',
+        habitId:'h2',dayKey:'2026-10-21',
+        updatedAtISO:'2026-10-21T12:00:00.000Z'};
+      const competing={...original,id:wal.mutationIdForDelta(
+        competingDelta,original.generation),delta:competingDelta};
+      const originalGet=Storage.prototype.getItem;
+      const originalSet=Storage.prototype.setItem;
+      let sharedReads=0,injected=false,error=null;
+      Storage.prototype.getItem=function(key){
+        if(this===localStorage && String(key)===sharedKey){
+          sharedReads++;
+          if(sharedReads===2){
+            originalSet.call(localStorage,sharedKey,JSON.stringify([original,competing]));
+            injected=true;
+          }
+        }
+        return originalGet.call(this,key);
+      };
+      try{wal.removeMutation(original.id,{
+        generation:original.generation,delta:original.delta
+      });}catch(e){error=String(e.message||e);}
+      finally{Storage.prototype.getItem=originalGet;}
+      const changedShared=localStorage.getItem(sharedKey);
+      const retainedSidecar=localStorage.getItem(independentKey);
+      const inventory=wal.getPendingRows();
+      const out={injected,sharedReads,error,
+        sharedRows:JSON.parse(changedShared).length,
+        inventory:inventory.rows.length,
+        sidecarUnchanged:retainedSidecar===oldSidecar,
+        v1Unchanged:oldV1===localStorage.getItem('taskpoints_v1'),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+      // Remove only the synthetic competing mutation used to model a tab
+      // race; leave the durable original row for restart replay.
+      localStorage.setItem(sharedKey,oldShared);
+      return out;
+    });
+    assert.equal(outcome.injected,true);
+    assert.match(outcome.error,/state_runtime_v2_wal_cleanup_shared_changed/);
+    assert.equal(outcome.sharedRows,2);
+    assert.equal(outcome.inventory,2);
+    assert.equal(outcome.sidecarUnchanged,true);
+    assert.equal(outcome.v1Unchanged,true);
+    assert.equal(outcome.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.wal.pendingCount===0&&s.bridge.replayCleared>=1;
+    },null,{timeout:25000});
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,1);
+    return {sharedArrayRecheckTriggered:true,competingMutationNotErased:true,
+      sidecarPreserved:true,recoveredOnRestart:true,parity:p.match};
+  });
+
+  await run('WAL cleanup preserves replaced sidecar after shared copy is removed',async context=>{
+    const page=await open(context);
+    const outcome=await page.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const original=wal.getPendingRows().rows[0];
+      if(!original) throw Error('Expected held WAL event');
+      const sharedKey='taskpoints_v2_pending_mutations_v1';
+      const sidecarKey='taskpoints_v2_pending_mutation_event_v1:'+original.id;
+      const initialSidecar=localStorage.getItem(sidecarKey);
+      const originalV1=localStorage.getItem('taskpoints_v1');
+      const replacement={...original,delta:{...original.delta,
+        clientMemo:'concurrent-uncleared-sidecar'}};
+      const newSidecar=JSON.stringify(replacement);
+      const originalRemove=Storage.prototype.removeItem;
+      const originalSet=Storage.prototype.setItem;
+      let injected=false,error=null;
+      Storage.prototype.removeItem=function(key){
+        const result=originalRemove.call(this,key);
+        if(this===localStorage&&String(key)===sharedKey&&!injected){
+          originalSet.call(localStorage,sidecarKey,newSidecar);
+          injected=true;
+        }
+        return result;
+      };
+      try{wal.removeMutation(original.id,{
+        generation:original.generation,delta:original.delta
+      });}catch(e){error=String(e.message||e);}
+      finally{Storage.prototype.removeItem=originalRemove;}
+      const sharedCleared=localStorage.getItem(sharedKey)===null;
+      const replacedSidecarRetained=localStorage.getItem(sidecarKey)===newSidecar;
+      const inventory=wal.getPendingRows();
+      const answer={injected,error,sharedCleared,replacedSidecarRetained,
+        pending:inventory.rows.length,changedMemo:inventory.rows[0]?.delta?.clientMemo,
+        v1Unchanged:localStorage.getItem('taskpoints_v1')===originalV1,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+      // A real changed sidecar must remain until reconciled. For this
+      // synthetic test, restore only the test-injected data before reload.
+      originalSet.call(localStorage,sidecarKey,initialSidecar);
+      return answer;
+    });
+    assert.equal(outcome.injected,true);
+    assert.match(outcome.error,/state_runtime_v2_wal_cleanup_sidecar_changed/);
+    assert.equal(outcome.sharedCleared,true);
+    assert.equal(outcome.replacedSidecarRetained,true);
+    assert.equal(outcome.pending,1);
+    assert.equal(outcome.changedMemo,'concurrent-uncleared-sidecar');
+    assert.equal(outcome.v1Unchanged,true);
+    assert.equal(outcome.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.wal.pendingCount===0&&s.bridge.replayCleared>=1;
+    },null,{timeout:25000});
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,1);
+    return {postSharedUpdateDetected:true,replacementSidecarPreserved:true,
+      originalRecoveredFromSidecar:true,parity:p.match};
+  });
+
+  await run('bridge passes verified Habit payload when removing a WAL record',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const bridge=window.TaskPointsStateRuntimeV2WalBridge;
+      const row=wal.getPendingRows().rows[0];
+      const originalRemove=wal.removeMutation;
+      let captured=null;
+      wal.removeMutation=function(id,expected){
+        captured={id,generation:expected?.generation,delta:expected?.delta};
+        return originalRemove.apply(this,arguments);
+      };
+      let replay;
+      try{replay=await bridge.replayPending();}
+      finally{wal.removeMutation=originalRemove;}
+      return {replay,captured,original:row,
+        remaining:wal.getPendingRows().rows.length,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(result.replay.cleared,1,JSON.stringify(result.replay));
+    assert.equal(result.captured.id,result.original.id);
+    assert.equal(result.captured.generation,result.original.generation);
+    assert.deepEqual(result.captured.delta,result.original.delta);
+    assert.equal(result.remaining,0);
+    assert.equal(result.authority,'legacy_only');
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,1);
+    return {bridgeSubmittedExactPayload:true,recoveryCleared:true,
+      v1StillPrimary:true,parity:p.match};
+  });
+
   await run('pending V2 WAL rejects changed payload under identical mutation ID and retains replay evidence',async context=>{
     const page=await open(context);
     const proof=await page.evaluate(()=>{
