@@ -73,6 +73,8 @@ test('work week starts Monday, ends Sunday, and counts current week hours only',
   assert.equal(summary.logged, 24);
   assert.equal(summary.remaining, 16);
   assert.equal(summary.progress, 60);
+  assert.equal(summary.loggedDays, 3);
+  assert.equal(summary.averagePerLoggedDay, 8);
 });
 
 test('Monday automatically starts a fresh week even with last Sunday hours present', () => {
@@ -82,6 +84,8 @@ test('Monday automatically starts a fresh week even with last Sunday hours prese
   assert.equal(before.logged, 21);
   assert.equal(after.logged, 0);
   assert.equal(after.remaining, 40);
+  assert.equal(after.loggedDays, 0);
+  assert.equal(after.averagePerLoggedDay, null);
   assert.equal(dateKey(after.weekStart), '2026-11-02');
 });
 
@@ -89,12 +93,15 @@ test('PTO with primary score zero still adds eight logged hours', () => {
   const summary = calculate([entry('2026-10-27', 8, 0)]);
   assert.equal(summary.logged, 8);
   assert.equal(summary.remaining, 32);
+  assert.equal(summary.loggedDays, 1);
+  assert.equal(summary.averagePerLoggedDay, 8);
 });
 
 test('decimal hours are summed, formatted, and never rounded to whole hours', () => {
   const summary = calculate([entry('2026-10-26', 7.75), entry('2026-10-27', 8.5)]);
   assert.equal(summary.logged, 16.25);
   assert.equal(summary.remaining, 23.75);
+  assert.equal(summary.averagePerLoggedDay, 8.13);
   assert.equal(context.format(summary.logged), '16.25');
 });
 
@@ -117,6 +124,8 @@ test('duplicate SCWM Work records on the same date do not double-count', () => {
     entry('2026-10-26', 6)
   ]);
   assert.equal(summary.logged, 14.25);
+  assert.equal(summary.loggedDays, 2);
+  assert.equal(summary.averagePerLoggedDay, 7.13);
 });
 
 test('invalid or missing hours and non-Work completions do not inflate totals', () => {
@@ -129,6 +138,8 @@ test('invalid or missing hours and non-Work completions do not inflate totals', 
   const summary = calculate(bad);
   assert.equal(summary.logged, 0);
   assert.equal(summary.remaining, 40);
+  assert.equal(summary.loggedDays, 0);
+  assert.equal(summary.averagePerLoggedDay, null);
 });
 
 test('legacy Work title Hours can be used when field is absent', () => {
@@ -136,6 +147,7 @@ test('legacy Work title Hours can be used when field is absent', () => {
   delete row.workHours;
   const summary = calculate([row]);
   assert.equal(summary.logged, 8.25);
+  assert.equal(summary.averagePerLoggedDay, 8.25);
 });
 
 test('original Work SCWM editing and saving paths remain intact', () => {
@@ -155,7 +167,7 @@ test('rendered card responds immediately to SCWM Hours edits and changes the pro
   const entries = [row];
 
   const ids = ['homeWorkHoursLogged', 'homeWorkHoursRemaining', 'homeWorkHoursWeek',
-    'homeWorkHoursProgress', 'homeWorkHoursProgressTrack', 'homeWorkHoursStatus'];
+    'homeWorkHoursProgress', 'homeWorkHoursProgressTrack', 'homeWorkHoursStatus', 'homeWorkHoursAverage'];
   const nodes = new Map(ids.map(id => [id, {
     textContent: '', style: {}, attributes: {},
     setAttribute(name, value) { this.attributes[name] = value; }
@@ -170,6 +182,7 @@ test('rendered card responds immediately to SCWM Hours edits and changes the pro
 
   render();
   assert.equal(nodes.get('homeWorkHoursLogged').textContent, '8');
+  assert.equal(nodes.get('homeWorkHoursAverage').textContent, 'Avg 8 hrs/day · 1 day');
   assert.equal(nodes.get('homeWorkHoursRemaining').textContent, '32');
   assert.equal(nodes.get('homeWorkHoursProgress').style.width, '20%');
   assert.equal(nodes.get('homeWorkHoursProgressTrack').attributes['aria-valuenow'], '8');
@@ -184,6 +197,7 @@ test('rendered card responds immediately to SCWM Hours edits and changes the pro
   assert.equal(nodes.get('homeWorkHoursLogged').textContent, '42.5');
   assert.equal(nodes.get('homeWorkHoursProgress').style.width, '100%');
   assert.equal(nodes.get('homeWorkHoursStatus').textContent, '2.5 hours over your 40-hour goal');
+  assert.equal(nodes.get('homeWorkHoursAverage').textContent, 'Avg 42.5 hrs/day · 1 day');
 });
 
 test('a single read-only week rollover timer is scheduled on boot', () => {
@@ -209,4 +223,58 @@ test('Work Hours card uses exactly the same teal gradient as Inertia and Reminde
   for (const block of [workCard, inertiaCard, remindersHeader]) {
     assert.match(block, /background:\s*var\(--tp-btn-teal-grad\);/);
   }
+});
+
+
+test('Average is this week only and excludes unfilled days and auto-created zero-hour weekends', () => {
+  const summary = calculate([
+    entry('2026-10-25', 10), // previous week
+    entry('2026-10-26', 7.78),
+    entry('2026-10-27', 8),
+    entry('2026-10-31', 0, 0),
+    entry('2026-11-01', 0, 0),
+    entry('2026-11-02', 12) // next week
+  ]);
+  assert.equal(summary.logged, 15.78);
+  assert.equal(summary.loggedDays, 2);
+  assert.equal(summary.averagePerLoggedDay, 7.89);
+});
+
+test('PTO with eight hours contributes to daily average, even with a zero primary score', () => {
+  const summary = calculate([
+    entry('2026-10-26', 6),
+    entry('2026-10-27', 8, 0),
+    entry('2026-10-28', 0, 0)
+  ]);
+  assert.equal(summary.logged, 14);
+  assert.equal(summary.loggedDays, 2);
+  assert.equal(summary.averagePerLoggedDay, 7);
+});
+
+test('Average uses the recorded Hours rather than Work Score or points', () => {
+  const summary = calculate([
+    { ...entry('2026-10-26', 8, 0), points: 100 },
+    { ...entry('2026-10-27', 4, 10), points: 0 }
+  ]);
+  assert.equal(summary.logged, 12);
+  assert.equal(summary.loggedDays, 2);
+  assert.equal(summary.averagePerLoggedDay, 6);
+});
+
+test('No hours entered shows the average as unavailable, not a misleading zero', () => {
+  const html = home.match(/<section id="homeWorkHoursSection"[\s\S]*?<\/section>/)?.[0] || '';
+  assert.match(html, /id="homeWorkHoursAverage"/);
+  assert.match(html, /Avg — hrs\/day/);
+  const summary = calculate([]);
+  assert.equal(summary.averagePerLoggedDay, null);
+  assert.equal(summary.loggedDays, 0);
+});
+
+test('Work Hours border is removed without changing the shared teal gradient', () => {
+  const workCard = styles.match(/\.home-work-hours-card\s*\{([^}]+)\}/)?.[1] || '';
+  assert.match(workCard, /border:\s*none\s*;/);
+  assert.doesNotMatch(workCard, /border:\s*1px/);
+  assert.match(workCard, /background:\s*var\(--tp-btn-teal-grad\);/);
+  assert.match(styles, /\.home-work-hours-footer\s*\{[^}]*flex-wrap:\s*wrap/);
+  assert.match(styles, /\.home-work-hours-average\s*\{/);
 });
