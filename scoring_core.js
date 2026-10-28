@@ -5743,6 +5743,7 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
       liveDiffSnapshots: src.liveDiffSnapshots && typeof src.liveDiffSnapshots === 'object' ? src.liveDiffSnapshots : {},
       youImageId:  typeof src.youImageId === "string" ? src.youImageId : "",
       youName: typeof src.youName === "string" ? src.youName : "",
+      youNotes: typeof src.youNotes === "string" ? src.youNotes : "",
       youRivalId: typeof src.youRivalId === "string" ? src.youRivalId : "",
       youPrimaryColor: normalizeHexColor(src.youPrimaryColor) || "#1a383b",
       youSecondaryColor: normalizeHexColor(src.youSecondaryColor) || "#254c52",
@@ -6207,7 +6208,7 @@ if (
   }
 
   const PROTECTED_HISTORY_KEYS = ['weightHistory', 'vo2MaxHistory', 'liveDiffHistory', 'liveDiffSnapshots'];
-  const STICKY_KEYS = ['youImageId', 'youName', 'youPrimaryColor', 'youSecondaryColor', 'habitTagColors', ...PROTECTED_HISTORY_KEYS];
+  const STICKY_KEYS = ['youImageId', 'youName', 'youNotes', 'youPrimaryColor', 'youSecondaryColor', 'habitTagColors', ...PROTECTED_HISTORY_KEYS];
 
   function shouldAllowStickyOverwrite(key, options = {}) {
     if (key === 'scoringSettings') return Boolean(options.allowScoringSettingsOverwrite);
@@ -6223,7 +6224,7 @@ if (
       if (typeof value !== 'string') return true;
       return value.trim() === '';
     }
-    if (key === 'youName') {
+    if (key === 'youName' || key === 'youNotes') {
       if (typeof value !== 'string') return true;
       return value.trim() === '';
     }
@@ -6560,6 +6561,7 @@ function fastEnsureStateShape(s) {
     notes: typeof src.notes === 'string' ? src.notes : '',
     youImageId: typeof src.youImageId === 'string' ? src.youImageId : '',
     youName: typeof src.youName === 'string' ? src.youName : '',
+    youNotes: typeof src.youNotes === 'string' ? src.youNotes : '',
     youRivalId: typeof src.youRivalId === 'string' ? src.youRivalId : '',
     youPrimaryColor: normalizeHexColor(src.youPrimaryColor) || '#1a383b',
     youSecondaryColor: normalizeHexColor(src.youSecondaryColor) || '#254c52',
