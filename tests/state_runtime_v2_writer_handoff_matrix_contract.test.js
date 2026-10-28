@@ -513,8 +513,10 @@ test('unique cross-tab WAL admission claims survive old per-ID sidecar overwrite
   assert.match(writer,/state_runtime_v2_wal_admission_sidecar_conflict/);
   assert.ok(writer.indexOf('uniqueClaimKey()')<writer.indexOf('writeRows(next)'),
     'Admission claim must be durable before the shared WAL can be overwritten');
-  assert.ok(writer.indexOf('uniqueClaimKey()')<writer.indexOf('setWalStorageVerified(independentKey(mutationId)'),
-    'Admission claim must precede canonical per-ID WAL sidecar');
+  const freshAdmission=writer.slice(writer.indexOf('const row = {'));
+  assert.ok(freshAdmission.indexOf('uniqueClaimKey()')
+    < freshAdmission.indexOf('setWalStorageVerified(independentKey(mutationId)'),
+    'New admission claim must precede canonical per-ID WAL sidecar');
   assert.match(cleanup,/for \(const key of claimKeys\(\)\)/);
   assert.match(cleanup,/readWalStorage\(claim.key\) !== claim.raw/);
   assert.match(cleanup,/state_runtime_v2_wal_claim_remove_failed/);
