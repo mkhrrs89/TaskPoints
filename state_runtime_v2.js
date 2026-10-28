@@ -4280,6 +4280,147 @@
     return result;
   }
 
+  // Isolated PREVIEW-ONLY IndexedDB writer fence protocol rehearsal.
+  // A single readwrite transaction atomically checks a persisted epoch and
+  // records either a participating test writer marker or a freeze decision.
+  // It NEVER writes V1 data or gates a production writer. Pre-V2 tabs do not
+  // consult this record and remain capable of writing localStorage.
+  async function rehearsePreviewDurableWriterFence(action, options = {}) {
+    const refuse = (reason, details = {}) => ({
+      checked: true, reason, previewOnly: true, canPromote: false,
+      productionWritersFenced: false, allLegacyWritersKnown: false,
+      mutationAuthority: 'legacy_only', readAuthority: 'legacy_only',
+      ...details
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    if (!['read', 'writer', 'freeze'].includes(action))
+      return refuse('invalid_fence_action');
+    if (!global.indexedDB?.open) return refuse('indexeddb_unavailable');
+    const expectedEpoch = options?.expectedEpoch;
+    if (action !== 'read' && (!Number.isSafeInteger(expectedEpoch) || expectedEpoch < 0))
+      return refuse('expected_epoch_required');
+    if (action === 'writer'
+      && (typeof options?.marker !== 'string' || !options.marker
+        || options.marker.length > 128))
+      return refuse('writer_marker_required');
+    const initialModeEpoch = darkMirrorModeEpoch;
+    let generation;
+    try { generation = currentGeneration({ create: false }); }
+    catch (_) { return refuse('generation_unreadable'); }
+    if (!generation) return refuse('generation_unavailable');
+    const DB = 'taskpoints_v2_writer_fence_preview_v1';
+    const STORE = 'control';
+    return new Promise(resolve => {
+      let settled = false;
+      let db = null;
+      let result = refuse('transaction_not_completed');
+      const finish = value => {
+        if (settled) return;
+        settled = true;
+        try { db?.close(); } catch (_) {}
+        resolve(value);
+      };
+      let opening;
+      try { opening = global.indexedDB.open(DB, 1); }
+      catch (_) { finish(refuse('fence_database_open_failed')); return; }
+      opening.onblocked = () => finish(refuse('fence_database_upgrade_blocked'));
+      opening.onerror = () => finish(refuse('fence_database_open_failed'));
+      opening.onupgradeneeded = () => {
+        const upgradeDb = opening.result;
+        if (!upgradeDb.objectStoreNames.contains(STORE))
+          upgradeDb.createObjectStore(STORE, { keyPath: 'id' });
+      };
+      opening.onsuccess = () => {
+        db = opening.result;
+        db.onversionchange = () => { try { db.close(); } catch (_) {} };
+        if (settled) { try { db.close(); } catch (_) {} return; }
+        try {
+          if (!isDarkEnabled() || darkMirrorModeEpoch !== initialModeEpoch
+            || currentGeneration({ create: false }) !== generation) {
+            finish(refuse('preview_or_generation_changed_before_transaction'));
+            return;
+          }
+          const tx = db.transaction(STORE, action === 'read' ? 'readonly' : 'readwrite');
+          tx.onabort = () => finish(refuse('fence_transaction_aborted'));
+          tx.onerror = () => {}; // The abort handler remains authoritative.
+          tx.oncomplete = () => finish(result);
+          const store = tx.objectStore(STORE);
+          const request = store.get('writer_fence');
+          request.onerror = () => {
+            result = refuse('fence_record_unreadable');
+            try { tx.abort(); } catch (_) {}
+          };
+          request.onsuccess = () => {
+            try {
+              if (!isDarkEnabled() || darkMirrorModeEpoch !== initialModeEpoch
+                || currentGeneration({ create: false }) !== generation) {
+                result = refuse('preview_or_generation_changed_in_transaction');
+                return;
+              }
+              const prior = request.result;
+              if (prior && (prior.id !== 'writer_fence'
+                || typeof prior.generation !== 'string'
+                || !Number.isSafeInteger(prior.epoch) || prior.epoch < 0
+                || typeof prior.frozen !== 'boolean'
+                || !Number.isSafeInteger(prior.writersCommitted)
+                || prior.writersCommitted < 0)) {
+                result = refuse('fence_record_malformed');
+                return;
+              }
+              const state = prior || {
+                id: 'writer_fence', generation, epoch: 0, frozen: false,
+                writersCommitted: 0, lastWriterMarker: null
+              };
+              const describe = value => ({
+                generation: value.generation, epoch: value.epoch,
+                frozen: value.frozen, writersCommitted: value.writersCommitted,
+                lastWriterMarker: value.lastWriterMarker || null
+              });
+              if (state.generation !== generation) {
+                result = refuse('fence_generation_mismatch', {
+                  fence: describe(state)
+                });
+                return;
+              }
+              if (action === 'read') {
+                result = refuse('fence_read_only', {
+                  initialized: !!prior, fence: describe(state)
+                });
+                return;
+              }
+              if (expectedEpoch !== state.epoch) {
+                result = refuse('fence_epoch_stale', { fence: describe(state) });
+                return;
+              }
+              if (state.frozen) {
+                result = refuse('fence_frozen', { fence: describe(state) });
+                return;
+              }
+              const next = action === 'freeze'
+                ? { ...state, frozen: true, epoch: state.epoch + 1 }
+                : { ...state, writersCommitted: state.writersCommitted + 1,
+                    lastWriterMarker: options.marker };
+              // The CAS decision and marker/freeze update belong to the
+              // same IndexedDB transaction; no await or external write can
+              // occur between the get() callback and this put().
+              store.put(next);
+              result = refuse(action === 'freeze'
+                ? 'preview_fence_frozen' : 'preview_writer_recorded', {
+                atomicPreviewTransaction: true, fence: describe(next)
+              });
+            } catch (_) {
+              result = refuse('fence_transaction_callback_failed');
+              try { tx.abort(); } catch (_) {}
+            }
+          };
+        } catch (_) {
+          finish(refuse('fence_transaction_unavailable'));
+        }
+      };
+    });
+  }
+
   // Browser-native exclusive-lock *rehearsal*, never a writer handoff.
   // Browser LockManager is shared by same-origin tabs and serializes callbacks
   // without vulnerable localStorage time-based leases. No fallback assumes
@@ -4651,6 +4792,7 @@
     inspectPreviewWriterPeers,
     exercisePreviewCooperativeWriterLease,
     exercisePreviewSerializedSnapshotLease,
+    rehearsePreviewDurableWriterFence,
     inspectPreservedParityMismatch,
     inspectLegacyRollbackSource,
     createPreviewRecoveryCheckpoint,
