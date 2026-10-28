@@ -7222,6 +7222,14 @@ return { state: merged, storageKey };
     }
     const stickyObjectFields = ['playerBadges', 'liveDiffHistory', 'liveDiffSnapshots'];
     const deletedReminderIds = new Set(Array.isArray(options.deletedReminderIds) ? options.deletedReminderIds.map(String) : []);
+    // A verified pending V1 Task-journal completion deletion must not be
+    // resurrected by the generic nonempty-array protection below. This
+    // option is supplied ONLY by the Task journal wrapper on V2; it does
+    // not change normal completion saves, imports or other history arrays.
+    const pendingTaskCompletionDeleteIds = new Set(
+      Array.isArray(options.pendingTaskCompletionDeleteIds)
+        ? options.pendingTaskCompletionDeleteIds.map(String).filter(Boolean) : []
+    );
     stickyArrayFields.forEach((key) => {
       if (Array.isArray(next[key])) {
         const allowExactReminderOverwrite = key === 'reminders' && (
@@ -7229,7 +7237,22 @@ return { state: merged, storageKey };
           || options.exactReminders === true
           || deletedReminderIds.size > 0
         );
-        const allowEmptyArrayOverwrite = options.allowDestructiveOverwrite === true || allowExactReminderOverwrite;
+        const pendingTaskCompletionDelete = key === 'completions'
+          && pendingTaskCompletionDeleteIds.size > 0;
+        if (pendingTaskCompletionDelete) {
+          // An unrelated completion committed by another tab must survive
+          // this narrow deletion. Match the regular merge semantics for
+          // ordinary partial saves, then apply only journaled tombstones.
+          // Explicit exact/destructive saves keep their existing semantics.
+          if (!options.allowDestructiveOverwrite && !options.replaceCompletions
+              && !options.exactCompletions) {
+            next[key] = mergeCompletions(latest?.[key], next[key]);
+          }
+          next[key] = next[key].filter(row=>
+            !pendingTaskCompletionDeleteIds.has(String(row?.id || '')));
+        }
+        const allowEmptyArrayOverwrite = options.allowDestructiveOverwrite === true
+          || allowExactReminderOverwrite || pendingTaskCompletionDelete;
 
         if (!allowEmptyArrayOverwrite && !shouldAllowProtectedHistoryOverwrite(key, options) && Array.isArray(latest?.[key]) && latest[key].length > 0 && next[key].length === 0) {
           // Defensive data-loss guard: partial saves from pages like Matchups may
