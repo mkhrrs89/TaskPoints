@@ -677,3 +677,29 @@ markers rather than actual TaskPoints records. It cannot fence legacy tabs,
 prove post-kill device durability or enable V2 primary storage. Full
 production writer admission, rollback and physical Safari/PWA testing remain
 required.
+
+### Full-payload identity guard for the actual Habit mutation ledger (October 28)
+
+The **real V2 Habit IndexedDB ledger** now validates an already-committed
+mutation's full normalized payload, operation type, status, generation and
+revision before accepting an exact-ID retry. A short FNV-derived ID alone can
+never authorize a duplicate: two differing payloads with the same calculated
+ID fail closed, leaving the existing ledger and the authoritative V1 snapshot
+unchanged. Legitimate identical retries remain idempotent.
+
+The read-only WAL confirmation method now requires the pending Habit delta
+rather than merely the mutation ID. The existing WAL bridge supplies that
+delta before clearing independent/shared recovery rows. A mismatched or
+corrupted ledger entry throws a diagnosable identity error; it does not clear
+WAL evidence, delete an original mutation, silently reseed V2 or rewrite V1.
+
+Chromium and WebKit synthetic browser tests cover cross-tab different-payload
+retries using an identical calculated ID, exact duplicate writes, read-only
+confirmation, persistence after reopening a tab, and corrupted IndexedDB
+mutation evidence. Existing V1 save timing, recovery paths, unmodified V2
+record formats and preview cutover blockers are preserved.
+
+**Important limitation:** This is V2 record-integrity and recovery hardening,
+not complete production writer fencing or migration of non-Habit collections.
+An uncooperative old Main tab can still write V1; independent off-device
+rollback and physical iPhone/PWA testing remain cutover prerequisites.
