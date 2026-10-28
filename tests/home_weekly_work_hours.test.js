@@ -146,3 +146,56 @@ test('original Work SCWM editing and saving paths remain intact', () => {
   assert.match(home, /startHomeWorkHoursWeekRollover\(\)/);
   assert.match(home, /refreshMainPageIfChanged\('visibilitychange'\);\s*renderHomeWorkHours\(\)/);
 });
+
+test('rendered card responds immediately to SCWM Hours edits and changes the progress UI', () => {
+  const now = new Date();
+  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  const row = entry(dateKey(monday), 8);
+  const entries = [row];
+
+  const ids = ['homeWorkHoursLogged', 'homeWorkHoursRemaining', 'homeWorkHoursWeek',
+    'homeWorkHoursProgress', 'homeWorkHoursProgressTrack', 'homeWorkHoursStatus'];
+  const nodes = new Map(ids.map(id => [id, {
+    textContent: '', style: {}, attributes: {},
+    setAttribute(name, value) { this.attributes[name] = value; }
+  }]));
+  const render = new Function('$', 'getDerived', 'calculateHomeWeeklyWorkHours',
+    'formatHomeWorkHours', extractFunction('renderHomeWorkHours') +
+    '\nreturn renderHomeWorkHours;')(
+    id => nodes.get(id),
+    () => ({ workEntries: entries }),
+    context.calculate, context.format
+  );
+
+  render();
+  assert.equal(nodes.get('homeWorkHoursLogged').textContent, '8');
+  assert.equal(nodes.get('homeWorkHoursRemaining').textContent, '32');
+  assert.equal(nodes.get('homeWorkHoursProgress').style.width, '20%');
+  assert.equal(nodes.get('homeWorkHoursProgressTrack').attributes['aria-valuenow'], '8');
+
+  row.workHours = 40;
+  render();
+  assert.equal(nodes.get('homeWorkHoursRemaining').textContent, '0');
+  assert.equal(nodes.get('homeWorkHoursStatus').textContent, '40-hour goal reached!');
+
+  row.workHours = 42.5;
+  render();
+  assert.equal(nodes.get('homeWorkHoursLogged').textContent, '42.5');
+  assert.equal(nodes.get('homeWorkHoursProgress').style.width, '100%');
+  assert.equal(nodes.get('homeWorkHoursStatus').textContent, '2.5 hours over your 40-hour goal');
+});
+
+test('a single read-only week rollover timer is scheduled on boot', () => {
+  const scheduled = [];
+  const timer = new Function('setTimeout', 'renderHomeWorkHours',
+    extractFunction('startHomeWorkHoursWeekRollover') +
+    '\nreturn startHomeWorkHoursWeekRollover;')(
+    (fn, delay) => scheduled.push({ fn, delay }),
+    () => {}
+  );
+  timer();
+  assert.equal(scheduled.length, 1);
+  assert.ok(scheduled[0].delay >= 1000);
+  assert.ok(scheduled[0].delay <= 7 * 24 * 60 * 60 * 1000 + 2000);
+});
