@@ -7650,3 +7650,140 @@ metal background attached only to the day-bubble row.
     margin-top: 0 !important;      /* Remove existing mobile -8px pull-up */
   }
 }
+
+
+/* TaskPoints player profile screen — one in-app view shared by all players.
+   No iframe, no extra page loads, no hidden copy per NPC. */
+.tp-player-profile-screen[hidden] { display: none !important; }
+body.tp-player-profile-open { overflow: hidden; }
+body.tp-player-profile-open #bottomToolbarMount,
+body.tp-player-profile-open #mobileBottomNav,
+body.tp-player-profile-open [data-scroll-top] { visibility: hidden !important; pointer-events: none !important; }
+body.tp-player-profile-open .player-editor-modal.is-open { z-index: 1800 !important; }
+body.tp-player-profile-open #cropModal:not(.hidden) { z-index: 1900 !important; }
+
+.tp-player-profile-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  height: 100vh;
+  height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  background: #10191c;
+  color: #eaf2f2;
+  padding: calc(env(safe-area-inset-top, 0px) + 16px) 16px
+    calc(env(safe-area-inset-bottom, 0px) + 36px);
+}
+.tp-profile-inner { max-width: 900px; margin: 0 auto; }
+.tp-profile-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 16px;
+}
+.tp-profile-back, .tp-profile-advanced, .tp-profile-inline-edit {
+  min-height: 42px;
+  background: #254c52;
+  color: #f4ffff;
+  border: 1px solid rgba(178, 225, 219, .26);
+  padding: 8px 13px;
+  border-radius: 11px;
+  font-size: 13px;
+  font-weight: 650;
+}
+.tp-profile-advanced { text-align: right; }
+.tp-profile-eyebrow { color: #a7c3c2; font-size: 10px; font-weight: 800; letter-spacing: .12em; text-align: center; }
+.tp-profile-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 190px) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+  padding: 20px;
+  background: linear-gradient(180deg, #254c52, #1a383b);
+  border-radius: 18px;
+}
+.tp-profile-photo {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #0b181a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: #9bb6b5;
+}
+.tp-profile-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tp-profile-photo img[hidden], .tp-profile-photo [hidden] { display: none !important; }
+.tp-profile-pid { font-size: 11px; font-weight: 700; letter-spacing: .055em; text-transform: uppercase; color: #c2d8d5; }
+.tp-profile-identity { min-width: 0; }
+.tp-profile-identity h1 { font-size: clamp(1.65rem, 4vw, 2.45rem); font-weight: 800; line-height: 1.06; overflow-wrap: anywhere; margin: 7px 0 12px; }
+.tp-profile-swatches { display: flex; gap: 6px; margin-bottom: 18px; }
+.tp-profile-swatches span { display: block; width: 30px; height: 12px; border: 1px solid rgba(255,255,255,.25); border-radius: 4px; }
+.tp-profile-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.tp-profile-stats > div { padding: 9px 8px; background: rgba(0,0,0,.19); border-radius: 9px; min-width: 0; }
+.tp-profile-stats small { display: block; font-size: 9px; color: #c1d3d1; letter-spacing: .06em; }
+.tp-profile-stats strong { display: block; font-size: clamp(1.1rem, 3vw, 1.55rem); font-variant-numeric: tabular-nums; margin-top: 1px; }
+.tp-profile-rival { display: inline-flex; align-items: center; margin-top: 14px; color: #c5f2e8; text-decoration: underline; text-underline-offset: 3px; font-size: 12px; }
+.tp-profile-columns { display: grid; grid-template-columns: 1.15fr 1fr; align-items: start; gap: 16px; margin-top: 16px; }
+.tp-profile-panel { background: #1a292e; border: 1px solid rgba(161, 209, 206, .13); padding: 18px; border-radius: 16px; min-width: 0; }
+.tp-profile-panel h2 { font-size: 17px; font-weight: 750; margin: 0 0 14px; }
+.tp-profile-form { display: flex; flex-direction: column; gap: 13px; }
+.tp-profile-form label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 650; color: #c8dcdb; }
+.tp-profile-form input:not([type="checkbox"]), .tp-profile-form select, .tp-profile-form textarea {
+  width: 100%;
+  background: #0c1a1d;
+  border: 1px solid #45686d;
+  border-radius: 9px;
+  color: #fff;
+  padding: 10px 11px;
+  min-height: 43px;
+  font: inherit;
+  font-size: 14px;
+}
+.tp-profile-form textarea { resize: vertical; line-height: 1.4; }
+.tp-profile-form input[type="color"] { padding: 4px; height: 46px; }
+.tp-profile-colors { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.tp-profile-form .tp-profile-active { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.tp-profile-active input { width: 19px; height: 19px; }
+.tp-profile-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.tp-profile-actions button { min-height: 43px; }
+#tpPlayerProfileSaved { color: #aee7d7; font-size: 13px; }
+.tp-profile-section-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.tp-profile-inline-edit { min-height: 32px; padding: 5px 9px; }
+.tp-profile-ratings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.tp-profile-rating { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 8px; background: rgba(114,166,164,.11); font-size: 12px; }
+.tp-profile-rating span { color: #b4cecd; }
+.tp-profile-rating strong { font-variant-numeric: tabular-nums; }
+.tp-profile-note { font-size: 13px; color: #b9d4d2; line-height: 1.6; }
+.tp-profile-gallery-name { border: 0; background: none; color: inherit; padding: 3px; cursor: pointer; }
+.tp-profile-gallery-name:focus-visible, .tp-profile-back:focus-visible,
+.tp-profile-advanced:focus-visible, .tp-profile-rival:focus-visible,
+.tp-profile-inline-edit:focus-visible, .tp-profile-form :focus-visible {
+  outline: 2px solid #8be4cf;
+  outline-offset: 3px;
+}
+
+@media (max-width: 640px) {
+  .tp-player-profile-screen {
+    padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px
+      calc(env(safe-area-inset-bottom, 0px) + 28px);
+  }
+  .tp-profile-topbar { padding-bottom: 11px; }
+  .tp-profile-eyebrow { font-size: 9px; }
+  .tp-profile-back, .tp-profile-advanced { font-size: 12px; padding: 8px 10px; }
+  .tp-profile-hero { grid-template-columns: minmax(0, 110px) minmax(0, 1fr); gap: 13px; padding: 13px; border-radius: 14px; }
+  .tp-profile-identity h1 { font-size: 1.45rem; margin: 5px 0 9px; }
+  .tp-profile-swatches { margin-bottom: 9px; }
+  .tp-profile-stats { gap: 4px; }
+  .tp-profile-stats > div { padding: 6px 4px; }
+  .tp-profile-stats strong { font-size: .98rem; }
+  .tp-profile-stats small { font-size: 8px; }
+  .tp-profile-columns { grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 12px; }
+  .tp-profile-panel { padding: 14px; }
+}
