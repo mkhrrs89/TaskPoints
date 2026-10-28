@@ -4967,7 +4967,9 @@ try {
           .find(k=>k.startsWith(wal.CLAIM_PREFIX)))};
     });
     assert.equal(interference.readOk,false);
-    assert.match(interference.error,/wal_admission_claim_identity_conflict/);
+    assert.match(interference.error,
+      /wal_admission_claim_identity_conflict|wal_shared_independent_identity_conflict/,
+      'Either earlier shared/sidecar or immutable-claim conflict must fail closed');
     assert.equal(interference.claim,original.claims[0]);
     assert.equal(interference.status.malformed,true);
     assert.equal(interference.status.pendingCount,null);
