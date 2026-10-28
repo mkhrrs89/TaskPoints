@@ -31,6 +31,9 @@ function fixture(count = 2, directHash = '') {
   const calls = { save: [], rerender: 0, schedule: 0, editNpc: [], editSelf: 0, photos: [] };
   const screen = {
     innerHTML: '', hidden: true, scrollTop: -1,
+    ratingArea: { innerHTML: '' },
+    ratingsEditButton: { hidden: false, attributes: {}, setAttribute(key, val) { this.attributes[key] = val; }, focus() {} },
+    pendingRatingsForm: null,
     style: {
       properties: {},
       setProperty(key, value) { this.properties[key] = value; },
@@ -40,6 +43,11 @@ function fixture(count = 2, directHash = '') {
     addEventListener(name, fn) { this[name] = fn; },
     querySelector(sel) {
       if (sel === '#tpPlayerProfileSaved') return { set textContent(value) { calls.status = value; } };
+      if (sel === '#tpProfileRatingsContent') return this.ratingArea;
+      if (sel === '#tpProfileEditRatings') return this.ratingsEditButton;
+      if (sel === '#tpPlayerRatingsForm') return this.pendingRatingsForm;
+      if (sel === '#tpProfileRatingsError') return { set textContent(value) { calls.ratingError = value; } };
+      if (sel === '[name="baseline"]') return { focus() { calls.ratingFocused = true; } };
       return null;
     }
   };
@@ -302,8 +310,6 @@ test('profile theme uses both player colors for backgrounds, panels, controls an
   for (const prop of [
     '--tp-profile-canvas-from', '--tp-profile-canvas-to',
     '--tp-profile-hero-from', '--tp-profile-hero-to',
-    '--tp-profile-panel-from', '--tp-profile-panel-to',
-    '--tp-profile-button-from', '--tp-profile-button-to',
     '--tp-profile-field', '--tp-profile-metric',
     '--tp-profile-accent', '--tp-profile-accent-secondary',
     '--tp-profile-border', '--tp-profile-focus'
@@ -389,9 +395,184 @@ test('white typography has >= 4.5:1 contrast on hero gradients for very bright a
 test('color theme remains scoped to player profiles and does not affect game cards or editors', () => {
   assert.match(css, /\.tp-player-profile-screen\s*\{/);
   assert.match(css, /\.tp-profile-hero\s*\{[^}]*--tp-profile-hero-from/);
-  assert.match(css, /\.tp-profile-panel\s*\{[^}]*--tp-profile-panel-from/);
+  assert.match(css, /\.tp-profile-panel\s*\{[^}]*--tp-profile-hero-from/);
   assert.match(css, /\.tp-profile-form input:not\(\[type="checkbox"\]\)[\s\S]*?--tp-profile-field/);
   assert.match(game, /function buildPlayerEditorContent\(player\)/);
   assert.match(game, /function wireViewCardProfileLinks/);
   assert.match(game, /id="playersList"/);
+});
+
+
+function ratingsForm(values = {}) {
+  const defaults = { baseline: '51', variance: '12', varianceTilt: '50', momentum: '50',
+    risky: '30', intimidation: '0', poise: '0', greed: '0', streaky: '0' };
+  const data = { ...defaults, ...values };
+  const inputs = Object.fromEntries(Object.entries(data).map(([key, val]) =>
+    [key, { value: val, focus() {} }]));
+  return {
+    id: 'tpPlayerRatingsForm',
+    elements: { namedItem(key) { return inputs[key] || null; } }
+  };
+}
+
+test('Games becomes Matchups, with no new statistics or record storage', () => {
+  const f = fixture();
+  f.controller.open('npc1');
+  assert.match(f.screen.innerHTML, /<small>MATCHUPS<\/small>/);
+  assert.doesNotMatch(f.screen.innerHTML, /<small>GAMES<\/small>/);
+  assert.equal(f.controller.statsFor('npc1').games, 5);
+  f.controller.open('YOU');
+  assert.match(f.screen.innerHTML, /<small>MATCHUPS<\/small>/);
+  assert.equal(f.calls.save.length, 0);
+});
+
+test('both lower sections share the exact top gradient and are borderless', () => {
+  const hero = css.match(/\.tp-profile-hero\s*\{([^}]+)\}/)?.[1] || '';
+  const panel = css.match(/\.tp-profile-panel\s*\{([^}]+)\}/)?.[1] || '';
+  const nav = css.match(/\.tp-profile-back,\s*\.tp-profile-advanced,\s*\.tp-profile-inline-edit\s*\{([^}]+)\}/)?.[1] || '';
+  const save = css.match(/\.tp-profile-actions \.btn\.btn-teal\s*\{([^}]+)\}/)?.[1] || '';
+  const sameGradient = /linear-gradient\(135deg,\s*var\(--tp-profile-hero-from\),\s*var\(--tp-profile-hero-to\)\)/;
+  for (const [name, block] of [['top hero', hero], ['lower panels', panel], ['header buttons', nav], ['Save Profile', save]]) {
+    assert.match(block, sameGradient, name + ' does not use same hero gradient');
+  }
+  for (const block of [panel, nav, save]) {
+    assert.match(block, /border:\s*none\b/);
+  }
+});
+
+test('Save Profile is right aligned and mobile section starts below floating score', () => {
+  const actions = css.match(/\.tp-profile-actions\s*\{([^}]+)\}/)?.[1] || '';
+  const status = css.match(/#tpPlayerProfileSaved\s*\{([^}]+)\}/)?.[1] || '';
+  assert.match(actions, /justify-content:\s*flex-end/);
+  assert.match(status, /order:\s*-1/);
+  assert.match(css, /@media \(max-width: 640px\)\s*\{[\s\S]*?\.tp-player-profile-screen\s*\{[^}]*padding:\s*calc\(env\(safe-area-inset-top,\s*0px\)\s*\+\s*56px\)/);
+  assert.match(css, /\.tp-player-profile-screen\s*\{[^}]*overflow-y:\s*auto/);
+  assert.match(css, /\.tp-profile-topbar\s*\{[^}]*display:\s*grid/);
+});
+
+test('Edit ratings exposes inline numeric controls for all nine existing NPC ratings, not old modal', () => {
+  const f = fixture();
+  f.controller.open('npc1');
+  const target = { getAttribute(key) { return key === 'data-tp-profile-action' ? 'edit-ratings' : ''; } };
+  f.screen.click({ target: { closest() { return target; } } });
+  const html = f.screen.ratingArea.innerHTML;
+  assert.match(html, /id="tpPlayerRatingsForm"/);
+  for (const key of ['baseline','variance','varianceTilt','momentum','risky',
+    'intimidation','poise','greed','streaky']) {
+    assert.match(html, new RegExp('name="' + key + '"'));
+  }
+  assert.match(html, /name="risky"[^>]*value="30"/);
+  assert.match(html, /Save ratings/);
+  assert.match(html, /Cancel/);
+  assert.equal(f.screen.ratingsEditButton.hidden, true);
+  assert.equal(f.calls.editNpc.length, 0);
+  assert.equal(f.calls.save.length, 0);
+});
+
+test('Save ratings writes existing fields in place, including 0 and Risky divided by 10', () => {
+  const f = fixture();
+  f.controller.open('npc1');
+  f.controller.editRatings();
+  const untouched = structuredClone(f.state.players[1]);
+  const form = ratingsForm({ baseline: '0', variance: '8.5', varianceTilt: '70',
+    momentum: '100', risky: '35', intimidation: '18', poise: '25',
+    greed: '66', streaky: '75' });
+  assert.equal(f.controller.saveRatingsForm(form), true);
+  assert.equal(f.state.players[0].baseline, 0);
+  assert.equal(f.state.players[0].variance, 8.5);
+  assert.equal(f.state.players[0].varianceTilt, 70);
+  assert.equal(f.state.players[0].momentum, 100);
+  assert.equal(f.state.players[0].risky, 3.5);
+  assert.equal(f.state.players[0].intimidation, 18);
+  assert.equal(f.state.players[0].poise, 25);
+  assert.equal(f.state.players[0].greed, 66);
+  assert.equal(f.state.players[0].streaky, 75);
+  assert.equal(f.state.players[0].notes, 'Old notes');
+  assert.deepEqual(f.state.players[1], untouched);
+  assert.equal(f.calls.save.length, 1);
+  assert.equal(f.calls.rerender, 1);
+  assert.equal(f.calls.schedule, 0);
+  assert.match(f.screen.ratingArea.innerHTML, /<strong>0<\/strong>/);
+  assert.equal(f.screen.ratingsEditButton.hidden, false);
+  assert.equal(f.calls.editNpc.length, 0);
+});
+
+test('invalid or incomplete inline ratings never mutate player or save partial results', () => {
+  for (const invalid of [{ baseline: '' }, { baseline: '-1' }, { risky: '101' },
+    { variance: 'nope' }, { poise: 'Infinity' }, { greed: null }]) {
+    const f = fixture();
+    f.controller.open('npc1');
+    f.controller.editRatings();
+    const playerBefore = structuredClone(f.state.players[0]);
+    assert.equal(f.controller.saveRatingsForm(ratingsForm(invalid)), false, JSON.stringify(invalid));
+    assert.deepEqual(f.state.players[0], playerBefore);
+    assert.equal(f.calls.save.length, 0);
+    assert.match(f.calls.ratingError, /Enter a number from 0 to 100/);
+  }
+});
+
+test('Cancel restores ratings view without writing or changing player data', () => {
+  const f = fixture();
+  f.controller.open('npc1');
+  f.controller.editRatings();
+  f.controller.cancelRatings();
+  assert.equal(f.screen.ratingsEditButton.hidden, false);
+  assert.match(f.screen.ratingArea.innerHTML, /tp-profile-rating/);
+  assert.doesNotMatch(f.screen.ratingArea.innerHTML, /tpPlayerRatingsForm/);
+  assert.equal(f.calls.save.length, 0);
+});
+
+test('Save Profile also commits open valid ratings edits without silently dropping them', () => {
+  const f = fixture();
+  f.controller.open('npc1');
+  f.controller.editRatings();
+  f.screen.pendingRatingsForm = ratingsForm({ baseline: '93', risky: '45' });
+  assert.equal(f.controller.saveForm(f.makeForm({
+    name: 'New NPC Name', notes: 'New bio', style: 'balanced', rivalId: 'npc2',
+    primaryColor: '#112233', secondaryColor: '#334455', active: true
+  })), true);
+  assert.equal(f.state.players[0].name, 'New NPC Name');
+  assert.equal(f.state.players[0].baseline, 93);
+  assert.equal(f.state.players[0].risky, 4.5);
+  assert.equal(f.state.players[0].notes, 'New bio');
+  assert.equal(f.calls.save.length, 1);
+});
+
+test('Save Profile refuses to discard invalid open ratings edits', () => {
+  const f = fixture();
+  f.controller.open('npc1');
+  f.controller.editRatings();
+  f.screen.pendingRatingsForm = ratingsForm({ baseline: '101' });
+  assert.equal(f.controller.saveForm(f.makeForm({
+    name: 'Oops', notes: 'Should not apply', style: 'balanced', rivalId: '',
+    primaryColor: '#112233', secondaryColor: '#334455', active: true
+  })), false);
+  assert.equal(f.state.players[0].name, 'NPC 1');
+  assert.equal(f.calls.save.length, 0);
+});
+
+test('inline rating controls close when switching players, and P000 retains its performance view', () => {
+  const f = fixture();
+  f.controller.open('npc1');
+  f.controller.editRatings();
+  f.controller.open('npc2');
+  assert.doesNotMatch(f.screen.innerHTML, /tpPlayerRatingsForm/);
+  f.controller.open('YOU');
+  assert.equal(f.controller.editRatings(), false);
+  assert.match(f.screen.innerHTML, /Your performance/);
+  assert.doesNotMatch(f.screen.innerHTML, /tpPlayerRatingsForm/);
+  assert.equal(f.calls.save.length, 0);
+});
+
+test('inline ratings submit event saves on profile, existing advanced/photo editor stays intact', () => {
+  const f = fixture();
+  f.controller.open('npc1');
+  f.controller.editRatings();
+  let prevented = false;
+  f.screen.submit({ target: ratingsForm(), preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(f.calls.save.length, 1);
+  assert.equal(f.calls.editNpc.length, 0);
+  assert.match(game, /editNpc: \(id\) => openPlayerEditor\(id\)/);
+  assert.match(game, /function buildPlayerEditorContent\(player\)/);
 });
