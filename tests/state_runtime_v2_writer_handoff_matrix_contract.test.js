@@ -386,3 +386,29 @@ test('Task completion cleanup protects changed same-ID patches and preserves fai
   assert.match(gate,/taskJournalCompactionHandoffValidated: false/);
   assert.match(gate,/canPromote: false/);
 });
+
+test('Task journal tombstones do not bypass ordinary completion history protection',()=>{
+  const journal=read('task_mutation_journal.js');
+  const original=journal.indexOf('core.saveStateSnapshot = function saveStateSnapshotWithTaskJournal(');
+  const stop=journal.indexOf('core.readPendingTaskMutations =',original);
+  assert.ok(original>0&&stop>original);
+  const wrapper=journal.slice(original,stop);
+  assert.match(wrapper,/!current\.malformed/);
+  assert.match(wrapper,/current\.record\.completionDeletes\.length/);
+  assert.match(wrapper,/pendingTaskCompletionDeleteIds/);
+  assert.match(wrapper,/originalSaveStateSnapshot\(candidate, protectedSaveOptions\)/);
+  const core=read('scoring_core.js');
+  const start=core.indexOf('function preserveStickyFieldsBeforeSave(');
+  const end=core.indexOf('function saveStateSnapshot(',start);
+  assert.ok(start>0&&end>start);
+  const guard=core.slice(start,end);
+  assert.match(guard,/const pendingTaskCompletionDeleteIds = new Set/);
+  assert.match(guard,/Array\.isArray\(options\.pendingTaskCompletionDeleteIds\)/);
+  assert.match(guard,/key === 'completions'/);
+  assert.match(guard,/next\[key\] = mergeCompletions\(latest\?\.\[key\], next\[key\]\)/);
+  assert.match(guard,/pendingTaskCompletionDeleteIds\.has/);
+  assert.match(guard,/allowExactReminderOverwrite \|\| pendingTaskCompletionDelete/);
+  assert.match(guard,/if \(!allowEmptyArrayOverwrite/);
+  assert.doesNotMatch(wrapper,/allowDestructiveOverwrite:\s*true/);
+  assert.doesNotMatch(wrapper,/replaceCompletions:\s*true/);
+});
