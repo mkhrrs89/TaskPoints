@@ -7774,6 +7774,12 @@ body.tp-player-profile-open #cropModal:not(.hidden) { z-index: 1900 !important; 
 .tp-profile-active input { width: 19px; height: 19px; }
 .tp-profile-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
 .tp-profile-actions button { min-height: 43px; }
+.tp-profile-actions .btn.btn-teal {
+  background: linear-gradient(135deg, var(--tp-profile-button-from), var(--tp-profile-button-to));
+  border: 1px solid var(--tp-profile-border);
+  color: #fff;
+}
+.tp-profile-form input[type="checkbox"] { accent-color: var(--tp-profile-accent); }
 #tpPlayerProfileSaved { color: var(--tp-profile-accent); font-size: 13px; }
 .tp-profile-section-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .tp-profile-inline-edit { min-height: 32px; padding: 5px 9px; }
