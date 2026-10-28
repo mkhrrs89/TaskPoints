@@ -5292,7 +5292,10 @@ try {
       const replacedSidecarRetained=localStorage.getItem(sidecarKey)===newSidecar;
       const inventory=wal.getPendingRows();
       const answer={injected,error,sharedCleared,replacedSidecarRetained,
-        pending:inventory.rows.length,changedMemo:inventory.rows[0]?.delta?.clientMemo,
+        inventoryOk:inventory.ok,inventoryError:inventory.error,
+        pendingCount:wal.getStatus().pendingCount,
+        retainedClaims:wal.getStatus().admissionClaimCount,
+        changedMemo:JSON.parse(localStorage.getItem(sidecarKey))?.delta?.clientMemo,
         v1Unchanged:localStorage.getItem('taskpoints_v1')===originalV1,
         authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
       // A real changed sidecar must remain until reconciled. For this
@@ -5304,7 +5307,11 @@ try {
     assert.match(outcome.error,/state_runtime_v2_wal_cleanup_sidecar_changed/);
     assert.equal(outcome.sharedCleared,true);
     assert.equal(outcome.replacedSidecarRetained,true);
-    assert.equal(outcome.pending,1);
+    assert.equal(outcome.inventoryOk,false,
+      'conflicting claim and sidecar must block normal WAL replay');
+    assert.match(outcome.inventoryError,/wal_admission_claim_identity_conflict/);
+    assert.equal(outcome.pendingCount,null,'conflict must not masquerade as an empty queue');
+    assert.equal(outcome.retainedClaims,1);
     assert.equal(outcome.changedMemo,'concurrent-uncleared-sidecar');
     assert.equal(outcome.v1Unchanged,true);
     assert.equal(outcome.authority,'legacy_only');
