@@ -68,6 +68,17 @@
           ppd: Number.isFinite(Number(you.avgPPD)) ? Number(you.avgPPD).toFixed(1) : '—',
           games: Number(you.games) || 0 };
       }
+      // Reuse the roster's canonical results when available; this avoids an
+      // unnecessary league-wide recomputation and keeps PPD consistent.
+      var canonical = deps.getCanonicalStat?.(id);
+      if (canonical) {
+        var canonPpd = Number(canonical.ppd);
+        return {
+          record: (Number(canonical.wins) || 0) + '-' + (Number(canonical.losses) || 0),
+          ppd: Number.isFinite(canonPpd) ? canonPpd.toFixed(1) : '—',
+          games: Number(canonical.games) || 0
+        };
+      }
       var rec = deps.getRecord(id) || {};
       var total = 0, count = 0, today = deps.todayKey();
       // Compute only the requested player's summary; nothing is added to storage.
@@ -202,7 +213,7 @@
         target.active = active;
         if (wasActive !== active) deps.onActiveChange();
       }
-      deps.save(st, options);
+      deps.save(deps.getState(), options);
       deps.renderRoster();
       render();
       var status = screen.querySelector('#tpPlayerProfileSaved');
