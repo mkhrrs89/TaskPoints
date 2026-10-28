@@ -1508,6 +1508,67 @@ try {
       committedWriters:after.fence.writersCommitted,legacyV1Unchanged:true};
   });
 
+  await run('preview durable writer detects generation rotation during IDB marker lookup',async context=>{
+    const page=await open(context);
+    const proof=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const before=localStorage.getItem('taskpoints_v1');
+      const previousGeneration=localStorage.getItem('taskpoints_state_v2_generation_v1');
+      const originalGet=IDBObjectStore.prototype.get;
+      let rotated=null,intercepted=false,report;
+      IDBObjectStore.prototype.get=function(key,...rest){
+        const request=originalGet.call(this,key,...rest);
+        if(this.name==='control' && typeof key==='string'
+          && key.startsWith('writer_marker:') && !intercepted){
+          intercepted=true;
+          rotated='v2-mid-marker-lookup:'+crypto.randomUUID();
+          localStorage.setItem('taskpoints_state_v2_generation_v1',rotated);
+        }
+        return request;
+      };
+      try{
+        report=await runtime.rehearsePreviewDurableWriterFence('writer',{
+          expectedEpoch:0,marker:'must-not-write-after-epoch-rotation'});
+      }finally{IDBObjectStore.prototype.get=originalGet;}
+      // Read the isolated preview database directly; the interrupted
+      // transaction must not leave even the synthetic marker behind.
+      const rows=await new Promise((resolve,reject)=>{
+        const opening=indexedDB.open('taskpoints_v2_writer_fence_preview_v1',1);
+        opening.onerror=()=>reject(opening.error);
+        opening.onsuccess=()=>{
+          const db=opening.result;
+          const tx=db.transaction('control','readonly');
+          const control=tx.objectStore('control');
+          const check=['writer_fence','writer_marker:must-not-write-after-epoch-rotation'];
+          const records={};
+          for(const key of check){
+            const request=control.get(key);
+            request.onsuccess=()=>{records[key]=request.result??null;};
+            request.onerror=()=>{try{tx.abort();}catch(_){}};
+          }
+          tx.oncomplete=()=>{db.close();resolve(records);};
+          tx.onabort=()=>{db.close();reject(Error('fence record inspection failed'));};
+        };
+      });
+      return {report,rows,rotated,intercepted,previousGeneration,
+        finalGeneration:localStorage.getItem('taskpoints_state_v2_generation_v1'),
+        before,after:localStorage.getItem('taskpoints_v1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(proof.intercepted,true,'Marker lookup must be intercepted');
+    assert.notEqual(proof.rotated,proof.previousGeneration);
+    assert.equal(proof.finalGeneration,proof.rotated);
+    assert.equal(proof.report.reason,'preview_or_generation_changed_in_transaction',
+      JSON.stringify(proof.report));
+    assert.equal(proof.report.canPromote,false);
+    assert.equal(proof.rows.writer_fence,null);
+    assert.equal(proof.rows['writer_marker:must-not-write-after-epoch-rotation'],null);
+    assert.equal(proof.before,proof.after);
+    assert.equal(proof.authority,'legacy_only');
+    return {midLookupGenerationChangeDenied:true,noMarkerOrCounterCommitted:true,
+      originalV1Unchanged:true,authorityUnchanged:true};
+  });
+
   await run('cooperative shared writer locks coexist and block exclusive handoff while legacy tabs remain unfenced',async context=>{
     const first=await open(context),second=await open(context);
     const silent=await context.newPage();
