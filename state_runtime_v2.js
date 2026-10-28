@@ -4366,7 +4366,13 @@
                 || !Number.isSafeInteger(prior.epoch) || prior.epoch < 0
                 || typeof prior.frozen !== 'boolean'
                 || !Number.isSafeInteger(prior.writersCommitted)
-                || prior.writersCommitted < 0)) {
+                || prior.writersCommitted < 0
+                || (prior.writersCommitted === 0 && prior.lastWriterMarker !== null)
+                || (prior.writersCommitted > 0
+                  && (typeof prior.lastWriterMarker !== 'string'
+                    || !prior.lastWriterMarker
+                    || prior.lastWriterMarker.length > 128))
+                || (prior.frozen && prior.epoch === 0))) {
                 result = refuse('fence_record_malformed');
                 return;
               }
@@ -4409,8 +4415,8 @@
                       return;
                     }
                     const item = lookup.result;
-                    if (item && (!prior || item.id !== markerId
-                      || item.generation !== generation
+                    if (item && (!prior || state.writersCommitted < 1
+                      || item.id !== markerId || item.generation !== generation
                       || !Number.isSafeInteger(item.epoch) || item.epoch < 0
                       || item.epoch > state.epoch)) {
                       result = refuse('fence_writer_marker_conflict', {
@@ -4474,7 +4480,9 @@
                   }
                   const marker = markerRequest.result;
                   if (marker) {
-                    if (marker.id !== markerId || marker.generation !== generation
+                    if (!prior || state.writersCommitted < 1
+                      || marker.id !== markerId
+                      || marker.generation !== generation
                       || marker.epoch !== state.epoch) {
                       result = refuse('fence_writer_marker_conflict', {
                         fence: describe(state)
