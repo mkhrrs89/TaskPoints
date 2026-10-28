@@ -144,8 +144,7 @@
     const document = global.document;
     if (!document?.querySelector) return false;
 
-    // The old mobile header buttons stay in layout but become invisible. This
-    // deliberately preserves the exact blank row height/spacing they occupied.
+    // Preserve mobile header spacing while the bottom toolbar owns those links.
     ensureHeaderNavSpacerStyle(document);
     ensureMotionStyle(document);
 
@@ -154,8 +153,7 @@
 
     const primary = findPrimaryRow(nav);
     const secondary = nav.querySelector('.mobile-bottom-nav-secondary');
-    const taskDropdown = nav.querySelector('.mobile-task-dropdown');
-    if (!primary || !secondary || !taskDropdown) return false;
+    if (!primary || !secondary) return false;
 
     const today = Array.from(secondary.querySelectorAll('a[href]')).find((anchor) => {
       const href = hrefPath(anchor);
@@ -171,34 +169,25 @@
 
     if (!link) {
       link = createStreaksLink(document);
-      // Keep the original insertion point as a safe fallback, then move it
-      // into the exact top-row slot vacated by Tasks below.
-      today.insertAdjacentElement('afterend', link);
+      primary.appendChild(link);
     } else {
       link.setAttribute(LINK_ATTR, 'true');
     }
 
-    // Streaks takes the exact primary-nav position currently occupied by Tasks.
-    if (!isTopRowLink(link)) {
-      if (taskDropdown.parentElement === primary) {
-        taskDropdown.insertAdjacentElement('beforebegin', link);
-      } else {
-        const inbox = Array.from(primary.querySelectorAll('a[href]')).find((anchor) => {
-          const href = hrefPath(anchor);
-          return href === 'inbox.html' || href.endsWith('/inbox.html');
-        });
-        if (inbox) inbox.insertAdjacentElement('afterend', link);
-        else primary.insertBefore(link, primary.children[2] || null);
-      }
+    // Keep Streaks in the primary row immediately after Inbox. The retired
+    // Tasks popup no longer occupies an expanded-row slot.
+    const inbox = Array.from(primary.querySelectorAll('a[href]')).find((anchor) => {
+      const href = hrefPath(anchor);
+      return href === 'inbox.html' || href.endsWith('/inbox.html');
+    });
+    if (!isTopRowLink(link) || (inbox && link.previousElementSibling !== inbox)) {
+      if (inbox) inbox.insertAdjacentElement('afterend', link);
+      else primary.insertBefore(link, primary.children[2] || null);
     }
 
-    // Tasks takes Streaks' former expanded-row position immediately after Today.
-    if (taskDropdown.parentElement !== secondary || taskDropdown.previousElementSibling !== today) {
-      today.insertAdjacentElement('afterend', taskDropdown);
-    }
-
-    // Fill the three requested empty expanded-menu slots in order after Tasks.
-    let previous = taskDropdown;
+    // Keep Sources, Log, Week directly after Today in the expanded row;
+    // all other expanded shortcuts remain exactly as before.
+    let previous = today;
     const expandedLinks = EXPANDED_SHORTCUTS.map((spec) => {
       const shortcut = findOrCreateExpandedShortcut(document, secondary, spec);
       if (shortcut.parentElement !== secondary || shortcut.previousElementSibling !== previous) {
@@ -209,8 +198,7 @@
     });
 
     return isTopRowLink(link)
-      && taskDropdown.parentElement === secondary
-      && taskDropdown.previousElementSibling === today
+      && (!inbox || link.previousElementSibling === inbox)
       && expandedLinks.every((shortcut) => shortcut.parentElement === secondary);
   }
 
@@ -221,8 +209,8 @@
     if (observer) return true;
 
     // Keep a short-lived observer even when the toolbar was already present.
-    // This preserves the swap and new shortcuts if another startup step redraws
-    // the mobile nav.
+    // This preserves Streaks and the expanded shortcuts if another startup
+    // step redraws the mobile nav.
     observer = new global.MutationObserver(() => {
       ensureLink();
     });

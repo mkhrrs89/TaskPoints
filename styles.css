@@ -2151,21 +2151,18 @@ header,
   animation: mobile-bottom-nav-press 240ms cubic-bezier(.34,1.56,.64,1);
 }
 
-/* Mobile popup menu items (Tasks menu + Game dropdown): subtle click-in animation */
+/* Mobile Game dropdown: subtle click-in animation */
 @media (max-width: 640px) {
-  .mobile-task-menu .btn,
   .mobile-bottom-dropdown .dropdown-menu .btn{
     transform-origin: center;
     will-change: transform, filter;
   }
 
-  .mobile-task-menu .btn.is-pressed,
   .mobile-bottom-dropdown .dropdown-menu .btn.is-pressed{
     animation: mobile-popup-menu-press 180ms cubic-bezier(.34,1.56,.64,1);
   }
 
   /* Fallback for iOS/tap edge cases */
-  .mobile-task-menu .btn:active,
   .mobile-bottom-dropdown .dropdown-menu .btn:active{
     transform: scale(0.965);
     filter: brightness(0.96);
@@ -2244,13 +2241,6 @@ header,
   border-left: 1px solid rgba(15,23,42,0.7);
 }
 
-.mobile-task-dropdown{
-  position: relative;
-  flex: 1;
-  display: flex;
-  justify-content: center;
-}
-
 .mobile-bottom-dropdown{
   position: relative;
   flex: 1;
@@ -2260,23 +2250,6 @@ header,
 
 .mobile-bottom-dropdown .dropdown-toggle{
   position: relative;
-}
-
-.mobile-task-toggle{
-  position: relative;
-}
-
-.mobile-task-toggle::before{
-  content: "";
-  position: absolute;
-  top: -6px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 0;
-  height: 0;
-  border-left: 6px solid transparent;
-  border-right: 6px solid transparent;
-  border-bottom: 5px solid rgba(226,232,240,0.6);
 }
 
 .mobile-bottom-dropdown .dropdown-toggle::before{
@@ -2290,27 +2263,6 @@ header,
   border-left: 6px solid transparent;
   border-right: 6px solid transparent;
   border-bottom: 5px solid rgba(226,232,240,0.6);
-}
-
-.mobile-task-menu{
-  position: absolute;
-  bottom: calc(100% + var(--tp-menu-gap) + var(--tp-bottom-nav-pad-top));
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--tp-teal-grad);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 180px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
-  z-index: var(--tp-z-toolbar-popup-layer);
-}
-
-.mobile-task-menu.hidden{
-  display: none !important;
 }
 
 .mobile-bottom-dropdown .dropdown-menu{
@@ -2330,10 +2282,6 @@ header,
 
   .mobile-bottom-nav-secondary > * + *{
     border-color: rgba(148,163,184,0.7);
-  }
-
-  .mobile-task-toggle::before{
-    border-bottom-color: rgba(15,23,42,0.45);
   }
 
   .mobile-bottom-dropdown .dropdown-toggle::before{
@@ -5590,6 +5538,121 @@ metal background attached only to the day-bubble row.
   display: none !important;
 }
 
+/* Weekly Work Hours tracker: read-only summary of SCWM Work Hours entries. */
+.home-work-hours-card {
+  padding: 15px 18px 13px;
+  min-width: 0;
+  border: none; /* Override the 1px border inherited from .glass. */
+  background: var(--tp-btn-teal-grad);
+}
+
+.home-work-hours-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  column-gap: 12px;
+  row-gap: 3px;
+  margin-bottom: 11px;
+}
+
+.home-work-hours-title {
+  font-family: 'Teko', 'Inter', ui-sans-serif, system-ui, sans-serif;
+  color: #f0faf9;
+  font-size: 1.65rem;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.015em;
+}
+
+.home-work-hours-week {
+  color: #adbfc2;
+  font-size: 0.77rem;
+  font-weight: 600;
+}
+
+.home-work-hours-totals {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.home-work-hours-total { min-width: 0; }
+.home-work-hours-remaining { text-align: right; }
+.home-work-hours-caption {
+  display: block;
+  margin-bottom: 2px;
+  color: #adc3c5;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.home-work-hours-number {
+  color: #fff;
+  font-family: 'Teko', 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-size: clamp(2rem, 5vw, 2.5rem);
+  font-weight: 500;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.home-work-hours-unit {
+  color: #cbd8d8;
+  font-size: 0.81rem;
+}
+
+.home-work-hours-progress-track {
+  height: 9px;
+  overflow: hidden;
+  background: rgba(169, 197, 198, 0.19);
+  border-radius: 999px;
+}
+
+.home-work-hours-progress-fill {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #347c82, #64c6be);
+  transition: width 220ms ease-out;
+}
+
+.home-work-hours-footer {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 5px 12px;
+  margin-top: 6px;
+}
+
+.home-work-hours-status {
+  color: #c2d5d5;
+  font-size: 0.74rem;
+  line-height: 1.2;
+}
+
+.home-work-hours-average {
+  color: #d4e5e5;
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 480px) {
+  .home-work-hours-card { padding: 13px 14px 12px; }
+  .home-work-hours-number { font-size: 2.1rem; }
+  .home-work-hours-unit { font-size: 0.74rem; }
+  .home-work-hours-heading { margin-bottom: 9px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-work-hours-progress-fill { transition: none; }
+}
+
 /* Mobile: make the Reminders card shorter without shrinking text */
 #remindersSection{
   margin-top: -8px !important;
@@ -7553,5 +7616,37 @@ metal background attached only to the day-bubble row.
   .habitGroup--rail-layout .habitGroupBody > .habitRow.habitRow--week-complete{
     padding-left:8px;
     padding-right:8px;
+  }
+}
+
+/* Main Home mobile section rhythm: 16px between adjacent cards.
+   Keep the desktop layout untouched. In particular, the Featured Matchup
+   mount's mb-3 and Reminders' -8px offsets must not distort mobile spacing. */
+@media (max-width: 767px) {
+  #homeTopCardStack {
+    margin-bottom: 16px !important; /* Trend graph → Work Hours (or breakdown) */
+  }
+
+  #homeTopCardStack > #homeSeasonChampionshipMount,
+  #homeTopCardStack > .inertiaTrendRow {
+    margin-top: 16px !important;    /* Scoreboard → Featured → Inertia */
+    margin-bottom: 0 !important;    /* Cancel Featured's extra mb-3 */
+  }
+
+  #homeTopCardStack > .inertiaTrendRow {
+    row-gap: 16px;                 /* Inertia/Streak/Yesterday → Score Trend */
+  }
+
+  #todayBreakdownCard {
+    margin-bottom: 16px !important; /* If visible, give its own 16px gap */
+  }
+
+  #homeWorkHoursSection {
+    margin-bottom: 16px !important; /* Work Hours → Reminders/Streak Bonus */
+  }
+
+  .home-reminders-row #remindersSection,
+  .home-reminders-row .home-reminders-sidecar {
+    margin-top: 0 !important;      /* Remove existing mobile -8px pull-up */
   }
 }

@@ -1419,6 +1419,7 @@ function normalizeState(s) {
     opponentDripSchedules: Array.isArray(s.opponentDripSchedules) ? s.opponentDripSchedules : [],
     youImageId:  typeof s.youImageId === "string" ? s.youImageId : "",
     youName: typeof s.youName === "string" ? s.youName : "",
+    youRivalId: typeof s.youRivalId === "string" ? s.youRivalId : "",
     youPrimaryColor: normalizePlayerColor(s.youPrimaryColor, DEFAULT_PRIMARY_COLOR),
     youSecondaryColor: normalizePlayerColor(s.youSecondaryColor, DEFAULT_SECONDARY_COLOR),
     projects: Array.isArray(s.projects) ? s.projects : [],
@@ -2722,6 +2723,7 @@ async function renderPlayers() {
     id: "YOU",
     pid: "P000",
     name: youName,
+    rivalId: typeof state.youRivalId === "string" ? state.youRivalId : "",
     imageId: state.youImageId || "",
     todayPoints: todayPoints.toFixed(1),
     primaryColor: youColors.primaryColor,
@@ -3065,6 +3067,13 @@ const rankingByPlayerId = new Map(
             placeholder="You"
           />
           <p class="text-[11px] opacity-70">Leave blank to keep “You”.</p>
+        </div>
+
+        <div class="player-editor-field">
+          <label for="youRivalId">Rival</label>
+          <select id="youRivalId" data-field="rivalId" class="input mt-1">
+            ${buildPlayerRivalOptions({ excludePlayerId: "YOU", selectedRivalId: state.youRivalId || "" })}
+          </select>
         </div>
 
 <div class="player-edit-color-control">
@@ -3700,13 +3709,18 @@ if (act === "clear-you-photo") {
   if (act === "done-you") {
     const card = btn.closest(".playerCard");
     const nameInput = card ? card.querySelector('input[data-field="you-name"]') : null;
+    const rivalInput = card ? card.querySelector('select[data-field="rivalId"]') : null;
     const primaryColorInput = card ? card.querySelector('input[data-field="primaryColor"]') : null;
     const secondaryColorInput = card ? card.querySelector('input[data-field="secondaryColor"]') : null;
     const nextName = nameInput ? (nameInput.value || "").trim() : "";
+    const nextRivalId = rivalInput ? String(rivalInput.value || "").trim() : String(state.youRivalId || "").trim();
+    const validRival = nextRivalId !== "YOU" && (Array.isArray(state.players) ? state.players : [])
+      .some((player) => String(player?.id || "") === nextRivalId);
     const youColors = getYouPlayerColors();
     const nextPrimaryColor = normalizePlayerColor(primaryColorInput ? primaryColorInput.value : youColors.primaryColor, DEFAULT_PRIMARY_COLOR);
     const nextSecondaryColor = normalizePlayerColor(secondaryColorInput ? secondaryColorInput.value : youColors.secondaryColor, DEFAULT_SECONDARY_COLOR);
     state.youName = nextName;
+    state.youRivalId = validRival ? nextRivalId : "";
     state.youPrimaryColor = nextPrimaryColor;
     state.youSecondaryColor = nextSecondaryColor;
     state = saveState(state, { allowStickyOverwriteKeys: ["youImageId", "youName", "youPrimaryColor", "youSecondaryColor"] });

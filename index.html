@@ -956,7 +956,7 @@ Nothing visible on the page is built here. === -->
 <!--    TOP ROW (START) -->
 <!--    This is the first “main content” block under the header. -->
 <!--    ======================================================================= -->
-  <div class="space-y-3 mb-6">
+  <div id="homeTopCardStack" class="space-y-3 mb-6">
     <div class="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[2fr_1fr]">
       
       <!-- SCOREBOARD CARD (START) Shows You vs Opponent + score + diff. -->
@@ -1191,6 +1191,31 @@ Nothing visible on the page is built here. === -->
       <div id="todayBreakdownBar" class="h-full flex"></div>
     </div>
   </div>
+
+<!-- Live weekly Work SCWM hours. Derived from existing entries; no new saved data. -->
+<section id="homeWorkHoursSection" class="glass home-work-hours-card mb-6" aria-labelledby="homeWorkHoursTitle">
+  <div class="home-work-hours-heading">
+    <h2 id="homeWorkHoursTitle" class="home-work-hours-title">Work Hours</h2>
+    <span id="homeWorkHoursWeek" class="home-work-hours-week">This week · Mon–Sun</span>
+  </div>
+  <div class="home-work-hours-totals">
+    <div class="home-work-hours-total">
+      <span class="home-work-hours-caption">Logged</span>
+      <div><span id="homeWorkHoursLogged" class="home-work-hours-number">0</span><span class="home-work-hours-unit"> hrs</span></div>
+    </div>
+    <div class="home-work-hours-total home-work-hours-remaining">
+      <span class="home-work-hours-caption">Until 40</span>
+      <div><span id="homeWorkHoursRemaining" class="home-work-hours-number">40</span><span class="home-work-hours-unit"> hrs left</span></div>
+    </div>
+  </div>
+  <div id="homeWorkHoursProgressTrack" class="home-work-hours-progress-track" role="progressbar" aria-label="Work hours toward 40 this week" aria-valuemin="0" aria-valuemax="40" aria-valuenow="0">
+    <div id="homeWorkHoursProgress" class="home-work-hours-progress-fill" style="width:0%"></div>
+  </div>
+  <div class="home-work-hours-footer">
+    <div id="homeWorkHoursStatus" class="home-work-hours-status" aria-live="polite">0 of 40 hours this week</div>
+    <div id="homeWorkHoursAverage" class="home-work-hours-average" aria-label="Average work hours per logged day this week">Avg — hrs/day</div>
+  </div>
+</section>
 
 <div class="home-reminders-row mb-6">
   <div id="remindersSection" class="glass reminders-card sectionCard sectionCard--teal">
@@ -2916,7 +2941,6 @@ function openAddTaskModal() {
   // ✅ add this
   const rep = $("repeatInput");
   syncCustomRepeatUI(rep);
-  ensureCreateTaskSkillRows();
 }
 
 
@@ -10669,129 +10693,6 @@ function showTrashToast(taskId){
   setTimeout(close, 4500);
 }
 
-function getTaskSkillsForEditor(task){
-  const rows = Array.isArray(task?.skills)
-    ? task.skills.map((row) => ({
-        skill: typeof row?.skill === 'string' ? row.skill : '',
-        pts: row?.pts == null ? '' : String(row.pts)
-      }))
-    : [];
-
-  while (rows.length < 2) {
-    rows.push({ skill: '', pts: '' });
-  }
-
-  return rows;
-}
-
-function renderTaskSkillRow(row){
-  const skill = typeof row?.skill === 'string' ? row.skill : '';
-  const pts = row?.pts == null ? '' : String(row.pts);
-
-  return `
-    <div class="task-skill-row" data-task-skill-row style="display:grid; grid-template-columns:minmax(0,3fr) minmax(84px,1fr); gap:8px;">
-      <input
-        class="input"
-        data-task-skill-field="skill"
-        placeholder="Skill"
-        value="${escapeHtml(skill)}"
-      >
-      <input
-        class="input"
-        data-task-skill-field="pts"
-        placeholder="Pts"
-        value="${escapeHtml(pts)}"
-      >
-    </div>
-  `;
-}
-
-function readTaskSkillsFromCard(card){
-  return Array.from(card.querySelectorAll('[data-task-skill-row]')).map((row) => {
-    const skillInput = row.querySelector('[data-task-skill-field="skill"]');
-    const ptsInput = row.querySelector('[data-task-skill-field="pts"]');
-
-    return {
-      skill: (skillInput?.value || '').trim(),
-      pts: (ptsInput?.value || '').trim()
-    };
-  });
-}
-
-function ensureCreateTaskSkillRows(){
-  const rowsWrap = $('createTaskSkillsRows');
-  if (!rowsWrap) return;
-  if (rowsWrap.querySelector('[data-task-skill-row]')) return;
-  rowsWrap.innerHTML = getTaskSkillsForEditor({ skills: [] }).map(renderTaskSkillRow).join('');
-}
-
-function readCreateTaskSkills(){
-  const editor = $('createTaskSkillsEditor');
-  if (!editor) return [];
-  return readTaskSkillsFromCard(editor);
-}
-
-function bindCreateTaskSkillsEditor(){
-  const editor = $('createTaskSkillsEditor');
-  if (!editor || editor.dataset.skillEditorBound === '1') return;
-  editor.dataset.skillEditorBound = '1';
-
-  editor.addEventListener('click', (event) => {
-    const addBtn = event.target.closest('[data-task-skill-add]');
-    if (!addBtn) return;
-    const rowsWrap = editor.querySelector('[data-task-skills-rows]');
-    if (!rowsWrap) return;
-    rowsWrap.insertAdjacentHTML('beforeend', renderTaskSkillRow({ skill: '', pts: '' }));
-  });
-}
-
-function saveTaskSkillsFromCard(taskId, card){
-  const task = state.tasks.find((x) => x.id === taskId);
-  if (!task || !card) return;
-
-  task.skills = readTaskSkillsFromCard(card);
-  task.updatedAtISO = new Date().toISOString();
-  save();
-}
-
-function queueTaskSkillsAutosave(taskId, card){
-  if (!card) return;
-  clearTimeout(card.__taskSkillsAutosaveTimer);
-  card.__taskSkillsAutosaveTimer = setTimeout(() => {
-    saveTaskSkillsFromCard(taskId, card);
-  }, 150);
-}
-
-function wireTaskSkillEditor(card, taskId){
-  if (!card || !taskId) return;
-
-  card.querySelectorAll('[data-task-skill-field]').forEach((input) => {
-    if (input.dataset.skillBound === '1') return;
-    input.dataset.skillBound = '1';
-
-    input.addEventListener('input', () => {
-      queueTaskSkillsAutosave(taskId, card);
-    });
-
-    input.addEventListener('change', () => {
-      saveTaskSkillsFromCard(taskId, card);
-    });
-  });
-
-  const addBtn = card.querySelector('[data-task-skill-add]');
-  if (addBtn && addBtn.dataset.skillAddBound !== '1') {
-    addBtn.dataset.skillAddBound = '1';
-    addBtn.addEventListener('click', () => {
-      const rowsWrap = card.querySelector('[data-task-skills-rows]');
-      if (!rowsWrap) return;
-
-      rowsWrap.insertAdjacentHTML('beforeend', renderTaskSkillRow({ skill: '', pts: '' }));
-      wireTaskSkillEditor(card, taskId);
-      saveTaskSkillsFromCard(taskId, card);
-    });
-  }
-}
-  
 function renderTasks(stateInput = null){
   const container=$('taskList'), empty=$('emptyList'); container.innerHTML='';
   window.updateUndatedReminderIsland?.();
@@ -10899,7 +10800,6 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
         const recMode = rec.mode || 'none';
         const recCount = Number.isFinite(rec.customCount) && rec.customCount > 0 ? rec.customCount : 1;
         const recUnit  = rec.customUnit || 'day';
-        const skillRows = getTaskSkillsForEditor(t).map(renderTaskSkillRow).join('');
         
         card.innerHTML = `
           <div class="flex flex-col gap-3">
@@ -10961,30 +10861,6 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
   <input class="input mt-1" data-field="tags" value="${(Array.isArray(t.tags) ? t.tags : []).join(', ')}">
 </div>
 
-<div class="sm:col-span-2">
-  <label class="text-xs muted block">Skills</label>
-
-  <div class="mt-2 grid gap-2">
-    <div style="display:grid; grid-template-columns:minmax(0,3fr) minmax(84px,1fr); gap:8px;" class="text-[11px] muted uppercase tracking-wide">
-      <div>Skill</div>
-      <div>Pts</div>
-    </div>
-
-    <div data-task-skills-rows class="grid gap-2">
-      ${skillRows}
-    </div>
-
-    <div>
-      <button
-        type="button"
-        class="btn btn-ghost btn-task"
-        data-task-skill-add="1"
-      >
-        Add
-      </button>
-    </div>
-  </div>
-</div>
             </div>
             <div class="flex gap-2 flex-wrap justify-end">
               <button class="btn btn-success" data-task-action="task-save" data-task-id="${t.id}">Save</button>
@@ -11013,7 +10889,6 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
           toggle();
         }
         
-wireTaskSkillEditor(card, t.id);
         
       } else {
         card.innerHTML = `
@@ -11090,6 +10965,114 @@ function computeTodayStreakMultiplierBonusTotal() {
   });
 
   return Math.round((total + Number.EPSILON) * 100) / 100;
+}
+
+const HOME_WORK_HOURS_GOAL = 40;
+
+// Calculate from the Work SCWM "Hours" value, not points/Work Score.
+// The input is getDerived().workEntries, sorted newest-first by completedAtISO.
+function calculateHomeWeeklyWorkHours(workEntries, now = new Date()) {
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  const startKey = dateKey(start);
+  const endKey = dateKey(end);
+  const seenDays = new Set();
+  let total = 0;
+  let loggedDays = 0;
+
+  (Array.isArray(workEntries) ? workEntries : []).forEach(entry => {
+    if (!entry || (entry.source !== 'work' && !String(entry.title || '').startsWith('Work Score'))) return;
+    // Work SCWM edits use completedAtISO as their canonical selected day.
+    const when = entry.completedAtISO ? new Date(entry.completedAtISO) : null;
+    const dayKey = when && Number.isFinite(when.getTime())
+      ? dateKey(when)
+      : (typeof entry.dateKey === 'string' ? entry.dateKey : '');
+    if (dayKey < startKey || dayKey > endKey || seenDays.has(dayKey)) return;
+
+    const storedHours = Object.prototype.hasOwnProperty.call(entry, 'workHours')
+      ? entry.workHours
+      : (() => {
+          // Old imports may have only "Hours 8" in their Work title.
+          const match = String(entry.title || '').match(/\bHours?\s*[:=]?\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))/i);
+          return match ? match[1] : null;
+        })();
+    if (storedHours == null || String(storedHours).trim() === '') return;
+    const hours = Number(storedHours);
+    if (!Number.isFinite(hours) || hours < 0) return;
+
+    // One Work SCWM entry per calendar day; duplicates must not add extra hours.
+    seenDays.add(dayKey);
+    total += hours;
+    // Only days with positive recorded hours contribute to the daily average.
+    // Weekend auto-zero entries and unfilled days are not worked days.
+    // PTO recorded as Work Score 0 + Hours 8 still counts as a logged day.
+    if (hours > 0) loggedDays += 1;
+  });
+
+  const logged = Math.round((total + Number.EPSILON) * 100) / 100;
+  return {
+    weekStart: start,
+    weekEnd: end,
+    logged,
+    loggedDays,
+    averagePerLoggedDay: loggedDays > 0 ? Math.round(((total / loggedDays) + Number.EPSILON) * 100) / 100 : null,
+    remaining: Math.max(0, Math.round((HOME_WORK_HOURS_GOAL - logged + Number.EPSILON) * 100) / 100),
+    over: Math.max(0, Math.round((logged - HOME_WORK_HOURS_GOAL + Number.EPSILON) * 100) / 100),
+    progress: Math.min(100, Math.max(0, logged / HOME_WORK_HOURS_GOAL * 100))
+  };
+}
+
+function formatHomeWorkHours(value) {
+  return Number(value.toFixed(2)).toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function renderHomeWorkHours() {
+  const loggedEl = $('homeWorkHoursLogged');
+  if (!loggedEl) return;
+  const remainingEl = $('homeWorkHoursRemaining');
+  const weekEl = $('homeWorkHoursWeek');
+  const progressEl = $('homeWorkHoursProgress');
+  const trackEl = $('homeWorkHoursProgressTrack');
+  const statusEl = $('homeWorkHoursStatus');
+  const averageEl = $('homeWorkHoursAverage');
+  const summary = calculateHomeWeeklyWorkHours(getDerived().workEntries, new Date());
+  const dateOptions = { month: 'short', day: 'numeric' };
+  const startText = summary.weekStart.toLocaleDateString(undefined, dateOptions);
+  const endText = summary.weekEnd.toLocaleDateString(undefined, dateOptions);
+  if (weekEl) weekEl.textContent = 'This week · ' + startText + ' – ' + endText;
+  loggedEl.textContent = formatHomeWorkHours(summary.logged);
+  if (remainingEl) remainingEl.textContent = formatHomeWorkHours(summary.remaining);
+  if (progressEl) progressEl.style.width = String(summary.progress) + '%';
+  if (trackEl) trackEl.setAttribute('aria-valuenow', String(Math.min(40, summary.logged)));
+  if (averageEl) averageEl.textContent = summary.loggedDays
+    ? 'Avg ' + formatHomeWorkHours(summary.averagePerLoggedDay) + ' hrs/day · ' + summary.loggedDays + (summary.loggedDays === 1 ? ' day' : ' days')
+    : 'Avg — hrs/day';
+  if (statusEl) {
+    statusEl.textContent = summary.over > 0
+      ? formatHomeWorkHours(summary.over) + ' hours over your 40-hour goal'
+      : summary.remaining === 0
+        ? '40-hour goal reached!'
+        : formatHomeWorkHours(summary.logged) + ' of 40 hours this week';
+  }
+}
+
+// A read-only timer refreshes the card if TaskPoints stays open across Sunday
+// night. On suspended iPhones, pageshow/visibilitychange refresh it instead.
+function startHomeWorkHoursWeekRollover() {
+  const scheduleNext = () => {
+    const now = new Date();
+    const nextMonday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    nextMonday.setDate(nextMonday.getDate() + (((8 - nextMonday.getDay()) % 7) || 7));
+    nextMonday.setHours(0, 0, 1, 0);
+    const delay = Math.max(1000, nextMonday.getTime() - now.getTime());
+    setTimeout(() => {
+      renderHomeWorkHours();
+      scheduleNext();
+    }, delay);
+  };
+  scheduleNext();
 }
 
 function renderHomeStreakBonusSidecar() {
@@ -12638,7 +12621,7 @@ const task = {
   points: Number($('pointsInput').value)||0,
   recurrence: rec,
   tags,
-  skills: readCreateTaskSkills(),
+  skills: [],
   skipDates: [],
   hidden: false,
   status: 'active',
@@ -12775,10 +12758,6 @@ function clearForm(){
   if ($('repeatCustomCount')) $('repeatCustomCount').value='1';
   if ($('repeatCustomUnit')) $('repeatCustomUnit').value='day';
   if ($('tagsInput')) $('tagsInput').value='';          // ⬅ new
-  const createSkillRows = $('createTaskSkillsRows');
-  if (createSkillRows) {
-    createSkillRows.innerHTML = getTaskSkillsForEditor({ skills: [] }).map(renderTaskSkillRow).join('');
-  }
   if (repeatCustomRow) repeatCustomRow.classList.add('hidden');
 }
 
@@ -13018,7 +12997,6 @@ function saveTaskEdit(id,card){
   const impSel=card.querySelector('select[data-field="importance"]');
   const repSel=card.querySelector('select[data-field="repeat"]');
   const tagsInput=card.querySelector('input[data-field="tags"]');
-const skillRows = readTaskSkillsFromCard(card);
 
   t.title = titleInput.value.trim() || t.title;
   t.points = Number(ptsInput.value)||0;
@@ -13038,7 +13016,6 @@ const skillRows = readTaskSkillsFromCard(card);
       .filter(s => s.length > 0);
   }
 
-t.skills = skillRows;
   
 if (repSel) {
   const mode = repSel.value || 'none';
@@ -14289,6 +14266,7 @@ function renderAll() {
     try {
 try { tpPerfTime('renderStats (call)', () => renderStats()); } catch (e) { console.error('renderStats error:', e); }
 try { tpPerfTime('renderTasks', () => renderTasks()); } catch (e) { console.error('renderTasks error:', e); }
+try { tpPerfTime('renderHomeWorkHours', () => renderHomeWorkHours()); } catch (e) { console.error('renderHomeWorkHours error:', e); }
 try { tpPerfTime('renderReminders', () => renderReminders()); } catch (e) { console.error('renderReminders error:', e); }
 try { tpPerfTime('renderHomeStreakBonusSidecar', () => renderHomeStreakBonusSidecar()); } catch (e) { console.error('renderHomeStreakBonusSidecar error:', e); }
 try { tpPerfTime('renderScoreDashboardV2_Skeleton', () => renderScoreDashboardV2_Skeleton()); } catch (e) { console.error('renderScoreDashboardV2_Skeleton error:', e); }
@@ -14456,8 +14434,6 @@ try {
   rep?.addEventListener("change", () => syncCustomRepeatUI(rep));
   rep?.addEventListener("input",  () => syncCustomRepeatUI(rep)); // extra iOS safety
   syncCustomRepeatUI(rep); // sync once at load
-  bindCreateTaskSkillsEditor();
-  ensureCreateTaskSkillRows();
   initTaskCompactToggle();
   
   initCaloriesDatePicker();
@@ -14480,6 +14456,7 @@ renderFlexActions();
 
 // paint ASAP
 scheduleRender(renderAll);
+startHomeWorkHoursWeekRollover();
 scheduleHomeSeasonMaterializationAfterFirstPaint();
 scheduleInitialHomeLiveDiffCapture();
 
@@ -14557,10 +14534,14 @@ window.addEventListener('pageshow', (event) => {
   }
 
   refreshMainPageIfChanged('pageshow');
+  renderHomeWorkHours();
 });
 
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) refreshMainPageIfChanged('visibilitychange');
+  if (!document.hidden) {
+    refreshMainPageIfChanged('visibilitychange');
+    renderHomeWorkHours();
+  }
 });
   
   startOpponentDripTicker();
@@ -15077,29 +15058,6 @@ function tpPerfMark(label) {
         class="input"
         placeholder="Tags (e.g., work, coding, creative)"
       >
-
-      <div id="createTaskSkillsEditor">
-        <label class="text-xs muted block">Skills</label>
-
-        <div class="mt-2 grid gap-2">
-          <div style="display:grid; grid-template-columns:minmax(0,3fr) minmax(84px,1fr); gap:8px;" class="text-[11px] muted uppercase tracking-wide">
-            <div>Skill</div>
-            <div>Pts</div>
-          </div>
-
-          <div id="createTaskSkillsRows" data-task-skills-rows class="grid gap-2"></div>
-
-          <div>
-            <button
-              type="button"
-              class="btn btn-ghost btn-task"
-              data-task-skill-add="1"
-            >
-              Add
-            </button>
-          </div>
-        </div>
-      </div>
 
       <button id="addBtn" class="btn btn-primary">Add Task</button>
     </div>

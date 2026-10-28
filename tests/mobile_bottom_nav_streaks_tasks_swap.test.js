@@ -6,30 +6,73 @@ const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 const nav = fs.readFileSync(path.join(ROOT, 'streaks_nav_link.js'), 'utf8');
 const toolbar = fs.readFileSync(path.join(ROOT, 'toolbar.js'), 'utf8');
+const styles = fs.readFileSync(path.join(ROOT, 'styles.css'), 'utf8');
 
-test('Streaks takes the primary slot vacated by Tasks', () => {
-  assert.match(nav, /const taskDropdown = nav\.querySelector\('\.mobile-task-dropdown'\)/);
-  assert.match(nav, /taskDropdown\.insertAdjacentElement\('beforebegin', link\)/);
+function section(source, from, to) {
+  const a = source.indexOf(from);
+  const b = source.indexOf(to, a + from.length);
+  assert.ok(a >= 0 && b > a, `Missing section: ${from}`);
+  return source.slice(a, b);
+}
+
+test('Main toolbar no longer renders Tasks button or its Add a Task / Go To Tasks submenu', () => {
+  const topRow = section(toolbar, 'function buildMobileBottomNavLinks() {', 'function ensureBottomToolbarMount() {');
+  assert.doesNotMatch(topRow, /mobileTasksToggle|mobileTasksMenu|mobileAddTaskBtn|mobileGoTasksBtn/);
+  assert.doesNotMatch(topRow, /mobile-task-dropdown|mobile-task-toggle|mobile-task-menu/);
+  assert.doesNotMatch(topRow, />Tasks<|>Add a Task<|>Go To Tasks</);
+  assert.doesNotMatch(toolbar, /setupMobileTasksMenu|__tpTasksMenuPointerListener|__tpTasksMenuResizeListener/);
+});
+
+test('Primary row still contains Home, Inbox, Game and Settings, with Streaks inserted after Inbox', () => {
+  const topRow = section(toolbar, 'function buildMobileBottomNavLinks() {', 'function ensureBottomToolbarMount() {');
+  for (const page of ['index.html', 'inbox.html', 'gamehub.html', 'settings.html']) {
+    assert.match(topRow, new RegExp(page.replace('.', '\\.') ));
+  }
   assert.match(nav, /href = 'streaks\.html'/);
   assert.match(nav, /textContent = 'Streaks'/);
+  assert.match(nav, /inbox\.insertAdjacentElement\('afterend', link\)/);
+  assert.doesNotMatch(nav, /taskDropdown|mobile-task-dropdown/);
 });
 
-test('Tasks moves to Streaks former expanded position immediately after Today', () => {
+test('Expanded shortcuts follow Today directly: Sources, Log, Week', () => {
   assert.match(nav, /href === 'today\.html'/);
-  assert.match(nav, /today\.insertAdjacentElement\('afterend', taskDropdown\)/);
-  assert.match(nav, /taskDropdown\.parentElement === secondary/);
-  assert.match(nav, /taskDropdown\.previousElementSibling === today/);
-});
-
-test('expanded mobile nav fills the next three slots with Sources, Log, then Week', () => {
+  assert.match(nav, /let previous = today/);
   assert.match(nav, /href: 'daily_sources\.html', label: 'Sources'/);
   assert.match(nav, /href: 'log\.html', label: 'Log'/);
   assert.match(nav, /href: 'week\.html', label: 'Week'/);
-  assert.match(nav, /let previous = taskDropdown/);
   assert.match(nav, /previous\.insertAdjacentElement\('afterend', shortcut\)/);
+  assert.match(styles, /\.mobile-bottom-nav-secondary\s*\{[^}]*grid-template-columns:\s*repeat\(5/);
 });
 
-test('mobile header nav buttons are visually removed while their row footprint is preserved', () => {
+test('All existing expanded toolbar destinations remain intact', () => {
+  const expanded = section(toolbar, '<div class="mobile-bottom-nav-expanded">', '</nav>');
+  for (const href of ['projects.html', 'notes.html', 'achievements.html', 'skills.html',
+    'tournament.html', 'season.html', 'today.html']) {
+    assert.ok(expanded.includes('href="' + href + '"'), `Missing existing expanded shortcut: ${href}`);
+  }
+  assert.match(nav, /EXPANDED_SHORTCUTS\.map/);
+});
+
+test('Game popup and its animation remain functional', () => {
+  assert.match(toolbar, /data-dropdown-toggle/);
+  assert.match(toolbar, /class="dropdown-menu"/);
+  assert.match(toolbar, /setupDropdowns\(nav\)/);
+  assert.match(toolbar, /setupPopupMenuPressAnimation\(\)/);
+  assert.match(toolbar, /const selector = '\.mobile-bottom-dropdown \.dropdown-menu \.btn'/);
+  assert.match(styles, /\.mobile-bottom-dropdown \.dropdown-menu\s*\{/);
+  assert.doesNotMatch(styles, /\.mobile-task-menu|\.mobile-task-dropdown|\.mobile-task-toggle/);
+});
+
+test('Shared mobile drag expansion, press effects and toolbar height remain installed', () => {
+  assert.match(toolbar, /setupBottomNavPressAnimation\(nav\)/);
+  assert.match(toolbar, /setupBottomNavDragExpand\(nav\)/);
+  assert.match(toolbar, /setupToolbarStackHeightTracking\(nav\)/);
+  assert.match(toolbar, /function setupBottomNavDragExpand\(nav\)/);
+  assert.match(toolbar, /if \(event\.target\.closest\('\.dropdown-menu'\)\) return/);
+  assert.doesNotMatch(toolbar, /mobileTasksMenu/);
+});
+
+test('Mobile header buttons remain visually hidden without collapsing the row', () => {
   assert.match(nav, /\.header-nav > a\[href="index\.html"\]/);
   assert.match(nav, /\.header-nav > a\[href="daily_sources\.html"\]/);
   assert.match(nav, /\.header-nav > a\[href="log\.html"\]/);
@@ -40,7 +83,7 @@ test('mobile header nav buttons are visually removed while their row footprint i
   assert.doesNotMatch(nav, /\.header-nav[\s\S]{0,500}display:\s*none\s*!important/);
 });
 
-test('mobile bottom menu motion uses composited child transforms and avoids filtered shell animation', () => {
+test('Bottom menu motion remains composited and avoids filtered shell animation', () => {
   assert.match(nav, /MOTION_STYLE_ID = 'taskpoints-mobile-bottom-nav-motion-style'/);
   assert.match(nav, /will-change: height, transform/);
   assert.match(nav, /filter: none !important/);
@@ -51,11 +94,11 @@ test('mobile bottom menu motion uses composited child transforms and avoids filt
   assert.match(nav, /\.mobile-bottom-nav-shell\.is-dragging[\s\S]*transition: none !important/);
 });
 
-test('moving Tasks preserves its existing popup and actions', () => {
-  assert.match(toolbar, /id="mobileTasksToggle"/);
-  assert.match(toolbar, /id="mobileTasksMenu"/);
-  assert.match(toolbar, /id="mobileAddTaskBtn"/);
-  assert.match(toolbar, /id="mobileGoTasksBtn"/);
-  assert.match(toolbar, /function setupMobileTasksMenu\(\)/);
-  assert.doesNotMatch(nav, /\.remove\(\)/);
+test('Task editing and adding features outside the retired toolbar are unaffected', () => {
+  const home = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  assert.match(home, /function openAddTaskModal\(\)/);
+  assert.match(home, /function scrollToTasks\(\)/);
+  assert.match(home, /id="homeTabTasks"/);
+  assert.match(home, /id="homePanelTasks"/);
+  assert.match(styles, /#mobileAddTaskFab/);
 });

@@ -2393,6 +2393,87 @@ if (!season) {
       return checks;
     }
 
+    // Coverage is intentionally separate from the 14-day Work Hours value audit:
+    // this checks whether the required daily entries exist, not historical points.
+    function auditRecentMetricCoverage(state, todayDateKey = TaskPointsCore.todayKey()) {
+      const issues = [];
+      const requiredMetrics = ['mood', 'calories'];
+      const todayDate = TaskPointsCore.fromKey(todayDateKey);
+      const recentDayKeys = Array.from({ length: 7 }, (_, idx) => {
+        const day = new Date(todayDate);
+        day.setDate(day.getDate() - (idx + 1));
+        return TaskPointsCore.dateKey(day);
+      });
+      const byDay = new Map(recentDayKeys.map(dayKey => [dayKey, {
+        seenMetrics: new Set(),
+        workEntries: []
+      }]));
+      const scoringSettings = TaskPointsCore.getScoringSettings(state);
+
+      (Array.isArray(state?.completions) ? state.completions : []).forEach(entry => {
+        if (!entry) return;
+        const dayKey = TaskPointsCore.dateKey(entry.completedAtISO || entry.dateKey || '');
+        const day = byDay.get(dayKey);
+        if (!day) return;
+
+        const derived = TaskPointsCore.deriveCompletionPoints
+          ? TaskPointsCore.deriveCompletionPoints(entry, scoringSettings)
+          : null;
+        if (requiredMetrics.includes(derived?.formula)) {
+          day.seenMetrics.add(derived.formula);
+        }
+
+        // Include malformed work entries so they cannot silently count as a
+        // valid primary score merely because the row is present.
+        if (derived?.formula === 'work' || entry.source === 'work'
+            || /^Work Score\b/i.test(String(entry.title || ''))) {
+          day.workEntries.push(entry);
+        }
+      });
+
+      recentDayKeys.forEach(dayKey => {
+        const day = byDay.get(dayKey);
+        requiredMetrics.forEach(metric => {
+          if (!day.seenMetrics.has(metric)) issues.push(`${dayKey}: missing ${metric}`);
+        });
+
+        // Saturday/Sunday are not expected work days. Mood/calories still count.
+        const weekday = TaskPointsCore.fromKey(dayKey).getDay();
+        if (weekday === 0 || weekday === 6) return;
+
+        const workEntries = day.workEntries.map(entry => {
+          const scoreMatch = String(entry.title || '').match(
+            /^Work Score\s*\(\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*\)/i
+          );
+          const score = scoreMatch ? Number(scoreMatch[1]) : NaN;
+          const hasHours = Object.prototype.hasOwnProperty.call(entry, 'workHours');
+          const hoursMatch = !hasHours
+            ? String(entry.title || '').match(/\bHours?\s*[:=]?\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))/i)
+            : null;
+          const rawHours = hasHours ? entry.workHours : (hoursMatch ? hoursMatch[1] : undefined);
+          const hours = rawHours == null || rawHours === '' ? NaN : Number(rawHours);
+          return { score, hours };
+        });
+        const validScores = workEntries.filter(row => Number.isFinite(row.score) && row.score >= 0);
+        if (!validScores.length) {
+          issues.push(`${dayKey}: missing primary Work Score${workEntries.length ? ' (entry has no valid numeric score)' : ''}`);
+          return;
+        }
+
+        // An explicit score of zero means no work was performed. It is valid
+        // without hours, and 0 score + 8 PTO hours is equally valid. When a
+        // nonzero score is also present, don't let a zero-score duplicate hide
+        // missing hours on that worked day.
+        const workedEntries = validScores.filter(row => row.score > 0);
+        if (!workedEntries.length) return;
+        if (!workedEntries.some(row => Number.isFinite(row.hours) && row.hours > 0)) {
+          issues.push(`${dayKey}: missing Work Hours for nonzero primary Work Score`);
+        }
+      });
+
+      return { days: 7, issues };
+    }
+
     function auditWorkHoursLast14Days(state, todayDateKey = TaskPointsCore.todayKey()) {
       const issues = [];
       const completions = Array.isArray(state?.completions) ? state.completions : [];
@@ -2947,53 +3028,19 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
         trace: 'state.storageWarnings[type="storage-quota-save-failed"]'
       });
 
-      // New: Last 7 days (excluding today) have mood/calories/work entries
-      const requiredRecentMetrics = ['mood', 'calories', 'work'];
-      const recentMetricDays = new Map();
-      const recentMissingMetrics = [];
-      const todayKey = TaskPointsCore.todayKey();
-      const todayDate = TaskPointsCore.fromKey(todayKey);
-      const recentDayKeys = Array.from({ length: 7 }, (_, idx) => {
-        const d = new Date(todayDate);
-        d.setDate(d.getDate() - (idx + 1));
-        return TaskPointsCore.dateKey(d);
-      });
-
-      recentDayKeys.forEach(key => {
-        recentMetricDays.set(key, new Set());
-      });
-
-      (state.completions || []).forEach(c => {
-        if (!c) return;
-        const entryDateKey = TaskPointsCore.dateKey(c.completedAtISO || c.dateKey || '');
-        if (!recentMetricDays.has(entryDateKey)) return;
-        const derived = TaskPointsCore.deriveCompletionPoints
-          ? TaskPointsCore.deriveCompletionPoints(c, scoringSettings)
-          : null;
-        if (!derived || !requiredRecentMetrics.includes(derived.formula)) return;
-        recentMetricDays.get(entryDateKey).add(derived.formula);
-      });
-
-      recentDayKeys.forEach(dayKey => {
-        const seenMetrics = recentMetricDays.get(dayKey) || new Set();
-        requiredRecentMetrics.forEach(metric => {
-          if (!seenMetrics.has(metric)) {
-            recentMissingMetrics.push(`${dayKey}: missing ${metric}`);
-          }
-        });
-      });
-
+      const recentMetricCoverage = auditRecentMetricCoverage(state);
+      const recentMissingMetrics = recentMetricCoverage.issues;
       checks.push({
         id: 'recent-metric-coverage',
         title: 'Last 7 days include mood/calories/work entries',
         status: recentMissingMetrics.length ? 'WARN' : 'PASS',
-        expected: 'Each day has at least one mood, calories, and work entry',
+        expected: 'Mood and calories each day; weekdays require primary Work Score and positive Hours unless Work Score is explicitly 0; weekends exempt from Work',
         actual: recentMissingMetrics.length
-          ? `${recentMissingMetrics.length} missing entr${recentMissingMetrics.length === 1 ? 'y' : 'ies'}`
+          ? `${recentMissingMetrics.length} missing/invalid entr${recentMissingMetrics.length === 1 ? 'y' : 'ies'}`
           : 'All covered',
         details: recentMissingMetrics,
-        trace: 'state.completions → TaskPointsCore.deriveCompletionPoints',
-        tips: 'Log a daily mood score, calorie entry, and work score for each day.'
+        trace: 'state.completions → TaskPointsCore.deriveCompletionPoints + Work Score title/workHours',
+        tips: 'Record mood and calories daily. On weekdays, record a primary Work Score and hours worked. An explicit Work Score of 0 marks a non-work day; PTO with 0 score and 8 hours is valid.'
       });
 
       const workHoursAudit = auditWorkHoursLast14Days(state);
