@@ -5595,7 +5595,7 @@ metal background attached only to the day-bubble row.
   padding: 15px 18px 13px;
   min-width: 0;
   border: 1px solid rgba(91, 178, 179, 0.23);
-  background: linear-gradient(135deg, rgba(31, 72, 76, 0.47), rgba(20, 29, 35, 0.75));
+  background: var(--tp-btn-teal-grad);
 }
 
 .home-work-hours-heading {
