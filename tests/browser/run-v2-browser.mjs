@@ -4948,18 +4948,24 @@ try {
     // Simulate an old/non-cooperating tab overwriting both legacy WAL keys.
     // Do not start V2's coordinated replay in the simulated old tab.
     const second=await context.newPage();
-    await second.goto(url,{waitUntil:'load'});
-    const interference=await second.evaluate(({row})=>{
+    // The isolated schema fixture shares the origin but installs no V2 WAL
+    // bridge. It models a genuinely non-cooperating old tab, not another
+    // startup coordinator that might legitimately clear the queue.
+    await second.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    await second.evaluate(({row})=>{
       const competitor={...row,delta:{...row.delta,clientMemo:'different-tab-same-short-id'}};
       localStorage.setItem('taskpoints_v2_pending_mutations_v1',JSON.stringify([competitor]));
       localStorage.setItem('taskpoints_v2_pending_mutation_event_v1:'+row.id,
         JSON.stringify(competitor));
+    },{row:original.row});
+    const interference=await first.evaluate(()=>{
       const wal=window.TaskPointsStateRuntimeV2Wal;
       const read=wal.getPendingRows();
       return {status:wal.getStatus(),readOk:read.ok,error:read.error,
         claim:localStorage.getItem(Array.from({length:localStorage.length},(_,i)=>localStorage.key(i))
           .find(k=>k.startsWith(wal.CLAIM_PREFIX)))};
-    },{row:original.row});
+    });
     assert.equal(interference.readOk,false);
     assert.match(interference.error,/wal_admission_claim_identity_conflict/);
     assert.equal(interference.claim,original.claims[0]);
