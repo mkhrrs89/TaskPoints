@@ -1407,8 +1407,28 @@
   // Inspect the exact durable mutation without writing or replaying it again.
   // The generation and revision checks prevent an unrelated/stale transaction
   // from being mistaken for successful confirmation.
-  async function hasCommittedHabitMutation(mutationId, expectedGeneration) {
-    if (!isDarkEnabled() || !mutationId || !expectedGeneration) return false;
+  // The real V2 ledger keeps an immutable acknowledgement of the full Habit
+  // payload. Its short FNV identifier is only a lookup key, not identity proof.
+  function assertCommittedHabitMutationIdentity(row, delta, generation, mutationId, meta) {
+    const revision = Number(row?.revision);
+    const currentRevision = Number(meta?.revision);
+    if (!row || row.id !== mutationId
+      || row.type !== 'habit-completion-set'
+      || row.status !== 'committed'
+      || row.resetGeneration !== generation
+      || meta?.resetGeneration !== generation
+      || !Number.isSafeInteger(revision) || revision < 1
+      || !Number.isSafeInteger(currentRevision) || revision > currentRevision
+      || mutationIdForDelta(delta, generation) !== mutationId
+      || !row.delta || stableJson(row.delta) !== stableJson(delta)) {
+      throw new Error('state_runtime_v2_mutation_identity_mismatch:' + mutationId);
+    }
+  }
+
+  async function hasCommittedHabitMutation(mutationId, expectedGeneration, expectedDelta = null) {
+    // Never clear a durable WAL row based only on the short mutation ID.
+    if (!isDarkEnabled() || !mutationId || !expectedGeneration || !expectedDelta) return false;
+    const delta = normalizeDelta(expectedDelta);
     const db = await open();
     if (!db) return false;
     const tx = db.transaction(['mutations', 'meta'], 'readonly');
@@ -1416,12 +1436,11 @@
       requestPromise(tx.objectStore('mutations').get(String(mutationId))),
       requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID))
     ]);
-    return mutation?.status === 'committed'
-      && String(mutation?.id || '') === String(mutationId)
-      && String(mutation?.resetGeneration || '') === String(expectedGeneration)
-      && String(meta?.resetGeneration || '') === String(expectedGeneration)
-      && Number.isFinite(Number(mutation?.revision))
-      && Number(meta?.revision || 0) >= Number(mutation.revision);
+    if (!mutation) return false;
+    assertCommittedHabitMutationIdentity(
+      mutation, delta, String(expectedGeneration), String(mutationId), meta
+    );
+    return true;
   }
 
   async function applyHabitDelta(deltaInput, options = {}) {
@@ -1536,6 +1555,10 @@
           }
 
           if (existingMutation) {
+            // Matching a short hash cannot acknowledge a different payload.
+            assertCommittedHabitMutationIdentity(
+              existingMutation, delta, expectedGeneration, mutationId, runtimeMeta
+            );
             duplicate = true;
             return;
           }
