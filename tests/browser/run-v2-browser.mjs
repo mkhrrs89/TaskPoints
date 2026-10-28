@@ -1369,6 +1369,8 @@ try {
           expectedEpoch:0,marker:'must-not-commit'});
       }finally{IDBObjectStore.prototype.put=originalPut;}
       const afterFailure=await runtime.rehearsePreviewDurableWriterFence('read');
+      const failedMarker=await runtime.rehearsePreviewDurableWriterFence(
+        'inspect_marker',{marker:'must-not-commit'});
       const retry=await runtime.rehearsePreviewDurableWriterFence('writer',{
         expectedEpoch:0,marker:'clean-retry'});
       const afterRetry=await runtime.rehearsePreviewDurableWriterFence('read');
@@ -1393,7 +1395,7 @@ try {
           tx.onabort=()=>{db.close();reject(Error('synthetic marker inspection aborted'));};
         };
       });
-      return {initial,refused,afterFailure,retry,afterRetry,markerRows,
+      return {initial,refused,afterFailure,failedMarker,retry,afterRetry,markerRows,
         originalV1,
         v1After:localStorage.getItem('taskpoints_v1'),
         authority:runtime.getStatus().readAuthority};
@@ -1404,6 +1406,8 @@ try {
     assert.equal(checked.refused.canPromote,false);
     assert.equal(checked.afterFailure.initialized,false);
     assert.equal(checked.afterFailure.fence.writersCommitted,0);
+    assert.equal(checked.failedMarker.reason,'preview_writer_marker_absent');
+    assert.equal(checked.failedMarker.readOnlyMarkerInspection,true);
     assert.equal(checked.retry.reason,'preview_writer_recorded',JSON.stringify(checked.retry));
     assert.equal(checked.afterRetry.fence.writersCommitted,1);
     assert.equal(checked.afterRetry.fence.lastWriterMarker,'clean-retry');
@@ -1567,6 +1571,71 @@ try {
     assert.equal(proof.authority,'legacy_only');
     return {midLookupGenerationChangeDenied:true,noMarkerOrCounterCommitted:true,
       originalV1Unchanged:true,authorityUnchanged:true};
+  });
+
+  await run('read-only fence marker lookup resolves lost-response writer after tab close and freeze',async context=>{
+    const origin=await open(context),observer=await open(context);
+    const originalV1=await observer.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const empty=await observer.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence(
+        'inspect_marker',{marker:'uncertain-commit'}));
+    assert.equal(empty.reason,'preview_writer_marker_absent',JSON.stringify(empty));
+    assert.equal(empty.readOnlyMarkerInspection,true);
+    assert.equal(empty.markerEpoch,null);
+    // Deliberately abandon the result instead of awaiting it: this models a
+    // page/renderer that loses its response after a transaction has committed.
+    const launched=await origin.evaluate(()=>{
+      window.__unobservedWriterResult =
+        window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence(
+          'writer',{expectedEpoch:0,marker:'uncertain-commit'});
+      return 'launched_without_await';
+    });
+    assert.equal(launched,'launched_without_await');
+    await observer.waitForFunction(async()=>{
+      const report=await window.TaskPointsStateRuntimeV2
+        .rehearsePreviewDurableWriterFence('inspect_marker',{marker:'uncertain-commit'});
+      return report.reason==='preview_writer_marker_present';
+    },null,{timeout:12000});
+    await origin.close();
+    const restarted=await open(context);
+    const evidence=await restarted.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence(
+        'inspect_marker',{marker:'uncertain-commit'}));
+    assert.equal(evidence.reason,'preview_writer_marker_present',JSON.stringify(evidence));
+    assert.equal(evidence.markerEpoch,0);
+    assert.equal(evidence.fence.writersCommitted,1);
+    assert.equal(evidence.fence.lastWriterMarker,'uncertain-commit');
+    assert.equal(evidence.canPromote,false);
+    const repeat=await restarted.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence(
+        'writer',{expectedEpoch:0,marker:'uncertain-commit'}));
+    assert.equal(repeat.reason,'preview_writer_replayed');
+    assert.equal(repeat.fence.writersCommitted,1);
+    const freeze=await observer.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence(
+        'freeze',{expectedEpoch:0}));
+    assert.equal(freeze.reason,'preview_fence_frozen');
+    const stillThere=await restarted.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence(
+        'inspect_marker',{marker:'uncertain-commit'}));
+    assert.equal(stillThere.reason,'preview_writer_marker_present');
+    assert.equal(stillThere.markerEpoch,0);
+    assert.equal(stillThere.fence.epoch,1);
+    assert.equal(stillThere.fence.frozen,true);
+    const noNew=await restarted.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence(
+        'inspect_marker',{marker:'not-committed'}));
+    assert.equal(noNew.reason,'preview_writer_marker_absent');
+    assert.equal(noNew.fence.writersCommitted,1);
+    const final=await observer.evaluate(()=>({
+      v1:localStorage.getItem('taskpoints_v1'),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    assert.equal(final.v1,originalV1);
+    assert.equal(final.authority,'legacy_only');
+    return {unobservedCommitRecoveredReadOnly:true,
+      retryDoesNotDuplicate:true,markerStillVisibleAfterFreeze:true,
+      nonrecordedMarkerRemainsAbsent:true,noV1Write:true};
   });
 
   await run('cooperative shared writer locks coexist and block exclusive handoff while legacy tabs remain unfenced',async context=>{
