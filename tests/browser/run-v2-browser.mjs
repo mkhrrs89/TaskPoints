@@ -1638,6 +1638,155 @@ try {
       nonrecordedMarkerRemainsAbsent:true,noV1Write:true};
   });
 
+  await run('preview fence aborts both queued writes before commit and recovers after tab close',async context=>{
+    const origin=await open(context),observer=await open(context);
+    const before=await observer.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const interrupted=await origin.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const originalPut=IDBObjectStore.prototype.put;
+      let puts=0,aborted=false,result;
+      IDBObjectStore.prototype.put=function(value,...args){
+        if(this.name==='control' &&
+          (value?.id==='writer_marker:aborted-after-queue'
+            || (value?.id==='writer_fence'
+              && value?.lastWriterMarker==='aborted-after-queue'))) {
+          puts++;
+          const request=originalPut.call(this,value,...args);
+          if(value?.id==='writer_fence') {
+            this.transaction.abort();
+            aborted=true;
+          }
+          return request;
+        }
+        return originalPut.call(this,value,...args);
+      };
+      try {
+        result=await runtime.rehearsePreviewDurableWriterFence('writer',{
+          expectedEpoch:0,marker:'aborted-after-queue'
+        });
+      } finally {
+        IDBObjectStore.prototype.put=originalPut;
+      }
+      return {puts,aborted,result};
+    });
+    assert.equal(interrupted.puts,2,'Both marker and count puts must have been queued');
+    assert.equal(interrupted.aborted,true);
+    assert.equal(interrupted.result.reason,'fence_transaction_aborted',
+      JSON.stringify(interrupted.result));
+    assert.equal(interrupted.result.canPromote,false);
+    const inspection=await observer.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      return {
+        marker:await runtime.rehearsePreviewDurableWriterFence(
+          'inspect_marker',{marker:'aborted-after-queue'}),
+        fence:await runtime.rehearsePreviewDurableWriterFence('read')
+      };
+    });
+    assert.equal(inspection.marker.reason,'preview_writer_marker_absent');
+    assert.equal(inspection.fence.initialized,false);
+    assert.equal(inspection.fence.fence.writersCommitted,0);
+    await origin.close();
+    const reopened=await open(context);
+    const afterRestart=await reopened.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence(
+        'inspect_marker',{marker:'aborted-after-queue'}));
+    assert.equal(afterRestart.reason,'preview_writer_marker_absent');
+    const retried=await reopened.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'aborted-after-queue'}));
+    assert.equal(retried.reason,'preview_writer_recorded',JSON.stringify(retried));
+    assert.equal(retried.fence.writersCommitted,1);
+    const replay=await observer.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'aborted-after-queue'}));
+    assert.equal(replay.reason,'preview_writer_replayed');
+    assert.equal(replay.fence.writersCommitted,1);
+    const final=await observer.evaluate(()=>({
+      raw:localStorage.getItem('taskpoints_v1'),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    assert.equal(final.raw,before);
+    assert.equal(final.authority,'legacy_only');
+    return {bothQueuedPutsRolledBack:true,unacknowledgedAbortRecovered:true,
+      safeRetryAfterReload:true,noDuplicateMarker:true,originalV1Untouched:true};
+  });
+
+  await run('preview fence refuses orphan marker and contradictory control evidence without repair',async context=>{
+    const page=await open(context);
+    const proof=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const before=localStorage.getItem('taskpoints_v1');
+      await runtime.rehearsePreviewDurableWriterFence('read');
+      const generation=localStorage.getItem('taskpoints_state_v2_generation_v1');
+      const writeTestRows=rows=>new Promise((resolve,reject)=>{
+        const request=indexedDB.open('taskpoints_v2_writer_fence_preview_v1',1);
+        request.onerror=()=>reject(request.error);
+        request.onsuccess=()=>{
+          const db=request.result;
+          const tx=db.transaction('control','readwrite');
+          const store=tx.objectStore('control');
+          for(const row of rows)store.put(row);
+          tx.oncomplete=()=>{db.close();resolve();};
+          tx.onabort=()=>{db.close();reject(Error('fixture corruption transaction aborted'));};
+        };
+      });
+      await writeTestRows([{id:'writer_marker:orphan',generation,epoch:0}]);
+      const orphanInspect=await runtime.rehearsePreviewDurableWriterFence(
+        'inspect_marker',{marker:'orphan'});
+      const orphanRetry=await runtime.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'orphan'
+      });
+      const controlBefore=await runtime.rehearsePreviewDurableWriterFence('read');
+      // Simulate malformed durable control independently of the prototype;
+      // normal runtime APIs must NEVER repair or consume this evidence.
+      await writeTestRows([{
+        id:'writer_fence',generation,epoch:0,frozen:false,
+        writersCommitted:0,lastWriterMarker:'ghost-without-counter'
+      }]);
+      const malformedRead=await runtime.rehearsePreviewDurableWriterFence('read');
+      const malformedInspect=await runtime.rehearsePreviewDurableWriterFence(
+        'inspect_marker',{marker:'orphan'});
+      const malformedWriter=await runtime.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'new-after-corruption'
+      });
+      const verify=await new Promise((resolve,reject)=>{
+        const openDb=indexedDB.open('taskpoints_v2_writer_fence_preview_v1',1);
+        openDb.onerror=()=>reject(openDb.error);
+        openDb.onsuccess=()=>{
+          const db=openDb.result,tx=db.transaction('control','readonly');
+          const store=tx.objectStore('control'),rows={};
+          for(const key of ['writer_fence','writer_marker:orphan',
+            'writer_marker:new-after-corruption']){
+            const r=store.get(key);
+            r.onsuccess=()=>{rows[key]=r.result??null;};
+            r.onerror=()=>{try{tx.abort();}catch(_){}};
+          }
+          tx.oncomplete=()=>{db.close();resolve(rows);};
+          tx.onabort=()=>{db.close();reject(Error('fixture evidence inspection aborted'));};
+        };
+      });
+      return {orphanInspect,orphanRetry,controlBefore,malformedRead,
+        malformedInspect,malformedWriter,verify,
+        before,after:localStorage.getItem('taskpoints_v1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(proof.orphanInspect.reason,'fence_writer_marker_conflict',
+      JSON.stringify(proof.orphanInspect));
+    assert.equal(proof.orphanRetry.reason,'fence_writer_marker_conflict');
+    assert.equal(proof.controlBefore.initialized,false);
+    assert.equal(proof.malformedRead.reason,'fence_record_malformed');
+    assert.equal(proof.malformedInspect.reason,'fence_record_malformed');
+    assert.equal(proof.malformedWriter.reason,'fence_record_malformed');
+    assert.equal(proof.verify.writer_fence.lastWriterMarker,'ghost-without-counter');
+    assert.equal(proof.verify['writer_marker:orphan']?.epoch,0);
+    assert.equal(proof.verify['writer_marker:new-after-corruption'],null);
+    assert.equal(proof.before,proof.after);
+    assert.equal(proof.authority,'legacy_only');
+    assert.equal(proof.malformedWriter.canPromote,false);
+    return {orphanNeverCertifiesCommit:true,contradictoryControlPreserved:true,
+      noImplicitRepair:true,noNewMarker:true,unchangedV1:true};
+  });
+
   await run('cooperative shared writer locks coexist and block exclusive handoff while legacy tabs remain unfenced',async context=>{
     const first=await open(context),second=await open(context);
     const silent=await context.newPage();
