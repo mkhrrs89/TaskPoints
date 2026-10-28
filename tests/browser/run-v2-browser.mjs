@@ -1372,7 +1372,28 @@ try {
       const retry=await runtime.rehearsePreviewDurableWriterFence('writer',{
         expectedEpoch:0,marker:'clean-retry'});
       const afterRetry=await runtime.rehearsePreviewDurableWriterFence('read');
-      return {initial,refused,afterFailure,retry,afterRetry,
+      // The first put of the failed transaction would have inserted the
+      // marker if the second put did not fail. Its absence proves rollback
+      // covered BOTH records rather than only the aggregate control row.
+      const markerRows=await new Promise((resolve,reject)=>{
+        const req=indexedDB.open('taskpoints_v2_writer_fence_preview_v1',1);
+        req.onerror=()=>reject(req.error);
+        req.onsuccess=()=>{
+          const db=req.result;
+          const tx=db.transaction('control','readonly');
+          const store=tx.objectStore('control');
+          const keys=['writer_marker:must-not-commit','writer_marker:clean-retry'];
+          const rows={};
+          keys.forEach(key=>{
+            const get=store.get(key);
+            get.onsuccess=()=>{rows[key]=get.result??null;};
+            get.onerror=()=>{try{tx.abort();}catch(_){}};
+          });
+          tx.oncomplete=()=>{db.close();resolve(rows);};
+          tx.onabort=()=>{db.close();reject(Error('synthetic marker inspection aborted'));};
+        };
+      });
+      return {initial,refused,afterFailure,retry,afterRetry,markerRows,
         originalV1,
         v1After:localStorage.getItem('taskpoints_v1'),
         authority:runtime.getStatus().readAuthority};
@@ -1386,6 +1407,9 @@ try {
     assert.equal(checked.retry.reason,'preview_writer_recorded',JSON.stringify(checked.retry));
     assert.equal(checked.afterRetry.fence.writersCommitted,1);
     assert.equal(checked.afterRetry.fence.lastWriterMarker,'clean-retry');
+    assert.equal(checked.markerRows['writer_marker:must-not-commit'],null,
+      'Aborted marker must not survive an aborted aggregate control write');
+    assert.equal(checked.markerRows['writer_marker:clean-retry']?.epoch,0);
     assert.equal(checked.v1After,checked.originalV1);
     assert.equal(checked.authority,'legacy_only');
     return {abortedMarkerNotCommitted:true,cleanRetrySucceeds:true,
