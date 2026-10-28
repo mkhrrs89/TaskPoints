@@ -50,6 +50,76 @@ const GENERATION_KEY = 'taskpoints_state_v2_generation_v1';
 const deltaA = { id: 'habit:h1:2026-08-31', habitId: 'h1', dayKey: '2026-08-31', status: 'full', done: true, updatedAtISO: '2026-08-31T12:00:00.000Z' };
 const deltaB = { id: 'habit:h2:2026-08-31', habitId: 'h2', dayKey: '2026-08-31', status: 'half', done: true, completionFraction: 0.5, updatedAtISO: '2026-08-31T12:01:00.000Z' };
 
+test('shared WAL recovery enumeration reads legacy sidecars and claims in one pass', () => {
+  const { api, localStorage } = install({ [DARK]: '1' });
+  const rows = [deltaA, deltaB,
+    { ...deltaA, id: 'habit:h3:2026-08-30', habitId: 'h3',
+      dayKey: '2026-08-30', updatedAtISO: '2026-08-30T12:01:00.000Z' }];
+  const admitted = rows.map(row => api.appendHabitDelta(row));
+  assert.equal(api.getStatus().independentEventCount,3);
+  assert.equal(api.getStatus().admissionClaimCount,3);
+  const originalKey = localStorage.key.bind(localStorage);
+  let scans = 0;
+  localStorage.key = index => { scans++; return originalKey(index); };
+  try {
+    const n = localStorage.length;
+    const read = api.getPendingRows();
+    assert.equal(read.ok,true);
+    assert.deepEqual(read.rows.map(row=>row.id).sort(),
+      admitted.map(row=>row.mutationId).sort());
+    assert.equal(scans,n,
+      'read must inspect every localStorage key exactly once, not once per sidecar type');
+    scans = 0;
+    const status = api.getStatus();
+    assert.equal(status.pendingCount,3);
+    assert.equal(status.independentEventCount,3);
+    assert.equal(status.admissionClaimCount,3);
+    assert.equal(scans,2*n,
+      'status must perform its own fresh verified read and a fresh independent inventory');
+  } finally {
+    localStorage.key = originalKey;
+  }
+  for (const admittedRow of admitted) {
+    const cleared = api.removeMutation(admittedRow.mutationId,
+      { generation: admittedRow.generation, delta: admittedRow.row.delta });
+    assert.equal(cleared.removed,true);
+  }
+  const empty = api.getStatus();
+  assert.equal(empty.pendingCount,0);
+  assert.equal(empty.independentEventCount,0);
+  assert.equal(empty.admissionClaimCount,0);
+});
+
+test('single-pass WAL inventory still blocks corrupt claims without rewriting evidence', () => {
+  const { api, localStorage } = install({ [DARK]: '1' });
+  const admitted = api.appendHabitDelta(deltaA);
+  const key = [...localStorage.rows.keys()].find(k=>k.startsWith(api.CLAIM_PREFIX));
+  assert.ok(key);
+  const original = localStorage.getItem(key);
+  const invalid = JSON.stringify({
+    ...JSON.parse(original),
+    delta: {...JSON.parse(original).delta, clientMemo:'tampered-claim'}
+  });
+  localStorage.setItem(key,invalid);
+  const sharedBefore = localStorage.getItem(KEY);
+  const sidecarKey='taskpoints_v2_pending_mutation_event_v1:'+admitted.mutationId;
+  const sidecarBefore=localStorage.getItem(sidecarKey);
+  const read=api.getPendingRows();
+  assert.equal(read.ok,false);
+  assert.match(read.error,/wal_admission_claim_identity_conflict/);
+  assert.throws(()=>api.appendHabitDelta(deltaB),/wal_admission_claim_identity_conflict/);
+  assert.throws(()=>api.removeMutation(admitted.mutationId,
+    {generation:admitted.generation,delta:admitted.row.delta}),
+    /wal_admission_claim_identity_conflict/);
+  assert.equal(localStorage.getItem(KEY),sharedBefore);
+  assert.equal(localStorage.getItem(sidecarKey),sidecarBefore);
+  assert.equal(localStorage.getItem(key),invalid);
+  assert.equal(api.getStatus().pendingCount,null);
+  localStorage.setItem(key,original);
+  assert.equal(api.removeMutation(admitted.mutationId,
+    {generation:admitted.generation,delta:admitted.row.delta}).removed,true);
+});
+
 test('V2 WAL is default-off and does not persist while dark mode is disabled', () => {
   const { api, localStorage } = install();
   const result = api.appendHabitDelta(deltaA);

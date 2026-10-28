@@ -183,16 +183,27 @@
     return EVENT_PREFIX + String(mutationId);
   }
 
-  function independentKeys() {
-    if (!supportsIndependentRows()) return [];
-    const keys = [];
+  // One read-only pass enumerates BOTH types of independently recoverable
+  // keys. Scanning the origin twice for every WAL read becomes expensive on
+  // devices with large localStorage. Never cache this inventory across calls:
+  // another tab may create a recovery claim between any two operations.
+  function recoveryKeys() {
+    const events = [];
+    const claims = [];
+    if (!supportsIndependentRows()) return { events, claims };
     const storage = global.localStorage;
     for (let i = 0; i < storage.length; i += 1) {
       const key = storage.key(i);
-      if (typeof key === 'string' && key.startsWith(EVENT_PREFIX)) keys.push(key);
+      if (typeof key !== 'string') continue;
+      if (key.startsWith(EVENT_PREFIX)) events.push(key);
+      else if (key.startsWith(CLAIM_PREFIX)) claims.push(key);
     }
-    return keys.sort();
+    events.sort();
+    claims.sort();
+    return { events, claims };
   }
+
+  function independentKeys() { return recoveryKeys().events; }
 
   function uniqueClaimKey() {
     // Random UUIDs prevent different tabs with colliding short mutation IDs
@@ -201,16 +212,7 @@
       || `${Date.now()}-${Math.random().toString(36).slice(2)}`);
   }
 
-  function claimKeys() {
-    if (!supportsIndependentRows()) return [];
-    const storage = global.localStorage;
-    const keys = [];
-    for (let i = 0; i < storage.length; i += 1) {
-      const key = storage.key(i);
-      if (typeof key === 'string' && key.startsWith(CLAIM_PREFIX)) keys.push(key);
-    }
-    return keys.sort();
-  }
+  function claimKeys() { return recoveryKeys().claims; }
 
   function validateRow(row) {
     return row && typeof row === 'object' && typeof row.id === 'string'
@@ -241,7 +243,8 @@
         }
         merged.set(row.id, row);
       }
-      for (const key of independentKeys()) {
+      const inventory = recoveryKeys();
+      for (const key of inventory.events) {
         const independentRaw = readWalStorage(key);
         if (independentRaw == null) continue; // concurrently confirmed/removed
         const row = JSON.parse(independentRaw);
@@ -260,7 +263,7 @@
       // concurrent tabs overwrite the old per-ID event and shared array, the
       // original claim remains independently recoverable and conflicts fail
       // closed instead of accepting a different mutation's acknowledgement.
-      for (const key of claimKeys()) {
+      for (const key of inventory.claims) {
         const claimRaw = readWalStorage(key);
         if (claimRaw == null) continue; // another tab finished cleanup
         const row = JSON.parse(claimRaw);
@@ -470,8 +473,9 @@
     // treat an incomplete WAL inventory as an empty healthy queue.
     try {
       if (supportsIndependentRows()) {
-        independentEventCount = independentKeys().length;
-        admissionClaimCount = claimKeys().length;
+        const inventory = recoveryKeys();
+        independentEventCount = inventory.events.length;
+        admissionClaimCount = inventory.claims.length;
       }
     } catch (error) {
       enumerationError = `state_runtime_v2_wal_inventory_unreadable:${String(error?.message || error)}`;

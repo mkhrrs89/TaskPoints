@@ -766,3 +766,20 @@ The V2 WAL status also counts admission claims for diagnostics.
 or a production-grade global mutex. This protects each new V2 WAL intent
 from key overwrite; it does not make the shared cache atomic, prevent old
 V1 tabs writing V1, or authorize promotion of V2 as primary storage.
+
+### Single-pass V2 WAL admission/sidecar inventory (October 28)
+
+The V2 Habit WAL now enumerates independently durable legacy per-ID events
+and uniquely addressed admission claims together in one uncached
+`localStorage` key pass. The former per-family scans doubled the
+synchronous key-enumeration work on every recovery read. The new scanner
+retains exact matching checks, malformed-row refusal, epoch checks, sorted
+recovery order, capacity gates and every original recovery key.
+
+Status diagnostics independently perform a fresh inventory and still report
+unknown pending counts rather than a false empty queue if any key, length or
+payload read is denied. Node regression tests count enumeration calls,
+verify clean removal of all claims and sidecars, and inject a tampered
+admission claim to ensure appends and cleanup fail closed with bytes intact.
+This is a WAL read-path optimization only; no background cache, V1 writer
+change or V2 cutover unlock is introduced.

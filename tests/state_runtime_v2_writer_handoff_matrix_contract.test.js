@@ -506,7 +506,9 @@ test('unique cross-tab WAL admission claims survive old per-ID sidecar overwrite
   const reader=wal.slice(begin,append);
   const writer=wal.slice(append,remove);
   const cleanup=wal.slice(remove,end);
-  assert.match(reader,/for \(const key of claimKeys\(\)\)/);
+  assert.match(reader,/const inventory = recoveryKeys\(\)/);
+  assert.match(reader,/for \(const key of inventory\.events\)/);
+  assert.match(reader,/for \(const key of inventory\.claims\)/);
   assert.match(reader,/wal_admission_claim_identity_conflict/);
   assert.match(reader,/wal_admission_claim_invalid/);
   assert.match(writer,/setWalStorageVerified\(uniqueClaimKey\(\), JSON.stringify\(row\)/);
@@ -520,6 +522,28 @@ test('unique cross-tab WAL admission claims survive old per-ID sidecar overwrite
   assert.match(cleanup,/for \(const key of claimKeys\(\)\)/);
   assert.match(cleanup,/readWalStorage\(claim.key\) !== claim.raw/);
   assert.match(cleanup,/state_runtime_v2_wal_claim_remove_failed/);
+});
+
+test('WAL inventory scans legacy sidecars and immutable claims together without caching',()=>{
+  const wal=read('state_runtime_v2_wal.js');
+  const begin=wal.indexOf('function recoveryKeys()');
+  const end=wal.indexOf('function uniqueClaimKey()',begin);
+  const scanner=wal.slice(begin,end);
+  assert.ok(begin>0&&end>begin);
+  assert.match(scanner,/for \(let i = 0; i < storage\.length; i \+= 1\)/);
+  assert.match(scanner,/key\.startsWith\(EVENT_PREFIX\)/);
+  assert.match(scanner,/key\.startsWith\(CLAIM_PREFIX\)/);
+  const readStart=wal.indexOf('function read()');
+  const appendStart=wal.indexOf('function appendHabitDelta(',readStart);
+  const reader=wal.slice(readStart,appendStart);
+  assert.equal(reader.match(/recoveryKeys\(\)/g)?.length,1,
+    'WAL recovery should enumerate both key families in the same fresh pass');
+  assert.match(reader,/wal_admission_claim_identity_conflict/);
+  assert.match(reader,/wal_shared_independent_identity_conflict/);
+  const statusStart=wal.indexOf('function getStatus()');
+  const status=wal.slice(statusStart,wal.indexOf('const api =',statusStart));
+  assert.match(status,/const inventory = recoveryKeys\(\)/);
+  assert.match(status,/state_runtime_v2_wal_inventory_unreadable/);
 });
 
 test('Task completion cleanup protects changed same-ID patches and preserves failed compaction',()=>{
