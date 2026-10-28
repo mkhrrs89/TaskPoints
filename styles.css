@@ -5594,7 +5594,7 @@ metal background attached only to the day-bubble row.
 .home-work-hours-card {
   padding: 15px 18px 13px;
   min-width: 0;
-  border: 1px solid rgba(91, 178, 179, 0.23);
+  border: none; /* Override the 1px border inherited from .glass. */
   background: var(--tp-btn-teal-grad);
 }
 
@@ -5671,11 +5671,27 @@ metal background attached only to the day-bubble row.
   transition: width 220ms ease-out;
 }
 
-.home-work-hours-status {
+.home-work-hours-footer {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 5px 12px;
   margin-top: 6px;
+}
+
+.home-work-hours-status {
   color: #c2d5d5;
   font-size: 0.74rem;
   line-height: 1.2;
+}
+
+.home-work-hours-average {
+  color: #d4e5e5;
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
 }
 
 @media (max-width: 480px) {
