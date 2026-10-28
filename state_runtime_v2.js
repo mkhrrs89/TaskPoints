@@ -4409,7 +4409,7 @@
                       return;
                     }
                     const item = lookup.result;
-                    if (item && (item.id !== markerId
+                    if (item && (!prior || item.id !== markerId
                       || item.generation !== generation
                       || !Number.isSafeInteger(item.epoch) || item.epoch < 0
                       || item.epoch > state.epoch)) {
