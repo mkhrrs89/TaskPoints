@@ -185,6 +185,11 @@ try {
       const generation=runtime.getStatus().currentGeneration;
       const recorded=await runtime.applyHabitDelta(delta,{expectedGeneration:generation});
       const db=await runtime.open();
+      const beforeRevision=await new Promise((resolve,reject)=>{
+        const req=db.transaction('meta','readonly').objectStore('meta').getAll();
+        req.onsuccess=()=>resolve(req.result[0]?.revision);
+        req.onerror=()=>reject(req.error);
+      });
       await new Promise((resolve,reject)=>{
         const tx=db.transaction('mutations','readwrite'),store=tx.objectStore('mutations');
         const req=store.get(recorded.mutationId);
@@ -209,7 +214,7 @@ try {
       const [mutations,meta]=await Promise.all([rows('mutations'),rows('meta')]);
       return {readError,writeError,mutations:mutations.length,
         damagedPoints:mutations[0]?.delta?.completionPoints,
-        revision:meta[0]?.revision,
+        revision:meta[0]?.revision,beforeRevision,
         source:localStorage.getItem('taskpoints_v1'),
         authority:runtime.getStatus().readAuthority};
     });
@@ -217,7 +222,8 @@ try {
     assert.match(proof.writeError,/state_runtime_v2_mutation_identity_mismatch/);
     assert.equal(proof.mutations,1);
     assert.equal(proof.damagedPoints,999,'Retain corruption evidence, do not silently overwrite');
-    assert.equal(proof.revision,1);
+    assert.equal(proof.revision,proof.beforeRevision,
+      'Corruption detection must not advance the V2 ledger revision');
     assert.equal(proof.source,rawBefore);
     assert.equal(proof.authority,'legacy_only');
     return {durablePayloadCorruptionRejected:true,unchangedRevision:true,
