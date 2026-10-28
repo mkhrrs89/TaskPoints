@@ -32,6 +32,33 @@ its proof. Existing WAL wrapping and the isolated IndexedDB preview fence
 | **Emergency recovery** — `emergency_recovery.html` | Recovery hold and V2-mode-off flags, `safeReplaceTaskPointsStorage()`, phase journal quarantine/removal, Habit journal reset, verification | Recovery can intentionally replace the entire V1 source and keep hold active | Preserve emergency access and independent off-device rollback; never block rescue solely because V2 fence DB is unavailable |
 | **Task journal/idle compaction** — `task_mutation_journal.js` | `journalMutation()` sync journal write; `scheduleCompaction()` / `runWhenQuiet()` deferred work; `saveStateSnapshotWithTaskJournal()` wrapping; verified cleanup | Sync journal precedes UI feedback; read overlay and deferred compaction protect pending Task changes | Must cover journal+overlay, completion updates and deletes, generation checks, quiet/idle failures, and compaction retry |
 
+## Task-journal handoff preflight: explicit read-only blocker
+
+The V2-only `inspectAuthorityCutoverBarriers()` now reads
+`taskpoints_pending_task_mutations_v1` **twice**, surrounding the asynchronous
+peer probe and full-origin storage inventory. It reports
+`taskJournal.reason` as `absent`, `empty`, `pending`, or `malformed`,
+and reports separate Task, completion-upsert, and completion-delete counts.
+Any pending record adds `task_mutation_journal_pending`; malformed rows or
+schema add `task_mutation_journal_malformed`. Denied reads continue to refuse
+the entire inspection. `checks.taskJournalEmpty` is true only for an absent
+or structurally valid empty journal; it **does not** grant a cutover.
+
+The raw journal bytes are compared in the observation window, but are not
+returned to callers. A Tab A/Tab B regression uses the actual synchronous
+`TaskPointsCore.journalTaskMutation()` write during the peer probe; the
+inspection must reject its stale preflight and leave the journal intact.
+Another test confirms malformed journal evidence is not silently normalized
+into an empty handoff. These tests never flush, compact, delete, restore, or
+migrate Task journal records.
+
+**Still unsafe for authority:** A read-only check is not transactional
+admission. An old tab can write immediately after the second read, and a
+Task journal can change and change back between reads. This preflight must
+remain diagnostic until all synchronous Task entry points and deferred
+compaction participate in a verified generation-fenced protocol, without
+weakening the current durable-before-paint experience.
+
 ## Writer ordering and race classes to solve
 
 1. **Immediate user action:** Task and Habit taps must remain durable before
