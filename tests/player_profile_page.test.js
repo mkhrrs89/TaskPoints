@@ -244,3 +244,34 @@ test('card/gallery and existing editors remain available and backed by same core
   assert.match(core, /youNotes: typeof src\.youNotes/);
   assert.equal((core.match(/youNotes: typeof src\.youNotes/g) || []).length, 2);
 });
+
+
+test('centered Players back button replaces title and stays clear of left floating Today island', () => {
+  const f = fixture();
+  assert.equal(f.controller.open('npc1'), true);
+  const markup = f.screen.innerHTML;
+  const topbar = markup.slice(markup.indexOf('class="tp-profile-topbar"'),
+    markup.indexOf('</div>', markup.indexOf('class="tp-profile-topbar"')));
+  assert.match(topbar, /class="tp-profile-topbar-spacer" aria-hidden="true"/);
+  assert.match(topbar, /class="tp-profile-back" aria-label="Back to players">← Players<\/button>/);
+  assert.match(topbar, /class="tp-profile-advanced">Ratings & photo<\/button>/);
+  assert.ok(topbar.indexOf('tp-profile-topbar-spacer') < topbar.indexOf('tp-profile-back'));
+  assert.ok(topbar.indexOf('tp-profile-back') < topbar.indexOf('tp-profile-advanced'));
+  assert.doesNotMatch(markup, /PLAYER PROFILE/);
+  assert.match(css, /\.tp-profile-topbar\s*\{[^}]*display:\s*grid/);
+  assert.match(css, /\.tp-profile-topbar\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto\s+minmax\(0,\s*1fr\)/);
+  assert.match(css, /\.tp-profile-back\s*\{[^}]*grid-column:\s*2;[^}]*justify-self:\s*center/);
+  assert.match(css, /\.tp-profile-advanced\s*\{[^}]*grid-column:\s*3;[^}]*justify-self:\s*end/);
+  assert.doesNotMatch(css, /\.tp-profile-eyebrow\s*\{/);
+});
+
+test('centered back control works for P000 without changing the existing photo editor', () => {
+  const f = fixture();
+  f.controller.open('YOU');
+  const markup = f.screen.innerHTML;
+  assert.match(markup, /class="tp-profile-back" aria-label="Back to players">← Players/);
+  assert.match(markup, /class="tp-profile-advanced">Edit photo/);
+  assert.equal(f.controller.activeId(), 'YOU');
+  f.controller.close();
+  assert.equal(f.screen.hidden, true);
+});
