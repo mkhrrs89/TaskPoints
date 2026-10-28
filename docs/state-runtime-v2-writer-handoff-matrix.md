@@ -59,6 +59,35 @@ remain diagnostic until all synchronous Task entry points and deferred
 compaction participate in a verified generation-fenced protocol, without
 weakening the current durable-before-paint experience.
 
+## Real Task journal compaction and stale-tab rehearsal
+
+The next V2-only browser safety cases exercise the **existing production V1
+Task journal implementation**, without changing its code or admitting writers
+to the preview fencing protocol:
+
+- A real `journalTaskMutation()` persists a Task patch plus a completion
+  upsert. A real `flushPendingTaskMutations()` then writes the canonical
+  snapshot, verifies both rows, and removes the covered journal records.
+  The read-only cutover inspector reports an empty/absent Task journal, but
+  still reports `canPromote:false`.
+- An injected `QuotaExceededError` on the real `taskpoints_v1` replacement
+  must cause compaction to fail safely, retaining the pending Task journal and
+  the previous snapshot bytes. The inspector must continue showing its
+  `task_mutation_journal_pending` blocker.
+- In a two-tab rehearsal, a newer Task edit is journaled and compacted by
+  one tab, then an older tab tries to save its stale Task state. The existing
+  newer-persisted-Task-row protection must prevent reverting that row, while
+  the still-unfenced old tab keeps the authority gate closed.
+
+The cutover inspector therefore also reports
+`checks.taskJournalCompactionHandoffValidated:false` and the independent
+hard blocker `task_journal_compaction_handoff_not_validated`, **including
+when the Task journal is empty after verified compaction**. A drain does not
+constitute proof that an old tab or idle callback cannot write again.
+Cross-tab browser tests are not equivalent to killing an installed iOS PWA.
+This incremental audit changes no V1 save timing, journals, recovery
+procedures, or writable storage.
+
 ## Writer ordering and race classes to solve
 
 1. **Immediate user action:** Task and Habit taps must remain durable before
