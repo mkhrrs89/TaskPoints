@@ -4,6 +4,49 @@
   var ROUTE = '#player=';
   var ACTION = 'data-tp-profile-action';
 
+  // Use the player's two existing colors to tint the entire profile.
+  // All large surfaces are blended toward near-black so white UI text stays
+  // readable even for white, yellow or other very bright player colors.
+  // Accents are blended lighter so black/dark player colors remain visible.
+  function profileThemeForColors(primaryColor, secondaryColor) {
+    function hex(value, fallback) {
+      return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)
+        ? value.toLowerCase() : fallback;
+    }
+    function mix(a, b, shareA) {
+      var x = hex(a, '#091014').slice(1);
+      var y = hex(b, '#091014').slice(1);
+      var channels = [0, 2, 4].map(function(offset) {
+        var aChannel = parseInt(x.slice(offset, offset + 2), 16);
+        var bChannel = parseInt(y.slice(offset, offset + 2), 16);
+        return Math.round(aChannel * shareA + bChannel * (1 - shareA))
+          .toString(16).padStart(2, '0');
+      });
+      return '#' + channels.join('');
+    }
+
+    var primary = hex(primaryColor, '#ffffff');
+    var secondary = hex(secondaryColor, '#808080');
+    var dark = '#091014';
+    var light = '#e6f0ed';
+    return {
+      '--tp-profile-canvas-from': mix(primary, dark, 0.16),
+      '--tp-profile-canvas-to': mix(secondary, dark, 0.14),
+      '--tp-profile-hero-from': mix(primary, dark, 0.34),
+      '--tp-profile-hero-to': mix(secondary, dark, 0.29),
+      '--tp-profile-panel-from': mix(primary, dark, 0.22),
+      '--tp-profile-panel-to': mix(secondary, dark, 0.18),
+      '--tp-profile-button-from': mix(primary, dark, 0.30),
+      '--tp-profile-button-to': mix(secondary, dark, 0.26),
+      '--tp-profile-field': mix(secondary, dark, 0.10),
+      '--tp-profile-metric': mix(secondary, dark, 0.16),
+      '--tp-profile-accent': mix(primary, light, 0.36),
+      '--tp-profile-accent-secondary': mix(secondary, light, 0.36),
+      '--tp-profile-border': mix(primary, '#547077', 0.33),
+      '--tp-profile-focus': mix(primary, '#c6f0e6', 0.30)
+    };
+  }
+
   function create(deps) {
     var doc = deps.document || global.document;
     var win = deps.window || global;
@@ -112,6 +155,8 @@
       var colors = player.isYou ? deps.getYouColors() : player;
       var primary = deps.normalizeColor(colors.primaryColor, '#FFFFFF');
       var secondary = deps.normalizeColor(colors.secondaryColor, '#808080');
+      var theme = profileThemeForColors(primary, secondary);
+      Object.keys(theme).forEach(function(key) { node.style.setProperty(key, theme[key]); });
       var name = player.isYou ? deps.getYouName() : player.name || 'Unnamed';
       var pid = player.isYou ? 'P000' : deps.getPlayerPid(st, id) || 'Unassigned';
       var stats = statsFor(id);
@@ -271,5 +316,5 @@
       isOpen: function() { return Boolean(activeId); },
       activeId: function() { return activeId; }, saveForm: saveForm, statsFor: statsFor };
   }
-  global.TaskPointsPlayerProfiles = { create: create };
+  global.TaskPointsPlayerProfiles = { create: create, profileThemeForColors: profileThemeForColors };
 })(typeof window !== 'undefined' ? window : globalThis);
