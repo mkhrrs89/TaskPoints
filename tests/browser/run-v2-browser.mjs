@@ -1731,9 +1731,18 @@ try {
     await other.waitForFunction(()=>
       localStorage.getItem('v2_guarded_preview_waiting')==='ready',
       null,{timeout:12000});
-    await other.evaluate(()=>
-      localStorage.setItem('taskpoints_state_v2_generation_v1',
-        'v2-guarded-fixture-rotation:'+crypto.randomUUID()));
+    const rotated=await other.evaluate(()=>{
+      const next='v2-guarded-fixture-rotation:'+crypto.randomUUID();
+      localStorage.setItem('taskpoints_state_v2_generation_v1',next);
+      return next;
+    });
+    // A completed localStorage write in one WebKit document is not a
+    // synchronization barrier for a suspended document in another process.
+    // Wait until that writer itself observes the new generation before
+    // releasing its voluntary pre-side-effect check.
+    await writer.waitForFunction(expected=>
+      localStorage.getItem('taskpoints_state_v2_generation_v1')===expected,
+      rotated,{timeout:12000});
     await writer.evaluate(()=>window.__releaseV2GuardedFixture());
     const denied=await pending;
     assert.equal(denied.reason,'cooperative_operation_generation_invalidated',
