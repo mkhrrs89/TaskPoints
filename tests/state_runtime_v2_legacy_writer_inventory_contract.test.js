@@ -258,6 +258,14 @@ test('durable writer fence remains confined to preview IDB markers, not producti
     "'legacy_only'",
     'frozen: true, epoch: state.epoch + 1',
     'store.put(next)',
+    "store.get(markerId)",
+    "'writer_marker:' + options.marker",
+    "store.put({ id: markerId, generation, epoch: state.epoch })",
+    "result = refuse('preview_writer_replayed'",
+    "result = refuse('fence_writer_marker_conflict'",
+    "result = refuse('fence_writer_marker_unreadable'",
+    "fence_writer_counter_exhausted",
+    "fence_epoch_exhausted",
     "tx.oncomplete = () => finish(result)"
   ]) assert.ok(fence.includes(requirement), 'Missing durable preview fence safety: '+requirement);
   assert.match(fence, /if \(state\.frozen\)/);
@@ -265,6 +273,13 @@ test('durable writer fence remains confined to preview IDB markers, not producti
   assert.match(fence, /fence_generation_mismatch/);
   assert.match(fence, /fence_epoch_stale/);
   assert.match(fence, /fence_frozen/);
+  const markerCheck=fence.indexOf("const markerRequest = store.get(markerId)");
+  const markerPut=fence.indexOf("store.put({ id: markerId, generation, epoch: state.epoch })");
+  const counterPut=fence.indexOf("store.put(next)",markerPut);
+  assert.ok(markerCheck > 0 && markerPut > markerCheck && counterPut > markerPut,
+    'Dedup marker and aggregate count must be written in one IDB transaction');
+  assert.match(fence, /marker\.generation !== generation/);
+  assert.match(fence, /marker\.epoch !== state\.epoch/);
   assert.ok(runtime.includes('    rehearsePreviewDurableWriterFence,'),
     'Test-only protocol must require an explicit preview API call');
   assert.doesNotMatch(fence, /localStorage\.(?:setItem|removeItem|clear)\(/);
