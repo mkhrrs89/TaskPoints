@@ -1350,6 +1350,48 @@ try {
       invalidCallersRefused:true,noV1Mutation:true};
   });
 
+  await run('preview durable IDB writer refuses an aborted transaction and allows clean retry',async context=>{
+    const page=await open(context);
+    const checked=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const originalV1=localStorage.getItem('taskpoints_v1');
+      // Create only the developer-owned database schema, with NO marker.
+      const initial=await runtime.rehearsePreviewDurableWriterFence('read');
+      const originalPut=IDBObjectStore.prototype.put;
+      let refused;
+      IDBObjectStore.prototype.put=function(record,...rest){
+        if(this.name==='control'&&record?.id==='writer_fence')
+          throw new DOMException('synthetic IDB write denial','QuotaExceededError');
+        return originalPut.call(this,record,...rest);
+      };
+      try{
+        refused=await runtime.rehearsePreviewDurableWriterFence('writer',{
+          expectedEpoch:0,marker:'must-not-commit'});
+      }finally{IDBObjectStore.prototype.put=originalPut;}
+      const afterFailure=await runtime.rehearsePreviewDurableWriterFence('read');
+      const retry=await runtime.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'clean-retry'});
+      const afterRetry=await runtime.rehearsePreviewDurableWriterFence('read');
+      return {initial,refused,afterFailure,retry,afterRetry,
+        originalV1,
+        v1After:localStorage.getItem('taskpoints_v1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(checked.initial.initialized,false);
+    assert.equal(checked.refused.reason,'fence_transaction_aborted',
+      JSON.stringify(checked.refused));
+    assert.equal(checked.refused.canPromote,false);
+    assert.equal(checked.afterFailure.initialized,false);
+    assert.equal(checked.afterFailure.fence.writersCommitted,0);
+    assert.equal(checked.retry.reason,'preview_writer_recorded',JSON.stringify(checked.retry));
+    assert.equal(checked.afterRetry.fence.writersCommitted,1);
+    assert.equal(checked.afterRetry.fence.lastWriterMarker,'clean-retry');
+    assert.equal(checked.v1After,checked.originalV1);
+    assert.equal(checked.authority,'legacy_only');
+    return {abortedMarkerNotCommitted:true,cleanRetrySucceeds:true,
+      originalV1Unchanged:true,noProductionAuthority:true};
+  });
+
   await run('cooperative shared writer locks coexist and block exclusive handoff while legacy tabs remain unfenced',async context=>{
     const first=await open(context),second=await open(context);
     const silent=await context.newPage();
