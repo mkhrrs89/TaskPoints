@@ -1242,6 +1242,114 @@ try {
       snapshotUnchanged:true,noAuthoritySwitch:true};
   });
 
+  await run('preview IndexedDB fence atomically freezes cooperating writers across tabs and reload',async context=>{
+    const first=await open(context),second=await open(context);
+    const v1=await first.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const initial=await first.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('read'));
+    assert.equal(initial.reason,'fence_read_only',JSON.stringify(initial));
+    assert.equal(initial.fence.epoch,0);
+    assert.equal(initial.fence.frozen,false);
+    assert.equal(initial.canPromote,false);
+    const one=await first.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'preview-writer-one'}));
+    assert.equal(one.reason,'preview_writer_recorded',JSON.stringify(one));
+    assert.equal(one.fence.writersCommitted,1);
+    assert.equal(one.atomicPreviewTransaction,true);
+    const old=await second.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('read'));
+    assert.equal(old.fence.epoch,0);
+    // Simultaneous same-epoch freezes can never both win the IDB CAS.
+    const [a,b]=await Promise.all([
+      first.evaluate(()=>window.TaskPointsStateRuntimeV2
+        .rehearsePreviewDurableWriterFence('freeze',{expectedEpoch:0})),
+      second.evaluate(()=>window.TaskPointsStateRuntimeV2
+        .rehearsePreviewDurableWriterFence('freeze',{expectedEpoch:0}))
+    ]);
+    const reasons=[a.reason,b.reason].sort();
+    assert.deepEqual(reasons,['fence_epoch_stale','preview_fence_frozen'],
+      JSON.stringify([a,b]));
+    const after=await first.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('read'));
+    assert.equal(after.fence.frozen,true);
+    assert.equal(after.fence.epoch,1);
+    assert.equal(after.fence.writersCommitted,1);
+    assert.equal(after.fence.lastWriterMarker,'preview-writer-one');
+    const stale=await second.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'stale-must-not-commit'}));
+    assert.equal(stale.reason,'fence_epoch_stale',JSON.stringify(stale));
+    const newer=await second.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:1,marker:'frozen-must-not-commit'}));
+    assert.equal(newer.reason,'fence_frozen',JSON.stringify(newer));
+    await second.close();
+    const reopened=await open(context);
+    const persisted=await reopened.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('read'));
+    assert.equal(persisted.fence.epoch,1);
+    assert.equal(persisted.fence.frozen,true);
+    assert.equal(persisted.fence.writersCommitted,1);
+    assert.equal(persisted.canPromote,false);
+    // A legacy tab that doesn't know the protocol is still NOT fenced.
+    await reopened.evaluate(()=>
+      localStorage.setItem('taskpoints_old_tab_ignores_preview_fence','legacy-write'));
+    const final=await first.evaluate(()=>({
+      v1:localStorage.getItem('taskpoints_v1'),
+      unfenced:localStorage.getItem('taskpoints_old_tab_ignores_preview_fence'),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    assert.equal(final.v1,v1);
+    assert.equal(final.unfenced,'legacy-write');
+    assert.equal(final.authority,'legacy_only');
+    return {singleAtomicFreeze:true,staleAndFrozenWritersDenied:true,
+      freezeSurvivesReload:true,oldLegacyTabStillUnfenced:true};
+  });
+
+  await run('preview durable writer fence rejects stale generations without touching legacy data',async context=>{
+    const writer=await open(context),other=await open(context);
+    const before=await writer.evaluate(()=>({
+      raw:localStorage.getItem('taskpoints_v1'),
+      generation:localStorage.getItem('taskpoints_state_v2_generation_v1')
+    }));
+    const recorded=await writer.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'before-rotation'}));
+    assert.equal(recorded.reason,'preview_writer_recorded',JSON.stringify(recorded));
+    const rotated=await other.evaluate(()=>{
+      const newGeneration='v2-fence-test-rotation:'+crypto.randomUUID();
+      localStorage.setItem('taskpoints_state_v2_generation_v1',newGeneration);
+      return newGeneration;
+    });
+    await writer.waitForFunction(expected=>
+      localStorage.getItem('taskpoints_state_v2_generation_v1')===expected,
+      rotated,{timeout:12000});
+    const denied=await writer.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'different-generation'}));
+    assert.equal(denied.reason,'fence_generation_mismatch',JSON.stringify(denied));
+    assert.equal(denied.canPromote,false);
+    assert.equal(denied.productionWritersFenced,false);
+    assert.equal(denied.fence.writersCommitted,1);
+    const invalid=await writer.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:-1,marker:'nope'}));
+    assert.equal(invalid.reason,'expected_epoch_required');
+    const missing=await writer.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0}));
+    assert.equal(missing.reason,'writer_marker_required');
+    const final=await other.evaluate(()=>({
+      v1:localStorage.getItem('taskpoints_v1'),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    assert.equal(final.v1,before.raw);
+    assert.equal(final.authority,'legacy_only');
+    return {oldEpochPersistsWithoutRebinding:true,generationMismatchDenied:true,
+      invalidCallersRefused:true,noV1Mutation:true};
+  });
+
   await run('cooperative shared writer locks coexist and block exclusive handoff while legacy tabs remain unfenced',async context=>{
     const first=await open(context),second=await open(context);
     const silent=await context.newPage();
