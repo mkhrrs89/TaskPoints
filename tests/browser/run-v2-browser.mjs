@@ -3305,6 +3305,126 @@ try {
       legacyAuthorityPreserved:true};
   });
 
+
+  await run('newer Task completion delete during verified upsert compaction survives cleanup',async context=>{
+    const page=await open(context);
+    const proof=await page.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const id='upsert-then-delete-during-compaction';
+      const row={id,taskId:'synthetic-task',source:'task',
+        title:'Delete must win after older upsert',points:11,
+        completedAtISO:'2026-10-28T12:00:00.000Z'};
+      core.journalTaskMutation({completionUpsert:row});
+      const originalSet=Storage.prototype.setItem;
+      let injected=0,firstFlush;
+      Storage.prototype.setItem=function(key,value){
+        const outcome=originalSet.call(this,key,value);
+        if(this===localStorage&&key==='taskpoints_v1'&&!injected){
+          injected++;
+          // A later synchronous delete is journaled after the older upsert
+          // hits the canonical snapshot but before its verified cleanup.
+          core.journalTaskMutation({completionDeleteId:id});
+        }
+        return outcome;
+      };
+      try{firstFlush=core.flushPendingTaskMutations();}
+      finally{Storage.prototype.setItem=originalSet;}
+      const rawAfterFirst=core.parseTaskPointsStorageJson(
+        localStorage.getItem('taskpoints_v1'),{});
+      const pending=core.readPendingTaskMutations();
+      const effective=core.readTaskPointsStoredState();
+      const secondFlush=core.flushPendingTaskMutations();
+      const rawAfterSecond=core.parseTaskPointsStorageJson(
+        localStorage.getItem('taskpoints_v1'),{});
+      const finalJournal=core.readPendingTaskMutations();
+      return {injected,firstFlush,secondFlush,
+        rawAfterFirstIds:rawAfterFirst.completions.map(row=>row.id),
+        pendingDeleteIds:pending.record.completionDeletes,
+        pendingUpsertIds:pending.record.completionUpserts.map(row=>row.id),
+        effectiveIds:effective.completions.map(row=>row.id),
+        finalIds:rawAfterSecond.completions.map(row=>row.id),
+        finalJournal,authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(proof.injected,1);
+    assert.equal(proof.firstFlush,true);
+    assert.ok(proof.rawAfterFirstIds.includes('upsert-then-delete-during-compaction'),
+      'An older upsert must have reached the canonical snapshot');
+    assert.ok(proof.pendingDeleteIds.includes('upsert-then-delete-during-compaction'),
+      'Newer deletion must remain in the durable journal after cleanup');
+    assert.ok(!proof.pendingUpsertIds.includes('upsert-then-delete-during-compaction'));
+    assert.ok(!proof.effectiveIds.includes('upsert-then-delete-during-compaction'),
+      'The pending deletion must already hide the old persisted upsert');
+    assert.equal(proof.secondFlush,true);
+    assert.ok(!proof.finalIds.includes('upsert-then-delete-during-compaction'));
+    assert.equal(proof.finalJournal.record.completionDeletes.length,0);
+    assert.equal(proof.authority,'legacy_only');
+    return {newerDeleteRetained:true,overlayHidesOldUpsert:true,
+      deleteCompactedAfterRetry:true,authorityUnchanged:true};
+  });
+
+  await run('newer Task completion upsert during verified delete compaction survives cleanup',async context=>{
+    const page=await open(context);
+    const proof=await page.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const id='delete-then-upsert-during-compaction';
+      const old={id,taskId:'synthetic-task',source:'task',
+        title:'Old completion to remove',points:2,
+        completedAtISO:'2026-10-20T12:00:00.000Z'};
+      const newer={...old,title:'Recreated after old tombstone',points:19,
+        completedAtISO:'2026-10-28T12:03:00.000Z'};
+      core.journalTaskMutation({completionUpsert:old});
+      if(!core.flushPendingTaskMutations())throw Error('Failed to seed older completion');
+      core.journalTaskMutation({completionDeleteId:id});
+      const originalSet=Storage.prototype.setItem;
+      let injected=0,firstFlush;
+      Storage.prototype.setItem=function(key,value){
+        const outcome=originalSet.call(this,key,value);
+        if(this===localStorage&&key==='taskpoints_v1'&&!injected){
+          injected++;
+          // The user recreates the same record while its earlier deletion
+          // is being compacted. Cleanup must not discard this newer upsert.
+          core.journalTaskMutation({completionUpsert:newer});
+        }
+        return outcome;
+      };
+      try{firstFlush=core.flushPendingTaskMutations();}
+      finally{Storage.prototype.setItem=originalSet;}
+      const rawAfterFirst=core.parseTaskPointsStorageJson(
+        localStorage.getItem('taskpoints_v1'),{});
+      const pending=core.readPendingTaskMutations();
+      const effective=core.readTaskPointsStoredState();
+      const secondFlush=core.flushPendingTaskMutations();
+      const rawAfterSecond=core.parseTaskPointsStorageJson(
+        localStorage.getItem('taskpoints_v1'),{});
+      const finalJournal=core.readPendingTaskMutations();
+      return {injected,firstFlush,secondFlush,
+        rawAfterFirst:rawAfterFirst.completions.filter(row=>row.id===id),
+        pendingUpserts:pending.record.completionUpserts.filter(row=>row.id===id),
+        pendingDeletes:pending.record.completionDeletes,
+        effectiveRows:effective.completions.filter(row=>row.id===id),
+        finalRows:rawAfterSecond.completions.filter(row=>row.id===id),
+        finalJournal,authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(proof.injected,1);
+    assert.equal(proof.firstFlush,true);
+    assert.equal(proof.rawAfterFirst.length,0,
+      'The earlier tombstone must be reflected in the canonical snapshot');
+    assert.equal(proof.pendingUpserts.length,1,
+      'Newer same-ID upsert must survive verified tombstone cleanup');
+    assert.equal(proof.pendingUpserts[0].points,19);
+    assert.equal(proof.pendingDeletes.length,0,
+      'Newer upsert supersedes the older same-ID pending deletion');
+    assert.equal(proof.effectiveRows.length,1);
+    assert.equal(proof.effectiveRows[0].points,19);
+    assert.equal(proof.secondFlush,true);
+    assert.equal(proof.finalRows.length,1);
+    assert.equal(proof.finalRows[0].points,19);
+    assert.equal(proof.finalJournal.record.completionUpserts.length,0);
+    assert.equal(proof.authority,'legacy_only');
+    return {olderTombstoneCompacted:true,newerUpsertRetained:true,
+      newerUpsertPersistedOnRetry:true,authorityUnchanged:true};
+  });
+
   await run('full cutover inventory refuses a green pilot and silent legacy writer',async context=>{
     const inspector=await open(context),participant=await open(context);
     const silent=await context.newPage();
