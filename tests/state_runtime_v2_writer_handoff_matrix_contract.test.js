@@ -356,3 +356,33 @@ test('the transactional preview protocol does not masquerade as a production V1 
       'A V1 writer started calling the experimental protocol without review: '+file);
   }
 });
+
+test('Task completion cleanup protects changed same-ID patches and preserves failed compaction',()=>{
+  const journal=read('task_mutation_journal.js');
+  const begin=journal.indexOf('function clearVerifiedSnapshot(snapshot)');
+  const end=journal.indexOf('function persistedState()',begin);
+  assert.ok(begin>0&&end>begin);
+  const cleanup=journal.slice(begin,end);
+  assert.match(cleanup,/if \(current\.malformed\) return false/);
+  assert.match(cleanup,/snapshot\.completionUpserts\.some/);
+  assert.match(cleanup,/sameRow\(saved, row\)/);
+  assert.match(cleanup,/snapshot\.completionDeletes\.includes\(id\)/);
+  const compactStart=journal.indexOf('function persistPending(reason =');
+  const compactEnd=journal.indexOf('function scheduleRetry()',compactStart);
+  assert.ok(compactStart>0&&compactEnd>compactStart);
+  const compact=journal.slice(compactStart,compactEnd);
+  const saved=compact.indexOf('originalSaveStateSnapshot(candidate,');
+  const verified=compact.indexOf('if (!snapshotVerified(saved, snapshot, result.state))');
+  const cleared=compact.indexOf('clearVerifiedSnapshot(snapshot)');
+  assert.ok(saved>0&&verified>saved&&cleared>verified,
+    'Task journal may clear only after the saved canonical snapshot is verified');
+  assert.match(compact,/catch \(error\)/);
+  assert.match(compact,/return false;/);
+  const runtime=read('state_runtime_v2.js');
+  const cutoverStart=runtime.indexOf('async function inspectAuthorityCutoverBarriers()');
+  const cutoverEnd=runtime.indexOf('// Explicit forensic inspection',cutoverStart);
+  const gate=runtime.slice(cutoverStart,cutoverEnd);
+  assert.match(gate,/task_journal_compaction_handoff_not_validated/);
+  assert.match(gate,/taskJournalCompactionHandoffValidated: false/);
+  assert.match(gate,/canPromote: false/);
+});
