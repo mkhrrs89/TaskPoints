@@ -416,6 +416,35 @@ test('preview fence marker replays must validate caller-supplied payload identit
   assert.match(preview,/canPromote: false/);
 });
 
+test('V2 actual Habit mutation ledger refuses identity collisions before replay and WAL clearance',()=>{
+  const runtime=read('state_runtime_v2.js');
+  const begin=runtime.indexOf('function assertCommittedHabitMutationIdentity(');
+  const check=runtime.indexOf('async function hasCommittedHabitMutation(',begin);
+  const apply=runtime.indexOf('async function applyHabitDelta(',check);
+  const next=runtime.indexOf('async function applyHabitOrder',apply);
+  assert.ok(begin>0 && check>begin && apply>check && next>apply);
+  const guard=runtime.slice(begin,check),readOnly=runtime.slice(check,apply);
+  const writer=runtime.slice(apply,next);
+  for(const condition of [
+    "row.type !== 'habit-completion-set'",
+    "row.status !== 'committed'",
+    'row.resetGeneration !== generation',
+    'mutationIdForDelta(delta, generation) !== mutationId',
+    'stableJson(row.delta) !== stableJson(delta)',
+    'state_runtime_v2_mutation_identity_mismatch'
+  ]) assert.ok(guard.includes(condition),'Missing immutable ledger proof: '+condition);
+  assert.ok(readOnly.includes('!expectedDelta) return false'),
+    'Read-only WAL confirmation must fail closed without content');
+  assert.ok(readOnly.includes('assertCommittedHabitMutationIdentity('));
+  assert.ok(writer.indexOf('assertCommittedHabitMutationIdentity(')
+    < writer.indexOf('duplicate = true;'),
+    'Writer must reject colliding payloads before acknowledging duplicates');
+  assert.ok(writer.includes('mutationsStore.put({'));
+  const bridge=read('state_runtime_v2_wal_bridge.js');
+  assert.ok(bridge.includes('hasCommittedHabitMutation(mutationId, generation, delta)'),
+    'WAL bridge must compare the exact pending delta before cleanup');
+});
+
 test('Task completion cleanup protects changed same-ID patches and preserves failed compaction',()=>{
   const journal=read('task_mutation_journal.js');
   const begin=journal.indexOf('function clearVerifiedSnapshot(snapshot)');
