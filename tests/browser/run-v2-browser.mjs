@@ -3447,7 +3447,7 @@ try {
     assert.equal(report.checks.physicalSafariPwaLifecycleValidated,false);
     assert.equal(report.checks.productionMultiContextHandoffValidated,false);
     assert.equal(report.rollback.canRestoreFromCheckpoint,false);
-    assert.equal(report.knownUnfencedWriterFamilies.length,7);
+    assert.equal(report.knownUnfencedWriterFamilies.length,8);
     for(const blocker of [
       'all_legacy_writers_not_fenced',
       'nonpilot_authoritative_collections_not_migrated',
@@ -3461,7 +3461,7 @@ try {
     }));
     assert.equal(after.v1,v1Before);
     assert.equal(after.authority,'legacy_only');
-    return {greenPilotStillBlocked:true,sevenWriterFamiliesEnumerated:true,
+    return {greenPilotStillBlocked:true,eightWriterFamiliesEnumerated:true,
       existingLegacyStatePreserved:true,nonpilotCutoverProhibited:true};
   });
 

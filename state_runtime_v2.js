@@ -3381,6 +3381,7 @@
   const AUTHORITY_CUTOVER_WRITER_FAMILIES = Object.freeze([
     'scoring_core_snapshot_and_habit_journal',
     'home_direct_keys_and_snapshot_saves',
+    'game_players_schedules_and_preferences',
     'today_snapshot_and_view_state',
     'settings_import_reset_and_direct_storage',
     'notes_content_dirty_and_authority_flags',

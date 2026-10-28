@@ -4,10 +4,10 @@ Updated: 2026-10-28 · V2 branch only · **NOT APPROVED FOR CUTOVER**
 
 ## Purpose and scope
 
-This audit identifies seven **known, currently unfenced** V1 writer families and
-38 **source-evidence anchors** across seven V1 runtime files. An anchor can be a
+This audit identifies eight **known, currently unfenced** V1 writer families and
+44 **source-evidence anchors** across eight V1 runtime files. An anchor can be a
 writer, fallback, lifecycle callback, journal compaction step or shared entry
-point; **38 does not mean 38 independent or exhaustive writers**. The
+point; **44 does not mean 44 independent or exhaustive writers**. The
 classification is checked by
 `tests/state_runtime_v2_writer_handoff_matrix_contract.test.js`, run in the
 focused V2 contract CI stage. The preexisting broader sink scanner is retained.
@@ -26,11 +26,23 @@ its proof. Existing WAL wrapping and the isolated IndexedDB preview fence
 | --- | --- | --- | --- |
 | **Core snapshot and Habit journal** — `scoring_core.js` | `safeReplaceTaskPointsStorage()` synchronous replacement; `writePendingHabitDelta()` primary journal plus separate event sidecar; `clearCompactedHabitDeltas()`; startup/idle Habit compaction; deferred `runPendingInteractiveRecompress()` on `pagehide`/visibility | Existing direct `setItem`, durable pre-paint Habit tap, verified journal cleanup, byte-identity check on deferred re-encoding | Preserve synchronous tap durability; include every journal and sidecar; transactional generation rejection; safely drain/abort background work |
 | **Home** — `index.html` | `save()` and last-ditch/cached save; `resetAll()`; direct `tp_projects_v1` and Today view; Habit tap journal/fallback; Task completion journal; pending Habit compaction | Foreground journaling precedes paint; fallback and reset are independent paths | Prevent stale Home state and fallback resurrection; fence Task/Habit journals, direct keys, reset, and maintenance together |
+| **Game/player editor** — `game.html` | `saveState()` via `TaskPointsCore.saveAppState`/`mergeAndSaveState`; scheduled matchup and roster changes; YOU/NPC rival and color edits; separate gallery columns, group-active, and sort preferences | Existing synchronous V1 snapshot save path and independent UI preference keys | Include game page and direct keys in writer admission, generation fencing, freshness checks and rollback; a Home-only fence is insufficient |
 | **Today** — `today.html` | `saveApp()` snapshot and `saveTodayStore()` direct `TODAY_STORE_KEY` | Direct Today view can change independently of core snapshot | Preserve view data and current-day ordering across cross-tab migration |
 | **Settings/import/reset** — `settings.html` | `saveValidatedSnapshot()` full import, direct `tp_projects_v1` import, reset/removal, manual compressed raw replacement and rollback, notes authority flags | User-confirmed destructive replacement and manual rescue/rollback | Independent rollback checkpoint, user-confirmation/recovery semantics, generation rotation, no bypass via direct-key import |
 | **Notes** — `notes.html` | Direct `NOTES_STORAGE_KEY`; `saveAppState` or `writeTaskPointsStoredState()` fallback; notes authoritative/dirty flags | Notes are dual-stored, and dirty/authority markers control reconciliation | Treat content and flags as one logical unit; no silent loss of newer notes or dirty intent |
 | **Emergency recovery** — `emergency_recovery.html` | Recovery hold and V2-mode-off flags, `safeReplaceTaskPointsStorage()`, phase journal quarantine/removal, Habit journal reset, verification | Recovery can intentionally replace the entire V1 source and keep hold active | Preserve emergency access and independent off-device rollback; never block rescue solely because V2 fence DB is unavailable |
 | **Task journal/idle compaction** — `task_mutation_journal.js` | `journalMutation()` sync journal write; `scheduleCompaction()` / `runWhenQuiet()` deferred work; `saveStateSnapshotWithTaskJournal()` wrapping; verified cleanup | Sync journal precedes UI feedback; read overlay and deferred compaction protect pending Task changes | Must cover journal+overlay, completion updates and deletes, generation checks, quiet/idle failures, and compaction retry |
+
+## Main sync writer coverage expansion (October 28)
+
+The October 28 Main sync brought player-rival and other Game page changes
+into V2. The preexisting seven-family audit did not explicitly name
+`game.html`, despite its `saveState()` calls and three independently stored
+preference keys. The audit now pins six Game anchors and reports an eighth
+**unfenced** V1 writer family. This is read-only evidence, **not** a Game
+writer fence, a player-data migration or permission for V2 cutover.
+Paused Game tabs and old deployed code remain unfenced. The cutover report
+must still keep `canPromote:false` and `allLegacyWritersFenced:false`.
 
 ## Task-journal handoff preflight: explicit read-only blocker
 

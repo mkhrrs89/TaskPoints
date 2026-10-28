@@ -124,6 +124,48 @@ const SOURCE_ANCHORS = [
     "verified_compaction"
   ],
   [
+    "game_players_schedules_and_preferences",
+    "game.html",
+    "function saveState(nextState, options = {})",
+    "synchronous",
+    "snapshot_guard"
+  ],
+  [
+    "game_players_schedules_and_preferences",
+    "game.html",
+    "localStorage.setItem(GALLERY_COLUMNS_STORAGE_KEY, JSON.stringify(galleryColumns))",
+    "synchronous",
+    "nonpilot_key"
+  ],
+  [
+    "game_players_schedules_and_preferences",
+    "game.html",
+    "localStorage.setItem(GROUP_ACTIVE_PLAYERS_STORAGE_KEY, String(groupActivePlayers))",
+    "synchronous",
+    "nonpilot_key"
+  ],
+  [
+    "game_players_schedules_and_preferences",
+    "game.html",
+    "localStorage.setItem(PLAYER_SORT_STORAGE_KEY, mode)",
+    "synchronous",
+    "nonpilot_key"
+  ],
+  [
+    "game_players_schedules_and_preferences",
+    "game.html",
+    "state.youRivalId = validRival ? nextRivalId : \"\";",
+    "synchronous",
+    "snapshot_guard"
+  ],
+  [
+    "game_players_schedules_and_preferences",
+    "game.html",
+    "state = saveState(state, { allowStickyOverwriteKeys: [\"youImageId\", \"youName\", \"youPrimaryColor\", \"youSecondaryColor\"] });",
+    "synchronous",
+    "snapshot_guard"
+  ],
+  [
     "today_snapshot_and_view_state",
     "today.html",
     "function saveApp(nextState)",
@@ -281,6 +323,7 @@ const SOURCE_ANCHORS = [
 const FAMILIES = [
   'scoring_core_snapshot_and_habit_journal',
   'home_direct_keys_and_snapshot_saves',
+  'game_players_schedules_and_preferences',
   'today_snapshot_and_view_state',
   'settings_import_reset_and_direct_storage',
   'notes_content_dirty_and_authority_flags',
@@ -313,9 +356,9 @@ test('every named unfenced writer family has pinned, classified real source evid
       '. Audit the new route; never infer this path was fenced or removed safely.');
   }
   assert.deepEqual([...foundFamilies].sort(),[...FAMILIES].sort());
-  assert.ok(SOURCE_ANCHORS.length >= 35,
+  assert.ok(SOURCE_ANCHORS.length >= 44,
     'Writer evidence inventory silently reduced without an explicit migration review');
-  assert.equal(sourceByFile.size,7,'One of the seven known writer-owner source files went missing');
+  assert.equal(sourceByFile.size,8,'One of the eight known writer-owner source files went missing');
 });
 
 test('writer evidence matrix agrees with runtime hard blockers and remains nonpromotable', () => {
