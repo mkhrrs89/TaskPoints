@@ -207,7 +207,19 @@
       // Read both the established shared WAL and every independently durable
       // row. An overlapping stale shared-key write must never erase a
       // different tab's mutation from the recoverable WAL.
-      const merged = new Map(parsed.map(row => [row.id, row]));
+      const merged = new Map();
+      for (const row of parsed) {
+        const previous = merged.get(row.id);
+        // Older shared-array writes can contain more than one row with the
+        // same short FNV mutation ID. Never silently prefer the last entry
+        // when its generation or full delta differs.
+        if (previous && (previous.generation !== row.generation
+          || stableJson(previous.delta) !== stableJson(row.delta)
+          || previous.type !== row.type)) {
+          throw new Error('wal_shared_duplicate_identity_conflict');
+        }
+        merged.set(row.id, row);
+      }
       for (const key of independentKeys()) {
         const independentRaw = readWalStorage(key);
         if (independentRaw == null) continue; // concurrently confirmed/removed
@@ -217,7 +229,8 @@
         }
         const old = merged.get(row.id);
         if (old && (old.generation !== row.generation
-          || stableJson(old.delta) !== stableJson(row.delta))) {
+          || stableJson(old.delta) !== stableJson(row.delta)
+          || old.type !== row.type)) {
           throw new Error('wal_shared_independent_identity_conflict');
         }
         merged.set(row.id, row);
@@ -244,11 +257,25 @@
     if (!isEnabled()) return { written: false, reason: 'dark_disabled' };
     const delta = normalizeDelta(deltaInput);
     const generation = String(options.generation || ensureGeneration());
-    const mutationId = options.mutationId || mutationIdForDelta(delta, generation);
+    const computedMutationId = mutationIdForDelta(delta, generation);
+    const mutationId = options.mutationId == null
+      ? computedMutationId : String(options.mutationId);
+    // An explicit ID override must not pretend that changed identity fields
+    // represent an earlier durable Habit action.
+    if (mutationId !== computedMutationId)
+      throw new Error('state_runtime_v2_wal_mutation_id_mismatch');
     const current = read();
     if (!current.ok) throw new Error(current.error || 'state_runtime_v2_wal_unreadable');
-    const existing = current.rows.find((row) => row.id === mutationId && row.generation === generation);
+    const existing = current.rows.find(row => row.id === mutationId);
     if (existing) {
+      // IDs are short hashes. Metadata outside the ID calculation can differ
+      // even for an identical hash: never count that as a durable duplicate
+      // or rewrite either the shared log or the independent recovery row.
+      if (existing.generation !== generation
+        || existing.type !== 'habit-completion-set'
+        || stableJson(existing.delta) !== stableJson(delta)) {
+        throw new Error('state_runtime_v2_wal_duplicate_payload_conflict');
+      }
       // Upgrade a pending row written before independent WAL keys existed.
       if (supportsIndependentRows() && readWalStorage(independentKey(mutationId)) == null) {
         setWalStorageVerified(independentKey(mutationId), JSON.stringify(existing),

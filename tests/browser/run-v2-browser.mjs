@@ -5015,6 +5015,124 @@ try {
       eventRecoveredAfterRestart:true,parity:p.match};
   });
 
+  await run('pending V2 WAL rejects changed payload under identical mutation ID and retains replay evidence',async context=>{
+    const page=await open(context);
+    const proof=await page.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const pending=wal.getPendingRows();
+      if(!pending.ok||pending.rows.length!==1) throw Error('Expected held WAL mutation');
+      const original=pending.rows[0];
+      const sharedKey='taskpoints_v2_pending_mutations_v1';
+      const sidecarKey='taskpoints_v2_pending_mutation_event_v1:'+original.id;
+      const sharedBefore=localStorage.getItem(sharedKey);
+      const sidecarBefore=localStorage.getItem(sidecarKey);
+      const v1Before=localStorage.getItem('taskpoints_v1');
+      const candidate={...original.delta,clientMemo:'same-short-id-different-payload'};
+      const hashUnchanged=wal.mutationIdForDelta(candidate,original.generation)===original.id;
+      let collision=null,spoofed=null;
+      try{wal.appendHabitDelta(candidate,{generation:original.generation});}
+      catch(e){collision=String(e.message||e);}
+      try{wal.appendHabitDelta({...original.delta,updatedAtISO:'2026-10-20T13:00:00.000Z'},
+        {generation:original.generation,mutationId:original.id});}
+      catch(e){spoofed=String(e.message||e);}
+      const afterFailure=wal.getPendingRows();
+      const identical=wal.appendHabitDelta(original.delta,{generation:original.generation});
+      return {
+        hashUnchanged,collision,spoofed,
+        identical:{duplicate:identical.duplicate,written:identical.written},
+        current:wal.getPendingRows(),
+        afterFailure:afterFailure.ok?afterFailure.rows:[],
+        sharedUnchanged:sharedBefore===localStorage.getItem(sharedKey),
+        sidecarUnchanged:sidecarBefore===localStorage.getItem(sidecarKey),
+        v1Unchanged:v1Before===localStorage.getItem('taskpoints_v1'),
+        v1Journal:window.TaskPointsCore.readPendingHabitDeltas().length,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority,
+        original
+      };
+    });
+    assert.equal(proof.hashUnchanged,true,'Untracked metadata must produce the same short ID');
+    assert.match(proof.collision,/state_runtime_v2_wal_duplicate_payload_conflict/);
+    assert.match(proof.spoofed,/state_runtime_v2_wal_mutation_id_mismatch/);
+    assert.equal(proof.identical.duplicate,true);
+    assert.equal(proof.identical.written,false);
+    assert.equal(proof.current.ok,true);
+    assert.equal(proof.current.rows.length,1);
+    assert.deepEqual(proof.current.rows[0],proof.original);
+    assert.equal(proof.sharedUnchanged,true);
+    assert.equal(proof.sidecarUnchanged,true);
+    assert.equal(proof.v1Unchanged,true);
+    assert.equal(proof.v1Journal,1);
+    assert.equal(proof.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.wal.pendingCount===0&&s.bridge.replayCleared>=1;
+    },null,{timeout:25000});
+    const verified=await parity(page);
+    assert.equal(verified.actualCounts.completions,1);
+    return {collidingPayloadRejected:true,forgedIdRejected:true,
+      exactDuplicateIdempotent:true,bothWalCopiesPreserved:true,
+      replayAfterReload:true,parity:verified.match};
+  });
+
+  await run('conflicting duplicate IDs inside shared WAL block append and cleanup without data loss',async context=>{
+    const page=await open(context);
+    const probe=await page.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      window.V2BrowserFixture.delta('h2','2026-10-20','full',2);
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const original=wal.getPendingRows().rows[0];
+      if(!original) throw Error('Expected held WAL for duplicate fixture');
+      const sharedKey='taskpoints_v2_pending_mutations_v1';
+      const independentKey='taskpoints_v2_pending_mutation_event_v1:'+original.id;
+      const originalShared=localStorage.getItem(sharedKey);
+      const originalSidecar=localStorage.getItem(independentKey);
+      const beforeV1=localStorage.getItem('taskpoints_v1');
+      const bad={...original,delta:{...original.delta,clientMemo:'contradictory-copy'}};
+      localStorage.setItem(sharedKey,JSON.stringify([original,bad]));
+      const corruptedShared=localStorage.getItem(sharedKey);
+      const read=wal.getPendingRows();
+      let appendError=null,cleanupError=null;
+      try{wal.appendHabitDelta(original.delta,{generation:original.generation});}
+      catch(e){appendError=String(e.message||e);}
+      try{wal.removeMutation(original.id);}
+      catch(e){cleanupError=String(e.message||e);}
+      const stillCorrupt=localStorage.getItem(sharedKey)===corruptedShared;
+      const sidecarSafe=localStorage.getItem(independentKey)===originalSidecar;
+      const v1Safe=localStorage.getItem('taskpoints_v1')===beforeV1;
+      const noFalseEmpty=wal.getStatus().pendingCount===null;
+      // Restore only the synthetic test corruption; recovery must then be
+      // able to replay the previously durable real pending Habit delta.
+      localStorage.setItem(sharedKey,originalShared);
+      return {readOk:read.ok,readError:read.error,appendError,cleanupError,
+        stillCorrupt,sidecarSafe,v1Safe,noFalseEmpty,
+        restored:wal.getPendingRows().rows.length===1,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(probe.readOk,false);
+    assert.match(probe.readError,/wal_shared_duplicate_identity_conflict/);
+    assert.match(probe.appendError,/wal_shared_duplicate_identity_conflict/);
+    assert.match(probe.cleanupError,/wal_shared_duplicate_identity_conflict/);
+    assert.equal(probe.stillCorrupt,true);
+    assert.equal(probe.sidecarSafe,true);
+    assert.equal(probe.v1Safe,true);
+    assert.equal(probe.noFalseEmpty,true);
+    assert.equal(probe.restored,true);
+    assert.equal(probe.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.wal.pendingCount===0&&s.bridge.replayCleared>=1;
+    },null,{timeout:25000});
+    const result=await parity(page);
+    assert.equal(result.actualCounts.completions,1);
+    return {duplicateSharedRowsRefused:true,noSilentCollapse:true,
+      appendAndCleanupBlocked:true,originalSidecarRetained:true,
+      syntheticCorruptionRecovered:true,parity:result.match};
+  });
+
   await run('independent WAL quota denial preserves V1 journal and cannot claim an orphan V2 mutation',async context=>{
     const page=await open(context);
     const result=await page.evaluate(()=>{

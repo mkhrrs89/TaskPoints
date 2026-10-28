@@ -445,6 +445,30 @@ test('V2 actual Habit mutation ledger refuses identity collisions before replay 
     'WAL bridge must compare the exact pending delta before cleanup');
 });
 
+test('WAL append and shared inventory refuse conflicting short mutation ID payloads',()=>{
+  const wal=read('state_runtime_v2_wal.js');
+  const begin=wal.indexOf('function read()');
+  const append=wal.indexOf('function appendHabitDelta(',begin);
+  const remove=wal.indexOf('function removeMutation(',append);
+  assert.ok(begin>0&&append>begin&&remove>append);
+  const reader=wal.slice(begin,append);
+  const writer=wal.slice(append,remove);
+  assert.match(reader,/wal_shared_duplicate_identity_conflict/);
+  assert.match(reader,/stableJson\(previous\.delta\) !== stableJson\(row\.delta\)/);
+  assert.match(reader,/wal_shared_independent_identity_conflict/);
+  assert.match(writer,/state_runtime_v2_wal_mutation_id_mismatch/);
+  assert.match(writer,/state_runtime_v2_wal_duplicate_payload_conflict/);
+  assert.match(writer,/stableJson\(existing\.delta\) !== stableJson\(delta\)/);
+  assert.ok(writer.indexOf('state_runtime_v2_wal_duplicate_payload_conflict')
+    < writer.indexOf('state_runtime_v2_wal_independent_write_failed'),
+    'A conflicting duplicate must never overwrite the independent WAL');
+  assert.ok(writer.indexOf('state_runtime_v2_wal_duplicate_payload_conflict')
+    < writer.indexOf('writeRows(next)'),
+    'A conflicting duplicate must never rewrite the shared WAL');
+  const bridge=read('state_runtime_v2_wal_bridge.js');
+  assert.ok(bridge.includes('hasCommittedHabitMutation(mutationId, generation, delta)'));
+});
+
 test('Task completion cleanup protects changed same-ID patches and preserves failed compaction',()=>{
   const journal=read('task_mutation_journal.js');
   const begin=journal.indexOf('function clearVerifiedSnapshot(snapshot)');

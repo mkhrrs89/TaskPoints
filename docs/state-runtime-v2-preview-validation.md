@@ -703,3 +703,25 @@ record formats and preview cutover blockers are preserved.
 not complete production writer fencing or migration of non-Habit collections.
 An uncooperative old Main tab can still write V1; independent off-device
 rollback and physical iPhone/PWA testing remain cutover prerequisites.
+
+### Same-ID collision refusal at the V2 pending WAL boundary (October 28)
+
+The preview-only Habit WAL now rejects a repeated short mutation ID unless the
+full pending Habit payload and generation are identical. An explicit mutation
+ID override must match the ID calculated from the new delta. Identical retries
+remain idempotent, including the existing compatibility path that writes a
+missing independent recovery row for older pending entries. No older pending
+WAL record formats are dropped or rewritten in bulk.
+
+The read-only WAL inventory also refuses a malformed shared array containing
+conflicting same-ID entries rather than silently collapsing it to the last
+entry. The preexisting shared/independent consistency check additionally
+compares the operation type. On a conflict, append, replay inspection and
+cleanup are blocked; the original shared bytes, sidecar, and V1 journal are
+preserved. Tests exercise colliding untracked metadata, a forged explicit ID,
+exact retry, contradictory shared-array rows and successful restart replay
+after removing only test-injected corruption.
+
+This protects V2's WAL append boundary but is **not** atomic cross-tab writer
+admission. Two non-cooperating tabs can still race on localStorage, and no
+V1 production save behavior or V2 cutover gate has changed.
