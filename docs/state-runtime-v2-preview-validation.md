@@ -745,3 +745,24 @@ cross-tab compare-and-swap**. A noncooperating tab can still modify keys
 between the last read and write, so this does not establish production
 writer fencing or authorize a V2 cutover. Only V2-scoped browser and
 source-contract coverage has been changed.
+
+### Immutable per-append admission claims for cross-tab V2 WAL (October 28)
+
+New V2 Habit WAL entries now write a **uniquely addressed, verified**
+localStorage recovery claim before they touch the existing per-ID sidecar
+or legacy shared WAL array. Concurrent tabs using the same short mutation ID
+cannot overwrite each other's new claim keys. WAL reads merge the existing
+shared and per-ID records with all claim entries and refuse any differing
+same-ID payloads, preserving both originals for diagnosis rather than
+silently accepting the last writer.
+
+The original WAL array, per-ID sidecars, V1 journal, and recovery bridge
+remain in place. Matching claims are cleaned up only after the V2 mutation
+ledger has been verified and the older sidecar cleanup succeeds. Interrupted
+cleanup, denied writes or conflict leaves independent evidence for restart.
+The V2 WAL status also counts admission claims for diagnostics.
+
+**Limitations:** localStorage cannot provide an atomic cross-tab transaction
+or a production-grade global mutex. This protects each new V2 WAL intent
+from key overwrite; it does not make the shared cache atomic, prevent old
+V1 tabs writing V1, or authorize promotion of V2 as primary storage.

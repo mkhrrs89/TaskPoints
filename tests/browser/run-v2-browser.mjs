@@ -4924,7 +4924,134 @@ try {
   });
 
 
-  await run('silent independent WAL write denial cannot claim durability or lose V1',async context=>{
+  await run('unique V2 WAL admission claims survive legacy sidecar clobber by a second tab',async context=>{
+    const first=await open(context);
+    const original=await first.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const pending=wal.getPendingRows();
+      if(!pending.ok||pending.rows.length!==1) throw Error('Expected held WAL admission');
+      const row=pending.rows[0];
+      const sharedKey=wal.KEY;
+      const sidecarKey='taskpoints_v2_pending_mutation_event_v1:'+row.id;
+      const claimKeys=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i))
+        .filter(k=>k.startsWith(wal.CLAIM_PREFIX));
+      return {row,shared:localStorage.getItem(sharedKey),
+        sidecar:localStorage.getItem(sidecarKey),claimKeys,
+        claims:claimKeys.map(k=>localStorage.getItem(k)),
+        v1:localStorage.getItem('taskpoints_v1'),
+        status:wal.getStatus()};
+    });
+    assert.equal(original.claimKeys.length,1);
+    assert.equal(original.status.admissionClaimCount,1);
+    // Simulate an old/non-cooperating tab overwriting both legacy WAL keys.
+    // Do not start V2's coordinated replay in the simulated old tab.
+    const second=await context.newPage();
+    await second.goto(url,{waitUntil:'load'});
+    const interference=await second.evaluate(({row})=>{
+      const competitor={...row,delta:{...row.delta,clientMemo:'different-tab-same-short-id'}};
+      localStorage.setItem('taskpoints_v2_pending_mutations_v1',JSON.stringify([competitor]));
+      localStorage.setItem('taskpoints_v2_pending_mutation_event_v1:'+row.id,
+        JSON.stringify(competitor));
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const read=wal.getPendingRows();
+      return {status:wal.getStatus(),readOk:read.ok,error:read.error,
+        claim:localStorage.getItem(Array.from({length:localStorage.length},(_,i)=>localStorage.key(i))
+          .find(k=>k.startsWith(wal.CLAIM_PREFIX)))};
+    },{row:original.row});
+    assert.equal(interference.readOk,false);
+    assert.match(interference.error,/wal_admission_claim_identity_conflict/);
+    assert.equal(interference.claim,original.claims[0]);
+    assert.equal(interference.status.malformed,true);
+    assert.equal(interference.status.pendingCount,null);
+    assert.equal(await first.evaluate(()=>localStorage.getItem('taskpoints_v1')),original.v1);
+    // Restore only the malicious synthetic overwrite; the unique claim
+    // must still replay the original event after a full browser reload.
+    await second.evaluate(({row,shared,sidecar})=>{
+      localStorage.setItem('taskpoints_v2_pending_mutations_v1',shared);
+      localStorage.setItem('taskpoints_v2_pending_mutation_event_v1:'+row.id,sidecar);
+    },original);
+    await second.close();
+    await first.reload({waitUntil:'load'});
+    await first.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.wal.pendingCount===0 && s.wal.admissionClaimCount===0
+        && s.bridge.replayCleared>=1;
+    },null,{timeout:25000});
+    const p=await parity(first);
+    assert.equal(p.actualCounts.completions,1);
+    assert.equal(await first.evaluate(()=>localStorage.getItem('taskpoints_v1')),original.v1);
+    return {secondTabClobberRejected:true,uniqueClaimUnchanged:true,
+      noFalseEmptyQueue:true,restartReplayRestoredOriginal:true,parity:p.match};
+  });
+
+  await run('new WAL admission claim write failure cannot alter V1 or existing WAL copies',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(()=>{
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const before=localStorage.getItem('taskpoints_v1');
+      const set=Storage.prototype.setItem;
+      let denied=0;
+      Storage.prototype.setItem=function(key,value){
+        if(this===localStorage && String(key).startsWith(wal.CLAIM_PREFIX)){
+          denied++;throw new DOMException('Synthetic immutable claim quota denial','QuotaExceededError');
+        }
+        return set.call(this,key,value);
+      };
+      try{window.V2BrowserFixture.delta('h1','2026-10-20','full',1);}
+      finally{Storage.prototype.setItem=set;}
+      const status=wal.getStatus();
+      return {denied,claims:status.admissionClaimCount,pending:status.pendingCount,
+        shared:localStorage.getItem(wal.KEY),
+        sidecars:status.independentEventCount,
+        v1Journal:window.TaskPointsCore.readPendingHabitDeltas().length,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority,
+        v1Saved:localStorage.getItem('taskpoints_v1')===before};
+    });
+    assert.equal(result.denied,1);
+    assert.equal(result.claims,0);
+    assert.equal(result.pending,0);
+    assert.equal(result.shared,null);
+    assert.equal(result.sidecars,0);
+    assert.equal(result.v1Journal,1);
+    assert.equal(result.authority,'legacy_only');
+    assert.equal(result.v1Saved,true);
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.bridge.failures>=1 && s.runtime.mirroredMutations>=1;
+    },null,{timeout:18000});
+    await page.reload({waitUntil:'load'});
+    assert.equal((await parity(page)).match,true);
+    return {claimDenialFailClosed:true,noFakeWalDurability:true,
+      V1JournalRetained:true,legacyAuthority:true};
+  });
+
+  await run('unique V2 WAL admission claims are removed only after confirmed ledger writes',async context=>{
+    const page=await open(context);
+    const before=await page.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      const status=window.TaskPointsStateRuntimeV2Wal.getStatus();
+      return {claims:status.admissionClaimCount,pending:status.pendingCount,
+        sidecars:status.independentEventCount};
+    });
+    assert.equal(before.claims,1);
+    assert.equal(before.pending,1);
+    assert.equal(before.sidecars,1);
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.wal.pendingCount===0 && s.wal.admissionClaimCount===0
+        && s.wal.independentEventCount===0 && s.bridge.replayCleared>=1;
+    },null,{timeout:25000});
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,1);
+    return {heldClaimCount:1,verifiedCleanupCount:0,
+      noOrphanClaimKeys:true,replayExactlyOnce:true,parity:p.match};
+  });
+
+  await run('silent legacy WAL sidecar denial retains unique admission claim and V1',async context=>{
     const page=await open(context);
     const outcome=await page.evaluate(()=>{
       const core=window.TaskPointsCore;
@@ -4948,7 +5075,8 @@ try {
     assert.equal(outcome.swallowed,1);
     assert.equal(outcome.shared,null);
     assert.equal(outcome.pending.ok,true);
-    assert.equal(outcome.pending.rows.length,0);
+    assert.equal(outcome.pending.rows.length,1,
+      'the new independent claim is durable despite legacy sidecar failure');
     assert.equal(outcome.journal.length,1);
     assert.equal(outcome.journal[0].status,'full');
     assert.equal(outcome.authority,'legacy_only');
@@ -4959,7 +5087,9 @@ try {
     await page.reload({waitUntil:'load'});
     const p=await parity(page);
     assert.equal(p.actualCounts.completions,1);
-    return {silentSidecarIgnored:true,noFalseWalDurability:true,
+    const after=await page.evaluate(()=>window.V2BrowserFixture.status().wal);
+    assert.equal(after.admissionClaimCount,0);
+    return {silentSidecarIgnored:true,uniqueAdmissionClaimRecovered:true,
       v1Persisted:true,parity:p.match};
   });
 
@@ -5340,7 +5470,7 @@ try {
       syntheticCorruptionRecovered:true,parity:result.match};
   });
 
-  await run('independent WAL quota denial preserves V1 journal and cannot claim an orphan V2 mutation',async context=>{
+  await run('legacy WAL sidecar quota denial leaves unique V2 claim and V1 journal recoverable',async context=>{
     const page=await open(context);
     const result=await page.evaluate(()=>{
       const original=Storage.prototype.setItem;
@@ -5358,13 +5488,15 @@ try {
       const wal=window.TaskPointsStateRuntimeV2Wal.getPendingRows();
       const legacy=window.TaskPointsCore.readPendingHabitDeltas();
       return {rejected,walOk:wal.ok,walRows:wal.rows.length,
+        claimCount:window.TaskPointsStateRuntimeV2Wal.getStatus().admissionClaimCount,
         legacyCount:legacy.length,legacyStatus:legacy[0]?.status,
         generation:window.TaskPointsStateRuntimeV2Generation.read(),
         readAuthority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
     });
     assert.equal(result.rejected,1);
     assert.equal(result.walOk,true);
-    assert.equal(result.walRows,0,'V2 must never report a WAL mutation whose sidecar could not be saved');
+    assert.equal(result.walRows,1,'the independently durable unique claim survives old sidecar denial');
+    assert.equal(result.claimCount,1);
     assert.equal(result.legacyCount,1);
     assert.equal(result.legacyStatus,'full');
     assert.equal(result.readAuthority,'legacy_only');
@@ -5381,10 +5513,11 @@ try {
     assert.equal(p.actualCounts.completions,1);
     const status=await page.evaluate(()=>window.V2BrowserFixture.status());
     assert.equal(status.wal.pendingCount,0);
+    assert.equal(status.wal.admissionClaimCount,0);
     assert.equal(status.runtime.currentGeneration,result.generation);
     assert.equal(status.runtime.readAuthority,'legacy_only');
     return {quotaDeniedSidecar:true,v1AuthoritativeJournalPreserved:true,
-      orphanWalRows:0,generationUnchanged:true,parity:true};
+      durableAdmissionClaimReplayed:true,generationUnchanged:true,parity:true};
   });
 
   await run('standalone WAL fallback rejects denied generation reads and retains epoch through restart',async context=>{

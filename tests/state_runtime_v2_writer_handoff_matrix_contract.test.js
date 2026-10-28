@@ -496,6 +496,30 @@ test('verified V2 Habit WAL cleanup must recheck exact payload and both localSto
   assert.ok(verified>0&&removed>verified,'WAL cannot clear without matching V2 ledger verification');
 });
 
+test('unique cross-tab WAL admission claims survive old per-ID sidecar overwrites',()=>{
+  const wal=read('state_runtime_v2_wal.js');
+  const begin=wal.indexOf('function read()');
+  const append=wal.indexOf('function appendHabitDelta(',begin);
+  const remove=wal.indexOf('function removeMutation(',append);
+  const end=wal.indexOf('function getPendingRows()',remove);
+  assert.ok(begin>0&&append>begin&&remove>append&&end>remove);
+  const reader=wal.slice(begin,append);
+  const writer=wal.slice(append,remove);
+  const cleanup=wal.slice(remove,end);
+  assert.match(reader,/for \(const key of claimKeys\(\)\)/);
+  assert.match(reader,/wal_admission_claim_identity_conflict/);
+  assert.match(reader,/wal_admission_claim_invalid/);
+  assert.match(writer,/setWalStorageVerified\(uniqueClaimKey\(\), JSON.stringify\(row\)/);
+  assert.match(writer,/state_runtime_v2_wal_admission_sidecar_conflict/);
+  assert.ok(writer.indexOf('uniqueClaimKey()')<writer.indexOf('writeRows(next)'),
+    'Admission claim must be durable before the shared WAL can be overwritten');
+  assert.ok(writer.indexOf('uniqueClaimKey()')<writer.indexOf('setWalStorageVerified(independentKey(mutationId)'),
+    'Admission claim must precede canonical per-ID WAL sidecar');
+  assert.match(cleanup,/for \(const key of claimKeys\(\)\)/);
+  assert.match(cleanup,/readWalStorage\(claim.key\) !== claim.raw/);
+  assert.match(cleanup,/state_runtime_v2_wal_claim_remove_failed/);
+});
+
 test('Task completion cleanup protects changed same-ID patches and preserves failed compaction',()=>{
   const journal=read('task_mutation_journal.js');
   const begin=journal.indexOf('function clearVerifiedSnapshot(snapshot)');

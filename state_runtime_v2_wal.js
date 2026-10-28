@@ -7,6 +7,9 @@
   // Independently durable event keys prevent concurrent tabs from
   // overwriting each other's rows in the legacy shared WAL array.
   const EVENT_PREFIX = 'taskpoints_v2_pending_mutation_event_v1:';
+  // A unique, immutable claim is written FIRST on each new WAL admission.
+  // The legacy per-ID event and shared WAL remain fully supported.
+  const CLAIM_PREFIX = 'taskpoints_v2_pending_mutation_claim_v1:';
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
   const GENERATION_KEY = 'taskpoints_state_v2_generation_v1';
   const SCHEMA_VERSION = 1;
@@ -191,6 +194,24 @@
     return keys.sort();
   }
 
+  function uniqueClaimKey() {
+    // Random UUIDs prevent different tabs with colliding short mutation IDs
+    // from ever writing to the same admission key.
+    return CLAIM_PREFIX + (global.crypto?.randomUUID?.()
+      || `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  }
+
+  function claimKeys() {
+    if (!supportsIndependentRows()) return [];
+    const storage = global.localStorage;
+    const keys = [];
+    for (let i = 0; i < storage.length; i += 1) {
+      const key = storage.key(i);
+      if (typeof key === 'string' && key.startsWith(CLAIM_PREFIX)) keys.push(key);
+    }
+    return keys.sort();
+  }
+
   function validateRow(row) {
     return row && typeof row === 'object' && typeof row.id === 'string'
       && row.delta && typeof row.generation === 'string';
@@ -232,6 +253,26 @@
           || stableJson(old.delta) !== stableJson(row.delta)
           || old.type !== row.type)) {
           throw new Error('wal_shared_independent_identity_conflict');
+        }
+        merged.set(row.id, row);
+      }
+      // Each newly admitted write also has a unique recovery claim. Even if
+      // concurrent tabs overwrite the old per-ID event and shared array, the
+      // original claim remains independently recoverable and conflicts fail
+      // closed instead of accepting a different mutation's acknowledgement.
+      for (const key of claimKeys()) {
+        const claimRaw = readWalStorage(key);
+        if (claimRaw == null) continue; // another tab finished cleanup
+        const row = JSON.parse(claimRaw);
+        if (!validateRow(row) || row.type !== 'habit-completion-set'
+          || mutationIdForDelta(row.delta, row.generation) !== row.id) {
+          throw new Error('wal_admission_claim_invalid');
+        }
+        const existing = merged.get(row.id);
+        if (existing && (existing.generation !== row.generation
+          || existing.type !== row.type
+          || stableJson(existing.delta) !== stableJson(row.delta))) {
+          throw new Error('wal_admission_claim_identity_conflict');
         }
         merged.set(row.id, row);
       }
@@ -294,11 +335,25 @@
     };
     const next = [...current.rows, row];
     if (next.length > MAX_ROWS) throw new Error('state_runtime_v2_wal_capacity_exceeded');
-    // Sidecar FIRST: if this tab is suspended while updating the shared array,
-    // another tab can still replay this exact mutation after restart.
+    // Unique claim FIRST. Old tabs and parallel new tabs can still overwrite
+    // the legacy per-ID event; they cannot overwrite this UUID-addressed row.
+    // If a later step fails, keep the claim for safe startup recovery.
     if (supportsIndependentRows()) {
-      setWalStorageVerified(independentKey(mutationId), JSON.stringify(row),
-        'state_runtime_v2_wal_independent_write_failed');
+      setWalStorageVerified(uniqueClaimKey(), JSON.stringify(row),
+        'state_runtime_v2_wal_claim_write_failed');
+      const existingSidecar = readWalStorage(independentKey(mutationId));
+      if (existingSidecar !== null) {
+        let prior;
+        try { prior = JSON.parse(existingSidecar); } catch (_) {}
+        if (!validateRow(prior) || prior.generation !== generation
+          || prior.type !== row.type
+          || stableJson(prior.delta) !== stableJson(delta)) {
+          throw new Error('state_runtime_v2_wal_admission_sidecar_conflict');
+        }
+      } else {
+        setWalStorageVerified(independentKey(mutationId), JSON.stringify(row),
+          'state_runtime_v2_wal_independent_write_failed');
+      }
     }
     writeRows(next);
     appendCount += 1;
@@ -354,6 +409,23 @@
     if (!target) return { removed: false, reason: 'not_found', mutationId: id };
 
     const next = current.rows.filter(row => row.id !== id);
+    // Collect immutable matching claims before any destructive mutation.
+    // A concurrently added claim after enumeration will remain recoverable.
+    const claimsToClear = [];
+    for (const key of claimKeys()) {
+      const raw = readWalStorage(key);
+      if (raw == null) continue;
+      let claim;
+      try { claim = JSON.parse(raw); }
+      catch (_) { throw new Error('state_runtime_v2_wal_cleanup_claim_changed'); }
+      if (claim?.id !== id) continue;
+      if (claim.generation !== target.generation
+        || claim.type !== target.type
+        || stableJson(claim.delta) !== stableJson(target.delta)) {
+        throw new Error('state_runtime_v2_wal_cleanup_claim_changed');
+      }
+      claimsToClear.push({ key, raw });
+    }
     // Another tab could update the shared key while the sidecar was being
     // inspected. Recheck it immediately before the destructive shared write.
     if (readWalStorage(KEY) !== current.raw)
@@ -368,6 +440,14 @@
         throw new Error('state_runtime_v2_wal_cleanup_sidecar_changed');
       removeWalStorageVerified(sidecarKey,
         'state_runtime_v2_wal_independent_remove_failed');
+      // Remove only claims whose bytes still match the verified snapshot.
+      // A failed removal leaves independently recoverable evidence behind.
+      for (const claim of claimsToClear) {
+        if (readWalStorage(claim.key) !== claim.raw)
+          throw new Error('state_runtime_v2_wal_cleanup_claim_changed');
+        removeWalStorageVerified(claim.key,
+          'state_runtime_v2_wal_claim_remove_failed');
+      }
     }
     removeCount += 1;
     try { global.TaskPointsPerf?.mark?.('stateV2.walCleared', { mutationId: id }); } catch (_) {}
@@ -383,12 +463,16 @@
   function getStatus() {
     const current = read();
     let independentEventCount = null;
+    let admissionClaimCount = null;
     let enumerationError = null;
     // Diagnostics must remain readable even when the browser denies access
     // to localStorage.length/key during a storage-security transition. Never
     // treat an incomplete WAL inventory as an empty healthy queue.
     try {
-      if (supportsIndependentRows()) independentEventCount = independentKeys().length;
+      if (supportsIndependentRows()) {
+        independentEventCount = independentKeys().length;
+        admissionClaimCount = claimKeys().length;
+      }
     } catch (error) {
       enumerationError = `state_runtime_v2_wal_inventory_unreadable:${String(error?.message || error)}`;
       lastError = enumerationError;
@@ -409,6 +493,7 @@
       key: KEY,
       independentEventPrefix: EVENT_PREFIX,
       independentEventCount,
+      admissionClaimCount,
       generationKey: GENERATION_KEY,
       generation,
       generationReadable,
@@ -426,6 +511,7 @@
     KEY,
     DARK_MODE_KEY,
     GENERATION_KEY,
+    CLAIM_PREFIX,
     SCHEMA_VERSION,
     isEnabled,
     ensureGeneration,
