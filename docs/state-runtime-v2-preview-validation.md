@@ -487,4 +487,36 @@ This is a test-only synchronization improvement and does **not** weaken
 `inspectPreservedParityMismatch()`, cause an automatic retry inside the
 runtime, or certify cross-tab consistency in production.
 
+### Combined prewrite source guard and deferred recompression test (October 28)
+
+The localhost/approved-preview-only exclusive snapshot rehearsal now passes a
+single optional callback guard called
+`assertPreviewCompleteWriterSourcesUnchanged(source)`. It expects version 1
+tokens for the exact `taskpoints_v1` snapshot, raw primary Task and Habit
+journals, and the sorted independent Habit-sidecar key/value inventory.
+For each controlled test write, this composed check compares the snapshot and
+both journals, enumerates/compares sidecars, then rechecks the snapshot and
+journals and finally the generation before returning. A missing/malformed
+composite token fails closed. The individual opt-in guard methods remain
+available and unchanged.
+
+A Chromium/WebKit scenario now suspends a preview-only writer, lets an
+**unfenced** legacy tab perform the real interactive packed
+`TaskPointsCore.saveStateSnapshot()` and
+`flushPendingInteractiveRecompresses()`, then resumes the preview writer.
+The newer Task and existing unrelated completion must survive; the stale
+preview candidate must be refused, and the rehearsal lock released. Another
+scenario verifies that the combined guard cannot accidentally omit the
+independent Habit sidecar check.
+
+This does **not** turn the sequence into a transaction: separate tab processes
+can still change storage between two synchronous reads or immediately after
+the last read; primary Task/Habit journals can also advance during
+compaction. The guard does not cover every TaskPoints key, image store or
+older app version, and the callback can still bypass it. It is intentionally
+**not installed into the real save path**, preserves all synchronous V1
+writes, leaves V1 authoritative, and never grants V2 cutover approval.
+Moving from this evidence to production requires a genuine writer-fencing
+protocol plus a crash-safe recovery/rollback design.
+
 **Cutover remains prohibited.** Before a production lease can replace this prototype: audit and integrate every V1 writer with abort/fencing semantics, preserve urgent writes and crash-recovery behavior, verify an off-device rollback source, migrate all nonpilot collections, and run full physical Safari/PWA lifecycle testing. This test API must never be mistaken for production writer fencing.
