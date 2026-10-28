@@ -3139,6 +3139,109 @@ try {
       journalAlreadyEmpty:true,oldTabsStillBlockCutover:true};
   });
 
+  await run('pending Task completion delete overrides stale full snapshot without resurrection',async context=>{
+    const oldTab=await open(context),editor=await open(context);
+    const stale=await oldTab.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      return core.parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1'),{});
+    });
+    assert.ok(stale.completions.some(row=>row.id==='synthetic-task-completion'));
+    const journaled=await editor.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      core.journalTaskMutation({completionDeleteId:'synthetic-task-completion'});
+      return core.readPendingTaskMutations();
+    });
+    assert.equal(journaled.record.completionDeletes.includes('synthetic-task-completion'),true);
+    await oldTab.waitForFunction(()=>window.TaskPointsCore.readPendingTaskMutations()
+      .record.completionDeletes.includes('synthetic-task-completion'),null,{timeout:12000});
+    const after=await oldTab.evaluate(stale=>{
+      const core=window.TaskPointsCore;
+      const result=core.saveStateSnapshot(stale,{
+        immediateWrite:true,userInitiated:true,
+        savePath:'home-stale-completion-while-journal-pending'
+      });
+      const raw=core.parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1'),{});
+      const effective=core.readTaskPointsStoredState();
+      const journal=core.readPendingTaskMutations();
+      return {skipped:result?.skipped===true,
+        rawIds:raw.completions.map(row=>row.id),
+        effectiveIds:effective.completions.map(row=>row.id),
+        journalMalformed:journal.malformed};
+    },stale);
+    assert.equal(after.skipped,false);
+    assert.equal(after.rawIds.includes('synthetic-task-completion'),false,
+      'Pending completion delete must block a stale snapshot resurrection');
+    assert.equal(after.effectiveIds.includes('synthetic-task-completion'),false);
+    assert.equal(after.journalMalformed,false);
+    const gate=await oldTab.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.inspectAuthorityCutoverBarriers());
+    assert.equal(gate.canPromote,false);
+    assert.equal(gate.checks.taskJournalCompactionHandoffValidated,false);
+    assert.ok(gate.blockers.includes('task_journal_compaction_handoff_not_validated'));
+    assert.equal(gate.mutationAuthority,'legacy_only');
+    return {pendingDeleteWinsOverStaleTab:true,
+      deletedCompletionAbsent:true,noAuthorityPromotion:true};
+  });
+
+  await run('newer Task completion edit during verified journal compaction survives cleanup and retry',async context=>{
+    const page=await open(context);
+    const proof=await page.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const initial=localStorage.getItem('taskpoints_v1');
+      const old={id:'task-compaction-race-completion',
+        taskId:'synthetic-task',source:'task',title:'Original journaled completion',
+        points:3,completedAtISO:'2026-10-20T12:00:00.000Z'};
+      const newer={...old,title:'Newer completion during cleanup',points:17,
+        completedAtISO:'2026-10-28T12:00:00.000Z'};
+      core.journalTaskMutation({completionUpsert:old});
+      const original=Storage.prototype.setItem;
+      let injected=0,firstFlush;
+      Storage.prototype.setItem=function(key,value){
+        const outcome=original.call(this,key,value);
+        if(this===localStorage && key==='taskpoints_v1' && !injected){
+          injected++;
+          // A new synchronous Task action arrives after the canonical V1
+          // write but before cleanup removes the verified older journal row.
+          // This is controlled reentrant interruption, NOT a claim that
+          // another browser process executes during the same JS call stack.
+          core.journalTaskMutation({completionUpsert:newer});
+        }
+        return outcome;
+      };
+      try{firstFlush=core.flushPendingTaskMutations();}
+      finally{Storage.prototype.setItem=original;}
+      const afterFirstRaw=core.parseTaskPointsStorageJson(
+        localStorage.getItem('taskpoints_v1'),{});
+      const pending=core.readPendingTaskMutations();
+      const effective=core.readTaskPointsStoredState();
+      const secondFlush=core.flushPendingTaskMutations();
+      const lastRaw=core.parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1'),{});
+      const finalJournal=core.readPendingTaskMutations();
+      return {initial,injected,firstFlush,secondFlush,
+        rawAfterFirst:afterFirstRaw.completions.filter(row=>row.id===old.id),
+        pendingRows:pending.record.completionUpserts.filter(row=>row.id===old.id),
+        effectiveRows:effective.completions.filter(row=>row.id===old.id),
+        finalRows:lastRaw.completions.filter(row=>row.id===old.id),
+        finalJournal,authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(proof.injected,1,'Newer completion must arrive during actual V1 save');
+    assert.equal(proof.firstFlush,true,'Verified old patch should compact successfully');
+    assert.equal(proof.rawAfterFirst.length,1);
+    assert.equal(proof.rawAfterFirst[0].points,3);
+    assert.equal(proof.pendingRows.length,1,'Cleanup must retain a changed same-ID patch');
+    assert.equal(proof.pendingRows[0].points,17);
+    assert.equal(proof.effectiveRows.length,1);
+    assert.equal(proof.effectiveRows[0].points,17);
+    assert.equal(proof.secondFlush,true,'Newer pending mutation must compact on retry');
+    assert.equal(proof.finalRows.length,1);
+    assert.equal(proof.finalRows[0].points,17);
+    assert.equal(proof.finalJournal.record.completionUpserts.length,0);
+    assert.equal(proof.authority,'legacy_only');
+    return {interleavedSameIdCompletionRetained:true,
+      compactionRetryExactlyOnce:true,finalPoints:17,
+      legacyAuthorityPreserved:true};
+  });
+
   await run('full cutover inventory refuses a green pilot and silent legacy writer',async context=>{
     const inspector=await open(context),participant=await open(context);
     const silent=await context.newPage();
