@@ -652,3 +652,28 @@ requires V1 writer coverage, full-collection migration, off-device recovery,
 and physical Safari/PWA tests.
 
 **Cutover remains prohibited.** Before a production lease can replace this prototype: audit and integrate every V1 writer with abort/fencing semantics, preserve urgent writes and crash-recovery behavior, verify an off-device rollback source, migrate all nonpilot collections, and run full physical Safari/PWA lifecycle testing. This test API must never be mistaken for production writer fencing.
+
+### Same-marker payload identity in the preview transactional writer (October 28)
+
+The isolated developer-only IndexedDB writer-fence rehearsal now optionally
+accepts a lowercase 64-hex-character `payloadFingerprint` with a synthetic
+writer marker. The marker and caller-claimed payload fingerprint are committed
+in the **same IndexedDB transaction** as its aggregate writer count. Repeating
+an already-recorded marker with a different fingerprint, or omitting a
+previously supplied fingerprint, now refuses the replay rather than treating
+that marker as an acknowledgement of a different action. The read-only marker
+inspector can independently verify an expected fingerprint; malformed durable
+fingerprints fail closed rather than being repaired.
+
+Cross-tab and reload browser scenarios verify a matching replay counts once,
+a mismatching retry stays rejected after an unrelated writer, a fingerprinted
+marker cannot silently become an unbound marker, and corrupt marker metadata
+cannot be accepted as evidence of a commit. Existing unbound synthetic
+marker tests continue working and no V1 snapshot is modified.
+
+**Limitations:** This is only caller-provided test metadata, not an independently
+calculated hash of real mutation bytes. The rehearsal still writes synthetic
+markers rather than actual TaskPoints records. It cannot fence legacy tabs,
+prove post-kill device durability or enable V2 primary storage. Full
+production writer admission, rollback and physical Safari/PWA testing remain
+required.

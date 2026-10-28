@@ -200,7 +200,7 @@ the cutover diagnostic continues reporting
 ## CI policy
 
 The source-evidence matrix requires that each known anchor still exists,
-has one of the seven documented owners, and names an admission/rollback
+has one of the eight documented owners, and names an admission/rollback
 requirement. It also requires the runtime's cutover report to stay
 non-promotable and explicitly list every family. It intentionally does
 **not** grant writer-fenced status, enumerate all dynamic writes, or require

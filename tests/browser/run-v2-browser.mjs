@@ -1479,6 +1479,120 @@ try {
       legacySnapshotUnchanged:true};
   });
 
+  await run('preview writer fingerprint binds duplicate markers to identical synthetic intent',async context=>{
+    const first=await open(context),second=await open(context);
+    const before=await first.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const fingerprintA='a'.repeat(64),fingerprintB='b'.repeat(64);
+    const firstWrite=await first.evaluate(fingerprint=>window.TaskPointsStateRuntimeV2
+      .rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'fingerprinted-action',payloadFingerprint:fingerprint
+      }),fingerprintA);
+    assert.equal(firstWrite.reason,'preview_writer_recorded',JSON.stringify(firstWrite));
+    assert.equal(firstWrite.fence.writersCommitted,1);
+    const conflicting=await second.evaluate(fingerprint=>window.TaskPointsStateRuntimeV2
+      .rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'fingerprinted-action',payloadFingerprint:fingerprint
+      }),fingerprintB);
+    assert.equal(conflicting.reason,'fence_writer_payload_mismatch',JSON.stringify(conflicting));
+    assert.equal(conflicting.fence.writersCommitted,1);
+    const inspectMismatch=await second.evaluate(fingerprint=>window.TaskPointsStateRuntimeV2
+      .rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker:'fingerprinted-action',payloadFingerprint:fingerprint
+      }),fingerprintB);
+    assert.equal(inspectMismatch.reason,'fence_writer_payload_mismatch');
+    const present=await second.evaluate(fingerprint=>window.TaskPointsStateRuntimeV2
+      .rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker:'fingerprinted-action',payloadFingerprint:fingerprint
+      }),fingerprintA);
+    assert.equal(present.reason,'preview_writer_marker_present',JSON.stringify(present));
+    assert.equal(present.markerPayloadFingerprint,fingerprintA);
+    const malformed=await second.evaluate(()=>window.TaskPointsStateRuntimeV2
+      .rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'fingerprinted-action',payloadFingerprint:'invalid'
+      }));
+    assert.equal(malformed.reason,'writer_payload_fingerprint_invalid');
+    const unrelated=await second.evaluate(()=>window.TaskPointsStateRuntimeV2
+      .rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'separate-action'
+      }));
+    assert.equal(unrelated.reason,'preview_writer_recorded');
+    assert.equal(unrelated.fence.writersCommitted,2);
+    await first.close();
+    const reopened=await open(context);
+    const repeated=await reopened.evaluate(fingerprint=>window.TaskPointsStateRuntimeV2
+      .rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'fingerprinted-action',payloadFingerprint:fingerprint
+      }),fingerprintA);
+    assert.equal(repeated.reason,'preview_writer_replayed');
+    assert.equal(repeated.fingerprintMatched,true);
+    assert.equal(repeated.fence.writersCommitted,2);
+    const missingDigest=await reopened.evaluate(()=>window.TaskPointsStateRuntimeV2
+      .rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'fingerprinted-action'
+      }));
+    assert.equal(missingDigest.reason,'fence_writer_payload_mismatch',
+      'Omitting a previously bound fingerprint must not count as a replay');
+    const final=await reopened.evaluate(async()=>({
+      fence:await window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('read'),
+      v1:localStorage.getItem('taskpoints_v1'),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    assert.equal(final.fence.fence.writersCommitted,2);
+    assert.equal(final.v1,before);
+    assert.equal(final.authority,'legacy_only');
+    assert.equal(conflicting.canPromote,false);
+    return {sameMarkerDifferentFingerprintRejected:true,readOnlyInspectionBound:true,
+      missingFingerprintRejected:true,sameFingerprintReplayedAfterReload:true,
+      noExtraWrites:true,legacyUnchanged:true};
+  });
+
+  await run('preview writer marker with malformed durable fingerprint fails closed',async context=>{
+    const page=await open(context);
+    const before=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const proof=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const marker='corrupted-payload-marker',digest='c'.repeat(64);
+      const first=await runtime.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker,payloadFingerprint:digest
+      });
+      const tamper=await new Promise((resolve,reject)=>{
+        const openDb=indexedDB.open('taskpoints_v2_writer_fence_preview_v1',1);
+        openDb.onerror=()=>reject(openDb.error);
+        openDb.onsuccess=()=>{
+          const db=openDb.result,tx=db.transaction('control','readwrite');
+          const store=tx.objectStore('control');
+          const req=store.get('writer_marker:'+marker);
+          req.onsuccess=()=>{
+            if(!req.result){try{tx.abort();}catch(_){};return;}
+            store.put({...req.result,payloadFingerprint:'tampered'});
+          };
+          req.onerror=()=>{try{tx.abort();}catch(_){}};
+          tx.oncomplete=()=>{db.close();resolve(true)};
+          tx.onabort=()=>{db.close();reject(Error('preview corruption injection failed'))};
+        };
+      });
+      const inspect=await runtime.rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker,payloadFingerprint:digest
+      });
+      const retry=await runtime.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker,payloadFingerprint:digest
+      });
+      const read=await runtime.rehearsePreviewDurableWriterFence('read');
+      return {first,tamper,inspect,retry,read,
+        v1:localStorage.getItem('taskpoints_v1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(proof.first.reason,'preview_writer_recorded');
+    assert.equal(proof.tamper,true);
+    assert.equal(proof.inspect.reason,'fence_writer_marker_conflict',JSON.stringify(proof.inspect));
+    assert.equal(proof.retry.reason,'fence_writer_marker_conflict',JSON.stringify(proof.retry));
+    assert.equal(proof.read.fence.writersCommitted,1);
+    assert.equal(proof.v1,before);
+    assert.equal(proof.authority,'legacy_only');
+    return {corruptionRejected:true,noAutoRepair:true,countUnchanged:true,
+      canonicalV1Unchanged:true};
+  });
+
   await run('preview durable IDB writer-versus-freeze race has a single serial order',async context=>{
     const writer=await open(context),freezer=await open(context);
     const oldV1=await writer.evaluate(()=>localStorage.getItem('taskpoints_v1'));

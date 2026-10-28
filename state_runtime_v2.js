@@ -4363,6 +4363,17 @@
       && (typeof options?.marker !== 'string' || !options.marker
         || options.marker.length > 128))
       return refuse('writer_marker_required');
+    // A marker alone does not prove an idempotent retry has the same intent.
+    // The optional caller-supplied SHA-256 fingerprint binds a *synthetic*
+    // writer marker to its claimed payload. This preview does not hash or
+    // persist a real TaskPoints mutation, and cannot authorize production.
+    const hasPayloadFingerprint = (action === 'writer' || action === 'inspect_marker')
+      && Object.prototype.hasOwnProperty.call(options || {}, 'payloadFingerprint');
+    const payloadFingerprint = hasPayloadFingerprint ? options.payloadFingerprint : null;
+    const validPayloadFingerprint = value => value === null
+      || (typeof value === 'string' && /^[a-f0-9]{64}$/.test(value));
+    if (hasPayloadFingerprint && !validPayloadFingerprint(payloadFingerprint))
+      return refuse('writer_payload_fingerprint_invalid');
     const initialModeEpoch = darkMirrorModeEpoch;
     let generation;
     try { generation = currentGeneration({ create: false }); }
@@ -4476,8 +4487,16 @@
                     if (item && (!prior || state.writersCommitted < 1
                       || item.id !== markerId || item.generation !== generation
                       || !Number.isSafeInteger(item.epoch) || item.epoch < 0
-                      || item.epoch > state.epoch)) {
+                      || item.epoch > state.epoch
+                      || !validPayloadFingerprint(item.payloadFingerprint))) {
                       result = refuse('fence_writer_marker_conflict', {
+                        fence: describe(state)
+                      });
+                      return;
+                    }
+                    if (item && hasPayloadFingerprint
+                      && item.payloadFingerprint !== payloadFingerprint) {
+                      result = refuse('fence_writer_payload_mismatch', {
                         fence: describe(state)
                       });
                       return;
@@ -4487,6 +4506,7 @@
                       : 'preview_writer_marker_absent', {
                       readOnlyMarkerInspection: true,
                       markerEpoch: item ? item.epoch : null,
+                      markerPayloadFingerprint: item ? item.payloadFingerprint : null,
                       fence: describe(state)
                     });
                   } catch (_) {
@@ -4541,14 +4561,22 @@
                     if (!prior || state.writersCommitted < 1
                       || marker.id !== markerId
                       || marker.generation !== generation
-                      || marker.epoch !== state.epoch) {
+                      || marker.epoch !== state.epoch
+                      || !validPayloadFingerprint(marker.payloadFingerprint)) {
                       result = refuse('fence_writer_marker_conflict', {
                         fence: describe(state)
                       });
                       return;
                     }
+                    if (marker.payloadFingerprint !== payloadFingerprint) {
+                      result = refuse('fence_writer_payload_mismatch', {
+                        fence: describe(state)
+                      });
+                      return;
+                    }
                     result = refuse('preview_writer_replayed', {
-                      alreadyRecorded: true, fence: describe(state)
+                      alreadyRecorded: true, fingerprintMatched: true,
+                      fence: describe(state)
                     });
                     return;
                   }
@@ -4564,7 +4592,8 @@
                   };
                   // Both puts commit together or neither does. Request
                   // callbacks stay synchronous to keep the IDB tx alive.
-                  store.put({ id: markerId, generation, epoch: state.epoch });
+                  store.put({ id: markerId, generation, epoch: state.epoch,
+                    payloadFingerprint });
                   store.put(next);
                   result = refuse('preview_writer_recorded', {
                     atomicPreviewTransaction: true, fence: describe(next)
