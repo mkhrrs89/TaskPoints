@@ -7709,9 +7709,9 @@ body.tp-player-profile-open #cropModal:not(.hidden) { z-index: 1900 !important; 
 }
 .tp-profile-back, .tp-profile-advanced, .tp-profile-inline-edit {
   min-height: 42px;
-  background: linear-gradient(135deg, var(--tp-profile-button-from), var(--tp-profile-button-to));
+  background: linear-gradient(135deg, var(--tp-profile-hero-from), var(--tp-profile-hero-to));
   color: #f4ffff;
-  border: 1px solid var(--tp-profile-border);
+  border: none;
   padding: 8px 13px;
   border-radius: 11px;
   font-size: 13px;
@@ -7752,7 +7752,7 @@ body.tp-player-profile-open #cropModal:not(.hidden) { z-index: 1900 !important; 
 .tp-profile-stats strong { display: block; font-size: clamp(1.1rem, 3vw, 1.55rem); font-variant-numeric: tabular-nums; margin-top: 1px; }
 .tp-profile-rival { display: inline-flex; align-items: center; margin-top: 14px; color: var(--tp-profile-accent); text-decoration: underline; text-underline-offset: 3px; font-size: 12px; }
 .tp-profile-columns { display: grid; grid-template-columns: 1.15fr 1fr; align-items: start; gap: 16px; margin-top: 16px; }
-.tp-profile-panel { background: linear-gradient(150deg, var(--tp-profile-panel-from), var(--tp-profile-panel-to)); border: 1px solid var(--tp-profile-border); padding: 18px; border-radius: 16px; min-width: 0; }
+.tp-profile-panel { background: linear-gradient(135deg, var(--tp-profile-hero-from), var(--tp-profile-hero-to)); border: none; padding: 18px; border-radius: 16px; min-width: 0; }
 .tp-profile-panel h2 { font-size: 17px; font-weight: 750; margin: 0 0 14px; }
 .tp-profile-form { display: flex; flex-direction: column; gap: 13px; }
 .tp-profile-form label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 650; color: #c8dcdb; }
@@ -7772,33 +7772,75 @@ body.tp-player-profile-open #cropModal:not(.hidden) { z-index: 1900 !important; 
 .tp-profile-colors { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .tp-profile-form .tp-profile-active { display: flex; flex-direction: row; align-items: center; gap: 8px; }
 .tp-profile-active input { width: 19px; height: 19px; }
-.tp-profile-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.tp-profile-actions { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 12px; }
 .tp-profile-actions button { min-height: 43px; }
 .tp-profile-actions .btn.btn-teal {
-  background: linear-gradient(135deg, var(--tp-profile-button-from), var(--tp-profile-button-to));
-  border: 1px solid var(--tp-profile-border);
+  background: linear-gradient(135deg, var(--tp-profile-hero-from), var(--tp-profile-hero-to));
+  border: none;
   color: #fff;
 }
 .tp-profile-form input[type="checkbox"] { accent-color: var(--tp-profile-accent); }
-#tpPlayerProfileSaved { color: var(--tp-profile-accent); font-size: 13px; }
+#tpPlayerProfileSaved { color: var(--tp-profile-accent); font-size: 13px; order: -1; }
 .tp-profile-section-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .tp-profile-inline-edit { min-height: 32px; padding: 5px 9px; }
 .tp-profile-ratings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
 .tp-profile-rating { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 8px; background: var(--tp-profile-metric); font-size: 12px; }
 .tp-profile-rating span { color: var(--tp-profile-accent-secondary); }
 .tp-profile-rating strong { font-variant-numeric: tabular-nums; }
+.tp-profile-rating-edit {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  min-width: 0;
+  gap: 6px;
+  font-size: 12px;
+}
+.tp-profile-rating-edit input {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  border-radius: 8px;
+  border: 1px solid var(--tp-profile-border);
+  background: var(--tp-profile-field);
+  color: #fff;
+  padding: 7px 9px;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+.tp-profile-rating-help { color: #d5e5e3; font-size: 11px; margin: 10px 0 0; line-height: 1.4; }
+.tp-profile-rating-error { min-height: 1em; color: #ffd5c9; font-size: 12px; margin-top: 5px; }
+.tp-profile-rating-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.tp-profile-rating-actions button {
+  min-height: 39px;
+  padding: 8px 13px;
+  border-radius: 10px;
+  border: none;
+  font-size: 13px;
+  font-weight: 650;
+  color: #fff;
+  background: linear-gradient(135deg, var(--tp-profile-hero-from), var(--tp-profile-hero-to));
+}
+.tp-profile-rating-actions .tp-profile-secondary-action {
+  background: var(--tp-profile-field);
+  color: #e5f1f0;
+}
+.tp-profile-inline-edit[hidden] { display: none !important; }
+
 .tp-profile-note { font-size: 13px; color: #b9d4d2; line-height: 1.6; }
 .tp-profile-gallery-name { border: 0; background: none; color: inherit; padding: 3px; cursor: pointer; }
 .tp-profile-gallery-name:focus-visible, .tp-profile-back:focus-visible,
 .tp-profile-advanced:focus-visible, .tp-profile-rival:focus-visible,
-.tp-profile-inline-edit:focus-visible, .tp-profile-form :focus-visible {
+.tp-profile-inline-edit:focus-visible, .tp-profile-form :focus-visible,
+.tp-profile-ratings-form :focus-visible {
   outline: 2px solid var(--tp-profile-focus);
   outline-offset: 3px;
 }
 
 @media (max-width: 640px) {
   .tp-player-profile-screen {
-    padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px
+    /* Below the persistent Today-score island at initial scroll position.
+       The screen still scrolls freely beneath it after entering the page. */
+    padding: calc(env(safe-area-inset-top, 0px) + 56px) 12px
       calc(env(safe-area-inset-bottom, 0px) + 28px);
   }
   .tp-profile-topbar { padding-bottom: 11px; }
