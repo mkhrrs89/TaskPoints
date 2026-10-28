@@ -165,6 +165,10 @@ async function test(name,fn){
   }finally{await ctx.close();}
 }
 try{
+  // Do not force Home Habit taps: force:true skips hit testing, so a mobile
+  // overlay can receive the synthetic touch while the test silently waits for
+  // a journal entry that never happened. Actionable taps must hit the actual
+  // bubble; a blocked row is a real accessibility regression, not a pass.
   await test('actual Home paints three synthetic Habits and keeps V1 authority',async ctx=>{
     const {page,status,pageErrors,consoleErrors}=await home(ctx);
     assert.equal(status.cards,3);
@@ -184,7 +188,7 @@ try{
     });
     assert.equal(chosen.id,'h1');
     await page.locator('[data-home-tab="habits"]').click({force:true});
-    await page.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+chosen.day+'"]').tap({force:true});
+    await page.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+chosen.day+'"]').tap();
     await page.waitForFunction(([id,day])=>
       window.TaskPointsCore.readPendingHabitDeltas().some(d=>d.habitId===id && d.dayKey===day),
       [chosen.id,chosen.day],{timeout:10000});
@@ -261,7 +265,7 @@ try{
     assert.ok(day);
     // Only one tab is visible to a real person at a time. True simultaneous
     // writes are covered by the separate 18-scenario storage stress suite.
-    await first.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+day+'"]').tap({force:true});
+    await first.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+day+'"]').tap();
     await first.waitForFunction(key=>window.TaskPointsCore.readPendingHabitDeltas()
       .some(d=>d.habitId==='h1'&&d.dayKey===key),day);
     // A tab opened before another tab's write may have stale Home data.
@@ -307,7 +311,7 @@ try{
     assert.ok(day);
     const touch=async habitId=>{
       await page.locator('#habitsList .habitDay[data-habit="'+habitId+'"][data-day="'+day+'"]')
-        .tap({force:true});
+        .tap();
       await page.waitForFunction(([id,key])=>{
         const core=window.TaskPointsCore;
         const pending=core.readPendingHabitDeltas();
@@ -378,7 +382,7 @@ try{
     await stale.locator('[data-home-tab="habits"]').click({force:true});
     const day=await first.locator('#habitsList .habitDay[data-habit="h1"]').first().getAttribute('data-day');
     assert.ok(day);
-    await first.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+day+'"]').tap({force:true});
+    await first.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+day+'"]').tap();
     await first.waitForFunction(key=>window.TaskPointsCore.readPendingHabitDeltas()
       .some(d=>d.habitId==='h1'&&d.dayKey===key),day);
     await stale.waitForFunction(()=>window.TaskPointsStateRuntimeV2?.getStatus?.()?.externalRevisionInvalidated===true,
@@ -824,12 +828,12 @@ try{
     await stale.locator('[data-home-tab="habits"]').click({force:true});
     const day=await first.locator('#habitsList .habitDay[data-habit="h1"]').first().getAttribute('data-day');
     assert.ok(day);
-    await first.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+day+'"]').tap({force:true});
+    await first.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+day+'"]').tap();
     await first.waitForFunction(key=>window.TaskPointsCore.readPendingHabitDeltas()
       .some(d=>d.habitId==='h1'&&d.dayKey===key&&d.status==='full'),day);
     await stale.waitForFunction(()=>window.TaskPointsStateRuntimeV2?.getStatus?.()?.externalRevisionInvalidated===true,
       null,{timeout:12000});
-    await stale.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+day+'"]').tap({force:true});
+    await stale.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+day+'"]').tap();
     await stale.waitForFunction(key=>window.TaskPointsCore?.readPendingHabitDeltas?.()
       .some(d=>d.habitId==='h1'&&d.dayKey===key&&d.status==='half'),day,{timeout:20000});
     const observed=await stale.evaluate(key=>{
@@ -980,7 +984,7 @@ try{
     const {page}=await home(ctx);
     await page.locator('[data-home-tab="habits"]').click({force:true});
     const day=await page.locator('#habitsList .habitDay[data-habit="h1"]').first().getAttribute('data-day');
-    await page.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+day+'"]').tap({force:true});
+    await page.locator('#habitsList .habitDay[data-habit="h1"][data-day="'+day+'"]').tap();
     await page.waitForFunction(key=>window.TaskPointsCore.readPendingHabitDeltas()
       .some(d=>d.habitId==='h1'&&d.dayKey===key&&d.status==='full'),day);
     await page.locator('[data-home-tab="tasks"]').click({force:true});
