@@ -1431,6 +1431,12 @@ try {
     // A legacy tab that doesn't know the protocol is still NOT fenced.
     await reopened.evaluate(()=>
       localStorage.setItem('taskpoints_old_tab_ignores_preview_fence','legacy-write'));
+    // WebKit can publish localStorage changes to another tab after the
+    // writer's setItem has returned. Wait for the actual observed value;
+    // the assertion below still requires the unfenced write to succeed.
+    await first.waitForFunction(()=>
+      localStorage.getItem('taskpoints_old_tab_ignores_preview_fence')==='legacy-write',
+      null,{timeout:12000,polling:75});
     const final=await first.evaluate(()=>({
       v1:localStorage.getItem('taskpoints_v1'),
       unfenced:localStorage.getItem('taskpoints_old_tab_ignores_preview_fence'),
