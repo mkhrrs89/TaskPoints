@@ -5435,7 +5435,9 @@ try {
       Storage.prototype.getItem=function(key){
         if(this===localStorage && String(key)===sharedKey){
           sharedReads++;
-          if(sharedReads===2){
+          // The second shared read now validates the recovery snapshot.
+          // Inject on cleanup's first follow-up read to test its own guard.
+          if(sharedReads===3){
             originalSet.call(localStorage,sharedKey,JSON.stringify([original,competing]));
             injected=true;
           }
