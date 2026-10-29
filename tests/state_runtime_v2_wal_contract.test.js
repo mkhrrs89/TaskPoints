@@ -210,7 +210,9 @@ test('shared WAL race after durable admission refuses overwrite and retains both
   const injected={...first.row,id:api.mutationIdForDelta(competing,first.generation),
     delta:competing};
   localStorage.getItem=key=>{
-    if(key===KEY&&++sharedReads===2){
+    // The second shared read now validates the inventory snapshot. Inject
+    // after the new claim/sidecar are durable, at the third shared read.
+    if(key===KEY&&++sharedReads===3){
       changed=true;
       originalSet(KEY,JSON.stringify([first.row,injected]));
     }
