@@ -499,6 +499,16 @@
     if (cleanupInventory.observedLength != null
       && global.localStorage.length !== cleanupInventory.observedLength)
       throw new Error('state_runtime_v2_wal_cleanup_claim_inventory_changed');
+    // A different tab can remove one claim and create another without
+    // changing localStorage.length. Only on verified cleanup, re-enumerate
+    // recovery keys to catch same-count swaps before any destructive write.
+    // Ordinary WAL reads/appends retain their single-pass inventory.
+    const latestCleanupInventory = recoveryKeys();
+    if (cleanupInventory.events.length !== latestCleanupInventory.events.length
+      || cleanupInventory.claims.length !== latestCleanupInventory.claims.length
+      || cleanupInventory.events.some((key, i) => key !== latestCleanupInventory.events[i])
+      || cleanupInventory.claims.some((key, i) => key !== latestCleanupInventory.claims[i]))
+      throw new Error('state_runtime_v2_wal_cleanup_keys_changed');
     // Another tab could update the shared key while the sidecar was being
     // inspected. Recheck it immediately before the destructive shared write.
     if (readWalStorage(KEY) !== current.raw)

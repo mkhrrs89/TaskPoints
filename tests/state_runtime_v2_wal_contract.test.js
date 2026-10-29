@@ -927,6 +927,55 @@ test('WAL cleanup refuses recovery-key growth during claim inspection',()=>{
   assert.equal(api.getStatus().admissionClaimCount,0);
 });
 
+test('WAL cleanup catches same-count cross-tab admission-claim key replacement',()=>{
+  const {api,localStorage}=install({[DARK]:'1'});
+  const first=api.appendHabitDelta(deltaA);
+  const second=api.appendHabitDelta(deltaB);
+  const claimKey=[...localStorage.rows.keys()].find(key=>
+    key.startsWith(api.CLAIM_PREFIX) &&
+    JSON.parse(localStorage.getItem(key)).id===second.mutationId);
+  assert.ok(claimKey);
+  const replacementKey=api.CLAIM_PREFIX+'same-size-cross-tab-replacement';
+  assert.equal(localStorage.getItem(replacementKey),null);
+  const oldShared=localStorage.getItem(KEY);
+  const oldSidecar=localStorage.getItem(
+    'taskpoints_v2_pending_mutation_event_v1:'+first.mutationId);
+  const startingLength=localStorage.length;
+  const get=localStorage.getItem.bind(localStorage);
+  let claimReads=0,swapped=false;
+  localStorage.getItem=key=>{
+    const value=get(key);
+    if(key===claimKey && ++claimReads===2){
+      // Return the previously read bytes, then simulate a different tab
+      // moving the same durable claim to a fresh UUID-addressed key.
+      localStorage.removeItem(claimKey);
+      localStorage.setItem(replacementKey,value);
+      swapped=true;
+    }
+    return value;
+  };
+  try{
+    assert.throws(()=>api.removeMutation(first.mutationId,
+      {generation:first.generation,delta:first.row.delta}),
+      /state_runtime_v2_wal_cleanup_keys_changed/);
+  }finally{localStorage.getItem=get;}
+  assert.equal(swapped,true);
+  assert.equal(localStorage.length,startingLength,
+    'the race has no observable key-count change');
+  assert.equal(localStorage.getItem(KEY),oldShared,
+    'shared recovery evidence must survive denied cleanup');
+  assert.equal(localStorage.getItem(
+    'taskpoints_v2_pending_mutation_event_v1:'+first.mutationId),oldSidecar);
+  assert.equal(api.getStatus().pendingCount,2);
+  assert.equal(api.getStatus().admissionClaimCount,2);
+  assert.equal(api.removeMutation(first.mutationId,
+    {generation:first.generation,delta:first.row.delta}).removed,true);
+  assert.deepEqual(api.getPendingRows().rows.map(r=>r.id),[second.mutationId]);
+  assert.equal(api.removeMutation(second.mutationId,
+    {generation:second.generation,delta:second.row.delta}).removed,true);
+  assert.equal(api.getStatus().admissionClaimCount,0);
+});
+
 test('denied WAL key enumeration fails closed without crashing status or dropping sidecars', () => {
   const { api, localStorage } = install({ [DARK]: '1' });
   const first = api.appendHabitDelta(deltaA);
