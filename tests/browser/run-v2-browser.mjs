@@ -5384,6 +5384,61 @@ try {
       restartRecoveredBoth:true,parity:p.match};
   });
 
+  await run('generation UUID collision cannot falsely rotate or erase suspended WAL',async context=>{
+    const page=await open(context);
+    const held=await page.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      const generation=window.TaskPointsStateRuntimeV2Generation;
+      const originalEpoch=generation.read();
+      const prefix=originalEpoch.slice(0,originalEpoch.indexOf(':'));
+      const uuid=originalEpoch.slice(originalEpoch.indexOf(':')+1);
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const original={epoch:originalEpoch,v1:localStorage.getItem('taskpoints_v1'),
+        shared:localStorage.getItem(wal.KEY),
+        pending:wal.getPendingRows().rows.map(r=>r.id),
+        claims:wal.getStatus().admissionClaimCount};
+      const prototype=Object.getPrototypeOf(crypto);
+      const descriptor=Object.getOwnPropertyDescriptor(prototype,'randomUUID');
+      if(typeof descriptor?.value!=='function'||!descriptor.configurable)
+        throw Error('Unable to install UUID collision regression');
+      let retries=0,failed=null;
+      Object.defineProperty(prototype,'randomUUID',{...descriptor,
+        value:function(){retries++;return uuid;}});
+      try{generation.rotate(prefix);}
+      catch(error){failed=String(error.message||error);}
+      finally{Object.defineProperty(prototype,'randomUUID',descriptor);}
+      return {retries,failed,
+        sameEpoch:generation.read()===original.epoch,
+        oldV1:localStorage.getItem('taskpoints_v1')===original.v1,
+        oldWal:localStorage.getItem(wal.KEY)===original.shared,
+        samePending:JSON.stringify(wal.getPendingRows().rows.map(r=>r.id))
+          ===JSON.stringify(original.pending),
+        sameClaims:wal.getStatus().admissionClaimCount===original.claims,
+        rotations:generation.getStatus().rotations,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(held.retries,8);
+    assert.match(held.failed,/state_runtime_v2_generation_collision/);
+    assert.equal(held.sameEpoch,true);
+    assert.equal(held.oldV1,true);
+    assert.equal(held.oldWal,true);
+    assert.equal(held.samePending,true);
+    assert.equal(held.sameClaims,true);
+    assert.equal(held.rotations,0);
+    assert.equal(held.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.wal.pendingCount===0 && s.wal.admissionClaimCount===0
+        && s.bridge.replayCleared>=1;
+    },null,{timeout:25000});
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,1);
+    return {boundedCollisionRefusal:true,oldEpochPreserved:true,
+      v1AndWalUntouched:true,restartReplayedExactlyOnce:true,parity:p.match};
+  });
+
   await run('silent legacy WAL sidecar denial retains unique admission claim and V1',async context=>{
     const page=await open(context);
     const outcome=await page.evaluate(()=>{

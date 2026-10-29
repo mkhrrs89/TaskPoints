@@ -353,6 +353,89 @@ test('silent generation rotation refuses success and never notifies stale WAL co
     'previous WAL evidence stays inspectable across verified rotation');
 });
 
+test('repeated generation UUID cannot falsely confirm the existing epoch',()=>{
+  const app=install();
+  const previous=app.generation.read();
+  const [prefix,uuid]=previous.split(':');
+  assert.ok(prefix&&uuid);
+  const held=app.wal.appendHabitDelta(delta());
+  const v1=app.localStorage.getItem(LEGACY_KEY);
+  const wal=app.localStorage.getItem(WAL_KEY);
+  let listeners=0,calls=0;
+  app.generation.subscribe(()=>listeners++);
+  const original=app.context.crypto.randomUUID;
+  app.context.crypto.randomUUID=()=>{calls++;return uuid;};
+  try{
+    assert.throws(()=>app.generation.rotate(prefix),
+      /state_runtime_v2_generation_collision/);
+    assert.equal(calls,8,'generation collision retries must be bounded');
+    assert.equal(app.generation.read(),previous);
+    assert.equal(app.generation.getStatus().rotations,0);
+    assert.equal(listeners,0);
+    assert.equal(app.localStorage.getItem(LEGACY_KEY),v1);
+    assert.equal(app.localStorage.getItem(WAL_KEY),wal);
+    assert.deepEqual(app.wal.getPendingRows().rows.map(r=>r.id),[held.mutationId]);
+  }finally{app.context.crypto.randomUUID=original;}
+});
+
+test('generation collision retries a distinct epoch without losing V1 or stale WAL',()=>{
+  const app=install();
+  const previous=app.generation.read();
+  const [prefix,uuid]=previous.split(':');
+  const held=app.wal.appendHabitDelta(delta());
+  const v1=app.localStorage.getItem(LEGACY_KEY);
+  const wal=app.localStorage.getItem(WAL_KEY);
+  let calls=0,notifications=0;
+  app.generation.subscribe(()=>notifications++);
+  const original=app.context.crypto.randomUUID;
+  app.context.crypto.randomUUID=()=>{
+    calls++;return calls===1?uuid:'verified-distinct-uuid';
+  };
+  let result;
+  try{result=app.generation.rotate(prefix);}
+  finally{app.context.crypto.randomUUID=original;}
+  assert.equal(calls,2);
+  assert.equal(result.rotated,true);
+  assert.notEqual(result.generation,previous);
+  assert.equal(result.generation,app.generation.read());
+  assert.equal(app.generation.getStatus().rotations,1);
+  assert.equal(notifications,1);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),v1);
+  assert.equal(app.localStorage.getItem(WAL_KEY),wal);
+  assert.deepEqual(app.wal.getPendingRows().rows.map(r=>r.id),[held.mutationId]);
+});
+
+test('generation rotation refuses a peer epoch changed during token preparation',()=>{
+  const app=install();
+  const previous=app.generation.read();
+  const held=app.wal.appendHabitDelta(delta());
+  const previousWal=app.localStorage.getItem(WAL_KEY);
+  const previousV1=app.localStorage.getItem(LEGACY_KEY);
+  let listenerCalls=0;
+  app.generation.subscribe(()=>listenerCalls++);
+  const originalGet=app.localStorage.getItem.bind(app.localStorage);
+  const originalSet=app.localStorage.setItem.bind(app.localStorage);
+  const peer='peer-concurrently-updated-epoch';
+  let keyReads=0;
+  app.localStorage.getItem=key=>{
+    if(String(key)===GENERATION_KEY && ++keyReads===2)
+      originalSet(GENERATION_KEY,peer);
+    return originalGet(key);
+  };
+  try{
+    assert.throws(()=>app.generation.rotate('stale-local-rotation'),
+      /state_runtime_v2_generation_changed_before_write/);
+  }finally{app.localStorage.getItem=originalGet;}
+  assert.equal(keyReads,2);
+  assert.equal(app.generation.read(),peer);
+  assert.equal(app.generation.getStatus().rotations,0);
+  assert.equal(listenerCalls,0,'the stale rotation must not be announced');
+  assert.equal(app.localStorage.getItem(WAL_KEY),previousWal);
+  assert.equal(app.localStorage.getItem(LEGACY_KEY),previousV1);
+  assert.deepEqual(app.wal.getPendingRows().rows.map(r=>r.id),[held.mutationId]);
+  assert.notEqual(peer,previous);
+});
+
 test('generation read denial never manufactures an epoch or discards existing WAL evidence', () => {
   const app = install();
   const epoch = app.generation.read();

@@ -180,7 +180,20 @@
   function rotate(reason = 'epoch-change') {
     if (!isEnabled()) return { rotated: false, reason: 'dark_disabled', generation: read() };
     const previousGeneration = read();
-    const generation = createGeneration(reason);
+    // A broken/duplicated UUID must not make a reset appear to rotate to
+    // the exact same epoch. No write or listener notification is allowed
+    // until a distinct generation has been produced.
+    let generation = null;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const candidate = createGeneration(reason);
+      if (candidate !== previousGeneration) { generation = candidate; break; }
+    }
+    if (!generation) throw new Error('state_runtime_v2_generation_collision');
+    // Another tab can rotate during ID creation. Refuse detectable stale
+    // overwrites rather than replacing a newer generation with this one.
+    // This recheck is best effort; localStorage cannot do atomic CAS.
+    if (read() !== previousGeneration)
+      throw new Error('state_runtime_v2_generation_changed_before_write');
     writeGenerationVerified(generation);
     rotations += 1;
     lastReason = String(reason || 'epoch-change');

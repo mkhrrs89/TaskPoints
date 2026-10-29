@@ -894,3 +894,22 @@ restart. Ordinary WAL *read* and *append* retain their single-pass key scan
 for foreground performance; the second scan applies only at destructive
 cleanup. These checks are not transactional synchronization with old browser
 tabs, and remain insufficient for V2 read/write promotion.
+
+### Distinct-generation refusal before V2 reset/restore rotation (October 29)
+
+V2 generation rotation now refuses to publish an unchanged epoch when a
+browser UUID source repeats the previous token. It tries at most eight
+candidate generations, then throws without writing, announcing a generation
+change, touching V1, or deleting any pending WAL. A fresh synchronous
+generation read immediately before the verified write also refuses a
+detectable concurrent generation change from another tab instead of
+blindly overwriting that newer value. Node regressions cover exhausted
+collisions, successful retry, and a competing rotation between reads;
+Chromium/WebKit browser scenarios cover collision exhaustion and subsequent
+exactly-once held-WAL restart replay.
+
+These guards are **best effort**, not a cross-tab atomic compare-and-swap.
+They do not prove uniqueness against every historical epoch or prevent
+an uncooperative old tab from writing V1 after the check. V1 remains primary;
+all migration, recovery, old-tab fencing, real-device testing, and
+off-device rollback blockers remain active.
