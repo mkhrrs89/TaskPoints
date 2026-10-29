@@ -110,6 +110,11 @@
     const existing = readWalStorage(GENERATION_KEY);
     if (existing) return String(existing);
     const generation = newFallbackGeneration();
+    // The generation module may not be available on older pages, but even
+    // this standalone fallback must adopt a peer tab's durable epoch if it
+    // appears while we generate the candidate. No localStorage CAS exists.
+    const peerGeneration = readWalStorage(GENERATION_KEY);
+    if (peerGeneration) return String(peerGeneration);
     // The older standalone WAL fallback must also verify its epoch. A
     // silent setItem denial is not permission to stamp a mutation with a
     // generation that was never persisted.

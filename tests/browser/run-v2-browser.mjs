@@ -6245,6 +6245,68 @@ try {
       eventPreserved:true,replayedOnRestart:true,parity:p.match};
   });
 
+  await run('standalone WAL fallback adopts peer epoch without erasing held Habit recovery',async context=>{
+    const page=await open(context);
+    const proof=await page.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const key=window.TaskPointsStateRuntimeV2Generation.KEY;
+      const oldEpoch=window.TaskPointsStateRuntimeV2Generation.read();
+      const oldShared=localStorage.getItem(wal.KEY);
+      const oldV1=localStorage.getItem('taskpoints_v1');
+      const held=wal.getPendingRows().rows.length;
+      const oldApi=window.TaskPointsStateRuntimeV2Generation;
+      const originalGet=Storage.prototype.getItem;
+      const originalSet=Storage.prototype.setItem;
+      let reads=0,writes=0,admitted;
+      window.TaskPointsStateRuntimeV2Generation=null;
+      localStorage.removeItem(key);
+      Storage.prototype.getItem=function(name){
+        if(this===localStorage&&String(name)===key&&++reads===2)
+          originalSet.call(localStorage,key,oldEpoch);
+        return originalGet.call(this,name);
+      };
+      Storage.prototype.setItem=function(name,value){
+        if(this===localStorage&&String(name)===key)writes++;
+        return originalSet.call(this,name,value);
+      };
+      try{
+        admitted=wal.appendHabitDelta({habitId:'h2',dayKey:'2026-10-21',
+          source:'habit',status:'full',done:true,
+          updatedAtISO:'2026-10-21T12:00:00.000Z'});
+      }finally{
+        Storage.prototype.getItem=originalGet;
+        Storage.prototype.setItem=originalSet;
+        window.TaskPointsStateRuntimeV2Generation=oldApi;
+      }
+      return {reads,writes,peerAdopted:admitted.generation===oldEpoch,
+        epochSame:oldApi.read()===oldEpoch,oldV1Same:oldV1===localStorage.getItem('taskpoints_v1'),
+        sharedIncludesOld:wal.getPendingRows().rows.length===held+1,
+        oldWalPreserved:oldShared!==null,claims:wal.getStatus().admissionClaimCount,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.ok(proof.reads>=2);
+    assert.equal(proof.writes,0);
+    assert.equal(proof.peerAdopted,true);
+    assert.equal(proof.epochSame,true);
+    assert.equal(proof.oldV1Same,true);
+    assert.equal(proof.sharedIncludesOld,true);
+    assert.equal(proof.oldWalPreserved,true);
+    assert.equal(proof.claims,2);
+    assert.equal(proof.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.wal.pendingCount===0&&s.wal.admissionClaimCount===0
+        &&s.bridge.replayCleared>=1;
+    },null,{timeout:30000});
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,1);
+    return {peerEpochAdopted:true,olderPendingMutationRetained:true,
+      allRecoveryDrained:true,v1RemainsAuthority:true,parity:p.match};
+  });
+
   await run('generation read denial preserves epoch and held WAL until restart',async context=>{
     const page=await open(context);
     const evidence=await page.evaluate(()=>{

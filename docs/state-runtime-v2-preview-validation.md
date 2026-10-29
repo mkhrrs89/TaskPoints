@@ -927,3 +927,17 @@ This is best-effort stale-write detection, **not** atomic create-if-absent
 or a production writer fence. LocalStorage remains unable to guarantee
 exclusive generation handoff to nonparticipating old browser tabs. V1
 retains read/write authority, and every existing rollout gate stays closed.
+
+### Standalone WAL generation fallback adopts peer epochs (October 29)
+
+The older V2-only standalone WAL fallback, used when the generation module
+is unavailable, now double-reads the generation key around candidate creation.
+It adopts a peer tab's already-written epoch instead of knowingly
+overwriting it, and refuses an inaccessible second read before any WAL
+admission. This matches the normal V2 generation bootstrap's conservative
+behavior. Node and Chromium/WebKit tests cover adoption, denied reads,
+old pending recovery, and restart.
+
+This is a best-effort read-before-write mitigation; localStorage still has
+no atomic compare-and-swap. Real production writer fencing, physical PWA
+lifecycle evidence and independently verified rollback remain blockers.

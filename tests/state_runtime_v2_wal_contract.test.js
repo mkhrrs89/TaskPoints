@@ -1096,6 +1096,64 @@ test('standalone WAL generation fallback refuses silently swallowed epoch writes
     {generation:recovered.generation,delta:recovered.row.delta}).removed,true);
 });
 
+test('standalone WAL fallback adopts a competing tab epoch before writing',()=>{
+  const {api,context,localStorage}=install({[DARK]:'1'});
+  context.TaskPointsStateRuntimeV2Generation=null;
+  localStorage.removeItem(GENERATION_KEY);
+  const read=localStorage.getItem.bind(localStorage);
+  const write=localStorage.setItem.bind(localStorage);
+  const peer='peer-standalone-wal-bootstrap';
+  let reads=0,writes=0;
+  localStorage.getItem=key=>{
+    if(String(key)===GENERATION_KEY && ++reads===2)
+      write(GENERATION_KEY,peer);
+    return read(key);
+  };
+  localStorage.setItem=(key,value)=>{
+    if(String(key)===GENERATION_KEY)writes++;
+    return write(key,value);
+  };
+  let accepted;
+  try{accepted=api.appendHabitDelta(deltaA);}
+  finally{localStorage.getItem=read;localStorage.setItem=write;}
+  assert.equal(accepted.written,true);
+  assert.equal(accepted.generation,peer);
+  assert.equal(reads>=2,true);
+  assert.equal(writes,0,'fallback must not overwrite peer epoch');
+  assert.equal(localStorage.getItem(GENERATION_KEY),peer);
+  assert.equal(api.getPendingRows().rows.length,1);
+  assert.equal(api.removeMutation(accepted.mutationId,
+    {generation:accepted.generation,delta:accepted.row.delta}).removed,true);
+});
+
+test('standalone WAL fallback refuses unreadable second epoch read without WAL admission',()=>{
+  const {api,context,localStorage}=install({[DARK]:'1'});
+  context.TaskPointsStateRuntimeV2Generation=null;
+  localStorage.removeItem(GENERATION_KEY);
+  const read=localStorage.getItem.bind(localStorage);
+  const write=localStorage.setItem.bind(localStorage);
+  let reads=0,writes=0;
+  localStorage.getItem=key=>{
+    if(String(key)===GENERATION_KEY && ++reads===2)
+      throw Error('temporary peer generation read SecurityError');
+    return read(key);
+  };
+  localStorage.setItem=(key,value)=>{
+    if(String(key)===GENERATION_KEY)writes++;
+    return write(key,value);
+  };
+  try{assert.throws(()=>api.appendHabitDelta(deltaA),/wal_storage_read_failed/);}
+  finally{localStorage.getItem=read;localStorage.setItem=write;}
+  assert.equal(reads,2);
+  assert.equal(writes,0);
+  assert.equal(localStorage.getItem(GENERATION_KEY),null);
+  assert.equal(localStorage.getItem(KEY),null);
+  assert.equal(api.getStatus().admissionClaimCount,0);
+  const restored=api.appendHabitDelta(deltaA);
+  assert.equal(restored.written,true);
+  assert.equal(localStorage.getItem(GENERATION_KEY),restored.generation);
+});
+
 test('standalone WAL fallback creates an epoch only when storage proves key is missing', () => {
   const { api, context, localStorage } = install({ [DARK]: '1' });
   // The full generation module creates its bootstrap epoch during setup.
