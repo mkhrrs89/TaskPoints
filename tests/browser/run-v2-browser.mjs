@@ -1536,7 +1536,7 @@ try {
         ['taskpoints_notes_dirty_v1','1'],
         ['taskpoints_notes_authoritative_v1','1'],
         ['tp_projects_v1',JSON.stringify([{id:'legacy-project',name:'Kept Project'}])],
-        ['taskpoints_today_store_v1',JSON.stringify({version:1,source:'old-tab'})]
+        ['taskpoints_today_view_v1',JSON.stringify({version:1,source:'old-tab'})]
       ];
       for(const [key,value] of entries)localStorage.setItem(key,value);
       return entries;
