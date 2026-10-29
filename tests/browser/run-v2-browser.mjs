@@ -5049,6 +5049,17 @@ try {
       ]);
       expected.add(a.id);expected.add(b.id);
     }
+    // WebKit can expose the last cross-tab V1 journal write slightly after
+    // the other tab's durable WAL claim. Require BOTH to converge, rather
+    // than treating an immediate cross-tab read as an atomic snapshot.
+    // The bound keeps a genuinely lost V1 mutation a hard test failure.
+    await first.waitForFunction(count=>{
+      const wal=window.TaskPointsStateRuntimeV2Wal.getStatus();
+      return window.TaskPointsCore.readPendingHabitDeltas().length===count
+        &&wal.pendingCount===count
+        &&wal.admissionClaimCount===count
+        &&wal.independentEventCount===count;
+    },expected.size,{timeout:18000,polling:75});
     const evidence=await first.evaluate(()=>{
       const wal=window.TaskPointsStateRuntimeV2Wal;
       const read=wal.getPendingRows(),status=wal.getStatus();
