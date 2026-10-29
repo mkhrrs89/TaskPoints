@@ -5769,6 +5769,75 @@ try {
       restartedReplayExactlyOnce:true,parity:p.match};
   });
 
+  await run('generation rotation after shared WAL deletion preserves independent restart recovery',async context=>{
+    const page=await open(context);
+    const evidence=await page.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const generation=window.TaskPointsStateRuntimeV2Generation;
+      const row=wal.getPendingRows().rows[0];
+      if(!row)throw Error('Expected pending Habit WAL');
+      const eventKey='taskpoints_v2_pending_mutation_event_v1:'+row.id;
+      const claimKeys=[];
+      for(let i=0;i<localStorage.length;i++){
+        const key=localStorage.key(i);
+        if(String(key).startsWith(wal.CLAIM_PREFIX))claimKeys.push(key);
+      }
+      if(claimKeys.length!==1)throw Error('Expected one immutable WAL claim');
+      const old={epoch:generation.read(),
+        shared:localStorage.getItem(wal.KEY),
+        sidecar:localStorage.getItem(eventKey),
+        claim:localStorage.getItem(claimKeys[0]),
+        v1:localStorage.getItem('taskpoints_v1')};
+      const remove=Storage.prototype.removeItem;
+      const set=Storage.prototype.setItem;
+      let rotated=false,blocked=null;
+      Storage.prototype.removeItem=function(key){
+        const result=remove.call(this,key);
+        if(this===localStorage && String(key)===wal.KEY && !rotated){
+          set.call(localStorage,generation.KEY,'synthetic-rotation-post-shared');
+          rotated=true;
+        }
+        return result;
+      };
+      try{wal.removeMutation(row.id,{generation:row.generation,delta:row.delta});}
+      catch(e){blocked=String(e.message||e);}
+      finally{Storage.prototype.removeItem=remove;}
+      const out={rotated,blocked,
+        sharedGone:localStorage.getItem(wal.KEY)===null,
+        sidecarRetained:localStorage.getItem(eventKey)===old.sidecar,
+        claimRetained:localStorage.getItem(claimKeys[0])===old.claim,
+        v1Retained:localStorage.getItem('taskpoints_v1')===old.v1,
+        pending:wal.getPendingRows().rows.length,
+        claims:wal.getStatus().admissionClaimCount,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+      // The rotated epoch was introduced solely to interrupt this test.
+      // Restore it before reload, without altering the durable WAL copies.
+      set.call(localStorage,generation.KEY,old.epoch);
+      return out;
+    });
+    assert.equal(evidence.rotated,true);
+    assert.match(evidence.blocked,/state_runtime_v2_wal_cleanup_generation_changed/);
+    assert.equal(evidence.sharedGone,true);
+    assert.equal(evidence.sidecarRetained,true);
+    assert.equal(evidence.claimRetained,true);
+    assert.equal(evidence.v1Retained,true);
+    assert.equal(evidence.pending,1);
+    assert.equal(evidence.claims,1);
+    assert.equal(evidence.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.wal.pendingCount===0 && s.wal.admissionClaimCount===0
+        && s.bridge.replayCleared>=1;
+    },null,{timeout:25000});
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,1);
+    return {sharedKeyAlreadyDeleted:true,independentRecoveryUnchanged:true,
+      exactlyOnceRestartReplay:true,parity:p.match};
+  });
+
   await run('WAL cleanup detects same-count cross-tab claim key substitution before deletion',async context=>{
     const page=await open(context);
     await page.evaluate(()=>{

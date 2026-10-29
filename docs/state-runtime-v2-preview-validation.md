@@ -980,3 +980,14 @@ The production V1 journal and all other V2 rollout blockers are untouched.
 These synchronous comparisons are best-effort; localStorage does not provide
 an atomic cross-tab epoch/CAS fence, and a noncooperating old tab can still
 write after a check. They are not permission to promote V2 authority.
+
+### Browser interruption after shared WAL deletion (October 29)
+
+An additional Chromium/WebKit regression now forces a competing generation
+rotation **after** the shared WAL key is removed but before the corresponding
+independent sidecar/claim cleanup. The verified cleanup must refuse the
+remaining deletions, leaving both independent recovery copies intact. The
+test reverses only its synthetic epoch perturbation, reloads the isolated
+fixture and verifies exactly-once restart replay and pilot parity. This
+complements the earlier pre-deletion browser interruption case and the
+Node post-deletion regression. No production cutover authority is granted.
