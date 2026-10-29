@@ -249,3 +249,28 @@ must continue refusing promotion.
 These writes are intentional evidence of **missing production fencing**,
 not a test of actual Notes or Today UI event handlers, and not a migration
 of these keys to V2. No old writer has been disabled or re-routed.
+
+## Atomic preview writer-marker inventory check before freeze (October 29)
+
+A new preview-only `rehearsePreviewDurableWriterFence('audit')` action
+reads every synthetic writer marker within one IndexedDB read-only
+transaction. It compares the exact count against the durable control
+counter, validates each marker ID, generation, epoch and optional SHA-256
+fingerprint, and confirms the control's last-written marker still exists.
+Any absent older marker, stray record, contradictory counter, or malformed
+marker refuses with `fence_writer_inventory_inconsistent`. The audit is
+read-only, returns no mutation payload, never repairs or removes evidence,
+and cannot grant V2 authority.
+
+Experimental `freeze` now runs this same inventory validation inside
+its own readwrite transaction **before** advancing the preview epoch.
+Cooperating marker writes serialize against that transaction. Chromium and
+WebKit regressions remove an earlier marker while keeping the latest marker
+and counter intact, and separately corrupt an older fingerprint without
+changing the count. Both must block freeze and remain nonpromotable; the
+older missing-marker case also persists through reload. Existing 'read',
+writer, and marker inspection behavior remains available.
+
+This validates only the isolated synthetic IndexedDB preview records.
+It does **not** fence old V1 tabs, prevent localStorage writes, protect a
+real TaskPoints mutation or establish a production-safe cutover.

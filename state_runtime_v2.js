@@ -4375,11 +4375,11 @@
     });
     if (!isWalTestPreviewHost()) return refuse('preview_host_required');
     if (!isDarkEnabled()) return refuse('dark_disabled');
-    if (!['read', 'writer', 'freeze', 'inspect_marker'].includes(action))
+    if (!['read', 'audit', 'writer', 'freeze', 'inspect_marker'].includes(action))
       return refuse('invalid_fence_action');
     if (!global.indexedDB?.open) return refuse('indexeddb_unavailable');
     const expectedEpoch = options?.expectedEpoch;
-    if (action !== 'read' && action !== 'inspect_marker'
+    if (action !== 'read' && action !== 'audit' && action !== 'inspect_marker'
       && (!Number.isSafeInteger(expectedEpoch) || expectedEpoch < 0))
       return refuse('expected_epoch_required');
     if ((action === 'writer' || action === 'inspect_marker')
@@ -4435,7 +4435,7 @@
             return;
           }
           const tx = db.transaction(STORE,
-            (action === 'read' || action === 'inspect_marker') ? 'readonly' : 'readwrite');
+            (action === 'read' || action === 'audit' || action === 'inspect_marker') ? 'readonly' : 'readwrite');
           tx.onabort = () => finish(refuse('fence_transaction_aborted'));
           tx.onerror = () => {}; // The abort handler remains authoritative.
           tx.oncomplete = () => finish(result);
@@ -4483,9 +4483,77 @@
                 });
                 return;
               }
+              // Audit the *entire* synthetic writer-marker inventory in one
+              // stable IndexedDB transaction. A missing older marker is not
+              // discoverable by a last-marker-only replay check.
+              // This preview-only scan is not a production writer hot path.
+              const inspectAllWriterMarkers = callback => {
+                const scan = store.getAll();
+                scan.onerror = () => {
+                  result = refuse('fence_writer_inventory_unreadable', {
+                    fence: describe(state)
+                  });
+                  try { tx.abort(); } catch (_) {}
+                };
+                scan.onsuccess = () => {
+                  try {
+                    if (!isDarkEnabled() || darkMirrorModeEpoch !== initialModeEpoch
+                      || currentGeneration({ create: false }) !== generation) {
+                      result = refuse('preview_or_generation_changed_in_transaction');
+                      return;
+                    }
+                    const records = scan.result;
+                    const markers = records.filter(row => row?.id !== 'writer_fence');
+                    const markerIds = new Set();
+                    const lastKey = 'writer_marker:' + state.lastWriterMarker;
+                    const inventoryValid = Array.isArray(records)
+                      && markers.length === state.writersCommitted
+                      && (!prior ? records.length === 0 : records.length === markers.length + 1)
+                      && markers.every(row => {
+                        if (!row || typeof row.id !== 'string'
+                          || !row.id.startsWith('writer_marker:')
+                          || row.id.length <= 'writer_marker:'.length
+                          || row.id.length > 'writer_marker:'.length + 128
+                          || markerIds.has(row.id)
+                          || row.generation !== generation
+                          || !Number.isSafeInteger(row.epoch)
+                          || row.epoch < 0 || row.epoch > state.epoch
+                          || !validPayloadFingerprint(row.payloadFingerprint))
+                          return false;
+                        markerIds.add(row.id);
+                        return true;
+                      })
+                      && (state.writersCommitted === 0
+                        || markerIds.has(lastKey));
+                    if (!inventoryValid) {
+                      result = refuse('fence_writer_inventory_inconsistent', {
+                        fence: describe(state),
+                        observedMarkerCount: markers.length
+                      });
+                      return;
+                    }
+                    callback(markers.length);
+                  } catch (_) {
+                    result = refuse('fence_writer_inventory_unreadable', {
+                      fence: describe(state)
+                    });
+                    try { tx.abort(); } catch (_) {}
+                  }
+                };
+              };
               if (action === 'read') {
                 result = refuse('fence_read_only', {
                   initialized: !!prior, fence: describe(state)
+                });
+                return;
+              }
+              if (action === 'audit') {
+                inspectAllWriterMarkers(count => {
+                  result = refuse('preview_writer_inventory_consistent', {
+                    readOnlyInventoryAudit: true,
+                    initialized: !!prior, observedMarkerCount: count,
+                    fence: describe(state)
+                  });
                 });
                 return;
               }
@@ -4561,10 +4629,18 @@
                   result = refuse('fence_epoch_exhausted', { fence: describe(state) });
                   return;
                 }
-                const next = { ...state, frozen: true, epoch: state.epoch + 1 };
-                store.put(next);
-                result = refuse('preview_fence_frozen', {
-                  atomicPreviewTransaction: true, fence: describe(next)
+                // Freeze must not certify an incomplete or corrupted marker
+                // ledger. The scan and frozen-control put share one IDB
+                // readwrite transaction, so cooperating writers cannot
+                // interleave a marker commit between these two operations.
+                inspectAllWriterMarkers(() => {
+                  const next = { ...state, frozen: true, epoch: state.epoch + 1 };
+                  store.put(next);
+                  result = refuse('preview_fence_frozen', {
+                    atomicPreviewTransaction: true,
+                    markerInventoryVerified: true,
+                    fence: describe(next)
+                  });
                 });
                 return;
               }

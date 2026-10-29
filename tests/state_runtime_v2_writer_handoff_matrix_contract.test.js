@@ -400,6 +400,26 @@ test('the transactional preview protocol does not masquerade as a production V1 
   }
 });
 
+test('preview freeze must atomically audit full writer marker inventory before committing',()=>{
+  const runtime=read('state_runtime_v2.js');
+  const begin=runtime.indexOf('async function rehearsePreviewDurableWriterFence(action, options = {})');
+  const end=runtime.indexOf('// Browser-native exclusive-lock *rehearsal*',begin);
+  assert.ok(begin>=0&&end>begin);
+  const source=runtime.slice(begin,end);
+  assert.match(source,/action === 'audit'/);
+  assert.match(source,/scan = store\.getAll\(\)/);
+  assert.match(source,/markers\.length === state\.writersCommitted/);
+  assert.match(source,/markerIds\.has\(lastKey\)/);
+  assert.match(source,/fence_writer_inventory_inconsistent/);
+  const freeze=source.slice(source.indexOf("if (action === 'freeze')"),
+    source.indexOf('// Keep each synthetic marker',source.indexOf("if (action === 'freeze')")));
+  assert.ok(freeze.indexOf('inspectAllWriterMarkers(')>=0);
+  assert.ok(freeze.indexOf('store.put(next)')>freeze.indexOf('inspectAllWriterMarkers('));
+  assert.match(freeze,/markerInventoryVerified: true/);
+  assert.match(source,/productionWritersFenced: false/);
+  assert.match(source,/canPromote: false/);
+});
+
 test('preview fence marker replays must validate caller-supplied payload identity',()=>{
   const runtime=read('state_runtime_v2.js');
   const start=runtime.indexOf('async function rehearsePreviewDurableWriterFence(action, options = {})');

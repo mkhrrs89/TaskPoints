@@ -1909,6 +1909,118 @@ try {
       noV1Modification:true,noPromotion:true};
   });
 
+  await run('preview marker inventory audit detects missing earlier marker before freeze',async context=>{
+    const first=await open(context),second=await open(context);
+    const before=await first.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const initial=await first.evaluate(async()=>{
+      const r=window.TaskPointsStateRuntimeV2;
+      const start=await r.rehearsePreviewDurableWriterFence('audit');
+      const one=await r.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'audit-first',payloadFingerprint:'a'.repeat(64)
+      });
+      const two=await r.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'audit-second',payloadFingerprint:'b'.repeat(64)
+      });
+      return {start,one,two};
+    });
+    assert.equal(initial.start.reason,'preview_writer_inventory_consistent');
+    assert.equal(initial.start.observedMarkerCount,0);
+    assert.equal(initial.one.reason,'preview_writer_recorded');
+    assert.equal(initial.two.reason,'preview_writer_recorded');
+    const intact=await second.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('audit'));
+    assert.equal(intact.reason,'preview_writer_inventory_consistent',JSON.stringify(intact));
+    assert.equal(intact.observedMarkerCount,2);
+    await second.evaluate(()=>new Promise((resolve,reject)=>{
+      const openDb=indexedDB.open('taskpoints_v2_writer_fence_preview_v1',1);
+      openDb.onerror=()=>reject(openDb.error);
+      openDb.onsuccess=()=>{
+        const db=openDb.result,tx=db.transaction('control','readwrite');
+        tx.objectStore('control').delete('writer_marker:audit-first');
+        tx.oncomplete=()=>{db.close();resolve()};
+        tx.onabort=()=>{db.close();reject(tx.error||Error('delete aborted'))};
+      };
+    }));
+    const proof=await first.evaluate(async()=>{
+      const r=window.TaskPointsStateRuntimeV2;
+      const audit=await r.rehearsePreviewDurableWriterFence('audit');
+      const freeze=await r.rehearsePreviewDurableWriterFence('freeze',{
+        expectedEpoch:0
+      });
+      const read=await r.rehearsePreviewDurableWriterFence('read');
+      const last=await r.rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker:'audit-second',payloadFingerprint:'b'.repeat(64)
+      });
+      return {audit,freeze,read,last,
+        v1:localStorage.getItem('taskpoints_v1'),
+        authority:r.getStatus().readAuthority};
+    });
+    assert.equal(proof.audit.reason,'fence_writer_inventory_inconsistent');
+    assert.equal(proof.audit.observedMarkerCount,1);
+    assert.equal(proof.freeze.reason,'fence_writer_inventory_inconsistent');
+    assert.equal(proof.freeze.canPromote,false);
+    assert.equal(proof.read.fence.epoch,0);
+    assert.equal(proof.read.fence.frozen,false);
+    assert.equal(proof.read.fence.writersCommitted,2);
+    assert.equal(proof.read.fence.lastWriterMarker,'audit-second');
+    assert.equal(proof.last.reason,'preview_writer_marker_present');
+    assert.equal(proof.v1,before);
+    assert.equal(proof.authority,'legacy_only');
+    await first.reload({waitUntil:'load'});
+    const repeated=await first.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('audit'));
+    assert.equal(repeated.reason,'fence_writer_inventory_inconsistent');
+    return {wholeMarkerAudit:true,oldMarkerLossDetected:true,
+      freezeRefusesIncompleteLedger:true,readOnlyEvidencePreserved:true,
+      reloadStillRefuses:true};
+  });
+
+  await run('preview writer inventory rejects malformed earlier fingerprints despite intact count',async context=>{
+    const page=await open(context);
+    const before=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const proof=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const one=await runtime.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'audit-tamper-one',payloadFingerprint:'d'.repeat(64)
+      });
+      const two=await runtime.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'audit-tamper-two',payloadFingerprint:'e'.repeat(64)
+      });
+      await new Promise((resolve,reject)=>{
+        const opening=indexedDB.open('taskpoints_v2_writer_fence_preview_v1',1);
+        opening.onerror=()=>reject(opening.error);
+        opening.onsuccess=()=>{
+          const db=opening.result,tx=db.transaction('control','readwrite');
+          const store=tx.objectStore('control');
+          const get=store.get('writer_marker:audit-tamper-one');
+          get.onsuccess=()=>store.put({...get.result,payloadFingerprint:'corrupted'});
+          get.onerror=()=>{try{tx.abort()}catch(_){}};
+          tx.oncomplete=()=>{db.close();resolve()};
+          tx.onabort=()=>{db.close();reject(tx.error||Error('tamper aborted'))};
+        };
+      });
+      const audit=await runtime.rehearsePreviewDurableWriterFence('audit');
+      const freeze=await runtime.rehearsePreviewDurableWriterFence('freeze',{
+        expectedEpoch:0
+      });
+      const read=await runtime.rehearsePreviewDurableWriterFence('read');
+      return {one,two,audit,freeze,read,
+        v1:localStorage.getItem('taskpoints_v1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(proof.one.reason,'preview_writer_recorded');
+    assert.equal(proof.two.reason,'preview_writer_recorded');
+    assert.equal(proof.audit.reason,'fence_writer_inventory_inconsistent');
+    assert.equal(proof.audit.observedMarkerCount,2);
+    assert.equal(proof.freeze.reason,'fence_writer_inventory_inconsistent');
+    assert.equal(proof.read.fence.frozen,false);
+    assert.equal(proof.read.fence.epoch,0);
+    assert.equal(proof.v1,before);
+    assert.equal(proof.authority,'legacy_only');
+    return {malformedHistoricMarkerDetected:true,matchingCountNotEnough:true,
+      freezeRefusesCorruptLedger:true,originalV1Untouched:true};
+  });
+
   await run('preview durable IDB writer-versus-freeze race has a single serial order',async context=>{
     const writer=await open(context),freezer=await open(context);
     const oldV1=await writer.evaluate(()=>localStorage.getItem('taskpoints_v1'));
