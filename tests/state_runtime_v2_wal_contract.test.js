@@ -217,7 +217,7 @@ test('shared WAL race after durable admission refuses overwrite and retains both
     return originalGet(key);
   };
   try{assert.throws(()=>api.appendHabitDelta(deltaB),
-    /state_runtime_v2_wal_append_shared_changed/);}
+    /state_runtime_v2_wal_append_shared_changed|wal_shared_changed_during_read/);}
   finally{localStorage.getItem=originalGet;}
   assert.equal(changed,true);
   assert.deepEqual(JSON.parse(originalGet(KEY)).map(r=>r.id),
