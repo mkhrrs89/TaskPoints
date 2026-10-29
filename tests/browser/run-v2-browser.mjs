@@ -6272,9 +6272,11 @@ try {
         return originalSet.call(this,name,value);
       };
       try{
-        admitted=wal.appendHabitDelta({habitId:'h2',dayKey:'2026-10-21',
-          source:'habit',status:'full',done:true,
-          updatedAtISO:'2026-10-21T12:00:00.000Z'});
+        // Exercise the real synchronous V1 Habit journal as well as the
+        // WAL bridge. A standalone WAL-only injection would create a fake
+        // unpaired V2 completion and invalidate the parity assertion.
+        window.V2BrowserFixture.delta('h2','2026-10-21','full',2);
+        admitted=wal.getPendingRows().rows.find(r=>r.delta.habitId==='h2');
       }finally{
         Storage.prototype.getItem=originalGet;
         Storage.prototype.setItem=originalSet;
@@ -6302,9 +6304,10 @@ try {
         &&s.bridge.replayCleared>=1;
     },null,{timeout:30000});
     const p=await parity(page);
-    assert.equal(p.actualCounts.completions,1);
+    assert.equal(p.actualCounts.completions,2);
     return {peerEpochAdopted:true,olderPendingMutationRetained:true,
-      allRecoveryDrained:true,v1RemainsAuthority:true,parity:p.match};
+      bothV1JournalEventsRecovered:true,allRecoveryDrained:true,
+      v1RemainsAuthority:true,parity:p.match};
   });
 
   await run('generation read denial preserves epoch and held WAL until restart',async context=>{
