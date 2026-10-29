@@ -343,10 +343,11 @@ test('durable writer fence remains confined to preview IDB markers, not producti
     'Dedup marker and aggregate count must be written in one IDB transaction');
   assert.match(fence, /marker\.generation !== generation/);
   assert.match(fence, /marker\.epoch !== state\.epoch/);
-  assert.match(fence, /payloadFingerprint \}\);/);
+  assert.match(fence, /payloadFingerprint: effectivePayloadFingerprint,/);
+  assert.match(fence, /syntheticMutationJson/);
   assert.match(fence, /fence_writer_payload_mismatch/);
   assert.match(fence, /!validPayloadFingerprint\(marker\.payloadFingerprint\)/);
-  assert.match(fence, /marker\.payloadFingerprint !== payloadFingerprint/);
+  assert.match(fence, /marker\.payloadFingerprint !== effectivePayloadFingerprint/);
   const lookupCallback=fence.slice(
     fence.indexOf('markerRequest.onsuccess = () => {'),
     fence.indexOf('const marker = markerRequest.result')

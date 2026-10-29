@@ -449,10 +449,10 @@ test('preview fence marker replays must validate caller-supplied payload identit
   const preview=runtime.slice(start,end);
   assert.match(preview,/writer_payload_fingerprint_invalid/);
   assert.match(preview,/fence_writer_payload_mismatch/);
-  assert.match(preview,/marker\.payloadFingerprint !== payloadFingerprint/);
+  assert.match(preview,/marker\.payloadFingerprint !== effectivePayloadFingerprint/);
   assert.match(preview,/item\.payloadFingerprint !== payloadFingerprint/);
   assert.match(preview,/store\.put\(\{ id: markerId, generation, epoch: state\.epoch,/);
-  assert.match(preview,/payloadFingerprint \}/);
+  assert.match(preview,/payloadFingerprint: effectivePayloadFingerprint/);
   assert.match(preview,/productionWritersFenced: false/);
   assert.match(preview,/canPromote: false/);
 });
