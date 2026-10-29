@@ -867,3 +867,30 @@ These guards avoid a second full key enumeration on stable reads. They do
 not provide atomic compare-and-swap across independent tabs; truly
 same-count independent-key swaps remain outside these guards, and
 production writer cutover remains blocked.
+
+
+### Verified recovery-claim UUID collision refusal and cleanup key-set stability (October 29)
+
+The V2-only pending Habit WAL now checks that each generated immutable
+admission-claim key is absent before writing it. A repeated UUID is retried
+up to eight times. If no unused key can be generated, admission fails closed
+without overwriting an older claim, its sidecar, or the shared WAL; normal
+V1 read/write authority remains unchanged. Synthetic Node tests cover the
+successful retry, the exhaustion path, byte-for-byte recovery preservation,
+and subsequent cleanup. Chromium/WebKit browser tests also exercise forced
+UUID collisions and a held-two-event restart replay. The collision guard
+is **best effort**: `localStorage` has no atomic create-if-absent primitive,
+so a tab could still race between the final check and write. No production
+multi-tab writer fence is claimed.
+
+V2 WAL cleanup now additionally revalidates independent recovery-claim
+enumeration and key-set identity immediately before touching the shared WAL.
+A disappearing claim, a changing storage key count, or a different claim key
+replacing an old one at the **same total key count** causes cleanup to refuse
+and preserves the existing sidecars, claims, shared WAL and V1 journal for
+retry. Unit tests cover each race and the stable subsequent replay, and a
+real Chromium/WebKit browser regression injects the same-count swap before
+restart. Ordinary WAL *read* and *append* retain their single-pass key scan
+for foreground performance; the second scan applies only at destructive
+cleanup. These checks are not transactional synchronization with old browser
+tabs, and remain insufficient for V2 read/write promotion.

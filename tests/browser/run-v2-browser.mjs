@@ -5282,6 +5282,96 @@ try {
       noOrphanClaimKeys:true,replayExactlyOnce:true,parity:p.match};
   });
 
+  await run('browser WAL UUID collisions retry safely or refuse without overwriting recovery claims',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const core=window.TaskPointsCore;
+      const first=window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      const current=wal.getPendingRows();
+      if(!current.ok||current.rows.length!==1)throw Error('Expected first pending WAL mutation');
+      const claimKeys=[];
+      for(let index=0;index<localStorage.length;index++){
+        const key=localStorage.key(index);
+        if(String(key).startsWith(wal.CLAIM_PREFIX))claimKeys.push(key);
+      }
+      if(claimKeys.length!==1)throw Error('Expected one independent claim');
+      const existingKey=claimKeys[0];
+      const existingBytes=localStorage.getItem(existingKey);
+      const existingToken=existingKey.slice(wal.CLAIM_PREFIX.length);
+      const newToken='browser-uuid-collision-safe-retry';
+      if(localStorage.getItem(wal.CLAIM_PREFIX+newToken)!==null)
+        throw Error('Unexpected preexisting collision retry key');
+      const cryptoPrototype=Object.getPrototypeOf(crypto);
+      const originalDescriptor=Object.getOwnPropertyDescriptor(cryptoPrototype,'randomUUID');
+      if(typeof originalDescriptor?.value!=='function'
+        || originalDescriptor.configurable!==true)
+        throw Error('Unable to install browser UUID collision fixture');
+      let calls=0,second;
+      Object.defineProperty(cryptoPrototype,'randomUUID',{
+        ...originalDescriptor,
+        value:function(){calls++;return calls===1?existingToken:newToken;}
+      });
+      try{second=window.V2BrowserFixture.delta('h2','2026-10-21','full',2);}
+      finally{Object.defineProperty(cryptoPrototype,'randomUUID',originalDescriptor);}
+      const beforeFailure={
+        shared:localStorage.getItem(wal.KEY),
+        originalClaim:localStorage.getItem(existingKey),
+        newClaim:localStorage.getItem(wal.CLAIM_PREFIX+newToken),
+        sidecars:wal.getStatus().independentEventCount,
+        claimCount:wal.getStatus().admissionClaimCount,
+        journal:core.readPendingHabitDeltas().length,
+        v1:localStorage.getItem('taskpoints_v1')
+      };
+      let exhausted=false,refusals=0;
+      Object.defineProperty(cryptoPrototype,'randomUUID',{
+        ...originalDescriptor,value:function(){refusals++;return existingToken;}
+      });
+      try{
+        try{wal.appendHabitDelta({
+          habitId:'h3',dayKey:'2026-10-22',status:'full',done:true,
+          updatedAtISO:'2026-10-22T12:00:00.000Z'
+        });}catch(error){exhausted=/state_runtime_v2_wal_claim_key_collision/.test(String(error));}
+      }finally{Object.defineProperty(cryptoPrototype,'randomUUID',originalDescriptor);}
+      return {first,second,calls,refusals,exhausted,
+        originalClaimPreserved:beforeFailure.originalClaim===existingBytes
+          &&localStorage.getItem(existingKey)===existingBytes,
+        newClaimPreserved:beforeFailure.newClaim!==null
+          &&beforeFailure.newClaim===localStorage.getItem(wal.CLAIM_PREFIX+newToken),
+        sharedPreserved:beforeFailure.shared===localStorage.getItem(wal.KEY),
+        v1Preserved:beforeFailure.v1===localStorage.getItem('taskpoints_v1'),
+        journal:core.readPendingHabitDeltas().length,
+        pending:wal.getStatus().pendingCount,
+        claims:wal.getStatus().admissionClaimCount,
+        sidecars:wal.getStatus().independentEventCount,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(result.calls,2);
+    assert.equal(result.refusals,8);
+    assert.equal(result.exhausted,true);
+    assert.equal(result.originalClaimPreserved,true);
+    assert.equal(result.newClaimPreserved,true);
+    assert.equal(result.sharedPreserved,true);
+    assert.equal(result.v1Preserved,true);
+    assert.equal(result.journal,2);
+    assert.equal(result.pending,2);
+    assert.equal(result.claims,2);
+    assert.equal(result.sidecars,2);
+    assert.equal(result.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.wal.pendingCount===0 && s.wal.admissionClaimCount===0
+        && s.bridge.replayCleared>=2;
+    },null,{timeout:30000});
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,2);
+    return {collidingUUIDRetried:true,exhaustedUUIDRefused:true,
+      originalClaimRetained:true,legacyJournalRetained:true,
+      restartRecoveredBoth:true,parity:p.match};
+  });
+
   await run('silent legacy WAL sidecar denial retains unique admission claim and V1',async context=>{
     const page=await open(context);
     const outcome=await page.evaluate(()=>{
