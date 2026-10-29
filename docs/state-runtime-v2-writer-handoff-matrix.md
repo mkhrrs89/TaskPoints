@@ -234,3 +234,18 @@ protection against existing/paused V1 tabs.
 
 No existing TaskPoints feature, V1 writer, backup or recovery mechanism
 has been removed or switched to V2 primary authority.
+
+## Nonpilot direct-storage writer proof after a preview freeze (October 29)
+
+A browser regression now uses an old-tab fixture without any V2 runtime
+installed to write five separate existing-family V1 keys *after* a preview
+IndexedDB fence is frozen: Notes content, Notes dirty/authoritative flags,
+Projects data and Today view data. It waits for other-tab visibility in
+WebKit, verifies an experimental cooperating writer remains frozen, verifies
+the V1 snapshot is unchanged, and checks that the independent values
+survive reload with `legacy_only` authority. The cutover inspector
+must continue refusing promotion.
+
+These writes are intentional evidence of **missing production fencing**,
+not a test of actual Notes or Today UI event handlers, and not a migration
+of these keys to V2. No old writer has been disabled or re-routed.

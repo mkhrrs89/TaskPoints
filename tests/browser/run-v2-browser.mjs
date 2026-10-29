@@ -1513,6 +1513,70 @@ try {
       oldTabDataSurvivedReload:true};
   });
 
+  await run('frozen preview fence cannot block old-tab Notes Projects and Today direct V1 keys',async context=>{
+    const observer=await open(context);
+    const before=await observer.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const fence=await runtime.rehearsePreviewDurableWriterFence('read');
+      const frozen=await runtime.rehearsePreviewDurableWriterFence('freeze',{
+        expectedEpoch:fence.fence.epoch
+      });
+      return {frozen,raw:localStorage.getItem('taskpoints_v1')};
+    });
+    assert.equal(before.frozen.reason,'preview_fence_frozen',JSON.stringify(before.frozen));
+    const oldTab=await context.newPage();
+    await oldTab.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const edits=await oldTab.evaluate(()=>{
+      // A legacy tab can write the actual nonpilot storage key family without
+      // loading or cooperating with the V2 IndexedDB protocol. The values
+      // model content + dirty/authority markers and independent view state.
+      const entries=[
+        ['taskpoints_notes_v1','Legacy notes after preview freeze'],
+        ['taskpoints_notes_dirty_v1','1'],
+        ['taskpoints_notes_authoritative_v1','1'],
+        ['tp_projects_v1',JSON.stringify([{id:'legacy-project',name:'Kept Project'}])],
+        ['taskpoints_today_store_v1',JSON.stringify({version:1,source:'old-tab'})]
+      ];
+      for(const [key,value] of entries)localStorage.setItem(key,value);
+      return entries;
+    });
+    // Confirm the receiving tab actually observes every write; in WebKit,
+    // successful setItem on another tab isn't an immediate visibility fence.
+    await observer.waitForFunction(pairs=>pairs.every(([key,value])=>
+      localStorage.getItem(key)===value),edits,{polling:75,timeout:15000});
+    const proof=await observer.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const fence=await runtime.rehearsePreviewDurableWriterFence('read');
+      const denied=await runtime.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:1,marker:'post-freeze-nonpilot-data-writer'
+      });
+      const cutover=await runtime.inspectAuthorityCutoverBarriers();
+      return {fence,denied,cutover,raw:localStorage.getItem('taskpoints_v1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(proof.fence.fence.frozen,true);
+    assert.equal(proof.fence.fence.epoch,1);
+    assert.equal(proof.denied.reason,'fence_frozen');
+    assert.equal(proof.cutover.canPromote,false);
+    assert.equal(proof.cutover.checks.allLegacyWritersFenced,false);
+    assert.equal(proof.raw,before.raw,'direct-key edits should not erase V1 snapshot');
+    assert.equal(proof.authority,'legacy_only');
+    await oldTab.close();
+    const reloaded=await open(context);
+    const retained=await reloaded.evaluate(pairs=>({
+      all: pairs.every(([key,value])=>localStorage.getItem(key)===value),
+      v1:localStorage.getItem('taskpoints_v1'),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }),edits);
+    assert.equal(retained.all,true);
+    assert.equal(retained.v1,before.raw);
+    assert.equal(retained.authority,'legacy_only');
+    return {oldTabDirectWritesVisible:true,notesFlagsRetained:true,
+      projectsAndTodayRetained:true,previewFenceStillFrozen:true,
+      productionCutoverStillBlocked:true,reloadPreserved:true};
+  });
+
   await run('preview durable writer fence rejects stale generations without touching legacy data',async context=>{
     const writer=await open(context),other=await open(context);
     const before=await writer.evaluate(()=>({
