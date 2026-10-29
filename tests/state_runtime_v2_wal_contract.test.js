@@ -123,6 +123,61 @@ test('single-pass WAL inventory still blocks corrupt claims without rewriting ev
     {generation:admitted.generation,delta:admitted.row.delta}).removed,true);
 });
 
+test('duplicate UUID candidate retries without overwriting an older admission claim',()=>{
+  const {api,localStorage,context}=install({[DARK]:'1'});
+  const first=api.appendHabitDelta(deltaA);
+  const originalClaimKey=[...localStorage.rows.keys()].find(k=>k.startsWith(api.CLAIM_PREFIX));
+  const originalClaim=localStorage.getItem(originalClaimKey);
+  const collisionSuffix=originalClaimKey.slice(api.CLAIM_PREFIX.length);
+  const nextSuffix='safe-unique-claim-after-collision';
+  const originalRandom=context.crypto.randomUUID;
+  const calls=[];
+  context.crypto.randomUUID=()=>{
+    const token=calls.length===0?collisionSuffix:nextSuffix;
+    calls.push(token);
+    return token;
+  };
+  let second;
+  try{second=api.appendHabitDelta(deltaB);}
+  finally{context.crypto.randomUUID=originalRandom;}
+  assert.equal(second.written,true);
+  assert.deepEqual(calls,[collisionSuffix,nextSuffix]);
+  assert.equal(localStorage.getItem(originalClaimKey),originalClaim,
+    'first claim must remain byte-for-byte unchanged');
+  assert.ok(localStorage.getItem(api.CLAIM_PREFIX+nextSuffix));
+  assert.deepEqual(api.getPendingRows().rows.map(row=>row.id).sort(),
+    [first.mutationId,second.mutationId].sort());
+  for(const entry of [first,second])
+    assert.equal(api.removeMutation(entry.mutationId,
+      {generation:entry.generation,delta:entry.row.delta}).removed,true);
+  assert.equal(api.getStatus().admissionClaimCount,0);
+});
+
+test('exhausted duplicate claim UUIDs fail closed without corrupting older WAL',()=>{
+  const {api,localStorage,context}=install({[DARK]:'1'});
+  const first=api.appendHabitDelta(deltaA);
+  const claimKey=[...localStorage.rows.keys()].find(k=>k.startsWith(api.CLAIM_PREFIX));
+  const claimBefore=localStorage.getItem(claimKey);
+  const sharedBefore=localStorage.getItem(KEY);
+  const sidecarKey='taskpoints_v2_pending_mutation_event_v1:'+first.mutationId;
+  const sidecarBefore=localStorage.getItem(sidecarKey);
+  const originalRandom=context.crypto.randomUUID;
+  let attempts=0;
+  context.crypto.randomUUID=()=>{attempts++;return claimKey.slice(api.CLAIM_PREFIX.length);};
+  try{assert.throws(()=>api.appendHabitDelta(deltaB),
+    /state_runtime_v2_wal_claim_key_collision/);}
+  finally{context.crypto.randomUUID=originalRandom;}
+  assert.equal(attempts,8,'collision retries must have a finite safety bound');
+  assert.equal(localStorage.getItem(claimKey),claimBefore);
+  assert.equal(localStorage.getItem(KEY),sharedBefore);
+  assert.equal(localStorage.getItem(sidecarKey),sidecarBefore);
+  assert.equal(api.getStatus().pendingCount,1);
+  assert.deepEqual(api.getPendingRows().rows.map(row=>row.id),[first.mutationId]);
+  assert.equal(api.removeMutation(first.mutationId,
+    {generation:first.generation,delta:first.row.delta}).removed,true);
+  assert.equal(api.getStatus().admissionClaimCount,0);
+});
+
 test('V2 WAL fast append avoids repeated full-array JSON serialization without omitting rows', () => {
   const {api,localStorage,context}=install({[DARK]:'1'});
   const originalJson=context.JSON;

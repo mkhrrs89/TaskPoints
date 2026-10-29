@@ -217,10 +217,17 @@
   function independentKeys() { return recoveryKeys().events; }
 
   function uniqueClaimKey() {
-    // Random UUIDs prevent different tabs with colliding short mutation IDs
-    // from ever writing to the same admission key.
-    return CLAIM_PREFIX + (global.crypto?.randomUUID?.()
-      || `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    // Random UUIDs make per-append recovery keys independent of short
+    // mutation IDs. Still verify nonexistence: a test shim, fallback PRNG,
+    // or broken UUID source must never silently overwrite a prior claim.
+    // localStorage has no atomic create-if-absent, so this is a best-effort
+    // collision guard, not a cross-tab compare-and-swap primitive.
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const key = CLAIM_PREFIX + (global.crypto?.randomUUID?.()
+        || `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      if (readWalStorage(key) === null) return key;
+    }
+    throw new Error('state_runtime_v2_wal_claim_key_collision');
   }
 
   function claimKeys() { return recoveryKeys().claims; }
