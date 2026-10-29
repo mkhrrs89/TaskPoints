@@ -5384,6 +5384,58 @@ try {
       restartRecoveredBoth:true,parity:p.match};
   });
 
+  await run('generation bootstrap does not overwrite an interleaved peer epoch',async context=>{
+    const page=await open(context);
+    const proof=await page.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      const generation=window.TaskPointsStateRuntimeV2Generation;
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const epoch=generation.read(),key=generation.KEY;
+      const before={v1:localStorage.getItem('taskpoints_v1'),
+        wal:localStorage.getItem(wal.KEY),
+        pending:wal.getStatus().pendingCount,
+        claims:wal.getStatus().admissionClaimCount};
+      localStorage.removeItem(key);
+      const get=Storage.prototype.getItem;
+      const set=Storage.prototype.setItem;
+      let reads=0,answer;
+      Storage.prototype.getItem=function(k){
+        if(this===localStorage && String(k)===key && ++reads===2)
+          set.call(localStorage,key,epoch);
+        return get.call(this,k);
+      };
+      try{answer=generation.ensure();}
+      finally{Storage.prototype.getItem=get;}
+      return {reads,created:answer.created,adopted:answer.generation===epoch,
+        epochPreserved:generation.read()===epoch,
+        v1Same:localStorage.getItem('taskpoints_v1')===before.v1,
+        walSame:localStorage.getItem(wal.KEY)===before.wal,
+        pendingSame:wal.getStatus().pendingCount===before.pending,
+        claimsSame:wal.getStatus().admissionClaimCount===before.claims,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(proof.reads,2);
+    assert.equal(proof.created,false);
+    assert.equal(proof.adopted,true);
+    assert.equal(proof.epochPreserved,true);
+    assert.equal(proof.v1Same,true);
+    assert.equal(proof.walSame,true);
+    assert.equal(proof.pendingSame,true);
+    assert.equal(proof.claimsSame,true);
+    assert.equal(proof.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.wal.pendingCount===0 && s.wal.admissionClaimCount===0
+        && s.bridge.replayCleared>=1;
+    },null,{timeout:25000});
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,1);
+    return {peerEpochAdopted:true,noOverwrittenBootstrap:true,
+      oldRecoveryRetained:true,replayedAfterRestart:true,parity:p.match};
+  });
+
   await run('generation UUID collision cannot falsely rotate or erase suspended WAL',async context=>{
     const page=await open(context);
     const held=await page.evaluate(()=>{

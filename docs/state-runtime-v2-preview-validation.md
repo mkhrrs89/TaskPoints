@@ -913,3 +913,17 @@ They do not prove uniqueness against every historical epoch or prevent
 an uncooperative old tab from writing V1 after the check. V1 remains primary;
 all migration, recovery, old-tab fencing, real-device testing, and
 off-device rollback blockers remain active.
+
+### Generation bootstrap peer-epoch preservation (October 29)
+
+V2's default-off generation bootstrap now rereads the epoch immediately
+before its verified write. If a second tab has already published an epoch,
+the observing tab adopts that value without reporting a new locally created
+generation. An unavailable second read refuses the bootstrap without
+inventing a token. Node and Chromium/WebKit browser regressions cover
+concurrent-epoch publication, storage denial, and held-WAL restart replay.
+
+This is best-effort stale-write detection, **not** atomic create-if-absent
+or a production writer fence. LocalStorage remains unable to guarantee
+exclusive generation handoff to nonparticipating old browser tabs. V1
+retains read/write authority, and every existing rollout gate stays closed.

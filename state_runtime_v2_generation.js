@@ -171,6 +171,12 @@
     const existing = read();
     if (existing) return { enabled: true, generation: existing, created: false };
     const generation = createGeneration('v2-bootstrap');
+    // A peer may have committed an epoch while this tab prepared a token.
+    // Prefer that already-durable generation over a detectable stale write.
+    // This is not an atomic cross-tab create-if-absent.
+    const concurrentGeneration = read();
+    if (concurrentGeneration)
+      return { enabled: true, generation: concurrentGeneration, created: false };
     writeGenerationVerified(generation);
     lastReason = forcedPreviewBootstrap ? 'forced-preview-bootstrap' : 'bootstrap';
     notify({ generation, previousGeneration: null, reason: lastReason, source: 'local' });

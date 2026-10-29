@@ -353,6 +353,65 @@ test('silent generation rotation refuses success and never notifies stale WAL co
     'previous WAL evidence stays inspectable across verified rotation');
 });
 
+test('V2 bootstrap adopts another tab epoch before writing its own',()=>{
+  const storage=new FakeStorage({[DARK]:'1'});
+  const get=storage.getItem.bind(storage);
+  const set=storage.setItem.bind(storage);
+  const peer='concurrent-bootstrap:other-tab';
+  let reads=0,writes=0;
+  storage.getItem=key=>{
+    if(String(key)===GENERATION_KEY && ++reads===2)
+      set(GENERATION_KEY,peer);
+    return get(key);
+  };
+  storage.setItem=(key,value)=>{
+    if(String(key)===GENERATION_KEY)writes++;
+    return set(key,value);
+  };
+  const ctx={localStorage:storage,JSON,Date,Math,String,Number,Boolean,
+    Array,Object,Map,Set,console};
+  ctx.window=ctx;ctx.globalThis=ctx;
+  vm.runInNewContext(generationSource,ctx,
+    {filename:'state_runtime_v2_generation.js'});
+  storage.getItem=get;
+  storage.setItem=set;
+  assert.equal(reads,2);
+  assert.equal(writes,0);
+  assert.equal(storage.getItem(GENERATION_KEY),peer);
+  assert.equal(ctx.TaskPointsStateRuntimeV2Generation.ensure().created,false);
+  assert.equal(ctx.TaskPointsStateRuntimeV2Generation.read(),peer);
+});
+
+test('denied second V2 bootstrap read cannot create an unverified epoch',()=>{
+  const storage=new FakeStorage({[DARK]:'1'});
+  const get=storage.getItem.bind(storage);
+  const set=storage.setItem.bind(storage);
+  let reads=0,writes=0;
+  storage.getItem=key=>{
+    if(String(key)===GENERATION_KEY && ++reads===2)
+      throw Error('synthetic second generation SecurityError');
+    return get(key);
+  };
+  storage.setItem=(key,value)=>{
+    if(String(key)===GENERATION_KEY)writes++;
+    return set(key,value);
+  };
+  const ctx={localStorage:storage,JSON,Date,Math,String,Number,Boolean,
+    Array,Object,Map,Set,console};
+  ctx.window=ctx;ctx.globalThis=ctx;
+  vm.runInNewContext(generationSource,ctx,
+    {filename:'state_runtime_v2_generation.js'});
+  storage.getItem=get;
+  storage.setItem=set;
+  assert.equal(reads,2);
+  assert.equal(writes,0);
+  assert.equal(storage.getItem(GENERATION_KEY),null);
+  assert.match(ctx.TaskPointsStateRuntimeV2Generation.getStatus().lastError,
+    /state_runtime_v2_generation_read_failed/);
+  assert.equal(ctx.TaskPointsStateRuntimeV2Generation.ensure().created,true);
+  assert.ok(storage.getItem(GENERATION_KEY));
+});
+
 test('repeated generation UUID cannot falsely confirm the existing epoch',()=>{
   const app=install();
   const previous=app.generation.read();
