@@ -519,7 +519,14 @@ test('unique cross-tab WAL admission claims survive old per-ID sidecar overwrite
   assert.ok(freshAdmission.indexOf('uniqueClaimKey()')
     < freshAdmission.indexOf('setWalStorageVerified(independentKey(mutationId)'),
     'New admission claim must precede canonical per-ID WAL sidecar');
-  assert.match(cleanup,/for \(const key of claimKeys\(\)\)/);
+  assert.match(cleanup,/const cleanupInventory = recoveryKeys\(\)/);
+  assert.match(cleanup,/for \(const key of cleanupInventory\.claims\)/);
+  assert.match(cleanup,/state_runtime_v2_wal_cleanup_claim_disappeared/);
+  assert.match(cleanup,/global\.localStorage\.length !== cleanupInventory\.observedLength/);
+  assert.match(cleanup,/state_runtime_v2_wal_cleanup_claim_inventory_changed/);
+  assert.ok(cleanup.indexOf('state_runtime_v2_wal_cleanup_claim_inventory_changed')
+    < cleanup.indexOf('if (next.length) writeRows(next);'),
+    'Cleanup must reject a changed recovery inventory before deleting shared WAL evidence');
   assert.match(cleanup,/readWalStorage\(claim.key\) !== claim.raw/);
   assert.match(cleanup,/state_runtime_v2_wal_claim_remove_failed/);
 });
