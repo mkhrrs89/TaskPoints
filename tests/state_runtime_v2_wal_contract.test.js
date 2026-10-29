@@ -683,7 +683,8 @@ test('shrinking storage inventory mid-scan never produces a falsely healthy WAL'
   try{
     const result=api.getPendingRows();
     assert.equal(result.ok,false);
-    assert.match(result.error,/wal_storage_inventory_changed/);
+    assert.match(result.error,/wal_storage_inventory_(changed|missing_key)/,
+      'shrinking inventory must fail closed whether detected by length or indexed gap');
   }finally{localStorage.key=original}
   assert.equal(removed,true);
   assert.equal(api.getPendingRows().rows.length,1);
