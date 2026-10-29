@@ -5491,6 +5491,87 @@ try {
       sidecarPreserved:true,recoveredOnRestart:true,parity:p.match};
   });
 
+  await run('WAL cleanup detects same-count cross-tab claim key substitution before deletion',async context=>{
+    const page=await open(context);
+    await page.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      window.V2BrowserFixture.delta('h2','2026-10-21','full',2);
+    });
+    await page.waitForFunction(()=>{
+      const wal=window.TaskPointsStateRuntimeV2Wal?.getStatus();
+      return wal?.pendingCount===2 && wal.admissionClaimCount===2
+        && window.TaskPointsCore.readPendingHabitDeltas().length===2;
+    },null,{timeout:18000});
+    const outcome=await page.evaluate(()=>{
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const rows=wal.getPendingRows().rows;
+      const target=rows.find(r=>r.delta.habitId==='h1');
+      const other=rows.find(r=>r.delta.habitId==='h2');
+      if(!target||!other)throw Error('Expected two independent held Habit events');
+      const claimKeys=[];
+      for(let i=0;i<localStorage.length;i++){
+        const key=localStorage.key(i);
+        if(String(key).startsWith(wal.CLAIM_PREFIX))claimKeys.push(key);
+      }
+      const moving=claimKeys.find(key=>JSON.parse(localStorage.getItem(key))?.id===other.id);
+      if(!moving)throw Error('Expected durable claim for second Habit');
+      const replacement=wal.CLAIM_PREFIX+'browser-same-count-key-swap';
+      if(localStorage.getItem(replacement)!==null)throw Error('Unexpected replacement key');
+      const sidecar='taskpoints_v2_pending_mutation_event_v1:'+target.id;
+      const before={shared:localStorage.getItem(wal.KEY),
+        sidecar:localStorage.getItem(sidecar),
+        v1:localStorage.getItem('taskpoints_v1'),length:localStorage.length};
+      const originalGet=Storage.prototype.getItem;
+      const originalSet=Storage.prototype.setItem;
+      const originalRemove=Storage.prototype.removeItem;
+      let claimReads=0,swapped=false,error=null;
+      Storage.prototype.getItem=function(key){
+        const value=originalGet.call(this,key);
+        if(this===localStorage && String(key)===moving && ++claimReads===2){
+          originalRemove.call(localStorage,moving);
+          originalSet.call(localStorage,replacement,value);
+          swapped=true;
+        }
+        return value;
+      };
+      try{wal.removeMutation(target.id,{
+        generation:target.generation,delta:target.delta
+      });}catch(e){error=String(e.message||e);}
+      finally{Storage.prototype.getItem=originalGet;}
+      return {error,swapped,claimReads,
+        sameCount:localStorage.length===before.length,
+        sharedUnchanged:localStorage.getItem(wal.KEY)===before.shared,
+        sidecarUnchanged:localStorage.getItem(sidecar)===before.sidecar,
+        v1Unchanged:localStorage.getItem('taskpoints_v1')===before.v1,
+        pending:wal.getStatus().pendingCount,
+        claims:wal.getStatus().admissionClaimCount,
+        journal:window.TaskPointsCore.readPendingHabitDeltas().length,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(outcome.swapped,true);
+    assert.equal(outcome.claimReads,2);
+    assert.match(outcome.error,/state_runtime_v2_wal_cleanup_keys_changed/);
+    assert.equal(outcome.sameCount,true);
+    assert.equal(outcome.sharedUnchanged,true);
+    assert.equal(outcome.sidecarUnchanged,true);
+    assert.equal(outcome.v1Unchanged,true);
+    assert.equal(outcome.pending,2);
+    assert.equal(outcome.claims,2);
+    assert.equal(outcome.journal,2);
+    assert.equal(outcome.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.wal.pendingCount===0 && s.wal.admissionClaimCount===0
+        && s.bridge.replayCleared>=2;
+    },null,{timeout:30000});
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,2);
+    return {sameCountSwapDetected:true,sharedAndV1Retained:true,
+      independentClaimsRecovered:true,replayedExactlyOnce:true,parity:p.match};
+  });
+
   await run('WAL cleanup preserves replaced sidecar after shared copy is removed',async context=>{
     const page=await open(context);
     const outcome=await page.evaluate(()=>{
