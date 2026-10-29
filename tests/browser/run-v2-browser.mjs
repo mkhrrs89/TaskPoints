@@ -5182,6 +5182,14 @@ try {
       localStorage.setItem('taskpoints_v2_pending_mutation_event_v1:'+row.id,
         JSON.stringify(competitor));
     },{row:original.row});
+    // WebKit may delay publishing another tab's localStorage writes to the
+    // first tab. Require observed visibility of BOTH clobbered legacy
+    // copies before asserting that the immutable claim detects the conflict.
+    // Waiting does not suppress or soften the subsequent fail-closed check.
+    await first.waitForFunction(({row,shared,sidecar})=>
+      localStorage.getItem('taskpoints_v2_pending_mutations_v1')!==shared
+        &&localStorage.getItem('taskpoints_v2_pending_mutation_event_v1:'+row.id)!==sidecar,
+      original,{timeout:15000,polling:75});
     const interference=await first.evaluate(()=>{
       const wal=window.TaskPointsStateRuntimeV2Wal;
       const read=wal.getPendingRows();
@@ -5203,6 +5211,10 @@ try {
       localStorage.setItem('taskpoints_v2_pending_mutations_v1',shared);
       localStorage.setItem('taskpoints_v2_pending_mutation_event_v1:'+row.id,sidecar);
     },original);
+    await first.waitForFunction(({row,shared,sidecar})=>
+      localStorage.getItem('taskpoints_v2_pending_mutations_v1')===shared
+        &&localStorage.getItem('taskpoints_v2_pending_mutation_event_v1:'+row.id)===sidecar,
+      original,{timeout:15000,polling:75});
     await second.close();
     await first.reload({waitUntil:'load'});
     await first.waitForFunction(()=>{
