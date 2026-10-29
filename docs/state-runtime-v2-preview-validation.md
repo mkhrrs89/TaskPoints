@@ -829,3 +829,22 @@ full-union repair, selective verified cleanup, and 32 concurrent held browser
 writes followed by simulated Safari tab eviction and restart replay.
 All V1 writes, WAL event and claim stores, failure guards, and authority
 cutover restrictions remain unchanged.
+
+### Fail-closed localStorage key-enumeration drift (October 29)
+
+The V2 WAL's single-pass recovery-key inventory now pins an initial
+localStorage length and refuses changing counts, missing indexed keys,
+or duplicate keys observed during a scan. A second tab adding or removing
+an unrelated key can shift indexes while the first tab inventories its
+pending sidecars and unique admission claims. Rather than silently treating
+that potentially incomplete view as a healthy empty/partial WAL, the reader
+returns malformed/unknown, appends and cleanup refuse to proceed, and all
+recovery evidence remains intact for a fresh read. The change keeps one
+inventory pass per read and never caches cross-tab recovery keys.
+
+Node tests exercise growth, shrinkage, duplicate and missing indexed keys,
+including subsequent verified cleanup. Real Chromium/WebKit browser tests
+inject storage-key drift during a held WAL read and verify restart replay.
+This is conservative drift detection, not an atomic storage snapshot or
+production writer-fencing solution; same-length simultaneous key swaps may
+still require independent recovery after the next reload.

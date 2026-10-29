@@ -5086,6 +5086,56 @@ try {
       parity:p.match};
   });
 
+  await run('changing localStorage inventory during WAL read fails closed and preserves held claim',async context=>{
+    const page=await open(context);
+    const evidence=await page.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const original=Storage.prototype.key;
+      let created=0;
+      let read,status;
+      Storage.prototype.key=function(index){
+        if(this===localStorage&&index===0)
+          localStorage.setItem('synthetic-key-drift:'+ ++created,'ephemeral');
+        return original.call(this,index);
+      };
+      try{
+        read=wal.getPendingRows();
+        status=wal.getStatus();
+      }finally{Storage.prototype.key=original}
+      const recovered=wal.getPendingRows();
+      const healthy=wal.getStatus();
+      return {readOk:read.ok,error:read.error,
+        malformed:status.malformed,pending:status.pendingCount,
+        claims:status.admissionClaimCount,created,
+        recoveredOk:recovered.ok,recoveredCount:recovered.rows.length,
+        restoredClaims:healthy.admissionClaimCount,
+        v1:window.TaskPointsCore.readPendingHabitDeltas().length,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(evidence.readOk,false);
+    assert.match(evidence.error,/wal_storage_inventory_changed/);
+    assert.equal(evidence.malformed,true);
+    assert.equal(evidence.pending,null);
+    assert.equal(evidence.claims,null);
+    assert.ok(evidence.created>=3);
+    assert.equal(evidence.recoveredOk,true);
+    assert.equal(evidence.recoveredCount,1);
+    assert.equal(evidence.restoredClaims,1);
+    assert.equal(evidence.v1,1);
+    assert.equal(evidence.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.wal.pendingCount===0 && s.wal.admissionClaimCount===0
+        && s.bridge.replayCleared>=1;
+    },null,{timeout:25000});
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,1);
+    return {inventoryDriftRefused:true,immutableClaimRecovered:true,parity:p.match};
+  });
+
   await run('unique V2 WAL admission claims survive legacy sidecar clobber by a second tab',async context=>{
     const first=await open(context);
     const original=await first.evaluate(()=>{

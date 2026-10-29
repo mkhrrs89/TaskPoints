@@ -530,7 +530,12 @@ test('WAL inventory scans legacy sidecars and immutable claims together without 
   const end=wal.indexOf('function uniqueClaimKey()',begin);
   const scanner=wal.slice(begin,end);
   assert.ok(begin>0&&end>begin);
-  assert.match(scanner,/for \(let i = 0; i < storage\.length; i \+= 1\)/);
+  assert.match(scanner,/const expectedLength = storage\.length/);
+  assert.match(scanner,/for \(let i = 0; i < expectedLength; i \+= 1\)/);
+  assert.match(scanner,/storage\.length !== expectedLength/);
+  assert.match(scanner,/wal_storage_inventory_changed/);
+  assert.match(scanner,/wal_storage_inventory_duplicate_key/);
+  assert.match(scanner,/wal_storage_inventory_missing_key/);
   assert.match(scanner,/key\.startsWith\(EVENT_PREFIX\)/);
   assert.match(scanner,/key\.startsWith\(CLAIM_PREFIX\)/);
   const readStart=wal.indexOf('function read()');

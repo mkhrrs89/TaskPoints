@@ -192,12 +192,23 @@
     const claims = [];
     if (!supportsIndependentRows()) return { events, claims };
     const storage = global.localStorage;
-    for (let i = 0; i < storage.length; i += 1) {
+    // A tab can add/remove keys while this tab is scanning the origin.
+    // A moving index must not masquerade as a complete recovery inventory:
+    // preserve all evidence and retry on the next read instead.
+    const expectedLength = storage.length;
+    const seen = new Set();
+    for (let i = 0; i < expectedLength; i += 1) {
       const key = storage.key(i);
-      if (typeof key !== 'string') continue;
+      if (typeof key !== 'string')
+        throw new Error('wal_storage_inventory_missing_key');
+      if (seen.has(key))
+        throw new Error('wal_storage_inventory_duplicate_key');
+      seen.add(key);
       if (key.startsWith(EVENT_PREFIX)) events.push(key);
       else if (key.startsWith(CLAIM_PREFIX)) claims.push(key);
     }
+    if (storage.length !== expectedLength)
+      throw new Error('wal_storage_inventory_changed');
     events.sort();
     claims.sort();
     return { events, claims };

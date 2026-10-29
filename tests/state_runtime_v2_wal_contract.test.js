@@ -630,6 +630,92 @@ test('independent sidecar read denial blocks replay and selective cleanup withou
   assert.equal(api.getPendingRows().rows.length, 0);
 });
 
+test('changing key count during WAL enumeration fails closed and preserves all claims',()=>{
+  const {api,localStorage}=install({[DARK]:'1'});
+  const saved=api.appendHabitDelta(deltaA);
+  const baseline=api.getPendingRows();
+  const beforeShared=localStorage.getItem(KEY);
+  const eventKey='taskpoints_v2_pending_mutation_event_v1:'+saved.mutationId;
+  const claimKey=[...localStorage.rows.keys()].find(k=>k.startsWith(api.CLAIM_PREFIX));
+  const beforeEvent=localStorage.getItem(eventKey);
+  const beforeClaim=localStorage.getItem(claimKey);
+  const original=localStorage.key.bind(localStorage);
+  let added=0;
+  localStorage.key=index=>{
+    if(index===0)localStorage.setItem('synthetic-tab-race:'+ ++added,'irrelevant');
+    return original(index);
+  };
+  try{
+    const read=api.getPendingRows();
+    assert.equal(read.ok,false);
+    assert.match(read.error,/wal_storage_inventory_changed/);
+    const status=api.getStatus();
+    assert.equal(status.malformed,true);
+    assert.equal(status.pendingCount,null);
+    assert.equal(status.admissionClaimCount,null);
+    assert.equal(status.independentEventCount,null);
+    assert.match(status.lastError,/state_runtime_v2_wal_inventory_unreadable/);
+    assert.throws(()=>api.appendHabitDelta(deltaB),/wal_storage_inventory_changed/);
+    assert.throws(()=>api.removeMutation(saved.mutationId,
+      {generation:saved.generation,delta:saved.row.delta}),
+      /wal_storage_inventory_changed/);
+  }finally{localStorage.key=original}
+  assert.ok(added>=4);
+  assert.equal(localStorage.getItem(KEY),beforeShared);
+  assert.equal(localStorage.getItem(eventKey),beforeEvent);
+  assert.equal(localStorage.getItem(claimKey),beforeClaim);
+  assert.deepEqual(api.getPendingRows().rows.map(r=>r.id),baseline.rows.map(r=>r.id));
+  assert.equal(api.removeMutation(saved.mutationId,
+    {generation:saved.generation,delta:saved.row.delta}).removed,true);
+  assert.equal(api.getStatus().admissionClaimCount,0);
+});
+
+test('shrinking storage inventory mid-scan never produces a falsely healthy WAL',()=>{
+  const {api,localStorage}=install({[DARK]:'1'});
+  const saved=api.appendHabitDelta(deltaA);
+  localStorage.setItem('synthetic-volatile-key','1');
+  const original=localStorage.key.bind(localStorage);
+  let removed=false;
+  localStorage.key=index=>{
+    if(!removed){removed=true;localStorage.removeItem('synthetic-volatile-key');}
+    return original(index);
+  };
+  try{
+    const result=api.getPendingRows();
+    assert.equal(result.ok,false);
+    assert.match(result.error,/wal_storage_inventory_changed/);
+  }finally{localStorage.key=original}
+  assert.equal(removed,true);
+  assert.equal(api.getPendingRows().rows.length,1);
+  assert.equal(api.getStatus().admissionClaimCount,1);
+  assert.equal(api.removeMutation(saved.mutationId,
+    {generation:saved.generation,delta:saved.row.delta}).removed,true);
+});
+
+test('duplicate or missing indexed keys refuse WAL read without clearing evidence',()=>{
+  for(const mode of ['duplicate','missing']){
+    const {api,localStorage}=install({[DARK]:'1'});
+    const saved=api.appendHabitDelta(deltaA);
+    const before=localStorage.getItem(KEY);
+    const original=localStorage.key.bind(localStorage);
+    localStorage.key=index=>{
+      if(index===1)return mode==='duplicate'?original(0):null;
+      return original(index);
+    };
+    try{
+      const read=api.getPendingRows();
+      assert.equal(read.ok,false);
+      assert.match(read.error,new RegExp('wal_storage_inventory_'+(mode==='duplicate'?'duplicate_key':'missing_key')));
+      assert.equal(api.getStatus().pendingCount,null);
+      assert.throws(()=>api.appendHabitDelta(deltaB),/wal_storage_inventory_/);
+    }finally{localStorage.key=original}
+    assert.equal(localStorage.getItem(KEY),before);
+    assert.equal(api.getStatus().admissionClaimCount,1);
+    assert.equal(api.removeMutation(saved.mutationId,
+      {generation:saved.generation,delta:saved.row.delta}).removed,true);
+  }
+});
+
 test('denied WAL key enumeration fails closed without crashing status or dropping sidecars', () => {
   const { api, localStorage } = install({ [DARK]: '1' });
   const first = api.appendHabitDelta(deltaA);
