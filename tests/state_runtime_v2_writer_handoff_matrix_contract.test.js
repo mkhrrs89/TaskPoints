@@ -546,6 +546,28 @@ test('WAL inventory scans legacy sidecars and immutable claims together without 
   assert.match(status,/state_runtime_v2_wal_inventory_unreadable/);
 });
 
+test('complete WAL shared-array appends serialize only a new row; missing rows still reconcile',()=>{
+  const wal=read('state_runtime_v2_wal.js');
+  const readStart=wal.indexOf('function read()');
+  const appendStart=wal.indexOf('function appendHabitDelta(',readStart);
+  const reader=wal.slice(readStart,appendStart);
+  assert.match(reader,/sharedComplete: parsed.length === merged.size/);
+  assert.match(reader,/sharedRowCount: parsed.length/);
+  const appendEnd=wal.indexOf('function removeMutation(',appendStart);
+  const append=wal.slice(appendStart,appendEnd);
+  const claim=append.indexOf('setWalStorageVerified(uniqueClaimKey()');
+  const sidecar=append.indexOf('setWalStorageVerified(independentKey(mutationId)');
+  const recheck=append.indexOf('readWalStorage(KEY) !== current.raw');
+  const fullFallback=append.indexOf('writeRows(next)');
+  assert.ok(claim>=0&&sidecar>claim&&recheck>sidecar&&fullFallback>recheck,
+    'shared writes cannot precede independent recovery or shared-array race guard');
+  assert.match(append,/state_runtime_v2_wal_append_shared_changed/);
+  assert.match(append,/current.sharedComplete && current.raw !== null/);
+  assert.match(append,/JSON.stringify\(row\) \+ current.raw.slice\(closing\)/);
+  assert.match(append,/setWalStorageVerified\(KEY, text/);
+  assert.match(append,/writeRows\(next\)/);
+});
+
 test('Task completion cleanup protects changed same-ID patches and preserves failed compaction',()=>{
   const journal=read('task_mutation_journal.js');
   const begin=journal.indexOf('function clearVerifiedSnapshot(snapshot)');

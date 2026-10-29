@@ -4924,6 +4924,80 @@ try {
   });
 
 
+  await run('complete V2 shared WAL fast append retains old bytes and survives reload',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      const first=wal.getPendingRows().rows[0];
+      if(!first)throw Error('Expected first held WAL delta');
+      const original=' \n'+localStorage.getItem(wal.KEY)+' \t';
+      localStorage.setItem(wal.KEY,original);
+      window.V2BrowserFixture.delta('h2','2026-10-20','full',2);
+      const text=localStorage.getItem(wal.KEY);
+      return {first:first.id,rows:JSON.parse(text).map(r=>r.id),
+        retainsPrefix:text.startsWith(original.slice(0,original.lastIndexOf(']'))),
+        retainsSuffix:text.endsWith(original.slice(original.lastIndexOf(']'))),
+        status:wal.getStatus(),
+        v1:window.TaskPointsCore.readPendingHabitDeltas().length,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(result.retainsPrefix,true);
+    assert.equal(result.retainsSuffix,true);
+    assert.equal(result.rows.length,2);
+    assert.equal(result.rows[0],result.first);
+    assert.equal(result.status.pendingCount,2);
+    assert.equal(result.status.admissionClaimCount,2);
+    assert.equal(result.v1,2);
+    assert.equal(result.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.wal.pendingCount===0 && s.wal.admissionClaimCount===0
+        && s.bridge.replayCleared>=2;
+    },null,{timeout:25000});
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,2);
+    return {preservedExistingBytes:true,twoIndependentClaims:true,
+      fullyReplayedAfterRestart:true,parity:p.match};
+  });
+
+  await run('stale V2 shared WAL append reconstructs independently durable pending rows',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      window.V2BrowserFixture.delta('h2','2026-10-20','full',2);
+      const original=wal.getPendingRows().rows;
+      if(original.length!==2)throw Error('Expected two held WAL rows');
+      localStorage.setItem(wal.KEY,JSON.stringify([original[0]]));
+      window.V2BrowserFixture.delta('h3','2026-10-20','full',3);
+      const shared=JSON.parse(localStorage.getItem(wal.KEY));
+      const pending=wal.getPendingRows();
+      return {sharedIds:shared.map(r=>r.id).sort(),
+        pendingIds:pending.rows.map(r=>r.id).sort(),claims:wal.getStatus().admissionClaimCount,
+        v1:window.TaskPointsCore.readPendingHabitDeltas().length,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.deepEqual(result.sharedIds,result.pendingIds);
+    assert.equal(result.sharedIds.length,3);
+    assert.equal(result.claims,3);
+    assert.equal(result.v1,3);
+    assert.equal(result.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.wal.pendingCount===0&&s.wal.admissionClaimCount===0
+        &&s.bridge.replayCleared>=3;
+    },null,{timeout:25000});
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,3);
+    return {incompleteSharedUnionRepaired:true,allRecoveryClaimsRetained:true,
+      verifiedThreeMutationReplay:true,parity:p.match};
+  });
+
   await run('unique V2 WAL admission claims survive legacy sidecar clobber by a second tab',async context=>{
     const first=await open(context);
     const original=await first.evaluate(()=>{

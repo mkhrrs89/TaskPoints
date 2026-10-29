@@ -783,3 +783,26 @@ verify clean removal of all claims and sidecars, and inject a tampered
 admission claim to ensure appends and cleanup fail closed with bytes intact.
 This is a WAL read-path optimization only; no background cache, V1 writer
 change or V2 cutover unlock is introduced.
+
+### Fast complete-shared WAL append with race refusal (October 29)
+
+For a fully validated shared WAL array whose IDs exactly cover the durable
+sidecar/claim union, a new V2 Habit append now inserts only its JSON row before
+the existing closing bracket. The shared array itself remains present, retains
+its existing bytes/order, and is read back after writing. This reduces
+repeated CPU work from serializing all previously pending rows for each append;
+localStorage still writes the complete resulting string (no claim of smaller
+storage writes).
+
+If the shared array is missing any independently recoverable row, V2 falls
+back to full JSON serialization of the verified union. An immediately prior
+shared-value recheck refuses a concurrent tab's changed shared array after
+its claim and sidecar have been durably recorded; this prevents detectable
+stale overwrites while leaving recovery evidence intact. The check is not an
+atomic compare-and-swap and does not claim production cross-tab fencing.
+
+Node contracts verify the fast path's absence of repeated large-array
+serialization, whitespace/ordering preservation, stale-shared reconstruction,
+and the race-refusal path. Chromium and WebKit browser fixtures cover repeated
+pending writes and restart replay. V1, legacy sidecars, admission claims and
+all existing cutover blockers are preserved.

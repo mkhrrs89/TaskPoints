@@ -120,6 +120,113 @@ test('single-pass WAL inventory still blocks corrupt claims without rewriting ev
     {generation:admitted.generation,delta:admitted.row.delta}).removed,true);
 });
 
+test('V2 WAL fast append avoids repeated full-array JSON serialization without omitting rows', () => {
+  const {api,localStorage,context}=install({[DARK]:'1'});
+  const originalJson=context.JSON;
+  let arraySerializations=0, rowSerializations=0;
+  context.JSON={
+    parse: originalJson.parse.bind(originalJson),
+    stringify(value,...rest){
+      if(Array.isArray(value)&&value.length>1) arraySerializations++;
+      else if(value&&value.type==='habit-completion-set') rowSerializations++;
+      return originalJson.stringify(value,...rest);
+    }
+  };
+  const admitted=[];
+  try{
+    for(let n=0;n<15;n++){
+      const day='2026-10-'+String(n+1).padStart(2,'0');
+      const row={...deltaA,id:'habit:h1:'+day,dayKey:day,
+        updatedAtISO:day+'T12:00:00.000Z'};
+      admitted.push(api.appendHabitDelta(row));
+    }
+  }finally{context.JSON=originalJson;}
+  assert.equal(admitted.filter(r=>r.written).length,15);
+  assert.equal(arraySerializations,0,
+    'admitting a complete shared WAL should serialize only the new row');
+  assert.ok(rowSerializations>=15,'each appended row must still be serialized');
+  assert.equal(JSON.parse(localStorage.getItem(KEY)).length,15);
+  assert.deepEqual(api.getPendingRows().rows.map(r=>r.id).sort(),
+    admitted.map(r=>r.mutationId).sort());
+  assert.equal(api.getStatus().admissionClaimCount,15);
+  assert.equal(api.getStatus().independentEventCount,15);
+  for(const row of admitted)
+    assert.equal(api.removeMutation(row.mutationId,
+      {generation:row.generation,delta:row.row.delta}).removed,true);
+  assert.equal(api.getStatus().pendingCount,0);
+  assert.equal(api.getStatus().admissionClaimCount,0);
+});
+
+test('fast append retains shared JSON whitespace and existing row order',()=>{
+  const {api,localStorage}=install({[DARK]:'1'});
+  const a=api.appendHabitDelta(deltaA);
+  const original='  \n'+localStorage.getItem(KEY)+'  \t';
+  localStorage.setItem(KEY,original);
+  const b=api.appendHabitDelta(deltaB);
+  const raw=localStorage.getItem(KEY);
+  assert.ok(raw.startsWith(original.slice(0,original.lastIndexOf(']'))));
+  assert.ok(raw.endsWith(original.slice(original.lastIndexOf(']'))));
+  assert.deepEqual(JSON.parse(raw).map(r=>r.id),[a.mutationId,b.mutationId]);
+  assert.deepEqual(api.getPendingRows().rows.map(r=>r.id).sort(),
+    [a.mutationId,b.mutationId].sort());
+});
+
+test('incomplete shared WAL reconstructs all independently durable rows on append',()=>{
+  const {api,localStorage,context}=install({[DARK]:'1'});
+  const a=api.appendHabitDelta(deltaA);
+  const b=api.appendHabitDelta(deltaB);
+  localStorage.setItem(KEY,JSON.stringify([a.row]));
+  const originalJson=context.JSON;
+  let fullSerializations=0;
+  context.JSON={parse:originalJson.parse.bind(originalJson),
+    stringify(value,...rest){
+      if(Array.isArray(value)&&value.length===3)fullSerializations++;
+      return originalJson.stringify(value,...rest);
+    }};
+  const deltaC={...deltaA,id:'habit:h3:2026-10-19',habitId:'h3',
+    dayKey:'2026-10-19',updatedAtISO:'2026-10-19T12:00:00.000Z'};
+  let c;
+  try{c=api.appendHabitDelta(deltaC);}
+  finally{context.JSON=originalJson;}
+  assert.equal(c.written,true);
+  assert.equal(fullSerializations,1,
+    'missing shared row must use full verified union serialization');
+  assert.deepEqual(JSON.parse(localStorage.getItem(KEY)).map(r=>r.id).sort(),
+    [a.mutationId,b.mutationId,c.mutationId].sort());
+  assert.equal(api.getStatus().admissionClaimCount,3);
+  assert.equal(api.getStatus().independentEventCount,3);
+});
+
+test('shared WAL race after durable admission refuses overwrite and retains both writes',()=>{
+  const {api,localStorage}=install({[DARK]:'1'});
+  const first=api.appendHabitDelta(deltaA);
+  const originalGet=localStorage.getItem.bind(localStorage);
+  const originalSet=localStorage.setItem.bind(localStorage);
+  let sharedReads=0,changed=false;
+  const competing={...deltaB,id:'habit:h4:2026-08-31',habitId:'h4'};
+  const injected={...first.row,id:api.mutationIdForDelta(competing,first.generation),
+    delta:competing};
+  localStorage.getItem=key=>{
+    if(key===KEY&&++sharedReads===2){
+      changed=true;
+      originalSet(KEY,JSON.stringify([first.row,injected]));
+    }
+    return originalGet(key);
+  };
+  try{assert.throws(()=>api.appendHabitDelta(deltaB),
+    /state_runtime_v2_wal_append_shared_changed/);}
+  finally{localStorage.getItem=originalGet;}
+  assert.equal(changed,true);
+  assert.deepEqual(JSON.parse(originalGet(KEY)).map(r=>r.id),
+    [first.mutationId,injected.id]);
+  const pending=api.getPendingRows();
+  assert.equal(pending.ok,true);
+  assert.deepEqual(pending.rows.map(r=>r.id).sort(),
+    [first.mutationId,injected.id,api.mutationIdForDelta(deltaB,first.generation)].sort());
+  assert.equal(api.getStatus().admissionClaimCount,2);
+  assert.equal(api.getStatus().independentEventCount,2);
+});
+
 test('V2 WAL is default-off and does not persist while dark mode is disabled', () => {
   const { api, localStorage } = install();
   const result = api.appendHabitDelta(deltaA);

@@ -283,7 +283,12 @@
         String(a.delta.updatedAtISO || '').localeCompare(String(b.delta.updatedAtISO || ''))
         || String(a.createdAtISO || '').localeCompare(String(b.createdAtISO || ''))
         || a.id.localeCompare(b.id));
-      return { ok: true, rows: clone(rows), raw: raw ?? null };
+      // The validated shared array is complete iff it contains exactly the
+      // merged distinct IDs. This enables a cheap append without re-serializing
+      // every older row; missing sidecar/claim rows require full reconciliation.
+      return { ok: true, rows: clone(rows), raw: raw ?? null,
+        sharedComplete: parsed.length === merged.size,
+        sharedRowCount: parsed.length };
     } catch (error) {
       malformedReads += 1;
       lastError = `state_runtime_v2_wal_malformed:${String(error?.message || error)}`;
@@ -358,7 +363,26 @@
           'state_runtime_v2_wal_independent_write_failed');
       }
     }
-    writeRows(next);
+    // A concurrent tab may have updated the shared array since admission
+    // began. The claim and sidecar are already independently durable; refuse
+    // an obsolete shared write rather than overwrite that newer evidence.
+    if (readWalStorage(KEY) !== current.raw)
+      throw new Error('state_runtime_v2_wal_append_shared_changed');
+    if (current.sharedComplete && current.raw !== null && current.raw !== '') {
+      // The JSON parser validated the raw array. Insert only the new row
+      // before its final closing bracket, preserving every older byte/order.
+      // localStorage still persists the complete value; this avoids a second
+      // JSON.stringify over the entire pending WAL on each admission.
+      const closing = current.raw.lastIndexOf(']');
+      const text = current.raw.slice(0, closing)
+        + (current.sharedRowCount > 0 ? ',' : '')
+        + JSON.stringify(row) + current.raw.slice(closing);
+      setWalStorageVerified(KEY, text, 'state_runtime_v2_wal_write_failed');
+    } else {
+      // Legacy shared data can lag the independently recoverable entries.
+      // Rebuild from the verified union so no older sidecar/claim disappears.
+      writeRows(next);
+    }
     appendCount += 1;
     try { global.TaskPointsPerf?.mark?.('stateV2.walAppended', { mutationId, generation, habitId: delta.habitId, dayKey: delta.dayKey }); } catch (_) {}
     return { written: true, duplicate: false, mutationId, generation, row: clone(row) };
