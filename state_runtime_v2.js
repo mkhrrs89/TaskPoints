@@ -4524,6 +4524,15 @@
                       });
                       return;
                     }
+                    // If the control's most recent committed marker is now
+                    // missing, "absent" does NOT mean the write never
+                    // happened. Refuse ambiguous recovery, never repair.
+                    if (!item && prior && state.lastWriterMarker === options.marker) {
+                      result = refuse('fence_writer_marker_missing', {
+                        fence: describe(state)
+                      });
+                      return;
+                    }
                     result = refuse(item
                       ? 'preview_writer_marker_present'
                       : 'preview_writer_marker_absent', {
@@ -4599,6 +4608,14 @@
                     }
                     result = refuse('preview_writer_replayed', {
                       alreadyRecorded: true, fingerprintMatched: true,
+                      fence: describe(state)
+                    });
+                    return;
+                  }
+                  // A vanished last-marker row is an inconsistency, not
+                  // permission to double-count a replay with the same ID.
+                  if (prior && state.lastWriterMarker === options.marker) {
+                    result = refuse('fence_writer_marker_missing', {
                       fence: describe(state)
                     });
                     return;

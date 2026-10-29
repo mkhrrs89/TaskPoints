@@ -209,3 +209,28 @@ update this matrix only after reviewing the new behavior; **never delete a
 live writer, a safeguard, or its test just to satisfy the audit**.
 
 No files from production `main` are modified by this document or test.
+
+## Latest preview-only writer marker and old-tab safety evidence (October 29)
+
+The isolated IndexedDB writer-marker rehearsal now checks an additional
+invariant when a caller inspects or retries the **last committed marker**:
+if the aggregate control record still names that marker but its individual
+row has disappeared, the result is `fence_writer_marker_missing`, never
+`preview_writer_marker_absent` or a second successful write. The control
+writer count and any surviving evidence remain untouched. This avoids a
+false "never committed" conclusion after marker loss. It remains a
+preview protocol, **not** production mutation durability. It does not
+perform exhaustive integrity scanning of earlier marker history.
+
+A new Chromium/WebKit regression also freezes the preview IDB writer epoch,
+then makes a real same-origin `taskpoints_v1` snapshot write from a
+nonparticipating legacy-only page with **no V2 runtime installed**.
+Cooperating preview writer attempts remain denied, while the legacy write
+survives reload; the cutover report continues to block promotion. The
+browser harness explicitly waits for cross-tab storage visibility rather
+than treating the legacy tab's completed `setItem()` as an immediate
+synchronization barrier. This demonstrates that the IDB rehearsal is not
+protection against existing/paused V1 tabs.
+
+No existing TaskPoints feature, V1 writer, backup or recovery mechanism
+has been removed or switched to V2 primary authority.

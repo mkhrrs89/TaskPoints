@@ -1449,6 +1449,70 @@ try {
       freezeSurvivesReload:true,oldLegacyTabStillUnfenced:true};
   });
 
+  await run('preview IDB freeze cannot fence a nonparticipating legacy V1 snapshot writer',async context=>{
+    const observer=await open(context);
+    const frozen=await observer.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const initial=await runtime.rehearsePreviewDurableWriterFence('read');
+      return runtime.rehearsePreviewDurableWriterFence('freeze',{
+        expectedEpoch:initial.fence.epoch
+      });
+    });
+    assert.equal(frozen.reason,'preview_fence_frozen',JSON.stringify(frozen));
+    const legacy=await context.newPage();
+    await legacy.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    // This page has NO V2 runtime and does not consult the preview fence.
+    // It represents an uncooperative old V1 snapshot writer.
+    const changed=await legacy.evaluate(()=>{
+      const key='taskpoints_v1';
+      const prior=JSON.parse(localStorage.getItem(key));
+      prior.tasks.push({id:'unfenced-legacy-v1-after-preview-freeze',
+        title:'Old tab may still write while test fence is frozen'});
+      localStorage.setItem(key,JSON.stringify(prior));
+      return JSON.stringify(prior);
+    });
+    // WebKit does not promise that cross-tab localStorage visibility is
+    // immediate after a separate tab's synchronous setItem returns.
+    await observer.waitForFunction(expected=>localStorage.getItem('taskpoints_v1')===expected,
+      changed,{timeout:15000,polling:75});
+    const proof=await observer.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const [fence,gate]=await Promise.all([
+        runtime.rehearsePreviewDurableWriterFence('read'),
+        runtime.inspectAuthorityCutoverBarriers()
+      ]);
+      const attempted=await runtime.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:1,marker:'blocked-cooperator'
+      });
+      return {v1:localStorage.getItem('taskpoints_v1'),fence,gate,attempted,
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(proof.v1,changed,'real V1 snapshot must remain durable');
+    assert.equal(proof.fence.fence.frozen,true);
+    assert.equal(proof.fence.fence.epoch,1);
+    assert.equal(proof.attempted.reason,'fence_frozen');
+    assert.equal(proof.gate.canPromote,false);
+    assert.equal(proof.gate.readAuthority,'legacy_only');
+    assert.equal(proof.gate.checks.allLegacyWritersFenced,false);
+    assert.equal(proof.authority,'legacy_only');
+    await legacy.close();
+    const restarted=await open(context);
+    const persisted=await restarted.evaluate(async()=>{
+      const fence=await window.TaskPointsStateRuntimeV2
+        .rehearsePreviewDurableWriterFence('read');
+      return {v1:localStorage.getItem('taskpoints_v1'),
+        frozen:fence.fence.frozen,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(persisted.v1,changed);
+    assert.equal(persisted.frozen,true);
+    assert.equal(persisted.authority,'legacy_only');
+    return {unfencedV1WriteSucceeded:true,frozenFencePersisted:true,
+      coopWriterStillDenied:true,cutoverStillBlocked:true,
+      oldTabDataSurvivedReload:true};
+  });
+
   await run('preview durable writer fence rejects stale generations without touching legacy data',async context=>{
     const writer=await open(context),other=await open(context);
     const before=await writer.evaluate(()=>({
@@ -1733,6 +1797,52 @@ try {
     assert.equal(proof.authority,'legacy_only');
     return {corruptionRejected:true,noAutoRepair:true,countUnchanged:true,
       canonicalV1Unchanged:true};
+  });
+
+  await run('missing last committed preview writer marker refuses ambiguous recovery and replay',async context=>{
+    const page=await open(context);
+    const before=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const result=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const marker='disappearing-last-committed-marker';
+      const first=await runtime.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker
+      });
+      if(first.reason!=='preview_writer_recorded')
+        throw Error('Expected preview marker commit before synthetic corruption');
+      await new Promise((resolve,reject)=>{
+        const request=indexedDB.open('taskpoints_v2_writer_fence_preview_v1',1);
+        request.onerror=()=>reject(request.error);
+        request.onsuccess=()=>{
+          const db=request.result,tx=db.transaction('control','readwrite');
+          tx.objectStore('control').delete('writer_marker:'+marker);
+          tx.oncomplete=()=>{db.close();resolve()};
+          tx.onabort=()=>{db.close();reject(tx.error||Error('Marker deletion aborted'))};
+        };
+      });
+      const missing=await runtime.rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker
+      });
+      const duplicate=await runtime.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker
+      });
+      const after=await runtime.rehearsePreviewDurableWriterFence('read');
+      return {first,missing,duplicate,after,
+        v1:localStorage.getItem('taskpoints_v1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(result.first.reason,'preview_writer_recorded');
+    assert.equal(result.missing.reason,'fence_writer_marker_missing',JSON.stringify(result.missing));
+    assert.equal(result.duplicate.reason,'fence_writer_marker_missing',JSON.stringify(result.duplicate));
+    assert.equal(result.missing.canPromote,false);
+    assert.equal(result.duplicate.productionWritersFenced,false);
+    assert.equal(result.after.fence.writersCommitted,1);
+    assert.equal(result.after.fence.lastWriterMarker,'disappearing-last-committed-marker');
+    assert.equal(result.v1,before);
+    assert.equal(result.authority,'legacy_only');
+    return {missingDurableEvidenceNotTreatedAsUncommitted:true,
+      duplicateReplayRefused:true,writerCountStable:true,
+      noV1Modification:true,noPromotion:true};
   });
 
   await run('preview durable IDB writer-versus-freeze race has a single serial order',async context=>{
