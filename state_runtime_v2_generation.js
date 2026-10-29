@@ -148,12 +148,30 @@
     try { global.TaskPointsPerf?.mark?.('stateV2.generationChanged', event); } catch (_) {}
   }
 
+  // Generation epochs fence stale post-reset/restore WAL replay. A storage
+  // shim can silently ignore setItem without throwing: never publish a new
+  // epoch, notify listeners, or report a successful rotation until exact
+  // same-key readback confirms it. This is not a cross-tab atomic CAS.
+  function writeGenerationVerified(generation) {
+    if (!safeSet(KEY, generation))
+      throw new Error(`state_runtime_v2_generation_write_failed:${lastError || 'unknown'}`);
+    let actual;
+    try { actual = read(); }
+    catch (error) {
+      throw new Error(`state_runtime_v2_generation_write_failed:${String(error?.message || error)}`);
+    }
+    if (actual !== generation) {
+      lastError = 'state_runtime_v2_generation_unverified_write';
+      throw new Error('state_runtime_v2_generation_write_failed:unverified_write');
+    }
+  }
+
   function ensure() {
     if (!isEnabled()) return { enabled: false, generation: null, created: false };
     const existing = read();
     if (existing) return { enabled: true, generation: existing, created: false };
     const generation = createGeneration('v2-bootstrap');
-    if (!safeSet(KEY, generation)) throw new Error(`state_runtime_v2_generation_write_failed:${lastError || 'unknown'}`);
+    writeGenerationVerified(generation);
     lastReason = forcedPreviewBootstrap ? 'forced-preview-bootstrap' : 'bootstrap';
     notify({ generation, previousGeneration: null, reason: lastReason, source: 'local' });
     return { enabled: true, generation, created: true };
@@ -163,7 +181,7 @@
     if (!isEnabled()) return { rotated: false, reason: 'dark_disabled', generation: read() };
     const previousGeneration = read();
     const generation = createGeneration(reason);
-    if (!safeSet(KEY, generation)) throw new Error(`state_runtime_v2_generation_write_failed:${lastError || 'unknown'}`);
+    writeGenerationVerified(generation);
     rotations += 1;
     lastReason = String(reason || 'epoch-change');
     const event = { generation, previousGeneration, reason: lastReason, source: 'local' };

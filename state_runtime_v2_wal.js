@@ -110,9 +110,11 @@
     const existing = readWalStorage(GENERATION_KEY);
     if (existing) return String(existing);
     const generation = newFallbackGeneration();
-    if (!safeSet(GENERATION_KEY, generation)) {
-      throw new Error(`state_runtime_v2_wal_generation_write_failed:${lastError || 'unknown'}`);
-    }
+    // The older standalone WAL fallback must also verify its epoch. A
+    // silent setItem denial is not permission to stamp a mutation with a
+    // generation that was never persisted.
+    setWalStorageVerified(GENERATION_KEY, generation,
+      'state_runtime_v2_wal_generation_write_failed');
     return generation;
   }
 

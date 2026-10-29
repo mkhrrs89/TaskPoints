@@ -286,6 +286,73 @@ test('generation module is default-off and does not create an epoch on productio
   assert.equal(localStorage.getItem(GENERATION_KEY), null);
 });
 
+test('silent generation bootstrap write is never acknowledged or published',()=>{
+  const localStorage=new FakeStorage({[DARK]:'1'});
+  const original=localStorage.setItem.bind(localStorage);
+  let swallowed=0;
+  localStorage.setItem=(key,value)=>{
+    if(String(key)===GENERATION_KEY){swallowed++;return;}
+    return original(key,value);
+  };
+  const context={localStorage,JSON,Date,Math,String,Number,Boolean,
+    Array,Object,Map,Set,console};
+  context.window=context;
+  context.globalThis=context;
+  // Automatic bootstrap deliberately catches storage failure at load.
+  vm.runInNewContext(generationSource,context,
+    {filename:'state_runtime_v2_generation.js'});
+  const generation=context.TaskPointsStateRuntimeV2Generation;
+  let notifications=0;
+  generation.subscribe(()=>notifications++);
+  try{
+    assert.throws(()=>generation.ensure(),
+      /state_runtime_v2_generation_write_failed:unverified_write/);
+    assert.ok(swallowed>=2);
+    assert.equal(localStorage.getItem(GENERATION_KEY),null);
+    assert.equal(generation.getStatus().rotations,0);
+    assert.equal(notifications,0);
+  }finally{localStorage.setItem=original;}
+  const recovered=generation.ensure();
+  assert.equal(recovered.created,true);
+  assert.equal(recovered.generation,localStorage.getItem(GENERATION_KEY));
+  assert.equal(notifications,1);
+});
+
+test('silent generation rotation refuses success and never notifies stale WAL consumers',()=>{
+  const app=install();
+  const previous=app.generation.read();
+  const beforeV1=app.localStorage.getItem(LEGACY_KEY);
+  const event=app.wal.appendHabitDelta(delta());
+  const beforeWal=app.localStorage.getItem(WAL_KEY);
+  let notifications=0;
+  app.generation.subscribe(()=>notifications++);
+  const original=app.localStorage.setItem.bind(app.localStorage);
+  let swallowed=0;
+  app.localStorage.setItem=(key,value)=>{
+    if(String(key)===GENERATION_KEY){swallowed++;return;}
+    return original(key,value);
+  };
+  try{
+    assert.throws(()=>app.generation.rotate('reset-must-not-falsely-advance'),
+      /state_runtime_v2_generation_write_failed:unverified_write/);
+    assert.equal(swallowed,1);
+    assert.equal(app.generation.read(),previous);
+    assert.equal(app.generation.getStatus().rotations,0);
+    assert.equal(notifications,0,'no false epoch notification may be emitted');
+    assert.equal(app.localStorage.getItem(WAL_KEY),beforeWal);
+    assert.equal(app.localStorage.getItem(LEGACY_KEY),beforeV1);
+    assert.deepEqual(app.wal.getPendingRows().rows.map(row=>row.id),[event.mutationId]);
+  }finally{app.localStorage.setItem=original;}
+  const successful=app.generation.rotate('verified-reset');
+  assert.equal(successful.rotated,true);
+  assert.notEqual(successful.generation,previous);
+  assert.equal(app.generation.read(),successful.generation);
+  assert.equal(app.generation.getStatus().rotations,1);
+  assert.equal(notifications,1);
+  assert.equal(app.localStorage.getItem(WAL_KEY),beforeWal,
+    'previous WAL evidence stays inspectable across verified rotation');
+});
+
 test('generation read denial never manufactures an epoch or discards existing WAL evidence', () => {
   const app = install();
   const epoch = app.generation.read();

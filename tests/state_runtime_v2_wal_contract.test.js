@@ -1066,6 +1066,36 @@ test('standalone WAL fallback never manufactures a new epoch when generation rea
   assert.equal(api.getPendingRows().rows.length, 2);
 });
 
+test('standalone WAL generation fallback refuses silently swallowed epoch writes',()=>{
+  const {api,context,localStorage}=install({[DARK]:'1'});
+  const oldEpoch=localStorage.getItem(GENERATION_KEY);
+  const original=localStorage.setItem.bind(localStorage);
+  // Only the standalone WAL fallback is under test: remove the generation
+  // module and its key without touching older V1/WAL recovery data.
+  context.TaskPointsStateRuntimeV2Generation=null;
+  localStorage.removeItem(GENERATION_KEY);
+  let refused=0;
+  localStorage.setItem=(key,value)=>{
+    if(String(key)===GENERATION_KEY){refused++;return;}
+    return original(key,value);
+  };
+  try{
+    assert.throws(()=>api.appendHabitDelta(deltaA),
+      /state_runtime_v2_wal_generation_write_failed:unverified_write/);
+    assert.equal(refused,1);
+    assert.equal(localStorage.getItem(GENERATION_KEY),null);
+    assert.equal(localStorage.getItem(KEY),null);
+    assert.equal(api.getPendingRows().rows.length,0);
+    assert.equal(api.getStatus().admissionClaimCount,0);
+  }finally{localStorage.setItem=original;}
+  const recovered=api.appendHabitDelta(deltaA);
+  assert.equal(recovered.written,true);
+  assert.notEqual(recovered.generation,oldEpoch);
+  assert.equal(localStorage.getItem(GENERATION_KEY),recovered.generation);
+  assert.equal(api.removeMutation(recovered.mutationId,
+    {generation:recovered.generation,delta:recovered.row.delta}).removed,true);
+});
+
 test('standalone WAL fallback creates an epoch only when storage proves key is missing', () => {
   const { api, context, localStorage } = install({ [DARK]: '1' });
   // The full generation module creates its bootstrap epoch during setup.
