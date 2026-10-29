@@ -467,9 +467,14 @@
     // Collect immutable matching claims before any destructive mutation.
     // A concurrently added claim after enumeration will remain recoverable.
     const claimsToClear = [];
-    for (const key of claimKeys()) {
+    const cleanupInventory = recoveryKeys();
+    for (const key of cleanupInventory.claims) {
       const raw = readWalStorage(key);
-      if (raw == null) continue;
+      // A claim can vanish after the initial WAL verification while another
+      // tab is cleaning up. Do not treat that as safe permission to delete
+      // the shared/sidecar recovery copies using a stale inventory.
+      if (raw == null)
+        throw new Error('state_runtime_v2_wal_cleanup_claim_disappeared');
       let claim;
       try { claim = JSON.parse(raw); }
       catch (_) { throw new Error('state_runtime_v2_wal_cleanup_claim_changed'); }
@@ -481,6 +486,12 @@
       }
       claimsToClear.push({ key, raw });
     }
+    // A new/deleted key during claim inspection invalidates cleanup's own
+    // inventory even if the earlier recovery read was stable. Retain the WAL
+    // until a fresh pass can reconcile the independent copies.
+    if (cleanupInventory.observedLength != null
+      && global.localStorage.length !== cleanupInventory.observedLength)
+      throw new Error('state_runtime_v2_wal_cleanup_claim_inventory_changed');
     // Another tab could update the shared key while the sidecar was being
     // inspected. Recheck it immediately before the destructive shared write.
     if (readWalStorage(KEY) !== current.raw)

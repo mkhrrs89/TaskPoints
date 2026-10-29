@@ -805,6 +805,73 @@ test('WAL refuses a disappearing sidecar or claim rather than claiming a complet
   }
 });
 
+test('WAL cleanup refuses a claim disappearing after the initial stable recovery read',()=>{
+  const {api,localStorage}=install({[DARK]:'1'});
+  const saved=api.appendHabitDelta(deltaA);
+  const claimKey=[...localStorage.rows.keys()].find(k=>k.startsWith(api.CLAIM_PREFIX));
+  const sidecarKey='taskpoints_v2_pending_mutation_event_v1:'+saved.mutationId;
+  const previous={shared:localStorage.getItem(KEY),sidecar:localStorage.getItem(sidecarKey),
+    claim:localStorage.getItem(claimKey)};
+  const originalGet=localStorage.getItem.bind(localStorage);
+  let claimReads=0;
+  localStorage.getItem=key=>{
+    // The WAL's first verified read succeeds; cleanup's own claim read
+    // observes a vanished key, as can happen between tab operations.
+    if(key===claimKey && ++claimReads===2) return null;
+    return originalGet(key);
+  };
+  try{
+    assert.throws(()=>api.removeMutation(saved.mutationId,
+      {generation:saved.generation,delta:saved.row.delta}),
+      /state_runtime_v2_wal_cleanup_claim_disappeared/);
+  }finally{localStorage.getItem=originalGet;}
+  assert.equal(claimReads,2);
+  assert.equal(localStorage.getItem(KEY),previous.shared);
+  assert.equal(localStorage.getItem(sidecarKey),previous.sidecar);
+  assert.equal(localStorage.getItem(claimKey),previous.claim);
+  assert.equal(api.getStatus().pendingCount,1);
+  assert.equal(api.removeMutation(saved.mutationId,
+    {generation:saved.generation,delta:saved.row.delta}).removed,true);
+  assert.equal(api.getStatus().admissionClaimCount,0);
+});
+
+test('WAL cleanup refuses recovery-key growth during claim inspection',()=>{
+  const {api,localStorage}=install({[DARK]:'1'});
+  const first=api.appendHabitDelta(deltaA);
+  const second=api.appendHabitDelta(deltaB);
+  const claimKey=[...localStorage.rows.keys()].find(k=>k.startsWith(api.CLAIM_PREFIX));
+  const originalGet=localStorage.getItem.bind(localStorage);
+  const originalShared=localStorage.getItem(KEY);
+  const firstSidecar='taskpoints_v2_pending_mutation_event_v1:'+first.mutationId;
+  const originalSidecar=localStorage.getItem(firstSidecar);
+  const volatileKey='synthetic-new-tab-key-during-cleanup';
+  let claimReads=0,inserted=false;
+  localStorage.getItem=key=>{
+    if(key===claimKey && ++claimReads===2){
+      localStorage.setItem(volatileKey,'new concurrent key');
+      inserted=true;
+    }
+    return originalGet(key);
+  };
+  try{
+    assert.throws(()=>api.removeMutation(first.mutationId,
+      {generation:first.generation,delta:first.row.delta}),
+      /state_runtime_v2_wal_cleanup_claim_inventory_changed/);
+  }finally{localStorage.getItem=originalGet;}
+  assert.equal(inserted,true);
+  assert.equal(localStorage.getItem(KEY),originalShared);
+  assert.equal(localStorage.getItem(firstSidecar),originalSidecar);
+  assert.equal(api.getStatus().pendingCount,2);
+  assert.equal(api.getStatus().admissionClaimCount,2);
+  localStorage.removeItem(volatileKey);
+  assert.equal(api.removeMutation(first.mutationId,
+    {generation:first.generation,delta:first.row.delta}).removed,true);
+  assert.deepEqual(api.getPendingRows().rows.map(r=>r.id),[second.mutationId]);
+  assert.equal(api.removeMutation(second.mutationId,
+    {generation:second.generation,delta:second.row.delta}).removed,true);
+  assert.equal(api.getStatus().admissionClaimCount,0);
+});
+
 test('denied WAL key enumeration fails closed without crashing status or dropping sidecars', () => {
   const { api, localStorage } = install({ [DARK]: '1' });
   const first = api.appendHabitDelta(deltaA);
