@@ -860,6 +860,100 @@ test('WAL refuses a disappearing sidecar or claim rather than claiming a complet
   }
 });
 
+test('verified WAL cleanup refuses an old generation while preserving all recovery copies',()=>{
+  const {api,generation,localStorage}=install({[DARK]:'1'});
+  const old=api.appendHabitDelta(deltaA);
+  const raw=localStorage.getItem(KEY);
+  const sidecar='taskpoints_v2_pending_mutation_event_v1:'+old.mutationId;
+  const sidecarRaw=localStorage.getItem(sidecar);
+  const claims=[...localStorage.rows.keys()].filter(k=>k.startsWith(api.CLAIM_PREFIX));
+  const claimBytes=claims.map(key=>localStorage.getItem(key));
+  generation.rotate('simulated-import');
+  assert.throws(()=>api.removeMutation(old.mutationId,
+    {generation:old.generation,delta:old.row.delta}),
+    /state_runtime_v2_wal_cleanup_generation_changed/);
+  assert.equal(localStorage.getItem(KEY),raw);
+  assert.equal(localStorage.getItem(sidecar),sidecarRaw);
+  assert.deepEqual(claims.map(key=>localStorage.getItem(key)),claimBytes);
+  assert.equal(api.getPendingRows().rows.length,1);
+  assert.equal(api.getStatus().admissionClaimCount,1);
+  assert.equal(api.getStatus().removeCount,0);
+  // Existing one-argument diagnostic cleanup remains available, and can
+  // deliberately clear an old generation only when explicitly invoked.
+  assert.equal(api.removeMutation(old.mutationId).removed,true);
+  assert.equal(api.getPendingRows().rows.length,0);
+});
+
+test('verified WAL cleanup detects peer rotation after inventory before shared deletion',()=>{
+  const {api,localStorage}=install({[DARK]:'1'});
+  const first=api.appendHabitDelta(deltaA);
+  const claim=[...localStorage.rows.keys()].find(k=>k.startsWith(api.CLAIM_PREFIX));
+  const sidecar='taskpoints_v2_pending_mutation_event_v1:'+first.mutationId;
+  const prior={shared:localStorage.getItem(KEY),sidecar:localStorage.getItem(sidecar),
+    claim:localStorage.getItem(claim),epoch:localStorage.getItem(GENERATION_KEY)};
+  const get=localStorage.getItem.bind(localStorage);
+  const set=localStorage.setItem.bind(localStorage);
+  let observed=0,rotated=false;
+  localStorage.getItem=key=>{
+    const value=get(key);
+    if(key===claim && ++observed===2){
+      rotated=true;
+      set(GENERATION_KEY,'concurrent-peer-import-epoch');
+    }
+    return value;
+  };
+  try{
+    assert.throws(()=>api.removeMutation(first.mutationId,
+      {generation:first.generation,delta:first.row.delta}),
+      /state_runtime_v2_wal_cleanup_generation_changed/);
+  }finally{localStorage.getItem=get;}
+  assert.equal(rotated,true);
+  assert.equal(localStorage.getItem(KEY),prior.shared);
+  assert.equal(localStorage.getItem(sidecar),prior.sidecar);
+  assert.equal(localStorage.getItem(claim),prior.claim);
+  assert.equal(api.getPendingRows().rows.length,1);
+  assert.equal(api.getStatus().removeCount,0);
+  // Restore only the synthetic peer change so the verified retry can finish.
+  set(GENERATION_KEY,prior.epoch);
+  assert.equal(api.removeMutation(first.mutationId,
+    {generation:first.generation,delta:first.row.delta}).removed,true);
+  assert.equal(api.getStatus().admissionClaimCount,0);
+});
+
+test('post-shared verified WAL cleanup stops deleting recovery copies on generation rotation',()=>{
+  const {api,localStorage}=install({[DARK]:'1'});
+  const first=api.appendHabitDelta(deltaA);
+  const claim=[...localStorage.rows.keys()].find(k=>k.startsWith(api.CLAIM_PREFIX));
+  const sidecar='taskpoints_v2_pending_mutation_event_v1:'+first.mutationId;
+  const savedClaim=localStorage.getItem(claim);
+  const savedSidecar=localStorage.getItem(sidecar);
+  const originalEpoch=localStorage.getItem(GENERATION_KEY);
+  const remove=localStorage.removeItem.bind(localStorage);
+  const set=localStorage.setItem.bind(localStorage);
+  let interrupted=false;
+  localStorage.removeItem=key=>{
+    remove(key);
+    if(key===KEY && !interrupted){
+      interrupted=true;
+      set(GENERATION_KEY,'rotation-after-shared-cleanup');
+    }
+  };
+  try{
+    assert.throws(()=>api.removeMutation(first.mutationId,
+      {generation:first.generation,delta:first.row.delta}),
+      /state_runtime_v2_wal_cleanup_generation_changed/);
+  }finally{localStorage.removeItem=remove;}
+  assert.equal(interrupted,true);
+  assert.equal(localStorage.getItem(KEY),null);
+  assert.equal(localStorage.getItem(sidecar),savedSidecar);
+  assert.equal(localStorage.getItem(claim),savedClaim);
+  assert.equal(api.getPendingRows().rows.length,1);
+  set(GENERATION_KEY,originalEpoch);
+  assert.equal(api.removeMutation(first.mutationId,
+    {generation:first.generation,delta:first.row.delta}).removed,true);
+  assert.equal(api.getStatus().admissionClaimCount,0);
+});
+
 test('WAL cleanup refuses a claim disappearing after the initial stable recovery read',()=>{
   const {api,localStorage}=install({[DARK]:'1'});
   const saved=api.appendHabitDelta(deltaA);

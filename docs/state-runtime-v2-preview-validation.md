@@ -959,3 +959,24 @@ V1 journal during a concurrent generation change.
 This is not atomic admission across localStorage keys, and a new epoch can
 still race after the last check. Pending old-generation evidence is not
 auto-deleted or implicitly promoted. All V2 activation gates stay closed.
+
+### Verified WAL cleanup is generation-fenced through destructive steps (October 29)
+
+When the V2 bridge passes the exact committed mutation identity to WAL
+cleanup, `removeMutation` now rechecks the current generation before the
+first shared recovery deletion, again before independent sidecar deletion,
+and before removing each immutable recovery claim. A detected reset/import
+between the ledger acknowledgement and any of those steps blocks further
+cleanup. This prevents old-epoch recovery evidence from being erased by a
+stale confirmation that woke after a newer generation was created.
+
+Node regressions cover an already-rotated epoch, a concurrent rotation during
+claim enumeration, and a rotation *after* shared cleanup that must preserve
+the independent sidecar and claim. Chromium/WebKit tests inject the middle
+case and verify held recovery replay on restart. The existing one-argument
+manual/diagnostic cleanup API is preserved for explicit selective cleanup.
+The production V1 journal and all other V2 rollout blockers are untouched.
+
+These synchronous comparisons are best-effort; localStorage does not provide
+an atomic cross-tab epoch/CAS fence, and a noncooperating old tab can still
+write after a check. They are not permission to promote V2 authority.

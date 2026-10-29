@@ -458,6 +458,15 @@
       if (mutationIdForDelta(verifiedIdentity.delta, verifiedIdentity.generation) !== id)
         throw new Error('state_runtime_v2_wal_cleanup_identity_mismatch');
     }
+    // Verified bridge cleanup may only discard evidence for the generation
+    // that was actually committed. Recheck before the first deletion and
+    // between destructive steps: a concurrent reset/import must leave at
+    // least one recoverable claim. One-argument manual diagnostics retain
+    // their historical selective-cleanup capability.
+    const requireCurrentCleanupGeneration = () => {
+      if (verifiedIdentity && cloneGeneration() !== verifiedIdentity.generation)
+        throw new Error('state_runtime_v2_wal_cleanup_generation_changed');
+    };
     const current = read();
     if (!current.ok) throw new Error(current.error || 'state_runtime_v2_wal_unreadable');
     const target = current.rows.find(row => row.id === id);
@@ -487,6 +496,7 @@
       }
     }
     if (!target) return { removed: false, reason: 'not_found', mutationId: id };
+    requireCurrentCleanupGeneration();
 
     const next = current.rows.filter(row => row.id !== id);
     // Collect immutable matching claims before any destructive mutation.
@@ -531,12 +541,14 @@
     // inspected. Recheck it immediately before the destructive shared write.
     if (readWalStorage(KEY) !== current.raw)
       throw new Error('state_runtime_v2_wal_cleanup_shared_changed');
+    requireCurrentCleanupGeneration();
     if (next.length) writeRows(next);
     else removeWalStorageVerified(KEY, 'state_runtime_v2_wal_remove_failed');
     // The shared cleanup may run concurrently with an independent append.
     // Refuse to delete a replaced sidecar; it remains independently durable
     // even if the old shared entry was already removed.
     if (hasSidecars) {
+      requireCurrentCleanupGeneration();
       if (readWalStorage(sidecarKey) !== originalSidecar)
         throw new Error('state_runtime_v2_wal_cleanup_sidecar_changed');
       removeWalStorageVerified(sidecarKey,
@@ -544,6 +556,7 @@
       // Remove only claims whose bytes still match the verified snapshot.
       // A failed removal leaves independently recoverable evidence behind.
       for (const claim of claimsToClear) {
+        requireCurrentCleanupGeneration();
         if (readWalStorage(claim.key) !== claim.raw)
           throw new Error('state_runtime_v2_wal_cleanup_claim_changed');
         removeWalStorageVerified(claim.key,
