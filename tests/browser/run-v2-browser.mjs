@@ -4998,6 +4998,94 @@ try {
       verifiedThreeMutationReplay:true,parity:p.match};
   });
 
+  await run('shared WAL duplicated cached row cannot hide another suspended Habit mutation',async context=>{
+    const page=await open(context);
+    const data=await page.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      window.V2BrowserFixture.delta('h2','2026-10-20','full',2);
+      const pending=wal.getPendingRows();
+      if(!pending.ok||pending.rows.length!==2)throw Error('Expected two held mutations');
+      localStorage.setItem(wal.KEY,JSON.stringify([pending.rows[0],pending.rows[0]]));
+      window.V2BrowserFixture.delta('h3','2026-10-20','full',3);
+      const shared=JSON.parse(localStorage.getItem(wal.KEY));
+      return {ids:shared.map(r=>r.id).sort(),unique:new Set(shared.map(r=>r.id)).size,
+        pending:wal.getPendingRows().rows.map(r=>r.id).sort(),
+        claims:wal.getStatus().admissionClaimCount,
+        sidecars:wal.getStatus().independentEventCount,
+        journal:window.TaskPointsCore.readPendingHabitDeltas().length,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(data.unique,3);
+    assert.equal(data.ids.length,3);
+    assert.deepEqual(data.ids,data.pending);
+    assert.equal(data.claims,3);
+    assert.equal(data.sidecars,3);
+    assert.equal(data.journal,3);
+    assert.equal(data.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.wal.pendingCount===0 && s.wal.admissionClaimCount===0
+        && s.bridge.replayCleared>=3;
+    },null,{timeout:30000});
+    const p=await parity(page);
+    assert.equal(p.actualCounts.completions,3);
+    return {duplicateCacheRepaired:true,allIndependentClaimsRetained:true,
+      replayedAfterRestart:true,parity:p.match};
+  });
+
+  await run('thirty-two overlapping held WAL writes in two tabs survive Safari-like tab eviction',async context=>{
+    const first=await open(context),second=await open(context);
+    await Promise.all([first,second].map(page=>page.evaluate(()=>
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1'))));
+    const expected=new Set();
+    for(let n=1;n<=16;n++){
+      const day='2026-09-'+String(n).padStart(2,'0');
+      const [a,b]=await Promise.all([
+        first.evaluate(([d,i])=>window.V2BrowserFixture.delta('h1',d,'full',i),[day,2*n-1]),
+        second.evaluate(([d,i])=>window.V2BrowserFixture.delta('h2',d,'full',i),[day,2*n])
+      ]);
+      expected.add(a.id);expected.add(b.id);
+    }
+    const evidence=await first.evaluate(()=>{
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const read=wal.getPendingRows(),status=wal.getStatus();
+      const v1=window.TaskPointsCore.readPendingHabitDeltas();
+      return {ok:read.ok,ids:read.rows.map(r=>r.delta.id).sort(),
+        claims:status.admissionClaimCount,events:status.independentEventCount,
+        sharedBytes:localStorage.getItem(wal.KEY)?.length||0,
+        v1Ids:v1.map(r=>r.id).sort(),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(evidence.ok,true);
+    assert.deepEqual(evidence.ids,[...expected].sort());
+    assert.deepEqual(evidence.v1Ids,[...expected].sort());
+    assert.equal(evidence.claims,32);
+    assert.equal(evidence.events,32);
+    assert.ok(evidence.sharedBytes>0);
+    assert.equal(evidence.authority,'legacy_only');
+    await second.evaluate(()=>{
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    await second.close();
+    await first.reload({waitUntil:'load'});
+    await first.waitForFunction(()=>{
+      const s=window.V2BrowserFixture?.status();
+      return s?.wal.pendingCount===0 && s.wal.admissionClaimCount===0
+        && s.wal.independentEventCount===0 && s.bridge.replayCleared>=32;
+    },null,{timeout:45000,polling:100});
+    const p=await parity(first);
+    assert.equal(p.actualCounts.completions,32);
+    const final=await first.evaluate(()=>window.V2BrowserFixture.status());
+    assert.equal(final.runtime.readAuthority,'legacy_only');
+    return {overlappingHeldWrites:32,uniqueClaims:32,
+      simulatedTabEviction:true,recoveredRows:final.bridge.replayCleared,
+      parity:p.match};
+  });
+
   await run('unique V2 WAL admission claims survive legacy sidecar clobber by a second tab',async context=>{
     const first=await open(context);
     const original=await first.evaluate(()=>{

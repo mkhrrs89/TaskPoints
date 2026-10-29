@@ -243,6 +243,10 @@
         }
         merged.set(row.id, row);
       }
+      // Count UNIQUE shared IDs before merging independent recovery rows.
+      // A shared array with duplicate identical entries can otherwise appear
+      // complete by length even while a different sidecar is absent.
+      const sharedDistinctRowCount = merged.size;
       const inventory = recoveryKeys();
       for (const key of inventory.events) {
         const independentRaw = readWalStorage(key);
@@ -287,7 +291,8 @@
       // merged distinct IDs. This enables a cheap append without re-serializing
       // every older row; missing sidecar/claim rows require full reconciliation.
       return { ok: true, rows: clone(rows), raw: raw ?? null,
-        sharedComplete: parsed.length === merged.size,
+        sharedComplete: parsed.length === merged.size
+          && sharedDistinctRowCount === parsed.length,
         sharedRowCount: parsed.length };
     } catch (error) {
       malformedReads += 1;

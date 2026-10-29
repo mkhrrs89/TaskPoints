@@ -806,3 +806,26 @@ serialization, whitespace/ordering preservation, stale-shared reconstruction,
 and the race-refusal path. Chromium and WebKit browser fixtures cover repeated
 pending writes and restart replay. V1, legacy sidecars, admission claims and
 all existing cutover blockers are preserved.
+
+### Duplicate shared-cache rows and high-volume two-tab WAL recovery (October 29)
+
+Strengthened the fast shared-WAL append predicate: an array is considered
+complete only if its own row IDs are **unique** and those same IDs cover the
+full independently recoverable sidecar/claim union. Before this check, a
+legacy shared array with two identical copies of row A could appear complete
+despite row B being durable only in its sidecar. The fast path could then
+retain two A rows without restoring B in the shared copy. The updated path
+rebuilds the verified union, retaining each mutation exactly once, without
+removing any recovery copies.
+
+The Node fake-browser UUID generator also now allocates unique claim IDs
+across independently simulated tabs sharing a single origin. This more
+faithfully exercises independent browser contexts and catches accidental
+claim-key replacement.
+
+New tests cover the duplicate-row counterexample, 80 held writes alternating
+between two simulated tab runtimes, stale shared-cache rollback, 81-row
+full-union repair, selective verified cleanup, and 32 concurrent held browser
+writes followed by simulated Safari tab eviction and restart replay.
+All V1 writes, WAL event and claim stores, failure guards, and authority
+cutover restrictions remain unchanged.

@@ -18,9 +18,12 @@ class FakeStorage {
   key(index) { return [...this.rows.keys()][index] ?? null; }
 }
 
+// A single simulated origin can have several independent tab runtimes.
+// UUIDs must be unique across those runtimes, not restart at 1 per tab.
+let nextFakeUuid = 0;
+
 function install(initial = {}, sharedStorage = null) {
   const localStorage = sharedStorage || new FakeStorage(initial);
-  let uuid = 0;
   const context = {
     localStorage,
     structuredClone,
@@ -35,7 +38,7 @@ function install(initial = {}, sharedStorage = null) {
     Map,
     Set,
     console,
-    crypto: { randomUUID() { uuid += 1; return `wal-test-${uuid}`; } }
+    crypto: { randomUUID() { nextFakeUuid += 1; return `wal-test-${nextFakeUuid}`; } }
   };
   context.window = context;
   context.globalThis = context;
@@ -225,6 +228,85 @@ test('shared WAL race after durable admission refuses overwrite and retains both
     [first.mutationId,injected.id,api.mutationIdForDelta(deltaB,first.generation)].sort());
   assert.equal(api.getStatus().admissionClaimCount,2);
   assert.equal(api.getStatus().independentEventCount,2);
+});
+
+test('identical shared duplicates cannot conceal a different sidecar during fast append',()=>{
+  const {api,localStorage,context}=install({[DARK]:'1'});
+  const first=api.appendHabitDelta(deltaA);
+  const second=api.appendHabitDelta(deltaB);
+  // Shared array length still equals the two DISTINCT recovered mutations,
+  // but both shared entries describe the first one. Fast append is unsafe.
+  const forgedShared=JSON.stringify([first.row,first.row]);
+  localStorage.setItem(KEY,forgedShared);
+  assert.equal(api.getPendingRows().ok,true,
+    'identical shared duplicates are valid legacy data, not corruption');
+  const original=context.JSON;
+  let rebuilt=0;
+  context.JSON={parse:original.parse.bind(original),
+    stringify(value,...rest) {
+      if(Array.isArray(value)&&value.length===3)rebuilt++;
+      return original.stringify(value,...rest);
+    }};
+  const thirdDelta={...deltaA,id:'habit:h3:2026-10-21',
+    habitId:'h3',dayKey:'2026-10-21',updatedAtISO:'2026-10-21T12:03:00.000Z'};
+  let third;
+  try{third=api.appendHabitDelta(thirdDelta);}
+  finally{context.JSON=original;}
+  assert.equal(third.written,true);
+  assert.equal(rebuilt,1,'duplicate shared rows require full verified reconstruction');
+  const rows=JSON.parse(localStorage.getItem(KEY));
+  assert.equal(rows.length,3);
+  assert.deepEqual(rows.map(r=>r.id).sort(),
+    [first.mutationId,second.mutationId,third.mutationId].sort());
+  assert.equal(new Set(rows.map(r=>r.id)).size,3);
+  assert.equal(api.getStatus().admissionClaimCount,3);
+  assert.equal(api.getStatus().independentEventCount,3);
+  for(const row of [first,second,third])
+    assert.equal(api.removeMutation(row.mutationId,
+      {generation:row.generation,delta:row.row.delta}).removed,true);
+  assert.equal(api.getStatus().pendingCount,0);
+});
+
+test('eighty held cross-tab WAL intents keep unique claims through shared rollback and cleanup',()=>{
+  const storage=new FakeStorage({[DARK]:'1'});
+  const first=install({},storage).api;
+  const second=install({},storage).api;
+  const all=[];
+  for(let i=0;i<80;i++){
+    const day='2026-'+String(1+Math.floor(i/25)).padStart(2,'0')
+      +'-'+String(1+i%25).padStart(2,'0');
+    const habitId=i%2===0?'h1':'h2';
+    const delta={...deltaA,id:'habit:'+habitId+':'+day,
+      habitId,dayKey:day,updatedAtISO:day+'T12:00:00.000Z'};
+    const result=(i%2===0?first:second).appendHabitDelta(delta);
+    assert.equal(result.written,true);
+    all.push(result);
+  }
+  const claimKeys=[...storage.rows.keys()].filter(k=>k.startsWith(first.CLAIM_PREFIX));
+  assert.equal(claimKeys.length,80,'different tab instances must not reuse claim UUIDs');
+  assert.equal(first.getStatus().independentEventCount,80);
+  assert.equal(second.getStatus().admissionClaimCount,80);
+  assert.deepEqual(first.getPendingRows().rows.map(r=>r.id).sort(),
+    all.map(r=>r.mutationId).sort());
+  // Model an old Safari tab flushing its stale shared-array snapshot.
+  storage.setItem(KEY,JSON.stringify(all.slice(0,5).map(r=>r.row)));
+  assert.deepEqual(second.getPendingRows().rows.map(r=>r.id).sort(),
+    all.map(r=>r.mutationId).sort(),'claim and sidecar union must recover all 80');
+  const next={...deltaA,id:'habit:h3:2026-06-29',habitId:'h3',
+    dayKey:'2026-06-29',updatedAtISO:'2026-06-29T12:01:00.000Z'};
+  const last=second.appendHabitDelta(next);
+  assert.equal(last.written,true);
+  assert.equal(JSON.parse(storage.getItem(KEY)).length,81,
+    'append must reconstruct the complete union after stale shared overwrite');
+  assert.equal(first.getStatus().admissionClaimCount,81);
+  for(const r of all.slice(0,8))
+    assert.equal(first.removeMutation(r.mutationId,
+      {generation:r.generation,delta:r.row.delta}).removed,true);
+  assert.equal(second.getStatus().pendingCount,73);
+  assert.equal(second.getStatus().admissionClaimCount,73);
+  assert.equal(second.getStatus().independentEventCount,73);
+  assert.deepEqual(second.getPendingRows().rows.map(r=>r.id).sort(),
+    [...all.slice(8),last].map(r=>r.mutationId).sort());
 });
 
 test('V2 WAL is default-off and does not persist while dark mode is disabled', () => {

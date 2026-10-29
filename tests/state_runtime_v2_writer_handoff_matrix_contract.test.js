@@ -571,6 +571,24 @@ test('complete WAL shared-array appends serialize only a new row; missing rows s
   assert.match(append,/writeRows\(next\)/);
 });
 
+test('shared WAL completeness requires unique shared IDs before using fast append',()=>{
+  const wal=read('state_runtime_v2_wal.js');
+  const begin=wal.indexOf('function read()');
+  const end=wal.indexOf('function writeRows(rows)',begin);
+  const reader=wal.slice(begin,end);
+  const count=reader.indexOf('const sharedDistinctRowCount = merged.size');
+  const sidecar=reader.indexOf('const inventory = recoveryKeys()');
+  assert.ok(count>0&&sidecar>count,'shared ID uniqueness must be recorded before recovery merge');
+  assert.match(reader,/sharedComplete: parsed.length === merged.size/);
+  assert.match(reader,/&& sharedDistinctRowCount === parsed.length/);
+  assert.match(reader,/wal_shared_duplicate_identity_conflict/);
+  const append=wal.slice(wal.indexOf('function appendHabitDelta('),
+    wal.indexOf('function removeMutation('));
+  assert.match(append,/current.sharedComplete && current.raw !== null/);
+  assert.match(append,/writeRows\(next\)/,
+    'incomplete shared WAL must still rebuild the entire verified union');
+});
+
 test('Task completion cleanup protects changed same-ID patches and preserves failed compaction',()=>{
   const journal=read('task_mutation_journal.js');
   const begin=journal.indexOf('function clearVerifiedSnapshot(snapshot)');
