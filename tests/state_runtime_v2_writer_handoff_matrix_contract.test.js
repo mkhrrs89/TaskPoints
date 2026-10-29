@@ -551,6 +551,23 @@ test('WAL inventory scans legacy sidecars and immutable claims together without 
   assert.match(status,/state_runtime_v2_wal_inventory_unreadable/);
 });
 
+test('WAL read detects changes between inventory snapshot and payload verification',()=>{
+  const wal=read('state_runtime_v2_wal.js');
+  const scanner=wal.slice(wal.indexOf('function recoveryKeys()'),
+    wal.indexOf('function independentKeys()'));
+  assert.match(scanner,/observedLength: expectedLength/);
+  const reader=wal.slice(wal.indexOf('function read()'),
+    wal.indexOf('function writeRows(rows)'));
+  assert.match(reader,/wal_recovery_inventory_changed_after_read/);
+  assert.match(reader,/global\.localStorage\.length !== inventory\.observedLength/);
+  assert.match(reader,/wal_shared_changed_during_read/);
+  assert.match(reader,/readWalStorage\(KEY\) !== raw/);
+  assert.match(reader,/wal_recovery_entry_disappeared_during_read/);
+  assert.ok(reader.indexOf('wal_recovery_inventory_changed_after_read')
+    > reader.indexOf('for (const key of inventory.claims)'),
+    'final inventory count guard must follow claim payload retrieval');
+});
+
 test('complete WAL shared-array appends serialize only a new row; missing rows still reconcile',()=>{
   const wal=read('state_runtime_v2_wal.js');
   const readStart=wal.indexOf('function read()');

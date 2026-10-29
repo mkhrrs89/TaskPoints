@@ -848,3 +848,22 @@ inject storage-key drift during a held WAL read and verify restart replay.
 This is conservative drift detection, not an atomic storage snapshot or
 production writer-fencing solution; same-length simultaneous key swaps may
 still require independent recovery after the next reload.
+
+### Post-enumeration WAL read stability checks (October 29)
+
+A validated localStorage key inventory can become stale while V2 reads the
+associated legacy sidecars and uniquely addressed admission claims. V2 now
+rechecks the recorded key count and original shared-WAL bytes after reading
+the independent payloads, before declaring the merged pending log healthy.
+A listed claim or sidecar that disappears between key enumeration and its
+payload read is treated as a transient unsafe snapshot rather than silently
+skipped. Such reads fail closed and can retry after storage settles; they do
+not alter V1 authority, write new recovery data or clear any existing
+recovery record. Unit regressions inject a concurrent unrelated-key
+creation, a shared-array edit with unchanged storage-key count, and
+transient disappearing sidecar/claim payload reads.
+
+These guards avoid a second full key enumeration on stable reads. They do
+not provide atomic compare-and-swap across independent tabs; truly
+same-count independent-key swaps remain outside these guards, and
+production writer cutover remains blocked.

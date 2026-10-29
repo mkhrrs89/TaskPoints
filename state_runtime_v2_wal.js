@@ -211,7 +211,7 @@
       throw new Error('wal_storage_inventory_changed');
     events.sort();
     claims.sort();
-    return { events, claims };
+    return { events, claims, observedLength: expectedLength };
   }
 
   function independentKeys() { return recoveryKeys().events; }
@@ -261,7 +261,8 @@
       const inventory = recoveryKeys();
       for (const key of inventory.events) {
         const independentRaw = readWalStorage(key);
-        if (independentRaw == null) continue; // concurrently confirmed/removed
+        if (independentRaw == null)
+          throw new Error('wal_recovery_entry_disappeared_during_read');
         const row = JSON.parse(independentRaw);
         if (!validateRow(row) || independentKey(row.id) !== key) {
           throw new Error('wal_independent_row_invalid');
@@ -280,7 +281,8 @@
       // closed instead of accepting a different mutation's acknowledgement.
       for (const key of inventory.claims) {
         const claimRaw = readWalStorage(key);
-        if (claimRaw == null) continue; // another tab finished cleanup
+        if (claimRaw == null)
+          throw new Error('wal_recovery_entry_disappeared_during_read');
         const row = JSON.parse(claimRaw);
         if (!validateRow(row) || row.type !== 'habit-completion-set'
           || mutationIdForDelta(row.delta, row.generation) !== row.id) {
@@ -294,6 +296,16 @@
         }
         merged.set(row.id, row);
       }
+      // The inventory can change after its indices were scanned, while we
+      // retrieve independently durable payloads. A successful key scan alone
+      // does not prove this merged snapshot remained stable. These read-only
+      // guards catch growth/shrink and shared-array rewrites without a second
+      // full localStorage key enumeration.
+      if (inventory.observedLength != null
+        && global.localStorage.length !== inventory.observedLength)
+        throw new Error('wal_recovery_inventory_changed_after_read');
+      if (readWalStorage(KEY) !== raw)
+        throw new Error('wal_shared_changed_during_read');
       const rows = [...merged.values()].sort((a, b) =>
         String(a.delta.updatedAtISO || '').localeCompare(String(b.delta.updatedAtISO || ''))
         || String(a.createdAtISO || '').localeCompare(String(b.createdAtISO || ''))

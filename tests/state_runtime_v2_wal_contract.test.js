@@ -717,6 +717,92 @@ test('duplicate or missing indexed keys refuse WAL read without clearing evidenc
   }
 });
 
+test('WAL refuses key count growth after inventory while independent payloads are read',()=>{
+  const {api,localStorage}=install({[DARK]:'1'});
+  const saved=api.appendHabitDelta(deltaA);
+  const beforeShared=localStorage.getItem(KEY);
+  const sidecar='taskpoints_v2_pending_mutation_event_v1:'+saved.mutationId;
+  const beforeSidecar=localStorage.getItem(sidecar);
+  const claim=[...localStorage.rows.keys()].find(k=>k.startsWith(api.CLAIM_PREFIX));
+  const beforeClaim=localStorage.getItem(claim);
+  const get=localStorage.getItem.bind(localStorage);
+  let touched=0;
+  localStorage.getItem=key=>{
+    if(key===sidecar){
+      touched++;
+      localStorage.setItem('synthetic-concurrent-tab-unrelated-key:'+touched,'still-here');
+    }
+    return get(key);
+  };
+  try{
+    const result=api.getPendingRows();
+    assert.equal(result.ok,false);
+    assert.match(result.error,/wal_recovery_inventory_changed_after_read/);
+    assert.throws(()=>api.appendHabitDelta(deltaB),/wal_recovery_inventory_changed_after_read/);
+  }finally{localStorage.getItem=get;}
+  assert.ok(touched>=2);
+  assert.equal(localStorage.getItem(KEY),beforeShared);
+  assert.equal(localStorage.getItem(sidecar),beforeSidecar);
+  assert.equal(localStorage.getItem(claim),beforeClaim);
+  assert.equal(api.getPendingRows().rows.length,1);
+  assert.equal(api.removeMutation(saved.mutationId,
+    {generation:saved.generation,delta:saved.row.delta}).removed,true);
+});
+
+test('WAL refuses changed shared bytes after the stable key inventory',()=>{
+  const {api,localStorage}=install({[DARK]:'1'});
+  const saved=api.appendHabitDelta(deltaA);
+  const previous=localStorage.getItem(KEY);
+  const sidecar='taskpoints_v2_pending_mutation_event_v1:'+saved.mutationId;
+  const get=localStorage.getItem.bind(localStorage);
+  let injected=false;
+  localStorage.getItem=key=>{
+    if(key===sidecar&&!injected){
+      injected=true;
+      localStorage.setItem(KEY,'  '+previous+' ');
+    }
+    return get(key);
+  };
+  try{
+    const pending=api.getPendingRows();
+    assert.equal(pending.ok,false);
+    assert.match(pending.error,/wal_shared_changed_during_read/);
+  }finally{localStorage.getItem=get;}
+  assert.equal(injected,true);
+  assert.equal(localStorage.getItem(KEY),'  '+previous+' ');
+  assert.equal(api.getPendingRows().rows.length,1);
+  assert.equal(api.removeMutation(saved.mutationId,
+    {generation:saved.generation,delta:saved.row.delta}).removed,true);
+});
+
+test('WAL refuses a disappearing sidecar or claim rather than claiming a complete snapshot',()=>{
+  for(const kind of ['sidecar','claim']){
+    const {api,localStorage}=install({[DARK]:'1'});
+    const saved=api.appendHabitDelta(deltaA);
+    const key=kind==='sidecar'
+      ?'taskpoints_v2_pending_mutation_event_v1:'+saved.mutationId
+      :[...localStorage.rows.keys()].find(k=>k.startsWith(api.CLAIM_PREFIX));
+    const original=localStorage.getItem.bind(localStorage);
+    let denied=0;
+    localStorage.getItem=which=>{
+      if(which===key){denied++;return null;}
+      return original(which);
+    };
+    try{
+      const unreadable=api.getPendingRows();
+      assert.equal(unreadable.ok,false);
+      assert.match(unreadable.error,/wal_recovery_entry_disappeared_during_read/);
+      assert.throws(()=>api.removeMutation(saved.mutationId,
+        {generation:saved.generation,delta:saved.row.delta}),
+        /wal_recovery_entry_disappeared_during_read/);
+    }finally{localStorage.getItem=original;}
+    assert.ok(denied>=2);
+    assert.equal(api.getStatus().pendingCount,1);
+    assert.equal(api.removeMutation(saved.mutationId,
+      {generation:saved.generation,delta:saved.row.delta}).removed,true);
+  }
+});
+
 test('denied WAL key enumeration fails closed without crashing status or dropping sidecars', () => {
   const { api, localStorage } = install({ [DARK]: '1' });
   const first = api.appendHabitDelta(deltaA);
