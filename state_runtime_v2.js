@@ -4397,6 +4397,61 @@
       || (typeof value === 'string' && /^[a-f0-9]{64}$/.test(value));
     if (hasPayloadFingerprint && !validPayloadFingerprint(payloadFingerprint))
       return refuse('writer_payload_fingerprint_invalid');
+    // A small REAL payload, not just a caller-asserted hash, may accompany
+    // the synthetic preview writer marker. Only this isolated IDB database
+    // is modified. Existing marker-only callers keep their old behavior.
+    const owns = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+    const canonicalSyntheticMutation = value => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)
+        || !['habits','tasks','notes','projects','today'].includes(value.collection)
+        || !['put','delete'].includes(value.operation)
+        || typeof value.entityId !== 'string'
+        || !value.entityId || value.entityId.length > 128) return null;
+      const validKeys = value.operation === 'put'
+        ? 'collection,entityId,operation,value' : 'collection,entityId,operation';
+      if (Object.keys(value).sort().join(',') !== validKeys) return null;
+      if (value.operation === 'put'
+        && (value.value == null
+          || !['object','string'].includes(typeof value.value))) return null;
+      try {
+        const json = JSON.stringify(value);
+        if (!json || json.length > 8192) return null;
+        const decoded = JSON.parse(json);
+        if (stableJson(value) !== stableJson(decoded)) return null;
+        return stableJson(decoded);
+      } catch (_) { return null; }
+    };
+    const hasSyntheticMutation = (action === 'writer' || action === 'inspect_marker')
+      && owns(options || {}, 'syntheticMutation');
+    const syntheticMutationJson = hasSyntheticMutation
+      ? canonicalSyntheticMutation(options.syntheticMutation) : null;
+    if (hasSyntheticMutation && !syntheticMutationJson)
+      return refuse('preview_synthetic_mutation_invalid');
+    let effectivePayloadFingerprint = payloadFingerprint;
+    if (hasSyntheticMutation) {
+      // Hash before opening any IDB transaction. Never await a digest from
+      // inside a live readwrite transaction, which would let it auto-commit.
+      if (typeof global.crypto?.subtle?.digest !== 'function'
+        || typeof global.TextEncoder !== 'function')
+        return refuse('preview_synthetic_digest_unavailable');
+      try {
+        const bytes = new global.TextEncoder().encode(syntheticMutationJson);
+        const hash = await global.crypto.subtle.digest('SHA-256', bytes);
+        const digest = Array.from(new Uint8Array(hash),
+          value => value.toString(16).padStart(2,'0')).join('');
+        if (hasPayloadFingerprint && payloadFingerprint !== digest)
+          return refuse('preview_synthetic_digest_mismatch');
+        effectivePayloadFingerprint = digest;
+      } catch (_) { return refuse('preview_synthetic_digest_failed'); }
+    }
+    const syntheticMarkerValid = row => {
+      if (!owns(row, 'syntheticMutationJson')) return true;
+      if (typeof row.syntheticMutationJson !== 'string') return false;
+      try {
+        return canonicalSyntheticMutation(
+          JSON.parse(row.syntheticMutationJson)) === row.syntheticMutationJson;
+      } catch (_) { return false; }
+    };
     const initialModeEpoch = darkMirrorModeEpoch;
     let generation;
     try { generation = currentGeneration({ create: false }); }
@@ -4518,7 +4573,10 @@
                           || row.generation !== generation
                           || !Number.isSafeInteger(row.epoch)
                           || row.epoch < 0 || row.epoch > state.epoch
-                          || !validPayloadFingerprint(row.payloadFingerprint))
+                          || !validPayloadFingerprint(row.payloadFingerprint)
+                          || !syntheticMarkerValid(row)
+                          || (owns(row,'syntheticMutationJson')
+                            && row.payloadFingerprint === null))
                           return false;
                         markerIds.add(row.id);
                         return true;
@@ -4579,8 +4637,23 @@
                       || item.id !== markerId || item.generation !== generation
                       || !Number.isSafeInteger(item.epoch) || item.epoch < 0
                       || item.epoch > state.epoch
-                      || !validPayloadFingerprint(item.payloadFingerprint))) {
+                      || !validPayloadFingerprint(item.payloadFingerprint)
+                      || !syntheticMarkerValid(item))) {
                       result = refuse('fence_writer_marker_conflict', {
+                        fence: describe(state)
+                      });
+                      return;
+                    }
+                    if (item && hasSyntheticMutation
+                      && (item.syntheticMutationJson || null) !== syntheticMutationJson) {
+                      result = refuse('fence_writer_synthetic_mutation_mismatch', {
+                        fence: describe(state)
+                      });
+                      return;
+                    }
+                    if (item && hasSyntheticMutation
+                      && item.payloadFingerprint !== effectivePayloadFingerprint) {
+                      result = refuse('fence_writer_synthetic_digest_mismatch', {
                         fence: describe(state)
                       });
                       return;
@@ -4607,6 +4680,8 @@
                       readOnlyMarkerInspection: true,
                       markerEpoch: item ? item.epoch : null,
                       markerPayloadFingerprint: item ? item.payloadFingerprint : null,
+                      syntheticMutationPresent: !!item?.syntheticMutationJson,
+                      syntheticMutationVerified: hasSyntheticMutation && !!item,
                       fence: describe(state)
                     });
                   } catch (_) {
@@ -4670,13 +4745,20 @@
                       || marker.id !== markerId
                       || marker.generation !== generation
                       || marker.epoch !== state.epoch
-                      || !validPayloadFingerprint(marker.payloadFingerprint)) {
+                      || !validPayloadFingerprint(marker.payloadFingerprint)
+                      || !syntheticMarkerValid(marker)) {
                       result = refuse('fence_writer_marker_conflict', {
                         fence: describe(state)
                       });
                       return;
                     }
-                    if (marker.payloadFingerprint !== payloadFingerprint) {
+                    if ((marker.syntheticMutationJson || null) !== syntheticMutationJson) {
+                      result = refuse('fence_writer_synthetic_mutation_mismatch', {
+                        fence: describe(state)
+                      });
+                      return;
+                    }
+                    if (marker.payloadFingerprint !== effectivePayloadFingerprint) {
                       result = refuse('fence_writer_payload_mismatch', {
                         fence: describe(state)
                       });
@@ -4684,6 +4766,7 @@
                     }
                     result = refuse('preview_writer_replayed', {
                       alreadyRecorded: true, fingerprintMatched: true,
+                      syntheticMutationVerified: hasSyntheticMutation,
                       fence: describe(state)
                     });
                     return;
@@ -4709,10 +4792,13 @@
                   // Both puts commit together or neither does. Request
                   // callbacks stay synchronous to keep the IDB tx alive.
                   store.put({ id: markerId, generation, epoch: state.epoch,
-                    payloadFingerprint });
+                    payloadFingerprint: effectivePayloadFingerprint,
+                    ...(hasSyntheticMutation ? { syntheticMutationJson } : {}) });
                   store.put(next);
                   result = refuse('preview_writer_recorded', {
-                    atomicPreviewTransaction: true, fence: describe(next)
+                    atomicPreviewTransaction: true,
+                    syntheticMutationDurable: hasSyntheticMutation,
+                    fence: describe(next)
                   });
                 } catch (_) {
                   result = refuse('fence_writer_marker_write_failed');

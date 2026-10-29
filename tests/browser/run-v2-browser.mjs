@@ -1816,6 +1816,100 @@ try {
       noExtraWrites:true,legacyUnchanged:true};
   });
 
+  await run('preview synthetic mutation and acknowledgement commit atomically across tabs',async context=>{
+    const writer=await open(context),observer=await open(context);
+    const oldV1=await writer.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const mutation={collection:'tasks',entityId:'preview-task-1',
+      operation:'put',value:{title:'Draft',points:17,done:false}};
+    const first=await writer.evaluate(m=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'synthetic-task-one',syntheticMutation:m
+      }),mutation);
+    assert.equal(first.reason,'preview_writer_recorded',JSON.stringify(first));
+    assert.equal(first.syntheticMutationDurable,true);
+    const seen=await observer.evaluate(async m=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const audit=await api.rehearsePreviewDurableWriterFence('audit');
+      const inspect=await api.rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker:'synthetic-task-one',syntheticMutation:m
+      });
+      const replay=await api.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'synthetic-task-one',syntheticMutation:m
+      });
+      const changed=await api.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'synthetic-task-one',
+        syntheticMutation:{...m,value:{...m.value,points:99}}
+      });
+      const missing=await api.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'synthetic-task-one'
+      });
+      const count=await api.rehearsePreviewDurableWriterFence('read');
+      const raw=await new Promise((resolve,reject)=>{
+        const r=indexedDB.open('taskpoints_v2_writer_fence_preview_v1',1);
+        r.onerror=()=>reject(r.error);
+        r.onsuccess=()=>{
+          const db=r.result,tx=db.transaction('control','readonly');
+          const request=tx.objectStore('control').get('writer_marker:synthetic-task-one');
+          request.onsuccess=()=>resolve(request.result);
+          request.onerror=()=>reject(request.error);
+          tx.oncomplete=()=>db.close();
+        };
+      });
+      return {audit,inspect,replay,changed,missing,count,raw,
+        v1:localStorage.getItem('taskpoints_v1'),
+        authority:api.getStatus().readAuthority};
+    },mutation);
+    assert.equal(seen.audit.reason,'preview_writer_inventory_consistent');
+    assert.equal(seen.inspect.reason,'preview_writer_marker_present');
+    assert.equal(seen.inspect.syntheticMutationVerified,true);
+    assert.equal(seen.replay.reason,'preview_writer_replayed');
+    assert.equal(seen.replay.syntheticMutationVerified,true);
+    assert.equal(seen.changed.reason,'fence_writer_synthetic_mutation_mismatch');
+    assert.equal(seen.missing.reason,'fence_writer_synthetic_mutation_mismatch');
+    assert.equal(seen.count.fence.writersCommitted,1);
+    assert.ok(seen.raw.syntheticMutationJson.includes('preview-task-1'));
+    assert.match(seen.raw.payloadFingerprint,/^[0-9a-f]{64}$/);
+    assert.equal(seen.v1,oldV1);
+    assert.equal(seen.authority,'legacy_only');
+    await observer.reload({waitUntil:'load'});
+    const after=await observer.evaluate(m=>window.TaskPointsStateRuntimeV2
+      .rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker:'synthetic-task-one',syntheticMutation:m
+      }),mutation);
+    assert.equal(after.reason,'preview_writer_marker_present');
+    assert.equal(after.syntheticMutationVerified,true);
+    return {payloadAndMarkerAtomic:true,sha256Derived:true,crossTabIdempotent:true,
+      changedPayloadDenied:true,missingPayloadDenied:true,
+      reloadPreservesEvidence:true,v1Unchanged:true};
+  });
+
+  await run('preview synthetic payload digest mismatch refuses without IDB writes',async context=>{
+    const page=await open(context);
+    const original=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const output=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const mutation={collection:'notes',entityId:'local-note',
+        operation:'put',value:'Synthetic only'};
+      const bad=await api.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'bad-synthetic-digest',
+        syntheticMutation:mutation,payloadFingerprint:'a'.repeat(64)
+      });
+      const missing=await api.rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker:'bad-synthetic-digest'
+      });
+      const read=await api.rehearsePreviewDurableWriterFence('read');
+      return {bad,missing,read,v1:localStorage.getItem('taskpoints_v1'),
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(output.bad.reason,'preview_synthetic_digest_mismatch');
+    assert.equal(output.missing.reason,'preview_writer_marker_absent');
+    assert.equal(output.read.fence.writersCommitted,0);
+    assert.equal(output.v1,original);
+    assert.equal(output.authority,'legacy_only');
+    return {falseDigestRejectedBeforeTransaction:true,
+      noMarkerWritten:true,noAppStorageModified:true};
+  });
+
   await run('preview writer marker with malformed durable fingerprint fails closed',async context=>{
     const page=await open(context);
     const before=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));

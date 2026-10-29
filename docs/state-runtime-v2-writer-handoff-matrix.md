@@ -274,3 +274,28 @@ writer, and marker inspection behavior remains available.
 This validates only the isolated synthetic IndexedDB preview records.
 It does **not** fence old V1 tabs, prevent localStorage writes, protect a
 real TaskPoints mutation or establish a production-safe cutover.
+
+## Preview synthetic payload + durable acknowledgement (October 29)
+
+The isolated IndexedDB writer rehearsal now optionally accepts a small,
+strictly validated `syntheticMutation` with a collection, entity ID,
+`put`/`delete` operation and optional JSON value. Only the five fixture
+collection names (Habits, Tasks, Notes, Projects and Today) are permitted.
+Canonical JSON is SHA-256 hashed before opening the IndexedDB transaction,
+so no asynchronous crypto operation can let a readwrite transaction expire.
+A caller-supplied mismatching fingerprint is rejected before any writes.
+
+The existing preview writer places that canonical payload *inside the
+immutable writer-marker record*, in the very same IndexedDB transaction as
+its idempotency marker and aggregate writer counter. A retry must present
+the identical payload and derived hash, or fail closed without changing
+the writer count. Read-only inspection with the expected payload verifies
+identity after a reload. The full inventory audit validates the canonical
+payload shape and fingerprint format before allowing a preview freeze.
+
+Synthetic tests use two browser tabs, typed payload replacement, wrong hash,
+reload and the existing read-only audit. Marker-only preview writers and
+all real V1 entry points retain their previous behavior. This establishes
+an experimental atomic **payload + acknowledgement** building block only:
+it neither writes a real TaskPoints mutation nor replaces sync V1 journaling,
+and does not prove the absence of noncooperating old tabs or allow promotion.

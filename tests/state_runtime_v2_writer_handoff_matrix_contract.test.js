@@ -420,6 +420,27 @@ test('preview freeze must atomically audit full writer marker inventory before c
   assert.match(source,/canPromote: false/);
 });
 
+test('preview synthetic writer persists a canonical payload and SHA-256 marker atomically',()=>{
+  const runtime=read('state_runtime_v2.js');
+  const begin=runtime.indexOf('async function rehearsePreviewDurableWriterFence(action, options = {})');
+  const end=runtime.indexOf('// Browser-native exclusive-lock *rehearsal*',begin);
+  const preview=runtime.slice(begin,end);
+  for(const evidence of [
+    'syntheticMutationJson','canonicalSyntheticMutation',
+    "preview_synthetic_digest_mismatch", "preview_synthetic_mutation_invalid",
+    "global.crypto.subtle.digest('SHA-256', bytes)",
+    'effectivePayloadFingerprint','syntheticMutationDurable: hasSyntheticMutation',
+    'fence_writer_synthetic_mutation_mismatch',
+    'syntheticMutationVerified: hasSyntheticMutation',
+    'syntheticMarkerValid(row)','syntheticMarkerValid(marker)',
+    "productionWritersFenced: false", "canPromote: false"
+  ])assert.ok(preview.includes(evidence),'Synthetic preview contract lost '+evidence);
+  const store=preview.indexOf('store.put({ id: markerId, generation, epoch: state.epoch,');
+  const tally=preview.indexOf('store.put(next)',store);
+  assert.ok(store>0&&tally>store,'marker/payload and counter must share a transaction');
+  assert.ok(!preview.includes("localStorage.setItem("));
+});
+
 test('preview fence marker replays must validate caller-supplied payload identity',()=>{
   const runtime=read('state_runtime_v2.js');
   const start=runtime.indexOf('async function rehearsePreviewDurableWriterFence(action, options = {})');
