@@ -1096,6 +1096,62 @@ test('standalone WAL generation fallback refuses silently swallowed epoch writes
     {generation:recovered.generation,delta:recovered.row.delta}).removed,true);
 });
 
+test('WAL refuses a changed epoch during read before creating any new claim',()=>{
+  const {api,localStorage}=install({[DARK]:'1'});
+  const first=api.appendHabitDelta(deltaA);
+  const shared=localStorage.getItem(KEY);
+  const priorGeneration=localStorage.getItem(GENERATION_KEY);
+  const priorClaimCount=api.getStatus().admissionClaimCount;
+  const other='peer-reset-between-wal-read-and-claim';
+  const originalGet=localStorage.getItem.bind(localStorage);
+  const originalSet=localStorage.setItem.bind(localStorage);
+  let injected=false;
+  localStorage.getItem=key=>{
+    if(key===KEY&&!injected){
+      injected=true;
+      originalSet(GENERATION_KEY,other);
+    }
+    return originalGet(key);
+  };
+  try{assert.throws(()=>api.appendHabitDelta(deltaB),
+    /state_runtime_v2_wal_generation_changed_before_admission/);}
+  finally{localStorage.getItem=originalGet;}
+  assert.equal(injected,true);
+  assert.notEqual(priorGeneration,other);
+  assert.equal(localStorage.getItem(GENERATION_KEY),other);
+  assert.equal(localStorage.getItem(KEY),shared);
+  assert.equal(api.getStatus().admissionClaimCount,priorClaimCount);
+  assert.deepEqual(api.getPendingRows().rows.map(r=>r.id),[first.mutationId]);
+});
+
+test('WAL preserves admitted claim when peer rotates after claim before shared write',()=>{
+  const {api,localStorage}=install({[DARK]:'1'});
+  const first=api.appendHabitDelta(deltaA);
+  const priorShared=localStorage.getItem(KEY);
+  const oldGeneration=localStorage.getItem(GENERATION_KEY);
+  const peer='peer-reset-after-claim-write';
+  const originalSet=localStorage.setItem.bind(localStorage);
+  let injected=false;
+  localStorage.setItem=(key,value)=>{
+    originalSet(key,value);
+    if(!injected && String(key).startsWith(api.CLAIM_PREFIX)
+      && JSON.parse(value).delta.habitId==='h2'){
+      injected=true; originalSet(GENERATION_KEY,peer);
+    }
+  };
+  try{assert.throws(()=>api.appendHabitDelta(deltaB),
+    /state_runtime_v2_wal_generation_changed_during_admission/);}
+  finally{localStorage.setItem=originalSet;}
+  assert.equal(injected,true);
+  assert.equal(localStorage.getItem(GENERATION_KEY),peer);
+  assert.equal(localStorage.getItem(KEY),priorShared);
+  assert.equal(api.getStatus().admissionClaimCount,2);
+  const rows=api.getPendingRows().rows;
+  assert.equal(rows.length,2,'refusal must not delete already durable claim');
+  assert.equal(rows.find(r=>r.delta.habitId==='h2').generation,oldGeneration);
+  assert.equal(rows.find(r=>r.delta.habitId==='h1').id,first.mutationId);
+});
+
 test('standalone WAL fallback adopts a competing tab epoch before writing',()=>{
   const {api,context,localStorage}=install({[DARK]:'1'});
   context.TaskPointsStateRuntimeV2Generation=null;

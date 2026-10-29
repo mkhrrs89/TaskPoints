@@ -357,6 +357,12 @@
       throw new Error('state_runtime_v2_wal_mutation_id_mismatch');
     const current = read();
     if (!current.ok) throw new Error(current.error || 'state_runtime_v2_wal_unreadable');
+    // A reset/import in another tab may have rotated the generation while
+    // we read the pending log. Never admit (or claim an idempotent replay of)
+    // a stale epoch after detecting the rotation. V1's synchronous journal
+    // remains the authority and is not changed by this preview-only guard.
+    if (cloneGeneration() !== generation)
+      throw new Error('state_runtime_v2_wal_generation_changed_before_admission');
     const existing = current.rows.find(row => row.id === mutationId);
     if (existing) {
       // IDs are short hashes. Metadata outside the ID calculation can differ
@@ -405,6 +411,11 @@
           'state_runtime_v2_wal_independent_write_failed');
       }
     }
+    // A competing reset can also occur after the unique claim was durably
+    // admitted. Keep that independent recovery evidence, but refuse to
+    // publish a now-stale generation into the shared WAL.
+    if (cloneGeneration() !== generation)
+      throw new Error('state_runtime_v2_wal_generation_changed_during_admission');
     // A concurrent tab may have updated the shared array since admission
     // began. The claim and sidecar are already independently durable; refuse
     // an obsolete shared write rather than overwrite that newer evidence.

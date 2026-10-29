@@ -941,3 +941,21 @@ old pending recovery, and restart.
 This is a best-effort read-before-write mitigation; localStorage still has
 no atomic compare-and-swap. Real production writer fencing, physical PWA
 lifecycle evidence and independently verified rollback remain blockers.
+
+### WAL admission checks active generation across the recovery read (October 29)
+
+Before creating a new V2 WAL claim, the preview WAL now checks that the
+effective persisted generation still matches the generation captured for
+the mutation. It makes another check after the immutable claim and sidecar
+are recorded, before writing the shared WAL. A detectable reset or restore
+during the WAL read refuses admission without creating a new claim; one
+detected after claim creation leaves that independent recovery evidence
+intact instead of deleting a potentially durable mutation. The real V1
+synchronous Habit journal remains authoritative, so failed V2 preview
+admission cannot roll back a successfully journaled Habit change.
+Node tests cover both interleavings and browser tests exercise the actual
+V1 journal during a concurrent generation change.
+
+This is not atomic admission across localStorage keys, and a new epoch can
+still race after the last check. Pending old-generation evidence is not
+auto-deleted or implicitly promoted. All V2 activation gates stay closed.

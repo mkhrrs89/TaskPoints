@@ -6245,6 +6245,51 @@ try {
       eventPreserved:true,replayedOnRestart:true,parity:p.match};
   });
 
+  await run('WAL refuses stale generation on live V1 journaled Habit after peer epoch changes',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(()=>{
+      sessionStorage.setItem('taskpoints_state_v2_wal_test_armed_v1','1');
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      const wal=window.TaskPointsStateRuntimeV2Wal;
+      const gen=window.TaskPointsStateRuntimeV2Generation;
+      const first=wal.getPendingRows().rows;
+      if(first.length!==1)throw Error('Expected held baseline WAL');
+      const shared=localStorage.getItem(wal.KEY);
+      const oldEpoch=gen.read(),peer='simulated-competing-import-epoch';
+      const originalGet=Storage.prototype.getItem;
+      const originalSet=Storage.prototype.setItem;
+      let injected=false;
+      Storage.prototype.getItem=function(key){
+        if(this===localStorage && String(key)===wal.KEY && !injected){
+          injected=true;
+          originalSet.call(localStorage,gen.KEY,peer);
+        }
+        return originalGet.call(this,key);
+      };
+      try{window.V2BrowserFixture.delta('h2','2026-10-21','full',2);}
+      finally{Storage.prototype.getItem=originalGet;}
+      const journal=window.TaskPointsCore.readPendingHabitDeltas();
+      const after=wal.getPendingRows();
+      return {injected,oldEpoch,peerEpoch:gen.read(),
+        sharedPreserved:localStorage.getItem(wal.KEY)===shared,
+        originalPendingPreserved:after.rows.length===1 && after.rows[0].id===first[0].id,
+        admissionClaimCount:wal.getStatus().admissionClaimCount,
+        realV1JournalIncludesBoth:['h1','h2'].every(id=>journal.some(r=>r.habitId===id)),
+        bridgeFailures:window.TaskPointsStateRuntimeV2WalBridge.getStatus().failures,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(result.injected,true);
+    assert.equal(result.peerEpoch,'simulated-competing-import-epoch');
+    assert.equal(result.sharedPreserved,true);
+    assert.equal(result.originalPendingPreserved,true);
+    assert.equal(result.admissionClaimCount,1);
+    assert.equal(result.realV1JournalIncludesBoth,true);
+    assert.ok(result.bridgeFailures>=1);
+    assert.equal(result.authority,'legacy_only');
+    return {staleV2AdmissionBlocked:true,syncV1JournalPreserved:true,
+      oldRecoveryClaimUntouched:true,legacyAuthorityRetained:true};
+  });
+
   await run('standalone WAL fallback adopts peer epoch without erasing held Habit recovery',async context=>{
     const page=await open(context);
     const proof=await page.evaluate(()=>{
