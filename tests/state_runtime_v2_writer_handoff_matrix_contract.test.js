@@ -555,10 +555,13 @@ test('complete WAL shared-array appends serialize only a new row; missing rows s
   assert.match(reader,/sharedRowCount: parsed.length/);
   const appendEnd=wal.indexOf('function removeMutation(',appendStart);
   const append=wal.slice(appendStart,appendEnd);
-  const claim=append.indexOf('setWalStorageVerified(uniqueClaimKey()');
-  const sidecar=append.indexOf('setWalStorageVerified(independentKey(mutationId)');
-  const recheck=append.indexOf('readWalStorage(KEY) !== current.raw');
-  const fullFallback=append.indexOf('writeRows(next)');
+  // Duplicate repair for pre-claim WAL data precedes new admission and is
+  // intentionally preserved. The strict ordering applies to a NEW row.
+  const freshAdmission=append.slice(append.indexOf('const row = {'));
+  const claim=freshAdmission.indexOf('setWalStorageVerified(uniqueClaimKey()');
+  const sidecar=freshAdmission.indexOf('setWalStorageVerified(independentKey(mutationId)');
+  const recheck=freshAdmission.indexOf('readWalStorage(KEY) !== current.raw');
+  const fullFallback=freshAdmission.indexOf('writeRows(next)');
   assert.ok(claim>=0&&sidecar>claim&&recheck>sidecar&&fullFallback>recheck,
     'shared writes cannot precede independent recovery or shared-array race guard');
   assert.match(append,/state_runtime_v2_wal_append_shared_changed/);
