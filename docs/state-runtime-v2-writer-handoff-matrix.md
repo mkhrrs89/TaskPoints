@@ -299,3 +299,21 @@ all real V1 entry points retain their previous behavior. This establishes
 an experimental atomic **payload + acknowledgement** building block only:
 it neither writes a real TaskPoints mutation nor replaces sync V1 journaling,
 and does not prove the absence of noncooperating old tabs or allow promotion.
+
+### Synthetic payload transaction rollback and evidence tampering
+
+Additional Chromium/WebKit regressions now force an IDB
+`QuotaExceededError` on the aggregate writer count **after** the typed
+synthetic marker/payload put has been queued. The transaction must abort
+both puts, leave no acknowledged payload, then allow a clean, idempotent
+retry with the same synthetic identity. Reload verifies that the later
+successful mutation remains inspectable without touching V1 storage.
+
+Another regression corrupts the stored synthetic JSON while leaving
+the writer count intact. The typed marker inspector and full inventory
+audit must refuse that record, and the preview freeze must stay
+uncommitted with the forensic evidence preserved. SHA-256 proof for
+original caller-supplied bytes is enforced by typed inspection; the
+preview inventory scan verifies canonical stored JSON shape and hash
+*format*, not a cryptographic recomputation for every historical row.
+This limitation is documented rather than treated as a production gate.

@@ -1910,6 +1910,116 @@ try {
       noMarkerWritten:true,noAppStorageModified:true};
   });
 
+  await run('aborted synthetic payload acknowledgement transaction never leaves an orphan mutation',async context=>{
+    const page=await open(context);
+    const outcome=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const v1=localStorage.getItem('taskpoints_v1');
+      const payload={collection:'habits',entityId:'synthetic-rollback-h1',
+        operation:'put',value:{doneKeys:['2026-10-29'],pointsPerDay:4}};
+      await runtime.rehearsePreviewDurableWriterFence('read');
+      const original=IDBObjectStore.prototype.put;
+      let blocked=0,refused;
+      IDBObjectStore.prototype.put=function(record,...rest){
+        if(this.name==='control'&&record?.id==='writer_fence'){
+          blocked++;
+          throw new DOMException('Synthetic payload tx interruption','QuotaExceededError');
+        }
+        return original.call(this,record,...rest);
+      };
+      try{
+        refused=await runtime.rehearsePreviewDurableWriterFence('writer',{
+          expectedEpoch:0,marker:'synthetic-rollback-marker',syntheticMutation:payload
+        });
+      }finally{IDBObjectStore.prototype.put=original;}
+      const inspected=await runtime.rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker:'synthetic-rollback-marker',syntheticMutation:payload
+      });
+      const empty=await runtime.rehearsePreviewDurableWriterFence('read');
+      const retry=await runtime.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'synthetic-rollback-marker',syntheticMutation:payload
+      });
+      const replay=await runtime.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'synthetic-rollback-marker',syntheticMutation:payload
+      });
+      const audit=await runtime.rehearsePreviewDurableWriterFence('audit');
+      return {blocked,refused,inspected,empty,retry,replay,audit,payload,
+        v1Before:v1,v1After:localStorage.getItem('taskpoints_v1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(outcome.blocked,1);
+    assert.equal(outcome.refused.reason,'fence_transaction_aborted',JSON.stringify(outcome.refused));
+    assert.equal(outcome.inspected.reason,'preview_writer_marker_absent');
+    assert.equal(outcome.empty.fence.writersCommitted,0);
+    assert.equal(outcome.empty.initialized,false);
+    assert.equal(outcome.retry.reason,'preview_writer_recorded');
+    assert.equal(outcome.retry.syntheticMutationDurable,true);
+    assert.equal(outcome.replay.reason,'preview_writer_replayed');
+    assert.equal(outcome.replay.syntheticMutationVerified,true);
+    assert.equal(outcome.audit.reason,'preview_writer_inventory_consistent');
+    assert.equal(outcome.audit.observedMarkerCount,1);
+    assert.equal(outcome.v1After,outcome.v1Before);
+    assert.equal(outcome.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    const recovered=await page.evaluate(payload=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker:'synthetic-rollback-marker',syntheticMutation:payload
+      }),outcome.payload);
+    assert.equal(recovered.reason,'preview_writer_marker_present');
+    assert.equal(recovered.syntheticMutationVerified,true);
+    return {interruptedTwoPutTransactionRolledBack:true,neverCountedTwice:true,
+      retryAfterFailureSafe:true,reloadRestoresTypedEvidence:true,v1Unaffected:true};
+  });
+
+  await run('synthetic preview payload corruption blocks audit freeze and replay',async context=>{
+    const page=await open(context);
+    const before=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const output=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const payload={collection:'projects',entityId:'p-1',operation:'put',
+        value:{title:'fixture-only'}};
+      const first=await runtime.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'synthetic-payload-corruption',syntheticMutation:payload
+      });
+      await new Promise((resolve,reject)=>{
+        const request=indexedDB.open('taskpoints_v2_writer_fence_preview_v1',1);
+        request.onerror=()=>reject(request.error);
+        request.onsuccess=()=>{
+          const db=request.result,tx=db.transaction('control','readwrite');
+          const store=tx.objectStore('control');
+          const row=store.get('writer_marker:synthetic-payload-corruption');
+          row.onsuccess=()=>store.put({...row.result,
+            syntheticMutationJson:'{not valid canonical json'});
+          row.onerror=()=>{try{tx.abort()}catch(_){}};
+          tx.oncomplete=()=>{db.close();resolve()};
+          tx.onabort=()=>{db.close();reject(tx.error||Error('corruption failed'))};
+        };
+      });
+      const inspection=await runtime.rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker:'synthetic-payload-corruption',syntheticMutation:payload
+      });
+      const audit=await runtime.rehearsePreviewDurableWriterFence('audit');
+      const freeze=await runtime.rehearsePreviewDurableWriterFence('freeze',{
+        expectedEpoch:0
+      });
+      const read=await runtime.rehearsePreviewDurableWriterFence('read');
+      return {first,inspection,audit,freeze,read,
+        v1:localStorage.getItem('taskpoints_v1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(output.first.reason,'preview_writer_recorded');
+    assert.equal(output.inspection.reason,'fence_writer_marker_conflict');
+    assert.equal(output.audit.reason,'fence_writer_inventory_inconsistent');
+    assert.equal(output.freeze.reason,'fence_writer_inventory_inconsistent');
+    assert.equal(output.read.fence.frozen,false);
+    assert.equal(output.read.fence.epoch,0);
+    assert.equal(output.read.fence.writersCommitted,1);
+    assert.equal(output.v1,before);
+    assert.equal(output.authority,'legacy_only');
+    return {corruptedTypedPayloadRejected:true,freezeDenied:true,
+      noImplicitRepair:true,noRealV1Mutation:true};
+  });
+
   await run('preview writer marker with malformed durable fingerprint fails closed',async context=>{
     const page=await open(context);
     const before=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
