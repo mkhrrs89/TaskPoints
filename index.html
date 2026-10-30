@@ -2783,7 +2783,11 @@ function submitWorkEditModal() {
   target.source = 'work';
 
   markCompletionsDirty();
-  save();
+  const workSaved = save('work-entry-edit');
+  if (!workSaved) {
+    alert("Your edited Work hours could not be confirmed saved. This editor will stay open so the values are not lost.");
+    return;
+  }
   scheduleRender(renderAll);
   closeWorkEditModal();
 }
@@ -4771,7 +4775,7 @@ function save(savePath, extraOptions = {}) {
         state = result.state;
         storageCache.parsed = state;
         storageCache.raw = null;
-        return;
+        return false; // caller must not report a new Work entry as saved
       }
 
       // If any other core save was skipped because of quota cooldown,
@@ -4779,7 +4783,7 @@ function save(savePath, extraOptions = {}) {
       if (result?.skipped || result?.blockedByQuotaCircuit) {
         storageCache.parsed = state;
         storageCache.raw = null;
-        return;
+        return false; // not durable, even if the live UI currently looks correct
       }
 
       if (result?.trimmed) {
@@ -4793,7 +4797,7 @@ function save(savePath, extraOptions = {}) {
       }
 
       markHomeStateRevisionCurrent();
-      return;
+      return true;
     }
 
     const existing = getCachedStorageState() || {};
@@ -4803,15 +4807,19 @@ function save(savePath, extraOptions = {}) {
     storageCache.parsed = merged;
     storageCache.raw = null;
     markHomeStateRevisionCurrent();
+    return true;
   } catch (e) {
     console.error("Failed to save state (index.html)", e);
 
     try {
-      writeCachedStorageState(state);
+      const result = writeCachedStorageState(state);
+      if (result?.skipped || result?.blockedByQuotaCircuit) return false;
       markHomeStateRevisionCurrent();
+      return true;
     } catch (e2) {
       console.error("Last-ditch save failed (index.html)", e2);
     }
+    return false;
   }
 }
 
@@ -12050,11 +12058,15 @@ function saveWorkScore() {
 
   toastPointsDeltaTodayAware(pts, oldPts, key);
 
+  markCompletionsDirty();
+  const workSaved = save('work-entry-save');
+  if (!workSaved) {
+    alert("Your Work score and hours could not be confirmed saved. The fields are still filled in; please export a backup before leaving this page.");
+    return;
+  }
   $('workScoreInput').value = "";
   const hoursInput = $('workHoursInput');
   if (hoursInput) hoursInput.value = "";
-  markCompletionsDirty();
-  save();
   scheduleRender(renderAll);
 }
 
