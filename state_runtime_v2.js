@@ -4388,7 +4388,7 @@
         || options.marker.length > 128))
       return refuse('writer_marker_required');
     if (action === 'inspect_entity'
-      && (!['habits','tasks','notes','projects','today'].includes(options?.collection)
+      && (!['habits','completions','tasks','notes','projects','today'].includes(options?.collection)
         || typeof options?.entityId !== 'string'
         || !options.entityId || options.entityId.length > 128))
       return refuse('preview_synthetic_entity_selector_invalid');
@@ -4411,7 +4411,7 @@
     const owns = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
     const canonicalSyntheticMutation = value => {
       if (!value || typeof value !== 'object' || Array.isArray(value)
-        || !['habits','tasks','notes','projects','today'].includes(value.collection)
+        || !['habits','completions','tasks','notes','projects','today'].includes(value.collection)
         || !['put','delete'].includes(value.operation)
         || typeof value.entityId !== 'string'
         || !value.entityId || value.entityId.length > 128) return null;
