@@ -7085,17 +7085,25 @@ function getTodayVisibleMatchupScores(){
 }
 
 function cleanupLiveDiffHistory(nextState){
-  const next = { ...nextState };
-  const snapshots = next.liveDiffSnapshots && typeof next.liveDiffSnapshots === 'object' ? next.liveDiffSnapshots : {};
-  const history = next.liveDiffHistory && typeof next.liveDiffHistory === 'object' ? next.liveDiffHistory : {};
+  const snapshots = nextState.liveDiffSnapshots && typeof nextState.liveDiffSnapshots === 'object' ? nextState.liveDiffSnapshots : {};
+  const history = nextState.liveDiffHistory && typeof nextState.liveDiffHistory === 'object' ? nextState.liveDiffHistory : {};
   const currentDayKey = getCurrentTaskPointsDayKey();
   const prior = fromKey(currentDayKey);
   prior.setDate(prior.getDate() - 1);
   const yesterdayKey = dateKey(prior);
   const keep = ([dayKey]) => dayKey === currentDayKey || dayKey === yesterdayKey;
-  next.liveDiffSnapshots = Object.fromEntries(Object.entries(snapshots).filter(keep));
-  next.liveDiffHistory = Object.fromEntries(Object.entries(history).filter(keep));
-  return next;
+  const keptSnapshots = Object.entries(snapshots).filter(keep);
+  const keptHistory = Object.entries(history).filter(keep);
+  // Avoid cloning the entire app state during every stats render if no
+  // history actually needs pruning. Keeping identity stable also preserves
+  // the completion-derived cache across read-only renders.
+  if (keptSnapshots.length === Object.keys(snapshots).length
+    && keptHistory.length === Object.keys(history).length) return nextState;
+  return {
+    ...nextState,
+    liveDiffSnapshots: Object.fromEntries(keptSnapshots),
+    liveDiffHistory: Object.fromEntries(keptHistory)
+  };
 }
 
 function captureLiveDiffPoint(){
