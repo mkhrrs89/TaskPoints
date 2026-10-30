@@ -177,6 +177,7 @@ test('Work save reports skipped/cooldown failures instead of pretending they wer
     markHomeStateRevisionCurrent: () => {},
     getCachedStorageState: () => null
   };
+  ctx.TaskPointsCore = ctx.window.TaskPointsCore;
   const save = new Function('ctx', 'with(ctx) { ' + fragment + '; return save; }')(ctx);
   assert.equal(save('work-entry-save'), false);
   ctx.window.TaskPointsCore.saveStateSnapshot = value => ({ state: value });
