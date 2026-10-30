@@ -4458,8 +4458,12 @@
     if (hasSyntheticBatch && !syntheticBatchJson)
       return refuse('preview_synthetic_batch_invalid');
     const hasAnySynthetic=hasSyntheticMutation || hasSyntheticBatch;
-    const syntheticEntries=hasSyntheticMutation ? [options.syntheticMutation]
-      : hasSyntheticBatch ? options.syntheticMutations : [];
+    // Snapshot the exact validated intent *before* asynchronous hashing.
+    // Callers may mutate their original objects while SubtleCrypto runs.
+    // Neither the materialized rows nor the acknowledgement may use those
+    // live references after the digest has captured its canonical bytes.
+    const syntheticEntries=hasSyntheticMutation ? [JSON.parse(syntheticMutationJson)]
+      : hasSyntheticBatch ? JSON.parse(syntheticBatchJson) : [];
     const syntheticPayloadJson=syntheticBatchJson || syntheticMutationJson;
     let effectivePayloadFingerprint = payloadFingerprint;
     if (hasAnySynthetic) {
