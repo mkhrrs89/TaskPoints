@@ -159,3 +159,95 @@ test('read-only live-diff cleanup retains state identity until pruning is requir
   assert.equal(pruned.completions, stale.completions);
   assert.deepEqual(Object.keys(pruned.liveDiffHistory), ['2026-10-30']);
 });
+
+
+test('Work save reports skipped/cooldown failures instead of pretending they were durable', () => {
+  const fragment = extractFunction(home, 'save');
+  assert.match(fragment, /return false; \/\/ not durable/);
+  assert.match(fragment, /markHomeStateRevisionCurrent\(\);\s*return true/);
+  const ctx = {
+    window: { TaskPointsCore: {
+      saveStateSnapshot: () => ({ skipped: true, state: ctx.state })
+    } },
+    state: { completions: [{ title: 'Work Score (7) — Hours 8', workHours: 8 }] },
+    storageCache: { parsed: null, raw: '' },
+    pruneOpponentDripSchedulesToTodayOnly: () => {},
+    buildHomeSaveOptions: () => ({}),
+    markHomeStateRevisionCurrent: () => {},
+    getCachedStorageState: () => null
+  };
+  const save = new Function('ctx', 'with(ctx) { ' + fragment + '; return save; }')(ctx);
+  assert.equal(save('work-entry-save'), false);
+  ctx.window.TaskPointsCore.saveStateSnapshot = value => ({ state: value });
+  assert.equal(save('work-entry-save'), true);
+  assert.equal(ctx.state.completions[0].workHours, 8);
+});
+
+test('new Work entry keeps typed score and hours when save cannot confirm persistence', () => {
+  const fragment = extractFunction(home, 'saveWorkScore');
+  assert.match(fragment, /if \(!workSaved\)[\s\S]*?return;/);
+  const elements = {
+    workScoreInput: { value: '7.5' },
+    workHoursInput: { value: '8.25' }
+  };
+  const state = { completions: [] };
+  let durable = false, rendered = 0, alerts = 0;
+  const ctx = {
+    $: name => elements[name],
+    state,
+    dateKey: d => d.toISOString().slice(0,10),
+    workPoints: (s,h) => s+h,
+    toastPointsDeltaTodayAware: () => {},
+    markCompletionsDirty: () => {},
+    save: () => durable,
+    scheduleRender: () => { rendered++; },
+    renderAll: () => {},
+    crypto: { randomUUID: () => 'work-entry-1' },
+    alert: () => { alerts++; }
+  };
+  const saveWork = new Function('ctx','with(ctx) { ' + fragment + '; return saveWorkScore; }')(ctx);
+  saveWork();
+  assert.equal(elements.workScoreInput.value, '7.5');
+  assert.equal(elements.workHoursInput.value, '8.25');
+  assert.equal(alerts, 1);
+  assert.equal(rendered, 0);
+  assert.equal(state.completions[0].workHours, 8.25);
+  durable = true;
+  saveWork();
+  assert.equal(elements.workScoreInput.value, '');
+  assert.equal(elements.workHoursInput.value, '');
+  assert.equal(state.completions.length, 1);
+  assert.equal(rendered, 1);
+});
+
+test('editing yesterday Work hours keeps modal open when persistence fails', () => {
+  const fragment = extractFunction(home, 'submitWorkEditModal');
+  const existing = { id:'work-prev', title:'Work Score (0) — Hours 8',
+    points: 8, workHours: 8, completedAtISO:'2026-10-29T12:00:00.000Z' };
+  let saved = false, closed = 0, alerts = 0;
+  const ctx = {
+    workEditContext: existing, workEditOptions: { pinToToday: false },
+    $: name => ({
+      workEditScoreInput: { value:'0' }, workEditHoursInput: { value:'8.5' }
+    })[name],
+    state: { completions: [existing] },
+    resolveCompletionRef: () => existing,
+    dateKey: d => d.toISOString().slice(0,10),
+    workPoints: (s,h) => s+h,
+    toastPointsDeltaTodayAware: () => {},
+    markCompletionsDirty: () => {},
+    save: () => saved,
+    scheduleRender: () => {},
+    renderAll: () => {},
+    closeWorkEditModal: () => { closed++; },
+    alert: () => { alerts++; }
+  };
+  const edit = new Function('ctx','with(ctx) { ' + fragment + '; return submitWorkEditModal; }')(ctx);
+  edit();
+  assert.equal(existing.workHours, 8.5);
+  assert.equal(closed, 0);
+  assert.equal(alerts, 1);
+  saved = true;
+  edit();
+  assert.equal(closed, 1);
+});
