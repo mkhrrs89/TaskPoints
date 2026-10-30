@@ -1997,6 +1997,148 @@ try {
       realV1Unchanged:true};
   });
 
+  await run('one synthetic Task plus completion batch commits atomically and replays once',async context=>{
+    const first=await open(context),second=await open(context);
+    const oldV1=await first.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const batch=[
+      {collection:'tasks',entityId:'task-batch-1',operation:'put',
+        value:{title:'Atomic example',points:11}},
+      {collection:'completions',entityId:'completion-batch-1',operation:'put',
+        value:{source:'task',taskId:'task-batch-1',points:11}}
+    ];
+    const written=await first.evaluate(changes=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'task-plus-completion',syntheticMutations:changes
+      }),batch);
+    assert.equal(written.reason,'preview_writer_recorded',JSON.stringify(written));
+    assert.equal(written.syntheticRecordCount,2);
+    assert.equal(written.fence.writersCommitted,1);
+    const proof=await second.evaluate(async changes=>{
+      const r=window.TaskPointsStateRuntimeV2;
+      const task=await r.rehearsePreviewDurableWriterFence('inspect_entity',{
+        collection:'tasks',entityId:'task-batch-1'
+      });
+      const completion=await r.rehearsePreviewDurableWriterFence('inspect_entity',{
+        collection:'completions',entityId:'completion-batch-1'
+      });
+      const replay=await r.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'task-plus-completion',syntheticMutations:changes
+      });
+      const altered=changes.map((m,i)=>i?{...m,value:{...m.value,points:999}}:m);
+      const refused=await r.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'task-plus-completion',syntheticMutations:altered
+      });
+      const inspected=await r.rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker:'task-plus-completion',syntheticMutations:changes
+      });
+      const audited=await r.rehearsePreviewDurableWriterFence('audit');
+      return {task,completion,replay,refused,inspected,audited,
+        v1:localStorage.getItem('taskpoints_v1'),
+        authority:r.getStatus().readAuthority};
+    },batch);
+    assert.equal(proof.task.reason,'preview_synthetic_entity_present');
+    assert.equal(proof.completion.reason,'preview_synthetic_entity_present');
+    assert.equal(proof.task.entity.value.points,11);
+    assert.equal(proof.completion.entity.value.points,11);
+    assert.equal(proof.task.entity.sequence,1);
+    assert.equal(proof.completion.entity.sequence,1);
+    assert.equal(proof.replay.reason,'preview_writer_replayed');
+    assert.equal(proof.replay.fence.writersCommitted,1);
+    assert.equal(proof.refused.reason,'fence_writer_synthetic_mutation_mismatch');
+    assert.equal(proof.inspected.reason,'preview_writer_marker_present');
+    assert.equal(proof.inspected.syntheticMutationVerified,true);
+    assert.equal(proof.inspected.syntheticBatchSize,2);
+    assert.equal(proof.audited.reason,'preview_writer_inventory_consistent');
+    assert.equal(proof.audited.observedMarkerCount,1);
+    assert.equal(proof.audited.observedEntityCount,2);
+    assert.equal(proof.v1,oldV1);
+    assert.equal(proof.authority,'legacy_only');
+    await second.reload({waitUntil:'load'});
+    const restart=await second.evaluate(async()=>{
+      const r=window.TaskPointsStateRuntimeV2;
+      return {audit:await r.rehearsePreviewDurableWriterFence('audit'),
+        complete:await r.rehearsePreviewDurableWriterFence('inspect_entity',{
+          collection:'completions',entityId:'completion-batch-1'
+        })};
+    });
+    assert.equal(restart.audit.reason,'preview_writer_inventory_consistent');
+    assert.equal(restart.complete.entity.value.points,11);
+    return {twoEntityOneCommit:true,immutableBatchAcknowledgement:true,
+      changedReplayRejected:true,crossTabAndReloadRetained:true,
+      v1Unchanged:true};
+  });
+
+  await run('synthetic preview batch validates uniqueness and rolls back all entity rows on abort',async context=>{
+    const page=await open(context);
+    const v1=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const proof=await page.evaluate(async()=>{
+      const r=window.TaskPointsStateRuntimeV2;
+      const put={collection:'tasks',entityId:'rollback-task',operation:'put',
+        value:{title:'Transactional'}};
+      const other={collection:'completions',entityId:'rollback-done',
+        operation:'put',value:{source:'task',taskId:'rollback-task'}};
+      const duplicate=await r.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'duplicate',syntheticMutations:[put,put]
+      });
+      const both=await r.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'conflicting',syntheticMutation:put,
+        syntheticMutations:[put,other]
+      });
+      const tooMany=await r.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'oversized',syntheticMutations:
+          Array.from({length:9},(_,i)=>({...put,entityId:'too-many-'+i}))
+      });
+      await r.rehearsePreviewDurableWriterFence('read');
+      const original=IDBObjectStore.prototype.put;
+      let injected=0,failed;
+      IDBObjectStore.prototype.put=function(record,...args){
+        if(this.name==='control'&&record?.id==='writer_fence'){
+          injected++;
+          throw new DOMException('batch transaction interrupted','QuotaExceededError');
+        }
+        return original.call(this,record,...args);
+      };
+      try{
+        failed=await r.rehearsePreviewDurableWriterFence('writer',{
+          expectedEpoch:0,marker:'batch-rollback',syntheticMutations:[put,other]
+        });
+      }finally{IDBObjectStore.prototype.put=original}
+      const audit=await r.rehearsePreviewDurableWriterFence('audit');
+      const task=await r.rehearsePreviewDurableWriterFence('inspect_entity',{
+        collection:'tasks',entityId:'rollback-task'
+      });
+      const completion=await r.rehearsePreviewDurableWriterFence('inspect_entity',{
+        collection:'completions',entityId:'rollback-done'
+      });
+      const marker=await r.rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker:'batch-rollback',syntheticMutations:[put,other]
+      });
+      const retried=await r.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'batch-rollback',syntheticMutations:[put,other]
+      });
+      return {duplicate,both,tooMany,injected,failed,audit,task,completion,
+        marker,retried,v1:localStorage.getItem('taskpoints_v1'),
+        authority:r.getStatus().readAuthority};
+    });
+    assert.equal(proof.duplicate.reason,'preview_synthetic_batch_invalid');
+    assert.equal(proof.both.reason,'preview_synthetic_batch_conflicts_with_single');
+    assert.equal(proof.tooMany.reason,'preview_synthetic_batch_invalid');
+    assert.equal(proof.injected,1);
+    assert.equal(proof.failed.reason,'fence_transaction_aborted');
+    assert.equal(proof.audit.observedMarkerCount,0);
+    assert.equal(proof.audit.observedEntityCount,0);
+    assert.equal(proof.task.reason,'preview_synthetic_entity_absent');
+    assert.equal(proof.completion.reason,'preview_synthetic_entity_absent');
+    assert.equal(proof.marker.reason,'preview_writer_marker_absent');
+    assert.equal(proof.retried.reason,'preview_writer_recorded');
+    assert.equal(proof.retried.syntheticRecordCount,2);
+    assert.equal(proof.retried.fence.writersCommitted,1);
+    assert.equal(proof.v1,v1);
+    assert.equal(proof.authority,'legacy_only');
+    return {boundedAndUnique:true,atomicRollbackAcrossAllRows:true,
+      safeRetryAfterAbort:true,legacyAuthorityPreserved:true};
+  });
+
   await run('preview synthetic mutation and acknowledgement commit atomically across tabs',async context=>{
     const writer=await open(context),observer=await open(context);
     const oldV1=await writer.evaluate(()=>localStorage.getItem('taskpoints_v1'));
