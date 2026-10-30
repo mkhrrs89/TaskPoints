@@ -1816,6 +1816,187 @@ try {
       noExtraWrites:true,legacyUnchanged:true};
   });
 
+  await run('preview materialized synthetic entity survives put correction and tombstone delete',async context=>{
+    const first=await open(context),second=await open(context);
+    const original=await first.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const put={collection:'tasks',entityId:'shared-preview-task',
+      operation:'put',value:{title:'First draft',points:3}};
+    const correction={...put,value:{title:'Corrected draft',points:9}};
+    const removed={collection:'tasks',entityId:'shared-preview-task',operation:'delete'};
+    const write=async(page,marker,mutation)=>page.evaluate(({marker,mutation})=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker,syntheticMutation:mutation
+      }),{marker,mutation});
+    const inspect=async page=>page.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('inspect_entity',{
+        collection:'tasks',entityId:'shared-preview-task'
+      }));
+    const a=await write(first,'materialized-first',put);
+    const afterPut=await inspect(second);
+    const b=await write(second,'materialized-correction',correction);
+    const afterCorrection=await inspect(first);
+    const c=await write(first,'materialized-delete',removed);
+    const afterDelete=await inspect(second);
+    const evidence=await second.evaluate(async firstMutation=>{
+      const rt=window.TaskPointsStateRuntimeV2;
+      return {
+        audit:await rt.rehearsePreviewDurableWriterFence('audit'),
+        oldMarker:await rt.rehearsePreviewDurableWriterFence('inspect_marker',{
+          marker:'materialized-first',syntheticMutation:firstMutation
+        }),
+        freeze:await rt.rehearsePreviewDurableWriterFence('freeze',{expectedEpoch:0}),
+        counter:await rt.rehearsePreviewDurableWriterFence('read'),
+        authority:rt.getStatus().readAuthority,
+        v1:localStorage.getItem('taskpoints_v1')
+      };
+    },put);
+    for(const result of [a,b,c])
+      assert.equal(result.reason,'preview_writer_recorded',JSON.stringify(result));
+    assert.equal(a.materializedSyntheticEntity,true);
+    assert.equal(afterPut.reason,'preview_synthetic_entity_present');
+    assert.deepEqual(afterPut.entity.value,put.value);
+    assert.equal(afterPut.entity.operation,'put');
+    assert.equal(afterPut.entity.sequence,1);
+    assert.equal(afterCorrection.entity.operation,'put');
+    assert.deepEqual(afterCorrection.entity.value,correction.value);
+    assert.equal(afterCorrection.entity.lastMarker,'materialized-correction');
+    assert.equal(afterCorrection.entity.sequence,2);
+    assert.equal(afterDelete.entity.operation,'delete');
+    assert.equal(afterDelete.entity.value,null);
+    assert.equal(afterDelete.entity.sequence,3);
+    assert.equal(afterDelete.entity.lastMarker,'materialized-delete');
+    assert.equal(evidence.audit.reason,'preview_writer_inventory_consistent');
+    assert.equal(evidence.audit.observedMarkerCount,3);
+    assert.equal(evidence.audit.observedEntityCount,1);
+    assert.equal(evidence.oldMarker.reason,'preview_writer_marker_present');
+    assert.equal(evidence.freeze.reason,'preview_fence_frozen');
+    assert.equal(evidence.freeze.markerInventoryVerified,true);
+    assert.equal(evidence.counter.fence.writersCommitted,3);
+    assert.equal(evidence.v1,original);
+    assert.equal(evidence.authority,'legacy_only');
+    await second.reload({waitUntil:'load'});
+    const recovered=await inspect(second);
+    assert.equal(recovered.reason,'preview_synthetic_entity_present');
+    assert.equal(recovered.entity.operation,'delete');
+    assert.equal(recovered.entity.sequence,3);
+    return {realPreviewPut:true,correctionWins:true,deleteTombstonePersisted:true,
+      olderImmutableIntentRetained:true,freezeAndReloadVerified:true,
+      originalV1Unchanged:true};
+  });
+
+  await run('concurrent preview materialized edits serialize and retain both immutable intents',async context=>{
+    const one=await open(context),two=await open(context);
+    const prior=await one.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const a={collection:'notes',entityId:'shared-preview-note',
+      operation:'put',value:'draft A'};
+    const b={collection:'notes',entityId:'shared-preview-note',
+      operation:'put',value:'draft B'};
+    const [first,second]=await Promise.all([
+      one.evaluate(m=>window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'race-A',syntheticMutation:m
+      }),a),
+      two.evaluate(m=>window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'race-B',syntheticMutation:m
+      }),b)
+    ]);
+    assert.equal(first.reason,'preview_writer_recorded',JSON.stringify(first));
+    assert.equal(second.reason,'preview_writer_recorded',JSON.stringify(second));
+    const last=await one.evaluate(async()=>{
+      const rt=window.TaskPointsStateRuntimeV2;
+      return {
+        entity:await rt.rehearsePreviewDurableWriterFence('inspect_entity',{
+          collection:'notes',entityId:'shared-preview-note'
+        }),
+        audit:await rt.rehearsePreviewDurableWriterFence('audit'),
+        fence:await rt.rehearsePreviewDurableWriterFence('read'),
+        v1:localStorage.getItem('taskpoints_v1'),
+        authority:rt.getStatus().readAuthority
+      };
+    });
+    assert.equal(last.audit.reason,'preview_writer_inventory_consistent');
+    assert.equal(last.audit.observedEntityCount,1);
+    assert.equal(last.audit.observedMarkerCount,2);
+    assert.equal(last.entity.reason,'preview_synthetic_entity_present');
+    assert.equal(last.entity.entity.sequence,2);
+    assert.ok(['race-A','race-B'].includes(last.entity.entity.lastMarker));
+    assert.equal(last.entity.entity.value,
+      last.entity.entity.lastMarker==='race-A'?'draft A':'draft B');
+    assert.equal(last.fence.fence.writersCommitted,2);
+    assert.equal(last.v1,prior);
+    assert.equal(last.authority,'legacy_only');
+    const [replayedA,replayedB]=await Promise.all([
+      one.evaluate(m=>window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'race-A',syntheticMutation:m
+      }),a),
+      two.evaluate(m=>window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'race-B',syntheticMutation:m
+      }),b)
+    ]);
+    assert.equal(replayedA.reason,'preview_writer_replayed');
+    assert.equal(replayedB.reason,'preview_writer_replayed');
+    assert.equal(replayedA.fence.writersCommitted,2);
+    assert.equal(replayedB.fence.writersCommitted,2);
+    return {bothSerialized:true,latestStateDeterministic:true,
+      bothMarkersRetained:true,noDuplicateWrites:true,legacyOnly:true};
+  });
+
+  await run('missing materialized preview entity blocks audit freeze and typed replay',async context=>{
+    const page=await open(context);
+    const before=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const payload={collection:'projects',entityId:'missing-entity-project',
+      operation:'put',value:{title:'Held evidence'}};
+    const proof=await page.evaluate(async mutation=>{
+      const rt=window.TaskPointsStateRuntimeV2;
+      const first=await rt.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'missing-materialized-row',syntheticMutation:mutation
+      });
+      await new Promise((resolve,reject)=>{
+        const opening=indexedDB.open('taskpoints_v2_writer_fence_preview_v1',1);
+        opening.onerror=()=>reject(opening.error);
+        opening.onsuccess=()=>{
+          const db=opening.result,tx=db.transaction('control','readwrite');
+          tx.objectStore('control').delete(
+            'synthetic_entity:projects:'+JSON.stringify('missing-entity-project'));
+          tx.oncomplete=()=>{db.close();resolve()};
+          tx.onabort=()=>{db.close();reject(tx.error||Error('synthetic row removal aborted'))};
+        };
+      });
+      const entity=await rt.rehearsePreviewDurableWriterFence('inspect_entity',{
+        collection:'projects',entityId:'missing-entity-project'
+      });
+      const audit=await rt.rehearsePreviewDurableWriterFence('audit');
+      const replay=await rt.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'missing-materialized-row',syntheticMutation:mutation
+      });
+      const freeze=await rt.rehearsePreviewDurableWriterFence('freeze',{expectedEpoch:0});
+      const snapshot=await rt.rehearsePreviewDurableWriterFence('read');
+      const originalMarker=await new Promise((resolve,reject)=>{
+        const opening=indexedDB.open('taskpoints_v2_writer_fence_preview_v1',1);
+        opening.onerror=()=>reject(opening.error);
+        opening.onsuccess=()=>{
+          const db=opening.result,tx=db.transaction('control','readonly');
+          const req=tx.objectStore('control').get('writer_marker:missing-materialized-row');
+          req.onsuccess=()=>resolve(req.result);
+          req.onerror=()=>reject(req.error);
+          tx.oncomplete=()=>db.close();
+        };
+      });
+      return {first,entity,audit,replay,freeze,snapshot,originalMarker,
+        v1:localStorage.getItem('taskpoints_v1'),authority:rt.getStatus().readAuthority};
+    },payload);
+    assert.equal(proof.first.reason,'preview_writer_recorded');
+    for(const refusal of [proof.entity,proof.audit,proof.replay,proof.freeze])
+      assert.equal(refusal.reason,'fence_writer_inventory_inconsistent',JSON.stringify(refusal));
+    assert.equal(proof.snapshot.fence.writersCommitted,1);
+    assert.equal(proof.snapshot.fence.frozen,false);
+    assert.equal(proof.originalMarker.syntheticSequence,1);
+    assert.equal(proof.v1,before);
+    assert.equal(proof.authority,'legacy_only');
+    return {missingEntityDetected:true,noReconstructionFromMarker:true,
+      replayAndFreezeBlocked:true,immutableEvidencePreserved:true,
+      realV1Unchanged:true};
+  });
+
   await run('preview synthetic mutation and acknowledgement commit atomically across tabs',async context=>{
     const writer=await open(context),observer=await open(context);
     const oldV1=await writer.evaluate(()=>localStorage.getItem('taskpoints_v1'));

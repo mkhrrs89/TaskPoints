@@ -343,3 +343,14 @@ counter; thus a cooperating writer cannot modify already-corrupted
 preview evidence. Typed marker inspection and replay require this audit
 as well. No promises are made about legacy tabs or the actual V2 mirror
 collections, and no V1 saving semantics change.
+
+### Materialized entity browser regressions
+
+Chromium and WebKit now exercise real isolated preview entity data: a
+two-tab sequence of Task put, correction, and explicit delete tombstone;
+two simultaneous Notes edits with deterministic IndexedDB serial ordering
+and idempotent retries; and an induced missing Projects materialized row
+while the immutable marker remains intact. Audit, read-only inspection,
+typed replay, freeze, and reload each verify the intended state. In the
+missing-row case, preview replay and freeze must refuse to repair the
+ambiguous record. All application V1 bytes remain untouched.
