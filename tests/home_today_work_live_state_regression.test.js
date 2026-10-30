@@ -10,7 +10,7 @@ function extractFunction(source, name) {
   const anchor = 'function ' + name + '(';
   const start = source.indexOf(anchor);
   assert.ok(start >= 0, 'Missing function: ' + name);
-  const brace = source.indexOf('{', start);
+  const brace = source.indexOf('{', source.indexOf(')', start));
   let level = 0;
   for (let i = brace; i < source.length; i++) {
     if (source[i] === '{') level++;
