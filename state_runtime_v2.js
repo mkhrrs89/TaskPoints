@@ -4437,15 +4437,39 @@
       ? syntheticEntityKeyFor(options.syntheticMutation) : null;
     if (hasSyntheticMutation && !syntheticMutationJson)
       return refuse('preview_synthetic_mutation_invalid');
+    const hasSyntheticBatch=(action === 'writer' || action === 'inspect_marker')
+      && owns(options || {},'syntheticMutations');
+    if (hasSyntheticBatch && hasSyntheticMutation)
+      return refuse('preview_synthetic_batch_conflicts_with_single');
+    const canonicalSyntheticBatch = batch => {
+      if (!Array.isArray(batch) || batch.length<1 || batch.length>8) return null;
+      const ids=new Set();
+      for(const entry of batch){
+        if(!canonicalSyntheticMutation(entry)) return null;
+        const key=syntheticEntityKeyFor(entry);
+        if(ids.has(key)) return null;
+        ids.add(key);
+      }
+      const json=stableJson(batch);
+      return json.length<=32768 ? json : null;
+    };
+    const syntheticBatchJson=hasSyntheticBatch
+      ? canonicalSyntheticBatch(options.syntheticMutations) : null;
+    if (hasSyntheticBatch && !syntheticBatchJson)
+      return refuse('preview_synthetic_batch_invalid');
+    const hasAnySynthetic=hasSyntheticMutation || hasSyntheticBatch;
+    const syntheticEntries=hasSyntheticMutation ? [options.syntheticMutation]
+      : hasSyntheticBatch ? options.syntheticMutations : [];
+    const syntheticPayloadJson=syntheticBatchJson || syntheticMutationJson;
     let effectivePayloadFingerprint = payloadFingerprint;
-    if (hasSyntheticMutation) {
+    if (hasAnySynthetic) {
       // Hash before opening any IDB transaction. Never await a digest from
       // inside a live readwrite transaction, which would let it auto-commit.
       if (typeof global.crypto?.subtle?.digest !== 'function'
         || typeof global.TextEncoder !== 'function')
         return refuse('preview_synthetic_digest_unavailable');
       try {
-        const bytes = new global.TextEncoder().encode(syntheticMutationJson);
+        const bytes = new global.TextEncoder().encode(syntheticPayloadJson);
         const hash = await global.crypto.subtle.digest('SHA-256', bytes);
         const digest = Array.from(new Uint8Array(hash),
           value => value.toString(16).padStart(2,'0')).join('');
@@ -4455,13 +4479,24 @@
       } catch (_) { return refuse('preview_synthetic_digest_failed'); }
     }
     const syntheticMarkerValid = row => {
-      if (!owns(row, 'syntheticMutationJson')) return true;
-      if (typeof row.syntheticMutationJson !== 'string') return false;
+      const single=owns(row,'syntheticMutationJson');
+      const batch=owns(row,'syntheticMutationBatchJson');
+      if (single && batch) return false;
+      if (!single && !batch) return true;
       try {
-        return canonicalSyntheticMutation(
-          JSON.parse(row.syntheticMutationJson)) === row.syntheticMutationJson;
+        return single ? typeof row.syntheticMutationJson === 'string'
+          && canonicalSyntheticMutation(JSON.parse(row.syntheticMutationJson))
+            === row.syntheticMutationJson
+          : typeof row.syntheticMutationBatchJson === 'string'
+            && canonicalSyntheticBatch(JSON.parse(row.syntheticMutationBatchJson))
+              === row.syntheticMutationBatchJson;
       } catch (_) { return false; }
     };
+    const storedSyntheticEntries = row =>
+      owns(row,'syntheticMutationBatchJson')
+        ? JSON.parse(row.syntheticMutationBatchJson)
+        : owns(row,'syntheticMutationJson')
+          ? [JSON.parse(row.syntheticMutationJson)] : [];
     const initialModeEpoch = darkMirrorModeEpoch;
     let generation;
     try { generation = currentGeneration({ create: false }); }
