@@ -375,3 +375,15 @@ rehearse the multi-record Task + completion use case.
 This is not a production writer handoff, real V1 journal replacement,
 or an authorization to activate V2 storage. All eight unfenced V1 writer
 families and independent rollback requirements remain unchanged.
+
+### Detached validated payload before asynchronous hashing
+
+A browser regression exercises a subtle race in both single-record and
+multi-record preview calls: the caller changes the original JavaScript
+payload object *after* invoking the writer but while its SHA-256 digest
+is pending. The validated canonical object is now parsed into a detached
+snapshot **before** the digest awaits. The eventual materialized entity
+rows, marker contents and digest all represent the same pre-mutation
+intent, and a retry using that original intent remains idempotent.
+This also avoids an otherwise permanently inconsistent preview ledger.
+No live V1 storage flow is affected.

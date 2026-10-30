@@ -1997,6 +1997,77 @@ try {
       realV1Unchanged:true};
   });
 
+  await run('preview writes snapshot caller payloads before asynchronous SHA-256',async context=>{
+    const page=await open(context);
+    const proof=await page.evaluate(async()=>{
+      const r=window.TaskPointsStateRuntimeV2;
+      const original=localStorage.getItem('taskpoints_v1');
+      const batch=[
+        {collection:'tasks',entityId:'frozen-task',operation:'put',
+          value:{title:'Original task',points:7}},
+        {collection:'completions',entityId:'frozen-completion',
+          operation:'put',value:{source:'task',points:7}}
+      ];
+      const unchanged=JSON.parse(JSON.stringify(batch));
+      const pending=r.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'frozen-batch',syntheticMutations:batch
+      });
+      // The method reaches an await during crypto.digest. This mutation
+      // immediately follows the call, before the IDB write can run.
+      batch[0].value.points=999;
+      batch[1].value.points=999;
+      const committed=await pending;
+      const single={collection:'notes',entityId:'frozen-single',
+        operation:'put',value:'Original note'};
+      const singleOriginal={...single};
+      const pendingSingle=r.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'frozen-single',syntheticMutation:single
+      });
+      single.value='Later mutated note';
+      const singleCommitted=await pendingSingle;
+      const [task,completion,note,audit,replay,changed]=await Promise.all([
+        r.rehearsePreviewDurableWriterFence('inspect_entity',{
+          collection:'tasks',entityId:'frozen-task'
+        }),
+        r.rehearsePreviewDurableWriterFence('inspect_entity',{
+          collection:'completions',entityId:'frozen-completion'
+        }),
+        r.rehearsePreviewDurableWriterFence('inspect_entity',{
+          collection:'notes',entityId:'frozen-single'
+        }),
+        r.rehearsePreviewDurableWriterFence('audit'),
+        r.rehearsePreviewDurableWriterFence('writer',{
+          expectedEpoch:0,marker:'frozen-batch',syntheticMutations:unchanged
+        }),
+        r.rehearsePreviewDurableWriterFence('writer',{
+          expectedEpoch:0,marker:'frozen-batch',syntheticMutations:batch
+        })
+      ]);
+      const singleReplay=await r.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'frozen-single',syntheticMutation:singleOriginal
+      });
+      return {original,committed,singleCommitted,task,completion,note,audit,
+        replay,changed,singleReplay,v1:localStorage.getItem('taskpoints_v1'),
+        authority:r.getStatus().readAuthority};
+    });
+    assert.equal(proof.committed.reason,'preview_writer_recorded');
+    assert.equal(proof.singleCommitted.reason,'preview_writer_recorded');
+    assert.equal(proof.task.entity.value.points,7);
+    assert.equal(proof.completion.entity.value.points,7);
+    assert.equal(proof.note.entity.value,'Original note');
+    assert.equal(proof.audit.reason,'preview_writer_inventory_consistent');
+    assert.equal(proof.audit.observedMarkerCount,2);
+    assert.equal(proof.audit.observedEntityCount,3);
+    assert.equal(proof.replay.reason,'preview_writer_replayed');
+    assert.equal(proof.singleReplay.reason,'preview_writer_replayed');
+    assert.equal(proof.changed.reason,'fence_writer_synthetic_mutation_mismatch');
+    assert.equal(proof.v1,proof.original);
+    assert.equal(proof.authority,'legacy_only');
+    return {singleAndBatchPayloadSnapshotted:true,hashMatchesMaterializedRows:true,
+      callerMutationCannotCorruptDurability:true,unchangedReplayIdempotent:true,
+      legacyStatePreserved:true};
+  });
+
   await run('one synthetic Task plus completion batch commits atomically and replays once',async context=>{
     const first=await open(context),second=await open(context);
     const oldV1=await first.evaluate(()=>localStorage.getItem('taskpoints_v1'));

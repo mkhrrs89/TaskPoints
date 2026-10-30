@@ -747,3 +747,19 @@ test('preview logical mutation batches are bounded, unique and atomic',()=>{
     'All entity writes, immutable intent and counter must share IDB transaction');
   assert.doesNotMatch(code,/localStorage\.setItem\(/);
 });
+
+test('preview canonical mutation payload is snapshotted before async hashing',()=>{
+  const runtime=read('state_runtime_v2.js');
+  const a=runtime.indexOf('async function rehearsePreviewDurableWriterFence(action, options = {})');
+  const b=runtime.indexOf('// Browser-native exclusive-lock *rehearsal*',a);
+  const p=runtime.slice(a,b);
+  assert.match(p,/hasSyntheticMutation \? \[JSON\.parse\(syntheticMutationJson\)\]/);
+  assert.match(p,/hasSyntheticBatch \? JSON\.parse\(syntheticBatchJson\)/);
+  const snapshot=p.indexOf('const syntheticEntries=');
+  const digest=p.indexOf("global.crypto.subtle.digest('SHA-256', bytes)");
+  const materialize=p.indexOf('for (const mutation of syntheticEntries)');
+  assert.ok(snapshot>=0&&digest>snapshot&&materialize>digest,
+    'The validated intent must be copied before awaiting digest and writing IDB');
+  assert.doesNotMatch(p.slice(snapshot,materialize),
+    /syntheticEntries\s*=\s*options\.syntheticMutations/);
+});
