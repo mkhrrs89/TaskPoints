@@ -7102,8 +7102,18 @@ function captureLiveDiffPoint(){
   const dayKey = getCurrentTaskPointsDayKey();
   const slot = getLiveDiffSlotForNow();
   if (!slot) return;
-  const latest = normalizeState(load());
-  state = latest;
+  // Never reload an older cached snapshot over the current in-memory state:
+  // habit taps are journaled immediately and only compacted after an idle
+  // delay, and other SCWM changes may also be newer than the last cache read.
+  // A background graph capture must not discard or replace those edits.
+  const latest = state;
+  // An external tab may have written a newer authoritative revision. Skip
+  // this optional graph sample rather than overwriting its newer data.
+  const storedRevision = readHomeStateRevision();
+  if (storedRevision && loadedStateRevision && storedRevision !== loadedStateRevision) {
+    if (window.TP_DEBUG_PERF) console.debug('[TP liveDiff] skipped stale-page capture');
+    return;
+  }
   const scores = getTodayVisibleMatchupScores();
   if (!scores) return;
   const diff = Number((scores.youScore - scores.opponentScore).toFixed(2));
