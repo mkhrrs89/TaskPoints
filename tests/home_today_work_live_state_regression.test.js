@@ -166,6 +166,7 @@ test('Work save reports skipped/cooldown failures instead of pretending they wer
   assert.match(fragment, /return false; \/\/ not durable/);
   assert.match(fragment, /markHomeStateRevisionCurrent\(\);\s*return true/);
   const ctx = {
+    console: { log() {}, warn() {}, error() {} },
     window: { TaskPointsCore: {
       saveStateSnapshot: () => ({ skipped: true, state: ctx.state })
     } },
