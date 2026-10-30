@@ -4621,24 +4621,35 @@
                         || row.epoch < 0 || row.epoch > state.epoch
                         || !validPayloadFingerprint(row.payloadFingerprint)
                         || !syntheticMarkerValid(row)
-                        || (owns(row,'syntheticMutationJson')
+                        || ((owns(row,'syntheticMutationJson')
+                          || owns(row,'syntheticMutationBatchJson'))
                           && row.payloadFingerprint === null))
                         return false;
                       markerIds.add(row.id);
-                      if (owns(row, 'syntheticMutationJson')) {
-                        const mutation = JSON.parse(row.syntheticMutationJson);
-                        const key = syntheticEntityKeyFor(mutation);
-                        if (row.syntheticEntityKey !== key
-                          || !Number.isSafeInteger(row.syntheticSequence)
+                      const entries=storedSyntheticEntries(row);
+                      if (entries.length) {
+                        const keys=entries.map(syntheticEntityKeyFor);
+                        const batch=owns(row,'syntheticMutationBatchJson');
+                        if (!Number.isSafeInteger(row.syntheticSequence)
                           || row.syntheticSequence < 1
-                          || row.syntheticSequence > state.writersCommitted)
+                          || row.syntheticSequence > state.writersCommitted
+                          || (batch && (owns(row,'syntheticEntityKey')
+                            || !Array.isArray(row.syntheticEntityKeys)
+                            || stableJson(row.syntheticEntityKeys) !== stableJson(keys)))
+                          || (!batch && (row.syntheticEntityKey !== keys[0]
+                            || owns(row,'syntheticEntityKeys'))))
                           return false;
-                        const former = expectedEntities.get(key);
-                        if (!former || former.syntheticSequence < row.syntheticSequence)
-                          expectedEntities.set(key,row);
-                        else if (former.syntheticSequence === row.syntheticSequence)
-                          return false;
-                      } else if (owns(row,'syntheticEntityKey') || owns(row,'syntheticSequence')) {
+                        for (let i=0;i<entries.length;i++) {
+                          const key=keys[i],former=expectedEntities.get(key);
+                          if (former && former.syntheticSequence >= row.syntheticSequence)
+                            return false;
+                          expectedEntities.set(key,{
+                            ...row,syntheticMutationJson:canonicalSyntheticMutation(entries[i])
+                          });
+                        }
+                      } else if (owns(row,'syntheticEntityKey')
+                        || owns(row,'syntheticEntityKeys')
+                        || owns(row,'syntheticSequence')) {
                         return false;
                       }
                       return true;
@@ -4748,14 +4759,15 @@
                       });
                       return;
                     }
-                    if (item && hasSyntheticMutation
-                      && (item.syntheticMutationJson || null) !== syntheticMutationJson) {
+                    if (item && hasAnySynthetic
+                      && ((item.syntheticMutationJson || null) !== syntheticMutationJson
+                        || (item.syntheticMutationBatchJson || null) !== syntheticBatchJson)) {
                       result = refuse('fence_writer_synthetic_mutation_mismatch', {
                         fence: describe(state)
                       });
                       return;
                     }
-                    if (item && hasSyntheticMutation
+                    if (item && hasAnySynthetic
                       && item.payloadFingerprint !== effectivePayloadFingerprint) {
                       result = refuse('fence_writer_synthetic_digest_mismatch', {
                         fence: describe(state)
@@ -4785,12 +4797,15 @@
                         readOnlyMarkerInspection: true,
                         markerEpoch: item ? item.epoch : null,
                         markerPayloadFingerprint: item ? item.payloadFingerprint : null,
-                        syntheticMutationPresent: !!item?.syntheticMutationJson,
-                        syntheticMutationVerified: hasSyntheticMutation && !!item,
+                        syntheticMutationPresent:
+                          !!(item?.syntheticMutationJson || item?.syntheticMutationBatchJson),
+                        syntheticMutationVerified: hasAnySynthetic && !!item,
+                        syntheticBatchSize: item?.syntheticMutationBatchJson
+                          ? storedSyntheticEntries(item).length : null,
                         fence: describe(state)
                       });
                     };
-                    if (item && hasSyntheticMutation)
+                    if (item && hasAnySynthetic)
                       inspectAllWriterMarkers(finishInspection);
                     else finishInspection();
                   } catch (_) {
@@ -4861,7 +4876,8 @@
                       });
                       return;
                     }
-                    if ((marker.syntheticMutationJson || null) !== syntheticMutationJson) {
+                    if ((marker.syntheticMutationJson || null) !== syntheticMutationJson
+                      || (marker.syntheticMutationBatchJson || null) !== syntheticBatchJson) {
                       result = refuse('fence_writer_synthetic_mutation_mismatch', {
                         fence: describe(state)
                       });
@@ -4876,11 +4892,11 @@
                     const finishReplay = () => {
                       result = refuse('preview_writer_replayed', {
                         alreadyRecorded: true, fingerprintMatched: true,
-                        syntheticMutationVerified: hasSyntheticMutation,
+                        syntheticMutationVerified: hasAnySynthetic,
                         fence: describe(state)
                       });
                     };
-                    if (hasSyntheticMutation)
+                    if (hasAnySynthetic)
                       inspectAllWriterMarkers(finishReplay);
                     else finishReplay();
                     return;
