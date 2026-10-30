@@ -409,6 +409,9 @@ test('preview freeze must atomically audit full writer marker inventory before c
   assert.match(source,/action === 'audit'/);
   assert.match(source,/scan = store\.getAll\(\)/);
   assert.match(source,/markers\.length === state\.writersCommitted/);
+  assert.match(source,/entities\.length === expectedEntities\.size/);
+  assert.match(source,/entityByKey\.set\(row\.id,row\)/);
+  assert.match(source,/row\.syntheticMutationJson !== latest\.syntheticMutationJson/);
   assert.match(source,/markerIds\.has\(lastKey\)/);
   assert.match(source,/fence_writer_inventory_inconsistent/);
   const freeze=source.slice(source.indexOf("if (action === 'freeze')"),
@@ -453,6 +456,9 @@ test('preview fence marker replays must validate caller-supplied payload identit
   assert.match(preview,/item\.payloadFingerprint !== payloadFingerprint/);
   assert.match(preview,/store\.put\(\{ id: markerId, generation, epoch: state\.epoch,/);
   assert.match(preview,/payloadFingerprint: effectivePayloadFingerprint/);
+  assert.match(preview,/materializedSyntheticEntity: hasSyntheticMutation/);
+  assert.match(preview,/readOnlyEntityInspection: true/);
+  assert.match(preview,/syntheticSequence: next\.writersCommitted/);
   assert.match(preview,/productionWritersFenced: false/);
   assert.match(preview,/canPromote: false/);
 });

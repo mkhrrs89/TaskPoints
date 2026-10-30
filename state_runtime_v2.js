@@ -4375,17 +4375,25 @@
     });
     if (!isWalTestPreviewHost()) return refuse('preview_host_required');
     if (!isDarkEnabled()) return refuse('dark_disabled');
-    if (!['read', 'audit', 'writer', 'freeze', 'inspect_marker'].includes(action))
+    if (!['read', 'audit', 'inspect_entity', 'writer', 'freeze', 'inspect_marker'].includes(action))
       return refuse('invalid_fence_action');
     if (!global.indexedDB?.open) return refuse('indexeddb_unavailable');
     const expectedEpoch = options?.expectedEpoch;
-    if (action !== 'read' && action !== 'audit' && action !== 'inspect_marker'
+    if (action !== 'read' && action !== 'audit'
+      && action !== 'inspect_entity' && action !== 'inspect_marker'
       && (!Number.isSafeInteger(expectedEpoch) || expectedEpoch < 0))
       return refuse('expected_epoch_required');
     if ((action === 'writer' || action === 'inspect_marker')
       && (typeof options?.marker !== 'string' || !options.marker
         || options.marker.length > 128))
       return refuse('writer_marker_required');
+    if (action === 'inspect_entity'
+      && (!['habits','tasks','notes','projects','today'].includes(options?.collection)
+        || typeof options?.entityId !== 'string'
+        || !options.entityId || options.entityId.length > 128))
+      return refuse('preview_synthetic_entity_selector_invalid');
+    const syntheticEntityKeyFor = mutation =>
+      'synthetic_entity:' + mutation.collection + ':' + JSON.stringify(mutation.entityId);
     // A marker alone does not prove an idempotent retry has the same intent.
     // The optional caller-supplied SHA-256 fingerprint binds a *synthetic*
     // writer marker to its claimed payload. This preview does not hash or
@@ -4425,6 +4433,8 @@
       && owns(options || {}, 'syntheticMutation');
     const syntheticMutationJson = hasSyntheticMutation
       ? canonicalSyntheticMutation(options.syntheticMutation) : null;
+    const syntheticEntityKey = hasSyntheticMutation
+      ? syntheticEntityKeyFor(options.syntheticMutation) : null;
     if (hasSyntheticMutation && !syntheticMutationJson)
       return refuse('preview_synthetic_mutation_invalid');
     let effectivePayloadFingerprint = payloadFingerprint;
@@ -4490,7 +4500,8 @@
             return;
           }
           const tx = db.transaction(STORE,
-            (action === 'read' || action === 'audit' || action === 'inspect_marker') ? 'readonly' : 'readwrite');
+            (action === 'read' || action === 'audit' || action === 'inspect_entity'
+              || action === 'inspect_marker') ? 'readonly' : 'readwrite');
           tx.onabort = () => finish(refuse('fence_transaction_aborted'));
           tx.onerror = () => {}; // The abort handler remains authoritative.
           tx.oncomplete = () => finish(result);
@@ -4558,31 +4569,65 @@
                       return;
                     }
                     const records = scan.result;
-                    const markers = records.filter(row => row?.id !== 'writer_fence');
+                    const markers = records.filter(row =>
+                      typeof row?.id === 'string' && row.id.startsWith('writer_marker:'));
+                    const entities = records.filter(row =>
+                      typeof row?.id === 'string' && row.id.startsWith('synthetic_entity:'));
                     const markerIds = new Set();
+                    const expectedEntities = new Map();
                     const lastKey = 'writer_marker:' + state.lastWriterMarker;
+                    const markersValid = markers.every(row => {
+                      if (!row || typeof row.id !== 'string'
+                        || row.id.length <= 'writer_marker:'.length
+                        || row.id.length > 'writer_marker:'.length + 128
+                        || markerIds.has(row.id)
+                        || row.generation !== generation
+                        || !Number.isSafeInteger(row.epoch)
+                        || row.epoch < 0 || row.epoch > state.epoch
+                        || !validPayloadFingerprint(row.payloadFingerprint)
+                        || !syntheticMarkerValid(row)
+                        || (owns(row,'syntheticMutationJson')
+                          && row.payloadFingerprint === null))
+                        return false;
+                      markerIds.add(row.id);
+                      if (owns(row, 'syntheticMutationJson')) {
+                        const mutation = JSON.parse(row.syntheticMutationJson);
+                        const key = syntheticEntityKeyFor(mutation);
+                        if (row.syntheticEntityKey !== key
+                          || !Number.isSafeInteger(row.syntheticSequence)
+                          || row.syntheticSequence < 1
+                          || row.syntheticSequence > state.writersCommitted)
+                          return false;
+                        const former = expectedEntities.get(key);
+                        if (!former || former.syntheticSequence < row.syntheticSequence)
+                          expectedEntities.set(key,row);
+                        else if (former.syntheticSequence === row.syntheticSequence)
+                          return false;
+                      } else if (owns(row,'syntheticEntityKey') || owns(row,'syntheticSequence')) {
+                        return false;
+                      }
+                      return true;
+                    });
+                    const entityByKey = new Map();
+                    const entitiesValid = entities.length === expectedEntities.size
+                      && entities.every(row => {
+                        const latest = expectedEntities.get(row.id);
+                        if (!latest || entityByKey.has(row.id)
+                          || row.generation !== generation
+                          || row.epoch !== latest.epoch
+                          || row.sequence !== latest.syntheticSequence
+                          || row.lastMarker !== latest.id.slice('writer_marker:'.length)
+                          || row.syntheticMutationJson !== latest.syntheticMutationJson
+                          || row.payloadFingerprint !== latest.payloadFingerprint)
+                          return false;
+                        entityByKey.set(row.id,row);
+                        return true;
+                      });
                     const inventoryValid = Array.isArray(records)
                       && markers.length === state.writersCommitted
-                      && (!prior ? records.length === 0 : records.length === markers.length + 1)
-                      && markers.every(row => {
-                        if (!row || typeof row.id !== 'string'
-                          || !row.id.startsWith('writer_marker:')
-                          || row.id.length <= 'writer_marker:'.length
-                          || row.id.length > 'writer_marker:'.length + 128
-                          || markerIds.has(row.id)
-                          || row.generation !== generation
-                          || !Number.isSafeInteger(row.epoch)
-                          || row.epoch < 0 || row.epoch > state.epoch
-                          || !validPayloadFingerprint(row.payloadFingerprint)
-                          || !syntheticMarkerValid(row)
-                          || (owns(row,'syntheticMutationJson')
-                            && row.payloadFingerprint === null))
-                          return false;
-                        markerIds.add(row.id);
-                        return true;
-                      })
-                      && (state.writersCommitted === 0
-                        || markerIds.has(lastKey));
+                      && records.length === markers.length + entities.length + (prior ? 1 : 0)
+                      && markersValid && entitiesValid
+                      && (state.writersCommitted === 0 || markerIds.has(lastKey));
                     if (!inventoryValid) {
                       result = refuse('fence_writer_inventory_inconsistent', {
                         fence: describe(state),
@@ -4590,7 +4635,7 @@
                       });
                       return;
                     }
-                    callback(markers.length);
+                    callback(markers.length,entityByKey);
                   } catch (_) {
                     result = refuse('fence_writer_inventory_unreadable', {
                       fence: describe(state)
@@ -4606,10 +4651,34 @@
                 return;
               }
               if (action === 'audit') {
-                inspectAllWriterMarkers(count => {
+                inspectAllWriterMarkers((count,entities) => {
                   result = refuse('preview_writer_inventory_consistent', {
                     readOnlyInventoryAudit: true,
                     initialized: !!prior, observedMarkerCount: count,
+                    observedEntityCount: entities.size,
+                    fence: describe(state)
+                  });
+                });
+                return;
+              }
+              if (action === 'inspect_entity') {
+                inspectAllWriterMarkers((count,entities) => {
+                  const key = syntheticEntityKeyFor(options);
+                  const saved = entities.get(key);
+                  const mutation = saved ? JSON.parse(saved.syntheticMutationJson) : null;
+                  result = refuse(saved
+                    ? 'preview_synthetic_entity_present'
+                    : 'preview_synthetic_entity_absent', {
+                    readOnlyEntityInspection: true,
+                    inventoryVerified: true,
+                    entity: saved ? {
+                      collection: mutation.collection,
+                      entityId: mutation.entityId,
+                      operation: mutation.operation,
+                      value: mutation.operation === 'put' ? mutation.value : null,
+                      lastMarker: saved.lastMarker,
+                      sequence: saved.sequence
+                    } : null,
                     fence: describe(state)
                   });
                 });
@@ -4674,16 +4743,21 @@
                       });
                       return;
                     }
-                    result = refuse(item
-                      ? 'preview_writer_marker_present'
-                      : 'preview_writer_marker_absent', {
-                      readOnlyMarkerInspection: true,
-                      markerEpoch: item ? item.epoch : null,
-                      markerPayloadFingerprint: item ? item.payloadFingerprint : null,
-                      syntheticMutationPresent: !!item?.syntheticMutationJson,
-                      syntheticMutationVerified: hasSyntheticMutation && !!item,
-                      fence: describe(state)
-                    });
+                    const finishInspection = () => {
+                      result = refuse(item
+                        ? 'preview_writer_marker_present'
+                        : 'preview_writer_marker_absent', {
+                        readOnlyMarkerInspection: true,
+                        markerEpoch: item ? item.epoch : null,
+                        markerPayloadFingerprint: item ? item.payloadFingerprint : null,
+                        syntheticMutationPresent: !!item?.syntheticMutationJson,
+                        syntheticMutationVerified: hasSyntheticMutation && !!item,
+                        fence: describe(state)
+                      });
+                    };
+                    if (item && hasSyntheticMutation)
+                      inspectAllWriterMarkers(finishInspection);
+                    else finishInspection();
                   } catch (_) {
                     result = refuse('fence_writer_marker_inspection_failed');
                     try { tx.abort(); } catch (_) {}
@@ -4764,11 +4838,16 @@
                       });
                       return;
                     }
-                    result = refuse('preview_writer_replayed', {
-                      alreadyRecorded: true, fingerprintMatched: true,
-                      syntheticMutationVerified: hasSyntheticMutation,
-                      fence: describe(state)
-                    });
+                    const finishReplay = () => {
+                      result = refuse('preview_writer_replayed', {
+                        alreadyRecorded: true, fingerprintMatched: true,
+                        syntheticMutationVerified: hasSyntheticMutation,
+                        fence: describe(state)
+                      });
+                    };
+                    if (hasSyntheticMutation)
+                      inspectAllWriterMarkers(finishReplay);
+                    else finishReplay();
                     return;
                   }
                   // A vanished last-marker row is an inconsistency, not
@@ -4791,15 +4870,35 @@
                   };
                   // Both puts commit together or neither does. Request
                   // callbacks stay synchronous to keep the IDB tx alive.
-                  store.put({ id: markerId, generation, epoch: state.epoch,
-                    payloadFingerprint: effectivePayloadFingerprint,
-                    ...(hasSyntheticMutation ? { syntheticMutationJson } : {}) });
-                  store.put(next);
-                  result = refuse('preview_writer_recorded', {
-                    atomicPreviewTransaction: true,
-                    syntheticMutationDurable: hasSyntheticMutation,
-                    fence: describe(next)
-                  });
+                  const commitPreviewWriter = () => {
+                    // Materialized put/delete (tombstone), immutable intent
+                    // and acknowledgement all commit in ONE IDB transaction.
+                    // Never delete an entity row: a deletion remains explicit.
+                    if (hasSyntheticMutation) {
+                      store.put({
+                        id: syntheticEntityKey, generation, epoch: state.epoch,
+                        sequence: next.writersCommitted, lastMarker: options.marker,
+                        syntheticMutationJson,
+                        payloadFingerprint: effectivePayloadFingerprint
+                      });
+                    }
+                    store.put({ id: markerId, generation, epoch: state.epoch,
+                      payloadFingerprint: effectivePayloadFingerprint,
+                      ...(hasSyntheticMutation ? {
+                        syntheticMutationJson, syntheticEntityKey,
+                        syntheticSequence: next.writersCommitted
+                      } : {}) });
+                    store.put(next);
+                    result = refuse('preview_writer_recorded', {
+                      atomicPreviewTransaction: true,
+                      syntheticMutationDurable: hasSyntheticMutation,
+                      materializedSyntheticEntity: hasSyntheticMutation,
+                      fence: describe(next)
+                    });
+                  };
+                  if (hasSyntheticMutation)
+                    inspectAllWriterMarkers(commitPreviewWriter);
+                  else commitPreviewWriter();
                 } catch (_) {
                   result = refuse('fence_writer_marker_write_failed');
                   try { tx.abort(); } catch (_) {}

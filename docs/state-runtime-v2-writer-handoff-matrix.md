@@ -317,3 +317,29 @@ original caller-supplied bytes is enforced by typed inspection; the
 preview inventory scan verifies canonical stored JSON shape and hash
 *format*, not a cryptographic recomputation for every historical row.
 This limitation is documented rather than treated as a production gate.
+
+## Atomic materialized preview entity writes (October 29)
+
+The isolated test-only writer prototype now stores **three** record classes
+atomically in its *existing* IndexedDB control store: the canonical synthetic
+entity's newest put/delete operation, an immutable writer marker containing
+the mutation identity, and the epoch/counter acknowledgement. No database
+schema upgrade, production V1 write, or application mutation routing changed.
+Deletes are explicit tombstone rows, not destructive removals.
+
+A new preview `inspect_entity` read-only action requires a collection
+(Habits, Tasks, Notes, Projects or Today) and entity ID and first scans the
+entire isolated marker/entity inventory in a single readonly transaction.
+The audit compares every entity against its **highest-sequence** committed
+marker and verifies generation, marker identity, epoch, digest and canonical
+payload equality. Missing materialized rows, unexpected orphan entities,
+and marker/entity disagreement fail closed. A replaced entity can be
+observed through its latest materialized row while earlier immutable
+markers remain available as historical evidence.
+
+Synthetic writers perform the same inventory verification inside their
+single readwrite transaction *before* adding the next entity, marker and
+counter; thus a cooperating writer cannot modify already-corrupted
+preview evidence. Typed marker inspection and replay require this audit
+as well. No promises are made about legacy tabs or the actual V2 mirror
+collections, and no V1 saving semantics change.
