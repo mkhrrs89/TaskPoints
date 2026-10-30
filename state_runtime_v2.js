@@ -4925,11 +4925,14 @@
                     // Materialized put/delete (tombstone), immutable intent
                     // and acknowledgement all commit in ONE IDB transaction.
                     // Never delete an entity row: a deletion remains explicit.
-                    if (hasSyntheticMutation) {
+                    // All entity puts/deletes, immutable intent, and one
+                    // acknowledgement commit or roll back together.
+                    for (const mutation of syntheticEntries) {
                       store.put({
-                        id: syntheticEntityKey, generation, epoch: state.epoch,
-                        sequence: next.writersCommitted, lastMarker: options.marker,
-                        syntheticMutationJson,
+                        id: syntheticEntityKeyFor(mutation),generation,
+                        epoch: state.epoch,sequence: next.writersCommitted,
+                        lastMarker: options.marker,
+                        syntheticMutationJson: canonicalSyntheticMutation(mutation),
                         payloadFingerprint: effectivePayloadFingerprint
                       });
                     }
@@ -4938,16 +4941,22 @@
                       ...(hasSyntheticMutation ? {
                         syntheticMutationJson, syntheticEntityKey,
                         syntheticSequence: next.writersCommitted
+                      } : {}),
+                      ...(hasSyntheticBatch ? {
+                        syntheticMutationBatchJson: syntheticBatchJson,
+                        syntheticEntityKeys: syntheticEntries.map(syntheticEntityKeyFor),
+                        syntheticSequence: next.writersCommitted
                       } : {}) });
                     store.put(next);
                     result = refuse('preview_writer_recorded', {
                       atomicPreviewTransaction: true,
-                      syntheticMutationDurable: hasSyntheticMutation,
-                      materializedSyntheticEntity: hasSyntheticMutation,
+                      syntheticMutationDurable: hasAnySynthetic,
+                      materializedSyntheticEntity: hasAnySynthetic,
+                      syntheticRecordCount: syntheticEntries.length,
                       fence: describe(next)
                     });
                   };
-                  if (hasSyntheticMutation)
+                  if (hasAnySynthetic)
                     inspectAllWriterMarkers(commitPreviewWriter);
                   else commitPreviewWriter();
                 } catch (_) {
