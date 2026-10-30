@@ -87,7 +87,7 @@ test('lifecycle reload invalidates scores before scheduling a repaint', () => {
   assert.equal(rendered, true);
 });
 
-test('every habit tap schedules canonical Today reconciliation, including today's taps', () => {
+test('every habit tap schedules canonical Today reconciliation, including current-day taps', () => {
   const action = extractFunction(home, 'handleHabitBubbleTap');
   assert.match(action, /renderTodayScoreValueOnly\(baseline \+ delta\)/);
   assert.match(action, /scheduleHabitTodayScoreReconciliation\(\);\s*if \(window\.TP_DEBUG_PERF\)/);
