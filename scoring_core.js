@@ -7832,10 +7832,15 @@ const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
     const match = title.match(/^Work Score\s*\((\d+(?:\.\d+)?)\)/i);
     const score = match ? Number(match[1]) : null;
 
-    const hoursRaw = entry && Object.prototype.hasOwnProperty.call(entry, 'workHours')
-      ? Number(entry.workHours)
-      : 0;
-    const hours = Number.isFinite(hoursRaw) ? hoursRaw : 0;
+    // Legacy or compacted Work entries can retain hours in the title without
+    // a workHours property. Do not silently score those entries as 0 hours.
+    // Explicitly recorded workHours: 0 takes precedence over the title.
+    const titledHours = title.match(/\bHours?\s*[:=]?\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))/i);
+    const hasHours = entry && Object.prototype.hasOwnProperty.call(entry, 'workHours')
+      && entry.workHours !== '' && entry.workHours != null;
+    const rawHours = hasHours ? Number(entry.workHours)
+      : (titledHours ? Number(titledHours[1]) : 0);
+    const hours = Number.isFinite(rawHours) ? rawHours : 0;
 
     return { score, hours };
   }
