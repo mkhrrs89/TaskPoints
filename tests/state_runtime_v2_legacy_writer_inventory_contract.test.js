@@ -286,7 +286,7 @@ test('durable writer fence remains confined to preview IDB markers, not producti
     'isDarkEnabled()',
     "taskpoints_v2_writer_fence_preview_v1",
     "['read', 'audit', 'inspect_entity', 'writer', 'freeze', 'inspect_marker']",
-    "action === 'read' || action === 'audit'",,
+    "action === 'read' || action === 'audit'",
     "'preview_writer_marker_present'",
     "'preview_writer_marker_absent'",
     'readOnlyMarkerInspection: true',
