@@ -2020,6 +2020,9 @@ window.TaskPointsHomeLiveState = {
 const _derived = {
   rev: 0,
   builtRev: -1,
+  builtState: null,
+  builtCompletions: null,
+  builtCompletionsLength: -1,
 
   byDay: new Map(),       // key -> [completions]
   moodEntries: [],
@@ -2075,9 +2078,14 @@ function commitCompletionsAndRefreshDerivedUI() {
 
 
 function getDerived(){
-  if (_derived.builtRev === _derived.rev) return _derived;
-
+  // A lifecycle refresh, journal compaction or storage reconciliation can
+  // replace state/completions without calling markCompletionsDirty(). Never
+  // reuse a cache built for a different state or a different completions array.
   const comps = Array.isArray(state?.completions) ? state.completions : [];
+  if (_derived.builtRev === _derived.rev
+    && _derived.builtState === state
+    && _derived.builtCompletions === comps
+    && _derived.builtCompletionsLength === comps.length) return _derived;
 
   // reset
   _derived.byDay = new Map();
@@ -2129,6 +2137,9 @@ function getDerived(){
   _derived.agg = aggregateCompletionsByDate(comps);
 
   _derived.builtRev = _derived.rev;
+  _derived.builtState = state;
+  _derived.builtCompletions = comps;
+  _derived.builtCompletionsLength = comps.length;
   return _derived;
 }
 // ---------- /Derived cache ----------
@@ -2451,12 +2462,17 @@ function sleepPoints(score, rested = 0) {
 }
 
 function getWorkInfo(entry) {
-  const match = entry?.title?.match(/\(([^)]+)\)/);
+  const title = typeof entry?.title === 'string' ? entry.title : '';
+  const match = title.match(/\(([^)]+)\)/);
   const score = match ? Number(match[1]) : null;
 
-  const hoursRaw = entry && Object.prototype.hasOwnProperty.call(entry, 'workHours')
-    ? Number(entry.workHours)
-    : 0;
+  // Older and compacted records can retain "— Hours 8" in their title even
+  // if workHours is absent. Keep an explicit stored 0 authoritative.
+  const titleHours = title.match(/\bHours?\s*[:=]?\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))/i);
+  const hasStoredHours = entry && Object.prototype.hasOwnProperty.call(entry, 'workHours')
+    && entry.workHours !== '' && entry.workHours != null;
+  const hoursRaw = hasStoredHours ? Number(entry.workHours)
+    : (titleHours ? Number(titleHours[1]) : 0);
   const hours = Number.isFinite(hoursRaw) ? hoursRaw : 0;
 
   return { score, hours };
@@ -10255,8 +10271,11 @@ scheduleHomeStreaksAtRiskRender();
     if (delta) showPointsToast(delta);
   } else {
     __tpQueueTodayScoreDeltaToast();
-    scheduleHabitTodayScoreReconciliation();
   }
+  // The fast delta remains immediate, but always reconcile against the
+  // canonical completion aggregate after the tap burst. This fixes stale
+  // Today/island scores without a heavy full-page re-render per tap.
+  scheduleHabitTodayScoreReconciliation();
 
   if (window.TP_DEBUG_PERF) {
     console.log('[TP_PERF] habitToggle', {
@@ -14428,6 +14447,9 @@ function refreshMainPageFromStorage() {
   storageCache.raw = null;
   storageCache.parsed = null;
   state = normalizeState(load());
+  // Replacing the state invalidates derived score/history even if the
+  // revision number is unchanged or completion count happens to match.
+  markCompletionsDirty();
 
   const autoSimRan = maybeAutoSimToday();
 
@@ -14435,9 +14457,11 @@ function refreshMainPageFromStorage() {
     storageCache.raw = null;
     storageCache.parsed = null;
     state = normalizeState(load());
+    markCompletionsDirty();
   }
 
   state = syncStateWithMatchups(state);
+  markCompletionsDirty();
   scheduleRender(renderAll);
   markHomeLifecycleBaseline();
   return true;
