@@ -4613,6 +4613,7 @@
                     const entities = records.filter(row =>
                       typeof row?.id === 'string' && row.id.startsWith('synthetic_entity:'));
                     const markerIds = new Set();
+                    const seenSyntheticSequences = new Set();
                     const expectedEntities = new Map();
                     const lastKey = 'writer_marker:' + state.lastWriterMarker;
                     const markersValid = markers.every(row => {
@@ -4637,19 +4638,25 @@
                         if (!Number.isSafeInteger(row.syntheticSequence)
                           || row.syntheticSequence < 1
                           || row.syntheticSequence > state.writersCommitted
+                          || seenSyntheticSequences.has(row.syntheticSequence)
                           || (batch && (owns(row,'syntheticEntityKey')
                             || !Array.isArray(row.syntheticEntityKeys)
                             || stableJson(row.syntheticEntityKeys) !== stableJson(keys)))
                           || (!batch && (row.syntheticEntityKey !== keys[0]
                             || owns(row,'syntheticEntityKeys'))))
                           return false;
+                        seenSyntheticSequences.add(row.syntheticSequence);
+                        // getAll() is sorted by marker ID, NOT by commit
+                        // order. Reconstruct each entity from the greatest
+                        // durable sequence regardless of lexical marker order.
                         for (let i=0;i<entries.length;i++) {
                           const key=keys[i],former=expectedEntities.get(key);
-                          if (former && former.syntheticSequence >= row.syntheticSequence)
+                          if (former && former.syntheticSequence === row.syntheticSequence)
                             return false;
-                          expectedEntities.set(key,{
-                            ...row,syntheticMutationJson:canonicalSyntheticMutation(entries[i])
-                          });
+                          if (!former || former.syntheticSequence < row.syntheticSequence)
+                            expectedEntities.set(key,{
+                              ...row,syntheticMutationJson:canonicalSyntheticMutation(entries[i])
+                            });
                         }
                       } else if (owns(row,'syntheticEntityKey')
                         || owns(row,'syntheticEntityKeys')

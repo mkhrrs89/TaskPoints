@@ -763,3 +763,18 @@ test('preview canonical mutation payload is snapshotted before async hashing',()
   assert.doesNotMatch(p.slice(snapshot,materialize),
     /syntheticEntries\s*=\s*options\.syntheticMutations/);
 });
+
+test('preview entity materialization never mistakes marker ID sorting for commit order',()=>{
+  const code=read('state_runtime_v2.js');
+  const start=code.indexOf('async function rehearsePreviewDurableWriterFence(action, options = {})');
+  const end=code.indexOf('// Browser-native exclusive-lock *rehearsal*',start);
+  const preview=code.slice(start,end);
+  assert.match(preview,/const seenSyntheticSequences = new Set\(\)/);
+  assert.match(preview,/seenSyntheticSequences\.has\(row\.syntheticSequence\)/);
+  assert.match(preview,/seenSyntheticSequences\.add\(row\.syntheticSequence\)/);
+  assert.match(preview,/former\.syntheticSequence === row\.syntheticSequence/);
+  assert.match(preview,/!former \|\| former\.syntheticSequence < row\.syntheticSequence/);
+  assert.doesNotMatch(preview,/former && former\.syntheticSequence >= row\.syntheticSequence/);
+  assert.match(preview,/row\.sequence !== latest\.syntheticSequence/);
+  assert.match(preview,/canPromote: false/);
+});

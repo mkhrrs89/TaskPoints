@@ -387,3 +387,18 @@ rows, marker contents and digest all represent the same pre-mutation
 intent, and a retry using that original intent remains idempotent.
 This also avoids an otherwise permanently inconsistent preview ledger.
 No live V1 storage flow is affected.
+
+### Historical marker ordering fix (October 30)
+
+Both Chromium and WebKit identified a real preview-recovery bug:
+IndexedDB `getAll()` returns records sorted by their *string keys*, but
+the inventory audit originally assumed marker enumeration was in commit
+order. After a correction, a newer marker could sort alphabetically before
+an older one, yielding a false `fence_writer_inventory_inconsistent`
+without actual corruption. The audit now reconstructs each current
+materialized entity using the **highest committed synthetic sequence**,
+independently of marker ID order. It also refuses duplicate sequence
+numbers across different immutable synthetic writer markers; legitimate
+batch entities share one marker/sequence. Existing historical markers and
+tombstones remain untouched. The existing browser correction and
+simultaneous-writer scenarios provide real-engine coverage of this edge.
