@@ -432,9 +432,9 @@ test('preview synthetic writer persists a canonical payload and SHA-256 marker a
     'syntheticMutationJson','canonicalSyntheticMutation',
     "preview_synthetic_digest_mismatch", "preview_synthetic_mutation_invalid",
     "global.crypto.subtle.digest('SHA-256', bytes)",
-    'effectivePayloadFingerprint','syntheticMutationDurable: hasSyntheticMutation',
+    'effectivePayloadFingerprint','syntheticMutationDurable: hasAnySynthetic',
     'fence_writer_synthetic_mutation_mismatch',
-    'syntheticMutationVerified: hasSyntheticMutation',
+    'syntheticMutationVerified: hasAnySynthetic',
     'syntheticMarkerValid(row)','syntheticMarkerValid(marker)',
     "productionWritersFenced: false", "canPromote: false"
   ])assert.ok(preview.includes(evidence),'Synthetic preview contract lost '+evidence);
@@ -456,7 +456,7 @@ test('preview fence marker replays must validate caller-supplied payload identit
   assert.match(preview,/item\.payloadFingerprint !== payloadFingerprint/);
   assert.match(preview,/store\.put\(\{ id: markerId, generation, epoch: state\.epoch,/);
   assert.match(preview,/payloadFingerprint: effectivePayloadFingerprint/);
-  assert.match(preview,/materializedSyntheticEntity: hasSyntheticMutation/);
+  assert.match(preview,/materializedSyntheticEntity: hasAnySynthetic/);
   assert.match(preview,/readOnlyEntityInspection: true/);
   assert.match(preview,/syntheticSequence: next\.writersCommitted/);
   assert.match(preview,/productionWritersFenced: false/);
@@ -724,4 +724,26 @@ test('Task journal tombstones do not bypass ordinary completion history protecti
   assert.match(guard,/if \(!allowEmptyArrayOverwrite/);
   assert.doesNotMatch(wrapper,/allowDestructiveOverwrite:\s*true/);
   assert.doesNotMatch(wrapper,/replaceCompletions:\s*true/);
+});
+
+test('preview logical mutation batches are bounded, unique and atomic',()=>{
+  const runtime=read('state_runtime_v2.js');
+  const start=runtime.indexOf('async function rehearsePreviewDurableWriterFence(action, options = {})');
+  const end=runtime.indexOf('// Browser-native exclusive-lock *rehearsal*',start);
+  assert.ok(start>0&&end>start);
+  const code=runtime.slice(start,end);
+  for(const evidence of [
+    'preview_synthetic_batch_conflicts_with_single','preview_synthetic_batch_invalid',
+    'batch.length>8','ids.has(key)','syntheticMutationBatchJson',
+    'syntheticEntityKeys: syntheticEntries.map(syntheticEntityKeyFor)',
+    'syntheticRecordCount: syntheticEntries.length','storedSyntheticEntries(row)',
+    'expectedEntities.set(key,{','syntheticMutationVerified: hasAnySynthetic',
+    "'completions'","productionWritersFenced: false","canPromote: false"
+  ])assert.ok(code.includes(evidence),'Missing bounded multi-entity protection: '+evidence);
+  const entity=code.lastIndexOf('for (const mutation of syntheticEntries)');
+  const marker=code.indexOf('store.put({ id: markerId, generation, epoch: state.epoch,',entity);
+  const counter=code.indexOf('store.put(next)',marker);
+  assert.ok(entity>0&&marker>entity&&counter>marker,
+    'All entity writes, immutable intent and counter must share IDB transaction');
+  assert.doesNotMatch(code,/localStorage\.setItem\(/);
 });

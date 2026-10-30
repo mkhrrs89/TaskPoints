@@ -354,3 +354,24 @@ while the immutable marker remains intact. Audit, read-only inspection,
 typed replay, freeze, and reload each verify the intended state. In the
 missing-row case, preview replay and freeze must refuse to repair the
 ambiguous record. All application V1 bytes remain untouched.
+
+## Bounded synthetic multi-record logical actions (October 30)
+
+The isolated, test-only IndexedDB preview writer now accepts
+`syntheticMutations`: 1–8 **different entity targets** in one logical
+action. It rejects duplicate targets, invalid records, oversized batches
+and conflicting single/batch payloads before any write. A canonical
+SHA-256 digest binds the entire ordered batch outside the transaction.
+
+In one IndexedDB readwrite transaction the prototype materializes every
+entity, saves one immutable full-batch intent, and increments the writer
+counter **once**. The existing marker-only and single-entity callers are
+retained. The inventory audit recomputes the latest materialized record
+from each historical single or batch intent; any missing/changed entity
+blocks inspection, replay and freeze. Typed batch replay must match every
+record, not just a marker ID. Synthetic completions are permitted to
+rehearse the multi-record Task + completion use case.
+
+This is not a production writer handoff, real V1 journal replacement,
+or an authorization to activate V2 storage. All eight unfenced V1 writer
+families and independent rollback requirements remain unchanged.
