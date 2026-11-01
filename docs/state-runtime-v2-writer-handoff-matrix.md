@@ -474,3 +474,32 @@ and a never-committed marker must all refuse with
 inspection writes repairs, clears evidence, changes V1, or grants authority.
 This is a stricter diagnostic of the preview rehearsal, not production
 fencing of older V1 tabs.
+
+### Marker-only writer/retry inventory enforcement (November 1)
+
+Although full-ledger audit was already enforced for typed synthetic writer
+replays and commits, marker-only preview writers still bypassed that audit.
+Because the durable counter advances for both marker types, a marker-only
+writer could previously append an acknowledgement after an older typed
+mutation had been corrupted, and a marker-only retry could report a
+successful idempotent replay while the ledger was inconsistent.
+
+**Both preview paths now require `inspectAllWriterMarkers()` before
+acknowledging a new marker or an existing-marker retry.** The audit checks
+the complete historical marker/entity inventory, and verifies stored
+SHA-256 payload fingerprints through the already introduced bounded
+two-pass digest proof. Inventory validation and any new writer-marker,
+materialized entity and counter writes remain in one IndexedDB readwrite
+transaction. No async hashing occurs inside a live transaction.
+
+A Chromium/WebKit regression commits one typed synthetic note mutation and
+one marker-only acknowledgement, confirms clean replay, corrupts the older
+typed marker fingerprint, then confirms marker-only replay, a fresh
+marker-only write, freeze and audit all fail closed. It also checks that
+the writer count, last marker, V1 snapshot and legacy read authority are
+unchanged and that refusal persists across reload.
+
+The added scans are intentionally preview-only and are **not** an
+endorsement of full-history scanning on the future production mutation
+hot path. Nonparticipating old V1 tabs remain unfenced, and the authority
+cutover must still refuse. No protection has been removed.
