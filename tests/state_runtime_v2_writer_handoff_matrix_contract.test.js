@@ -794,7 +794,13 @@ test('historical digest preflight never hashes in an open IDB transaction and re
     &&digest>scanComplete&&verifyTx>digest,
     'Hashing must follow a completed read-only snapshot and precede the verification transaction');
   assert.match(preview,/for\(let digestRetry=0;digestRetry<4;digestRetry\+\+\)/);
-  assert.match(preview,/state\.writersCommitted > preflightMarkerCount/);
+  assert.match(preview,/historicalMarkerSnapshots=new Map/);
+  assert.match(preview,/const historicalUnchanged=historicalMarkerSnapshots\.size/);
+  assert.match(preview,/const freshMarkers=markers\.filter/);
+  assert.match(preview,/state\.writersCommitted===\s*preflightMarkerCount\+freshMarkers\.length/);
+  assert.match(preview,/historicalMarkerSnapshots\.get\(row\.id\)!==stableJson\(row\)/);
+  assert.match(preview,/markers\.filter\(row=>historicalMarkerSnapshots\.has\(row\.id\)\)\.length/);
+  assert.doesNotMatch(preview,/freshSyntheticMarkers/);
   assert.match(preview,/fence_writer_digest_snapshot_stale/);
   assert.match(preview,/typedMarkerCount === historicalDigestProofs\.size/);
   assert.match(preview,/historicalDigestProofs\.get\(row\.id\)\.digest\s*!== row\.payloadFingerprint/);
