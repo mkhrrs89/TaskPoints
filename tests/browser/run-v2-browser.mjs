@@ -1940,6 +1940,162 @@ try {
       bothMarkersRetained:true,noDuplicateWrites:true,legacyOnly:true};
   });
 
+  await run('paused historical digest accepts newly committed marker-only writer',async context=>{
+    const first=await open(context),second=await open(context);
+    const originalV1=await first.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const seed=await first.evaluate(()=>window.TaskPointsStateRuntimeV2
+      .rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'digest-seed',syntheticMutation:{
+          collection:'notes',entityId:'digest-seed-note',operation:'put',
+          value:'Seed for historical hashing'
+        }
+      }));
+    assert.equal(seed.reason,'preview_writer_recorded',JSON.stringify(seed));
+    // Hold the first WebCrypto digest in Tab A *after* its readonly
+    // preflight transaction completed but before its write transaction.
+    // Tab B must be able to commit a marker-only action in this gap.
+    const gate=await first.evaluate(()=>{
+      const subtle=crypto.subtle,original=subtle.digest.bind(subtle);
+      let intercepted=false;
+      window.__digestEntered=false;
+      window.__releaseDigest=null;
+      Object.defineProperty(subtle,'digest',{configurable:true,value(...args){
+        if(intercepted)return original(...args);
+        intercepted=true;window.__digestEntered=true;
+        return new Promise(resolve=>{window.__releaseDigest=resolve})
+          .then(()=>original(...args));
+      }});
+      return typeof subtle.digest==='function';
+    });
+    assert.equal(gate,true);
+    await first.evaluate(()=>{
+      window.__pendingMarkerOnlyWriter=window.TaskPointsStateRuntimeV2
+        .rehearsePreviewDurableWriterFence('writer',{
+          expectedEpoch:0,marker:'after-paused-hash'
+        });
+    });
+    await first.waitForFunction(()=>window.__digestEntered &&
+      typeof window.__releaseDigest==='function',null,{timeout:12000});
+    const middle=await second.evaluate(()=>window.TaskPointsStateRuntimeV2
+      .rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'middle-marker-only'
+      }));
+    assert.equal(middle.reason,'preview_writer_recorded',JSON.stringify(middle));
+    const resumed=await first.evaluate(async()=>{
+      window.__releaseDigest();
+      const result=await window.__pendingMarkerOnlyWriter;
+      delete crypto.subtle.digest;
+      return result;
+    });
+    assert.equal(resumed.reason,'preview_writer_recorded',JSON.stringify(resumed));
+    assert.equal(resumed.fence.writersCommitted,3);
+    const checked=await second.evaluate(async()=>{
+      const rt=window.TaskPointsStateRuntimeV2;
+      return {audit:await rt.rehearsePreviewDurableWriterFence('audit'),
+        replay:await rt.rehearsePreviewDurableWriterFence('writer',{
+          expectedEpoch:0,marker:'after-paused-hash'
+        }),v1:localStorage.getItem('taskpoints_v1'),
+        authority:rt.getStatus().readAuthority};
+    });
+    assert.equal(checked.audit.reason,'preview_writer_inventory_consistent');
+    assert.equal(checked.audit.observedMarkerCount,3);
+    assert.equal(checked.replay.reason,'preview_writer_replayed');
+    assert.equal(checked.replay.fence.writersCommitted,3);
+    assert.equal(checked.v1,originalV1);
+    assert.equal(checked.authority,'legacy_only');
+    return {deterministicDigestPause:true,markerOnlyConcurrencyRehashed:true,
+      noFalseCorruption:true,allThreeMarkersDurable:true,v1Untouched:true};
+  });
+
+  await run('historical marker rewrite during digest gap is not mistaken for a new writer',async context=>{
+    const first=await open(context),second=await open(context);
+    const originalV1=await first.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const seed=await first.evaluate(()=>window.TaskPointsStateRuntimeV2
+      .rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'rewrite-seed',syntheticMutation:{
+          collection:'notes',entityId:'rewrite-seed-note',operation:'put',
+          value:'Immutable typed proof'
+        }
+      }));
+    assert.equal(seed.reason,'preview_writer_recorded');
+    const firstMarker=await second.evaluate(()=>window.TaskPointsStateRuntimeV2
+      .rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'old-marker-only',payloadFingerprint:'a'.repeat(64)
+      }));
+    assert.equal(firstMarker.reason,'preview_writer_recorded');
+    await first.evaluate(()=>{
+      const subtle=crypto.subtle,original=subtle.digest.bind(subtle);
+      let intercepted=false;window.__digestEntered=false;
+      Object.defineProperty(subtle,'digest',{configurable:true,value(...args){
+        if(intercepted)return original(...args);
+        intercepted=true;window.__digestEntered=true;
+        return new Promise(resolve=>{window.__releaseDigest=resolve})
+          .then(()=>original(...args));
+      }});
+      window.__pendingWriter=window.TaskPointsStateRuntimeV2
+        .rehearsePreviewDurableWriterFence('writer',{
+          expectedEpoch:0,marker:'after-corrupt-gap'
+        });
+    });
+    await first.waitForFunction(()=>window.__digestEntered &&
+      typeof window.__releaseDigest==='function',null,{timeout:12000});
+    // Concurrent Tab B commits a real extra marker and alters a
+    // pre-existing marker-only fingerprint in the same IDB transaction.
+    await second.evaluate(()=>new Promise((resolve,reject)=>{
+      const opening=indexedDB.open('taskpoints_v2_writer_fence_preview_v1',1);
+      opening.onerror=()=>reject(opening.error);
+      opening.onsuccess=()=>{
+        const db=opening.result,tx=db.transaction('control','readwrite');
+        const store=tx.objectStore('control');
+        const row=store.get('writer_marker:old-marker-only');
+        const control=store.get('writer_fence');
+        const change=()=>{
+          if(row.readyState!=='done'||control.readyState!=='done')return;
+          store.put({...row.result,payloadFingerprint:'b'.repeat(64)});
+          store.put({id:'writer_marker:untrusted-extra',
+            generation:control.result.generation,epoch:control.result.epoch,
+            payloadFingerprint:null});
+          store.put({...control.result,writersCommitted:3,
+            lastWriterMarker:'untrusted-extra'});
+        };
+        row.onsuccess=change;control.onsuccess=change;
+        row.onerror=control.onerror=()=>{try{tx.abort()}catch(_){}};
+        tx.oncomplete=()=>{db.close();resolve()};
+        tx.onabort=()=>{db.close();reject(tx.error||Error('tamper aborted'))};
+      };
+    }));
+    const refused=await first.evaluate(async()=>{
+      window.__releaseDigest();
+      const outcome=await window.__pendingWriter;
+      delete crypto.subtle.digest;
+      return outcome;
+    });
+    assert.equal(refused.reason,'fence_writer_inventory_inconsistent',
+      JSON.stringify(refused));
+    assert.equal(refused.canPromote,false);
+    const after=await second.evaluate(async()=>{
+      const rt=window.TaskPointsStateRuntimeV2;
+      return {audit:await rt.rehearsePreviewDurableWriterFence('audit'),
+        read:await rt.rehearsePreviewDurableWriterFence('read'),
+        v1:localStorage.getItem('taskpoints_v1'),
+        authority:rt.getStatus().readAuthority};
+    });
+    assert.equal(after.audit.reason,'preview_writer_inventory_consistent');
+    // The altered marker-only digest is not independently authenticated.
+    // This test proves a *mid-preflight change* is rejected, not that
+    // a post-facto arbitrary fingerprint can be cryptographically verified.
+    assert.equal(after.read.fence.writersCommitted,3);
+    assert.equal(after.read.fence.lastWriterMarker,'untrusted-extra');
+    assert.equal(after.v1,originalV1);
+    assert.equal(after.authority,'legacy_only');
+    const attempted=await second.evaluate(()=>window.TaskPointsStateRuntimeV2
+      .rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker:'after-corrupt-gap'
+      }));
+    assert.equal(attempted.reason,'preview_writer_marker_absent');
+    return {changedHistoricalMarkerNotRetried:true,
+      noUnauthorizedFourthMarker:true,unmodifiedV1:true};
+  });
   await run('reverse lexical marker order preserves newest preview entities and duplicate sequences fail closed',async context=>{
     const page=await open(context);
     const originalV1=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
