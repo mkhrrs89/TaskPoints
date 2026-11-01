@@ -4550,12 +4550,20 @@
         }catch(_){finish({error:'fence_writer_digest_scan_failed'})}
       };
     });
+    // A cooperating writer may commit after our digest snapshot and before
+    // our transaction. Refresh the read+hash proof a bounded number of
+    // times rather than treating legitimate serialized writes as corruption.
+    // Every retry rechecks the entire inventory; exhaustion fails closed.
+    for(let digestRetry=0;digestRetry<4;digestRetry++){
+    let preflightMarkerCount=0;
     let historicalDigestProofs=null;
     if(action!=='read'){
       const snapshot=await readPreviewMarkerDigestInputs();
       if(snapshot.error)return refuse(snapshot.error);
       if(!Array.isArray(snapshot.rows))
         return refuse('fence_writer_digest_scan_failed');
+      preflightMarkerCount=snapshot.rows.filter(row =>
+        typeof row?.id==='string' && row.id.startsWith('writer_marker:')).length;
       historicalDigestProofs=new Map();
       for(const row of snapshot.rows){
         if(typeof row?.id!=='string' || !row.id.startsWith('writer_marker:'))
@@ -4581,7 +4589,7 @@
         historicalDigestProofs.set(row.id,{single,batch,json,digest});
       }
     }
-    return new Promise(resolve => {
+    const attemptResult=await new Promise(resolve => {
       let settled = false;
       let db = null;
       let result = refuse('transaction_not_completed');
@@ -4685,6 +4693,23 @@
                       typeof row?.id === 'string' && row.id.startsWith('writer_marker:'));
                     const entities = records.filter(row =>
                       typeof row?.id === 'string' && row.id.startsWith('synthetic_entity:'));
+                    // If an additional participating synthetic writer
+                    // committed since preflight, our proof is simply stale.
+                    // Abort this attempt without making any writes; the
+                    // caller's bounded loop rehashes the new full inventory.
+                    // A substituted marker at the same counter is NOT
+                    // eligible for this retry.
+                    const freshSyntheticMarkers=markers.filter(row =>
+                      (owns(row,'syntheticMutationJson')
+                        || owns(row,'syntheticMutationBatchJson'))
+                        && !historicalDigestProofs.has(row.id));
+                    if(freshSyntheticMarkers.length
+                      && state.writersCommitted > preflightMarkerCount){
+                      result=refuse('fence_writer_digest_snapshot_stale',{
+                        fence:describe(state)
+                      });
+                      return;
+                    }
                     const markerIds = new Set();
                     const seenSyntheticSequences = new Set();
                     const expectedEntities = new Map();
@@ -5080,6 +5105,10 @@
         }
       };
     });
+    if(attemptResult.reason!=='fence_writer_digest_snapshot_stale')
+      return attemptResult;
+    }
+    return refuse('fence_writer_digest_snapshot_stale');
   }
 
   // Browser-native exclusive-lock *rehearsal*, never a writer handoff.
