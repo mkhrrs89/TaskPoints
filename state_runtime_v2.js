@@ -4556,14 +4556,17 @@
     // Every retry rechecks the entire inventory; exhaustion fails closed.
     for(let digestRetry=0;digestRetry<4;digestRetry++){
     let preflightMarkerCount=0;
+    let historicalMarkerSnapshots=null;
     let historicalDigestProofs=null;
     if(action!=='read'){
       const snapshot=await readPreviewMarkerDigestInputs();
       if(snapshot.error)return refuse(snapshot.error);
       if(!Array.isArray(snapshot.rows))
         return refuse('fence_writer_digest_scan_failed');
-      preflightMarkerCount=snapshot.rows.filter(row =>
-        typeof row?.id==='string' && row.id.startsWith('writer_marker:')).length;
+      historicalMarkerSnapshots=new Map(snapshot.rows.filter(row =>
+        typeof row?.id==='string' && row.id.startsWith('writer_marker:'))
+        .map(row=>[row.id,stableJson(row)]));
+      preflightMarkerCount=historicalMarkerSnapshots.size;
       historicalDigestProofs=new Map();
       for(const row of snapshot.rows){
         if(typeof row?.id!=='string' || !row.id.startsWith('writer_marker:'))
@@ -4693,18 +4696,20 @@
                       typeof row?.id === 'string' && row.id.startsWith('writer_marker:'));
                     const entities = records.filter(row =>
                       typeof row?.id === 'string' && row.id.startsWith('synthetic_entity:'));
-                    // If an additional participating synthetic writer
-                    // committed since preflight, our proof is simply stale.
-                    // Abort this attempt without making any writes; the
-                    // caller's bounded loop rehashes the new full inventory.
-                    // A substituted marker at the same counter is NOT
-                    // eligible for this retry.
-                    const freshSyntheticMarkers=markers.filter(row =>
-                      (owns(row,'syntheticMutationJson')
-                        || owns(row,'syntheticMutationBatchJson'))
-                        && !historicalDigestProofs.has(row.id));
-                    if(freshSyntheticMarkers.length
-                      && state.writersCommitted > preflightMarkerCount){
+                    // Retry on *any* newly committed marker, including
+                    // marker-only acknowledgements. But first prove every
+                    // preflight marker still exists with identical bytes.
+                    // Rewriting an older marker plus increasing the counter
+                    // cannot masquerade as a harmless concurrent writer.
+                    const historicalUnchanged=historicalMarkerSnapshots.size
+                      ===markers.filter(row=>historicalMarkerSnapshots.has(row.id)
+                        && historicalMarkerSnapshots.get(row.id)===stableJson(row)).length;
+                    const freshMarkers=markers.filter(row=>
+                      !historicalMarkerSnapshots.has(row.id));
+                    if(historicalUnchanged && freshMarkers.length
+                      && markers.length===state.writersCommitted
+                      && state.writersCommitted===
+                        preflightMarkerCount+freshMarkers.length){
                       result=refuse('fence_writer_digest_snapshot_stale',{
                         fence:describe(state)
                       });
@@ -4724,6 +4729,8 @@
                         || row.epoch < 0 || row.epoch > state.epoch
                         || !validPayloadFingerprint(row.payloadFingerprint)
                         || !syntheticMarkerValid(row)
+                        || (historicalMarkerSnapshots.has(row.id)
+                          && historicalMarkerSnapshots.get(row.id)!==stableJson(row))
                         || ((owns(row,'syntheticMutationJson')
                           || owns(row,'syntheticMutationBatchJson'))
                           && (!historicalDigestProofs?.has(row.id)
@@ -4799,6 +4806,8 @@
                         || owns(row,'syntheticMutationBatchJson')).length;
                     const inventoryValid = Array.isArray(records)
                       && typedMarkerCount === historicalDigestProofs.size
+                      && markers.filter(row=>historicalMarkerSnapshots.has(row.id)).length
+                        === historicalMarkerSnapshots.size
                       && markers.length === state.writersCommitted
                       && records.length === markers.length + entities.length + (prior ? 1 : 0)
                       && markersValid && entitiesValid
