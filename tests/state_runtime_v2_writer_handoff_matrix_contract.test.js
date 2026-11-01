@@ -778,3 +778,25 @@ test('preview entity materialization never mistakes marker ID sorting for commit
   assert.match(preview,/row\.sequence !== latest\.syntheticSequence/);
   assert.match(preview,/canPromote: false/);
 });
+
+
+test('historical digest preflight never hashes in an open IDB transaction and requires the complete marker set',()=>{
+  const code=read('state_runtime_v2.js');
+  const start=code.indexOf('async function rehearsePreviewDurableWriterFence(action, options = {})');
+  const end=code.indexOf('// Browser-native exclusive-lock *rehearsal*',start);
+  const preview=code.slice(start,end);
+  const preflight=preview.indexOf('const readPreviewMarkerDigestInputs = () =>');
+  const snapshotTx=preview.indexOf("const tx=db.transaction(STORE,'readonly')",preflight);
+  const scanComplete=preview.indexOf('tx.oncomplete=()=>finish({rows})',snapshotTx);
+  const digest=preview.indexOf("global.crypto.subtle.digest('SHA-256',bytes)",scanComplete);
+  const verifyTx=preview.indexOf('const tx = db.transaction(STORE,',digest);
+  assert.ok(preflight>=0&&snapshotTx>preflight&&scanComplete>snapshotTx
+    &&digest>scanComplete&&verifyTx>digest,
+    'Hashing must follow a completed read-only snapshot and precede the verification transaction');
+  assert.match(preview,/typedMarkerCount === historicalDigestProofs\.size/);
+  assert.match(preview,/historicalDigestProofs\.get\(row\.id\)\.digest\s*!== row\.payloadFingerprint/);
+  assert.match(preview,/historicalDigestProofs\.get\(row\.id\)\.json !==/);
+  assert.match(preview,/historicalPayloadDigestsVerified: true/);
+  assert.match(preview,/markerInventoryVerified: true/);
+  assert.match(preview,/canPromote: false/);
+});
