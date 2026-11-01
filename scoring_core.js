@@ -7305,15 +7305,19 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
     };
     const attemptSave = (candidate, trimmed, stage = 'initial', attemptOptions = {}) => {
       const stickyOptions = { ...options, ...attemptOptions };
+      const endSticky = global.TaskPointsPerf?.span?.('storage.save.stickyProtection');
       const candidateWithSticky = preserveStickyFieldsBeforeSave(candidate, storageKey, stickyOptions);
+      endSticky?.({ savePath, stage });
       const storedBytes = getStorageKeySizeBytes(storageKey);
       const candidateBytes = getJsonSizeBytes(candidateWithSticky);
       if (candidateBytes > TASKPOINTS_LARGE_SAVE_WARN_BYTES || (storedBytes > 0 && candidateBytes > storedBytes + (512 * 1024))) {
         recordQuotaFailureDiagnostics({ savePath, stage, storageKey, storedBytes, candidateBytes, snapshot: candidateWithSticky });
       }
       const interactiveFastSave = options.interactive === true && options.deferCompression === true;
+      const endPack = global.TaskPointsPerf?.span?.('storage.save.pack');
       const packedState = packTaskPointsStorageState(candidateWithSticky);
       const packedRawJson = JSON.stringify(packedState);
+      endPack?.({ savePath, stage, packedRawChars: packedRawJson.length });
       const packedInteractiveBytes = packedRawJson.length * 2;
       // Some journal-backed UI paths can safely leave canonical compaction for
       // a lifecycle/explicit flush. Once the packed snapshot grows beyond the
@@ -7340,6 +7344,7 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
       }
       // Do not invoke the LZ encoder for safe, small interactive writes.
       const useFastPacked = interactiveFastSave && packedInteractiveBytes < TASKPOINTS_INTERACTIVE_PACKED_SAFE_BYTES;
+      const endEncoding = global.TaskPointsPerf?.span?.('storage.save.encoding');
       const storagePlan = useFastPacked
         ? {
           packedState,
@@ -7353,6 +7358,7 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
           chosenBytes: packedRawJson.length * 2
         }
         : buildOptimizedTaskPointsStorageRaw(candidateWithSticky, { packedState, packedRawJson });
+      endEncoding?.({ savePath, stage, encoding: storagePlan.chosenEncoding });
       const packedCandidateBytes = storagePlan.packedRawChars * 2;
       const compressedCandidateBytes = storagePlan.compressedRawChars * 2;
       const chosenStorageBytes = storagePlan.chosenChars * 2;
@@ -7380,6 +7386,7 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
         recordQuotaFailureDiagnostics({ savePath, stage, storageKey, storedBytes, candidateBytes: chosenStorageBytes, packedCandidateBytes, compressedCandidateBytes, unpackedCandidateBytes: candidateBytes, packedRawChars: storagePlan.packedRawChars, compressedRawChars: storagePlan.compressedRawChars, chosenStorageEncoding: storagePlan.chosenEncoding, chosenStorageChars: storagePlan.chosenChars, chosenStorageBytes, snapshot: candidateWithSticky });
         throw err;
       }
+      const endVerification = global.TaskPointsPerf?.span?.('storage.save.verifyReadback');
       const savedRaw = localStorage.getItem(storageKey);
       const saved = savedRaw ? (parseTaskPointsStorageJson(savedRaw, {}) || {}) : {};
       const criticalArrays = ['completions', 'matchups', 'gameHistory', 'seasonHistory', 'weightHistory', 'vo2MaxHistory', 'reminders', 'players', 'habits'];
@@ -7393,6 +7400,7 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
           failed.push(key);
         }
       });
+      endVerification?.({ savePath, stage, failedFields: failed.length });
       if (failed.length) {
         if (typeof alert === 'function') {
           alert('Save verification failed: reminders, weightHistory, vo2MaxHistory, or live diff history were not preserved.');
@@ -7433,6 +7441,7 @@ const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
     : {})
 });
     const interactiveSaveStarted = Date.now();
+    const endPreflight = global.TaskPointsPerf?.span?.('storage.save.preflight');
     const initialStoredBytes = getStorageKeySizeBytes(storageKey);
     const initialCandidateBytes = getJsonSizeBytes(cleanedInitialCandidate);
     const shouldPrecompactGenerated = initialCandidateBytes > TASKPOINTS_LARGE_SAVE_WARN_BYTES
@@ -7440,6 +7449,7 @@ const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
     const initialCandidate = shouldPrecompactGenerated
       ? compactStateForLocalStorage(cleanedInitialCandidate)
       : cleanedInitialCandidate;
+    endPreflight?.({ savePath, precompacted: shouldPrecompactGenerated });
     try {
       return attemptSave(initialCandidate, shouldPrecompactGenerated, shouldPrecompactGenerated ? 'initial-generated-compacted' : 'initial', {
         allowGeneratedCacheClear: shouldPrecompactGenerated
