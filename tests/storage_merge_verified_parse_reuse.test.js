@@ -83,7 +83,7 @@ test('a competing storage update invalidates reuse and protects latest previousl
   initial.vo2MaxHistory = [];
   initial.liveDiffHistory = {};
   seed(initial);
-  const updatedSource = structuredClone(initial);
+  const updatedSource = JSON.parse(JSON.stringify(initial));
   updatedSource.reminders.push({ id: 'r2', text: 'Added by another tab' });
   updatedSource.weightHistory.push({ id: 'w2', dateKey: '2026-11-01', weight: 177 });
   updatedSource.vo2MaxHistory.push({ id: 'v2', dateKey: '2026-11-01', value: 44 });
