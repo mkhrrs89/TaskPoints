@@ -85,7 +85,8 @@ test('Audit uses the selected-day optimization without removing existing checks'
   const source = fs.readFileSync(path.join(__dirname, '..', 'audit.html'), 'utf8');
   assert.match(source, /<script src="audit_selected_day_breakdown\.js"><\/script>/);
   assert.match(source, /TaskPointsAuditSelectedDay\.buildSelectedDayBreakdown\(state, dateKey/);
-  assert.doesNotMatch(source, /TaskPointsCore\.buildDailyBreakdowns\(state\)/);
+  assert.match(source, /typeof selectedDayBuilder === 'function'/);
+  assert.equal((source.match(/TaskPointsCore\.buildDailyBreakdowns\(state\)/g) || []).length, 1, 'legacy implementation kept only as fail-safe fallback');
   assert.match(source, /checks\.push\(\.\.\.buildSeasonChampionshipAuditChecks\(state, dateKey\)\)/);
   assert.match(source, /runNoOpPageVisitAudit\(state\)/);
   assert.match(source, /runStickyFieldPreservationAudit\(state\)/);
