@@ -5981,6 +5981,7 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
   }
 
   function loadAppState(options = {}) {
+    const endLoadParse = global.TaskPointsPerf?.span?.('storage.load.parse');
     let parsed = {};
     let storageKeysFound = [];
     try {
@@ -6003,7 +6004,10 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
       console.error("Failed to parse stored state", e);
     }
 
+    endLoadParse?.({ preloaded: !!options.preloadedState });
+    const endLoadNormalize = global.TaskPointsPerf?.span?.('storage.load.normalize');
     let state = normalizeState(parsed);
+    endLoadNormalize?.();
     // This is the authoritative app-wide recovery point. Every page using the
     // shared loader sees pending taps before scoring, rendering, or saves.
     let pendingHabitDeltas = [];
@@ -6017,7 +6021,9 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     const shouldPersist = options.persistSync !== false;
     let changed = false;
 
+    const endHistoricalRepair = global.TaskPointsPerf?.span?.('storage.load.historicalRepair');
     const june2026HistoryRepair = repairConfirmedJune2026LifetimeHistory(state);
+    endHistoricalRepair?.({ changed: june2026HistoryRepair.changed });
     state = june2026HistoryRepair.state;
     changed = changed || june2026HistoryRepair.changed;
 
@@ -6038,23 +6044,31 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
     const cutoff = Date.now() - THIRTY_DAYS_MS;
     const beforeCount = state.tasks.length;
+    const endLoadTaskPrune = global.TaskPointsPerf?.span?.('storage.load.expiredTrash');
     state.tasks = state.tasks.filter((task) => {
       if (!task || task.status !== 'trashed') return true;
       const deletedMs = isoToMs(task.deletedAtISO || task.deletedAt);
       return deletedMs >= cutoff;
     });
+    endLoadTaskPrune?.({ removed: beforeCount - state.tasks.length });
     if (state.tasks.length !== beforeCount) changed = true;
 
     if (shouldSync) {
+      const endDerivedSync = global.TaskPointsPerf?.span?.('storage.load.derivedSync');
       const derivedSync = syncDerivedPoints(state, { normalized: true });
+      endDerivedSync?.({ changed: derivedSync.changed });
       state = derivedSync.state;
       changed = changed || derivedSync.changed;
 
+      const endMatchupSync = global.TaskPointsPerf?.span?.('storage.load.matchupSync');
       const matchupSync = syncYouMatchups(state, { normalized: true });
+      endMatchupSync?.({ changed: matchupSync.changed });
       state = matchupSync.state;
       changed = changed || matchupSync.changed;
 
+      const endSeasonRepair = global.TaskPointsPerf?.span?.('storage.load.seasonRepair');
       const seasonRepair = repairSeasonChampionshipData(state, options);
+      endSeasonRepair?.({ ok: seasonRepair.ok });
       if (seasonRepair.ok) {
         const beforeSeasonRepair = JSON.stringify(state.currentSeason || null);
         state = seasonRepair.state;
@@ -6063,7 +6077,9 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     }
 
     if (changed && shouldPersist) {
+      const endLoadSave = global.TaskPointsPerf?.span?.('storage.load.persistRepair');
       mergeAndSaveState(state, { storageKey: STORAGE_KEY });
+      endLoadSave?.();
     }
 
     if (pendingHabitDeltas.length) schedulePendingHabitDeltaCompaction(state, { storageKey: STORAGE_KEY });
