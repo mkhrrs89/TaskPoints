@@ -5032,9 +5032,11 @@
                         fence: describe(state)
                       });
                     };
-                    if (hasAnySynthetic)
-                      inspectAllWriterMarkers(finishReplay);
-                    else finishReplay();
+                    // Even marker-only idempotent retries must not
+                    // report success over an incomplete historical ledger.
+                    // The entire inventory is verified in the same IDB
+                    // transaction as the replay verdict.
+                    inspectAllWriterMarkers(finishReplay);
                     return;
                   }
                   // A vanished last-marker row is an inconsistency, not
@@ -5092,9 +5094,12 @@
                       fence: describe(next)
                     });
                   };
-                  if (hasAnySynthetic)
-                    inspectAllWriterMarkers(commitPreviewWriter);
-                  else commitPreviewWriter();
+                  // Marker-only preview acknowledgements also advance
+                  // the durable writer counter. They must meet the same
+                  // complete historical-evidence gate as typed mutations.
+                  // Commit and inventory verification remain in one IDB
+                  // readwrite transaction, with no async work in callbacks.
+                  inspectAllWriterMarkers(commitPreviewWriter);
                 } catch (_) {
                   result = refuse('fence_writer_marker_write_failed');
                   try { tx.abort(); } catch (_) {}
