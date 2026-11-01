@@ -1207,11 +1207,14 @@ function buildLogNormalizeShape(state) {
     ];
 
     function summarizeNoOpStateDiff(beforeState, afterState) {
-      const before = stableNormalizeForDiff(beforeState || {});
-      const after = stableNormalizeForDiff(afterState || {});
-      const keySet = new Set([...Object.keys(before), ...Object.keys(after)]);
+      // stableStringify() canonicalizes each compared field. Recursively
+      // normalizing both *entire* historical states first duplicates that work
+      // and consumes substantial memory on long-lived TaskPoints installs.
+      const before = beforeState || {};
+      const after = afterState || {};
+      const keys = Array.from(new Set([...Object.keys(before), ...Object.keys(after)])).sort();
       const changes = [];
-      keySet.forEach(key => {
+      keys.forEach(key => {
         if (NO_OP_DIFF_EXCLUDED_KEYS.has(key)) return;
         const hadBefore = Object.prototype.hasOwnProperty.call(before, key);
         const hasAfter = Object.prototype.hasOwnProperty.call(after, key);
@@ -2579,10 +2582,14 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
       // Compute only the selected date, independently of Log snapshot math.
       // The old all-history path scanned every completion once per historical day.
       const endSelectedDayBreakdown = window.TaskPointsPerf?.span?.('audit.selectedDayBreakdown');
-      const dayBreak = window.TaskPointsAuditSelectedDay.buildSelectedDayBreakdown(state, dateKey, {
-        normalizedState: snapshot.state,
-        dailyTotals: snapshot.rollups.dailyTotals
-      });
+      const selectedDayBuilder = window.TaskPointsAuditSelectedDay?.buildSelectedDayBreakdown;
+      const dayBreak = typeof selectedDayBuilder === 'function'
+        ? selectedDayBuilder(state, dateKey, {
+            normalizedState: snapshot.state,
+            dailyTotals: snapshot.rollups.dailyTotals
+          })
+        // Fail safe: retain the existing calculation if the optional fast script cannot load.
+        : (TaskPointsCore.buildDailyBreakdowns(state)[dateKey] || { total: 0, categories: {} });
       endSelectedDayBreakdown?.({ completionCount: state.completions?.length || 0, selectedDateKey: dateKey });
 
       const checks = [];
@@ -3580,7 +3587,9 @@ if (!dripSchedule) {
         tips: 'Edit each listed habit on the Home page and set “Week complete at” to a number from 1 to 7. This audit does not change habit settings.'
       });
 
+      const endNoOpPageVisits = window.TaskPointsPerf?.span?.('audit.readOnlyPageVisits');
       const noOpVisitAudit = runNoOpPageVisitAudit(state);
+      endNoOpPageVisits?.({ adapterCount: AUDIT_PAGE_ADAPTERS.length });
       checks.push({
         id: 'page-visit-read-only',
         title: 'Page visit is read-only',
@@ -3592,7 +3601,9 @@ if (!dripSchedule) {
         tips: 'Investigate adapter/page normalize-save paths that mutate cloned state without user actions.'
       });
 
+      const endStickyFields = window.TaskPointsPerf?.span?.('audit.stickyFieldPreservation');
       const stickyFieldAudit = runStickyFieldPreservationAudit(state);
+      endStickyFields?.({ adapterCount: AUDIT_PAGE_ADAPTERS.length });
       checks.push({
         id: 'sticky-fields-preserved',
         title: 'Sticky fields survive page save paths',
@@ -3604,7 +3615,9 @@ if (!dripSchedule) {
         tips: 'Ensure page-level normalize/save logic preserves sticky profile and settings fields.'
       });
 
+      const endHistoryPreservation = window.TaskPointsPerf?.span?.('audit.historyPreservation');
       const weightHistoryAudit = runWeightVo2HistorySavePathAudit(state);
+      endHistoryPreservation?.({ adapterCount: AUDIT_PAGE_ADAPTERS.length });
       checks.push({
         id: 'reminders-weight-vo2-history-preserved',
         title: 'Reminders, Weight, and VO2 Max histories survive page save paths',
