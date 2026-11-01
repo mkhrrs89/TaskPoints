@@ -74,9 +74,16 @@ test('merge-save avoids a duplicate decompression/parse of an unchanged stored s
   }
 });
 
-test('a competing storage update invalidates reuse and protects the newest reminder and history', () => {
-  seed();
-  const updatedSource = baseState();
+test('a competing storage update invalidates reuse and protects latest previously-empty histories', () => {
+  const initial = baseState();
+  // The existing sticky-field contract restores a newly populated domain
+  // when an older page submits an empty one. It does not attempt to merge
+  // two independently appended history arrays.
+  initial.weightHistory = [];
+  initial.vo2MaxHistory = [];
+  initial.liveDiffHistory = {};
+  seed(initial);
+  const updatedSource = structuredClone(initial);
   updatedSource.reminders.push({ id: 'r2', text: 'Added by another tab' });
   updatedSource.weightHistory.push({ id: 'w2', dateKey: '2026-11-01', weight: 177 });
   updatedSource.vo2MaxHistory.push({ id: 'v2', dateKey: '2026-11-01', value: 44 });
