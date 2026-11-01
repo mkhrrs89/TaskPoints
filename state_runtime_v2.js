@@ -4925,6 +4925,8 @@
                         ? 'preview_writer_marker_present'
                         : 'preview_writer_marker_absent', {
                         readOnlyMarkerInspection: true,
+                        inventoryVerified: true,
+                        historicalPayloadDigestsVerified: true,
                         markerEpoch: item ? item.epoch : null,
                         markerPayloadFingerprint: item ? item.payloadFingerprint : null,
                         syntheticMutationPresent:
@@ -4935,9 +4937,12 @@
                         fence: describe(state)
                       });
                     };
-                    if (item && hasAnySynthetic)
-                      inspectAllWriterMarkers(finishInspection);
-                    else finishInspection();
+                    // A marker-only or absent-marker lookup is not a
+                    // trustworthy recovery verdict if an older ledger row
+                    // is missing or its synthetic evidence was altered.
+                    // Validate the *whole* preview inventory for every
+                    // read-only marker inspection, not just typed callers.
+                    inspectAllWriterMarkers(finishInspection);
                   } catch (_) {
                     result = refuse('fence_writer_marker_inspection_failed');
                     try { tx.abort(); } catch (_) {}
