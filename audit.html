@@ -1212,7 +1212,8 @@ function buildLogNormalizeShape(state) {
       // and consumes substantial memory on long-lived TaskPoints installs.
       const before = beforeState || {};
       const after = afterState || {};
-      const keys = Array.from(new Set([...Object.keys(before), ...Object.keys(after)])).sort();
+      // Match the legacy report order: existing keys first, then added keys.
+      const keys = Array.from(new Set([...Object.keys(before).sort(), ...Object.keys(after).sort()]));
       const changes = [];
       keys.forEach(key => {
         if (NO_OP_DIFF_EXCLUDED_KEYS.has(key)) return;
