@@ -1249,7 +1249,11 @@ function buildLogNormalizeShape(state) {
     function runNoOpPageVisitAudit(state) {
       const evaluation = TaskPointsAuditIntegrity.evaluateReadOnlyPageVisits(state, AUDIT_PAGE_ADAPTERS, {
         clone: cloneAuditState,
-        diff: summarizeNoOpStateDiff
+        diff: summarizeNoOpStateDiff,
+        // Every adapter receives its own isolated clone, so the original
+        // read-only baseline can be compared without cloning it nine times.
+        reuseReadOnlyBaseline: true,
+        retainFullResults: false
       });
       const { results, failed } = evaluation;
       const details = [];
