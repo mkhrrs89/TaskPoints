@@ -422,9 +422,13 @@ The subsequent inventory scan compares those exact marker bytes and
 recomputed digests within the same IndexedDB transaction used for its
 normal operation. A concurrent synthetic writer, revision of existing
 payload evidence, missing fingerprint or mismatched digest makes the
-scan refuse rather than assuming the preflight is still current. The
-freeze decision still shares its final audit and fence update in one
-readwrite transaction.
+scan refuse rather than assuming the preflight is still current. If a
+cooperating writer *adds* a marker between the snapshot and transaction,
+the preview rehashes the full inventory and retries at most three times
+(four total attempts). It never accepts an unverified digest, and a
+substitution at an unchanged counter is not retryable. Exhausted retries
+refuse without changing the state. The freeze decision still shares its
+final audit and fence update in one readwrite transaction.
 
 Real-browser regression coverage rewrites a valid-looking historical
 Task payload *and* its materialized row while retaining the original
