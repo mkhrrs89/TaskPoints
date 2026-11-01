@@ -271,9 +271,9 @@
     return Array.from(fieldSet);
   }
 
-  function packObjectArray(rows, preferredFields) {
+  function packObjectArray(rows, preferredFields, precomputedFields = null) {
     const list = Array.isArray(rows) ? rows : [];
-    const fields = getPackedArrayFields(list, preferredFields);
+    const fields = Array.isArray(precomputedFields) ? precomputedFields : getPackedArrayFields(list, preferredFields);
     const packedRows = list.map((row) => {
       if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
       return fields.map((field) => {
@@ -284,9 +284,9 @@
     return { fields, rows: packedRows };
   }
 
-  function packObjectArrayShortKeys(rows, preferredFields) {
+  function packObjectArrayShortKeys(rows, preferredFields, precomputedFields = null) {
     const list = Array.isArray(rows) ? rows : [];
-    const fields = getPackedArrayFields(list, preferredFields);
+    const fields = Array.isArray(precomputedFields) ? precomputedFields : getPackedArrayFields(list, preferredFields);
     const aliases = {};
     const fieldToAlias = {};
     fields.forEach((field, index) => {
@@ -336,8 +336,11 @@
 
   function getPackedArrayCandidate(rows, preferredFields) {
     const originalRaw = JSON.stringify(Array.isArray(rows) ? rows : []);
-    const fixedPacked = packObjectArray(rows, preferredFields);
-    const shortKeyPacked = packObjectArrayShortKeys(rows, preferredFields);
+    // Both candidate encodings use the same field set. Scan each historical
+    // collection once instead of rediscovering its keys for each format.
+    const fields = getPackedArrayFields(rows, preferredFields);
+    const fixedPacked = packObjectArray(rows, preferredFields, fields);
+    const shortKeyPacked = packObjectArrayShortKeys(rows, preferredFields, fields);
     const fixedRaw = JSON.stringify(fixedPacked);
     const shortKeyRaw = JSON.stringify(shortKeyPacked);
     const candidates = [
