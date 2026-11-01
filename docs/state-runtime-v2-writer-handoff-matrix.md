@@ -503,3 +503,38 @@ The added scans are intentionally preview-only and are **not** an
 endorsement of full-history scanning on the future production mutation
 hot path. Nonparticipating old V1 tabs remain unfenced, and the authority
 cutover must still refuse. No protection has been removed.
+
+### Marker-only concurrency proof and preflight substitution guard (November 1)
+
+The historical SHA-256 proof is obtained outside IndexedDB transactions.
+A concurrent cooperating marker-only acknowledgement can therefore commit
+after an audit's preflight snapshot but before its verification transaction.
+Earlier bounded retry logic only recognized newly added **typed** markers;
+a valid marker-only interleaving could incorrectly fail with
+`fence_writer_inventory_inconsistent` despite an intact ledger.
+
+The preflight now records the canonical bytes of **every** historical
+marker, whether typed or marker-only. The verification transaction permits
+a bounded digest refresh when new marker IDs increase the committed
+counter consistently **and every older marker is still byte-identical**.
+Adding marker-only and typed intents now follows the same retry path.
+Removing or rewriting an existing marker, even alongside a new marker and
+a counter increment, cannot be treated as a legitimate stale snapshot.
+The final inventory check also requires all preflight marker IDs to remain
+present and unchanged. New marker payloads are checked on the refreshed
+preflight, never trusted based on the counter alone.
+
+Browser regressions explicitly pause an older marker's WebCrypto digest
+between the read-only and verification transactions. A second tab commits
+a marker-only acknowledgement and the first write must safely retry,
+preserving both markers. A separate fixture mutates a preexisting
+marker-only fingerprint while incrementing the control and adding a new
+marker; the paused operation must refuse rather than rehash the altered
+history into an apparent success.
+
+Marker-only fingerprints are still *caller assertions*, not independently
+authenticated payload digests. These checks establish snapshot
+consistency during preview operations; they do not prove that a
+preexisting marker-only assertion could never have been tampered with.
+This is diagnostic hardening, not a production migration or a fence
+against nonparticipating V1 pages. The legacy storage remains primary.
