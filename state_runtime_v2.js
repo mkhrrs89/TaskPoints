@@ -4766,7 +4766,14 @@
                         entityByKey.set(row.id,row);
                         return true;
                       });
+                    // Every preflighted typed marker must still be present.
+                    // Replacing it with a marker-only row (and deleting its
+                    // entity) must not escape the two-pass digest check.
+                    const typedMarkerCount = markers.filter(row =>
+                      owns(row,'syntheticMutationJson')
+                        || owns(row,'syntheticMutationBatchJson')).length;
                     const inventoryValid = Array.isArray(records)
+                      && typedMarkerCount === historicalDigestProofs.size
                       && markers.length === state.writersCommitted
                       && records.length === markers.length + entities.length + (prior ? 1 : 0)
                       && markersValid && entitiesValid
