@@ -2473,6 +2473,90 @@ try {
       retryAfterFailureSafe:true,reloadRestoresTypedEvidence:true,v1Unaffected:true};
   });
 
+  await run('valid-looking historical preview rewrite cannot evade SHA-256 audit',async context=>{
+    const page=await open(context);
+    const originalV1=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const proof=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const original={collection:'tasks',entityId:'hash-bound-task',
+        operation:'put',value:{title:'Unchanged original'}};
+      const written=await runtime.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'hash-bound-original',syntheticMutation:original
+      });
+      const intact=await runtime.rehearsePreviewDurableWriterFence('audit');
+      const altered={...original,value:{title:'Rewritten without updating hash'}};
+      const tamper=await new Promise((resolve,reject)=>{
+        const opening=indexedDB.open('taskpoints_v2_writer_fence_preview_v1',1);
+        opening.onerror=()=>reject(opening.error);
+        opening.onsuccess=()=>{
+          const db=opening.result,tx=db.transaction('control','readwrite');
+          const store=tx.objectStore('control');
+          const marker=store.get('writer_marker:hash-bound-original');
+          const entity=store.get('synthetic_entity:tasks:'+JSON.stringify('hash-bound-task'));
+          let oldHash=null,oldJson=null;
+          const rewrite=()=>{
+            if(!marker.result || !entity.result)return;
+            oldHash=marker.result.payloadFingerprint;
+            oldJson=marker.result.syntheticMutationJson;
+            // Make both rows agree on a new, canonical-shaped value; retain
+            // the original digest. A structural-only audit would miss this.
+            const canonical=JSON.stringify({
+              ...JSON.parse(oldJson),value:altered.value
+            });
+            store.put({...marker.result,syntheticMutationJson:canonical});
+            store.put({...entity.result,syntheticMutationJson:canonical});
+          };
+          marker.onsuccess=()=>{if(entity.readyState==='done')rewrite()};
+          entity.onsuccess=()=>{if(marker.readyState==='done')rewrite()};
+          marker.onerror=entity.onerror=()=>{try{tx.abort()}catch(_){}};
+          tx.oncomplete=()=>{db.close();resolve({oldHash,oldJson})};
+          tx.onabort=()=>{db.close();reject(tx.error||Error('Rewrite aborted'))};
+        };
+      });
+      const audit=await runtime.rehearsePreviewDurableWriterFence('audit');
+      const inspect=await runtime.rehearsePreviewDurableWriterFence('inspect_entity',{
+        collection:'tasks',entityId:'hash-bound-task'
+      });
+      const replay=await runtime.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'post-tamper-replay',syntheticMutation:altered
+      });
+      const freeze=await runtime.rehearsePreviewDurableWriterFence('freeze',{
+        expectedEpoch:0
+      });
+      const fence=await runtime.rehearsePreviewDurableWriterFence('read');
+      return {written,intact,tamper,audit,inspect,replay,freeze,fence,
+        v1:localStorage.getItem('taskpoints_v1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(proof.written.reason,'preview_writer_recorded');
+    assert.equal(proof.intact.reason,'preview_writer_inventory_consistent');
+    assert.equal(proof.intact.historicalPayloadDigestsVerified,true);
+    assert.match(proof.tamper.oldHash,/^[a-f0-9]{64}$/);
+    assert.ok(proof.tamper.oldJson.includes('Unchanged original'));
+    for(const refusal of [proof.audit,proof.inspect,proof.replay,proof.freeze]){
+      assert.equal(refusal.reason,'fence_writer_inventory_inconsistent',
+        JSON.stringify(refusal));
+      assert.equal(refusal.canPromote,false);
+    }
+    assert.equal(proof.fence.fence.writersCommitted,1);
+    assert.equal(proof.fence.fence.frozen,false);
+    assert.equal(proof.v1,originalV1);
+    assert.equal(proof.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    const recovered=await page.evaluate(async()=>{
+      const r=window.TaskPointsStateRuntimeV2;
+      return {audit:await r.rehearsePreviewDurableWriterFence('audit'),
+        v1:localStorage.getItem('taskpoints_v1'),
+        authority:r.getStatus().readAuthority};
+    });
+    assert.equal(recovered.audit.reason,'fence_writer_inventory_inconsistent');
+    assert.equal(recovered.v1,originalV1);
+    assert.equal(recovered.authority,'legacy_only');
+    return {canonicalShapedTamperDetected:true,historyHashRequired:true,
+      inspectReplayAndFreezeFailClosed:true,reloadPreservesEvidence:true,
+      originalV1Untouched:true};
+  });
+
   await run('synthetic preview payload corruption blocks audit freeze and replay',async context=>{
     const page=await open(context);
     const before=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
