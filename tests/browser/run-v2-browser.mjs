@@ -2766,6 +2766,99 @@ try {
       reloadStillRefuses:true};
   });
 
+  await run('marker-only writer and retry require complete historical ledger',async context=>{
+    const page=await open(context);
+    const originalV1=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const proof=await page.evaluate(async()=>{
+      const rt=window.TaskPointsStateRuntimeV2;
+      const typed=await rt.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'prior-typed-evidence',
+        syntheticMutation:{collection:'notes',entityId:'older-ledger-note',
+          operation:'put',value:'Durable original'}
+      });
+      const markerOnly=await rt.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'marker-only-after-typed'
+      });
+      const cleanReplay=await rt.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'marker-only-after-typed'
+      });
+      const cleanAudit=await rt.rehearsePreviewDurableWriterFence('audit');
+      // Tamper with the older immutable typed marker but leave its
+      // materialized entity, latest marker, and aggregate count intact.
+      await new Promise((resolve,reject)=>{
+        const opening=indexedDB.open('taskpoints_v2_writer_fence_preview_v1',1);
+        opening.onerror=()=>reject(opening.error);
+        opening.onsuccess=()=>{
+          const db=opening.result,tx=db.transaction('control','readwrite');
+          const store=tx.objectStore('control');
+          const get=store.get('writer_marker:prior-typed-evidence');
+          get.onsuccess=()=>{
+            if(!get.result){try{tx.abort()}catch(_){};return;}
+            store.put({...get.result,payloadFingerprint:'f'.repeat(64)});
+          };
+          get.onerror=()=>{try{tx.abort()}catch(_){}};
+          tx.oncomplete=()=>{db.close();resolve()};
+          tx.onabort=()=>{db.close();reject(tx.error||Error('fixture corruption aborted'))};
+        };
+      });
+      const replay=await rt.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'marker-only-after-typed'
+      });
+      const newMarker=await rt.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'marker-only-must-not-write'
+      });
+      const freeze=await rt.rehearsePreviewDurableWriterFence('freeze',{
+        expectedEpoch:0
+      });
+      const audit=await rt.rehearsePreviewDurableWriterFence('audit');
+      const read=await rt.rehearsePreviewDurableWriterFence('read');
+      const unchanged=await new Promise((resolve,reject)=>{
+        const opening=indexedDB.open('taskpoints_v2_writer_fence_preview_v1',1);
+        opening.onerror=()=>reject(opening.error);
+        opening.onsuccess=()=>{
+          const db=opening.result,tx=db.transaction('control','readonly');
+          const row=tx.objectStore('control').get('writer_marker:marker-only-must-not-write');
+          row.onsuccess=()=>{};
+          row.onerror=()=>{try{tx.abort()}catch(_){}};
+          tx.oncomplete=()=>{db.close();resolve(row.result===undefined)};
+          tx.onabort=()=>{db.close();reject(tx.error||Error('verification aborted'))};
+        };
+      });
+      return {typed,markerOnly,cleanReplay,cleanAudit,replay,newMarker,
+        freeze,audit,read,unchanged,
+        v1:localStorage.getItem('taskpoints_v1'),
+        authority:rt.getStatus().readAuthority};
+    });
+    assert.equal(proof.typed.reason,'preview_writer_recorded');
+    assert.equal(proof.markerOnly.reason,'preview_writer_recorded');
+    assert.equal(proof.cleanReplay.reason,'preview_writer_replayed');
+    assert.equal(proof.cleanAudit.reason,'preview_writer_inventory_consistent');
+    assert.equal(proof.cleanAudit.historicalPayloadDigestsVerified,true);
+    for(const refusal of [proof.replay,proof.newMarker,proof.freeze,proof.audit]){
+      assert.equal(refusal.reason,'fence_writer_inventory_inconsistent',
+        JSON.stringify(refusal));
+      assert.equal(refusal.canPromote,false);
+    }
+    assert.equal(proof.unchanged,true);
+    assert.equal(proof.read.fence.writersCommitted,2);
+    assert.equal(proof.read.fence.lastWriterMarker,'marker-only-after-typed');
+    assert.equal(proof.read.fence.frozen,false);
+    assert.equal(proof.v1,originalV1);
+    assert.equal(proof.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    const restart=await page.evaluate(async()=>{
+      const rt=window.TaskPointsStateRuntimeV2;
+      return {retry:await rt.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'marker-only-after-typed'
+      }),read:await rt.rehearsePreviewDurableWriterFence('read')};
+    });
+    assert.equal(restart.retry.reason,'fence_writer_inventory_inconsistent');
+    assert.equal(restart.read.fence.writersCommitted,2);
+    return {markerOnlyReplayChecksHistory:true,newMarkerBlockedOnOldCorruption:true,
+      immutableEvidencePreserved:true,reloadStillRefuses:true,
+      V1ReadAuthorityRetained:true};
+  });
+
   await run('preview marker lookup cannot report absent or present against corrupted earlier history',async context=>{
     const page=await open(context);
     const original=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
