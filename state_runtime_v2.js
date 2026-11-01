@@ -4508,6 +4508,79 @@
     if (!generation) return refuse('generation_unavailable');
     const DB = 'taskpoints_v2_writer_fence_preview_v1';
     const STORE = 'control';
+    // A WebCrypto digest cannot be awaited while an IndexedDB transaction
+    // is active: the transaction may commit during the await. For the
+    // isolated PREVIEW writer rehearsal, copy the historical marker inputs
+    // in a short readonly transaction, hash them after it completes, then
+    // require the very same bytes + expected digest in the subsequent
+    // atomic inventory transaction. A concurrent rewrite/addition of a
+    // synthetic marker invalidates this proof and fails closed.
+    const readPreviewMarkerDigestInputs = () => new Promise(resolve => {
+      let finished=false, db=null, rows=null;
+      const finish=value=>{
+        if(finished)return;
+        finished=true;
+        try{db?.close()}catch(_){}
+        resolve(value);
+      };
+      let opening;
+      try{opening=global.indexedDB.open(DB,1)}
+      catch(_){finish({error:'fence_database_open_failed'});return}
+      opening.onblocked=()=>finish({error:'fence_database_upgrade_blocked'});
+      opening.onerror=()=>finish({error:'fence_database_open_failed'});
+      opening.onupgradeneeded=()=>{
+        if(!opening.result.objectStoreNames.contains(STORE))
+          opening.result.createObjectStore(STORE,{keyPath:'id'});
+      };
+      opening.onsuccess=()=>{
+        db=opening.result;
+        db.onversionchange=()=>{try{db.close()}catch(_){}};
+        if(finished){try{db.close()}catch(_){};return}
+        try{
+          const tx=db.transaction(STORE,'readonly');
+          tx.onabort=()=>finish({error:'fence_writer_digest_scan_failed'});
+          tx.onerror=()=>{};
+          tx.oncomplete=()=>finish({rows});
+          const request=tx.objectStore(STORE).getAll();
+          request.onsuccess=()=>{rows=request.result};
+          request.onerror=()=>{
+            try{tx.abort()}catch(_){}
+            finish({error:'fence_writer_digest_scan_failed'});
+          };
+        }catch(_){finish({error:'fence_writer_digest_scan_failed'})}
+      };
+    });
+    let historicalDigestProofs=null;
+    if(action!=='read'){
+      const snapshot=await readPreviewMarkerDigestInputs();
+      if(snapshot.error)return refuse(snapshot.error);
+      if(!Array.isArray(snapshot.rows))
+        return refuse('fence_writer_digest_scan_failed');
+      historicalDigestProofs=new Map();
+      for(const row of snapshot.rows){
+        if(typeof row?.id!=='string' || !row.id.startsWith('writer_marker:'))
+          continue;
+        const single=owns(row,'syntheticMutationJson');
+        const batch=owns(row,'syntheticMutationBatchJson');
+        if(!single && !batch)continue;
+        const json=single?row.syntheticMutationJson:row.syntheticMutationBatchJson;
+        if(typeof json!=='string'){
+          historicalDigestProofs.set(row.id,{single,batch,json,digest:null});
+          continue;
+        }
+        if(typeof global.crypto?.subtle?.digest!=='function'
+          || typeof global.TextEncoder!=='function')
+          return refuse('fence_writer_digest_unavailable');
+        let digest;
+        try{
+          const bytes=new global.TextEncoder().encode(json);
+          const hash=await global.crypto.subtle.digest('SHA-256',bytes);
+          digest=Array.from(new Uint8Array(hash),
+            value=>value.toString(16).padStart(2,'0')).join('');
+        }catch(_){return refuse('fence_writer_digest_failed')}
+        historicalDigestProofs.set(row.id,{single,batch,json,digest});
+      }
+    }
     return new Promise(resolve => {
       let settled = false;
       let db = null;
@@ -4628,6 +4701,19 @@
                         || !syntheticMarkerValid(row)
                         || ((owns(row,'syntheticMutationJson')
                           || owns(row,'syntheticMutationBatchJson'))
+                          && (!historicalDigestProofs?.has(row.id)
+                            || historicalDigestProofs.get(row.id).single
+                              !== owns(row,'syntheticMutationJson')
+                            || historicalDigestProofs.get(row.id).batch
+                              !== owns(row,'syntheticMutationBatchJson')
+                            || historicalDigestProofs.get(row.id).json !==
+                              (owns(row,'syntheticMutationJson')
+                                ? row.syntheticMutationJson
+                                : row.syntheticMutationBatchJson)
+                            || historicalDigestProofs.get(row.id).digest
+                              !== row.payloadFingerprint))
+                        || ((owns(row,'syntheticMutationJson')
+                          || owns(row,'syntheticMutationBatchJson'))
                           && row.payloadFingerprint === null))
                         return false;
                       markerIds.add(row.id);
@@ -4711,6 +4797,7 @@
                 inspectAllWriterMarkers((count,entities) => {
                   result = refuse('preview_writer_inventory_consistent', {
                     readOnlyInventoryAudit: true,
+                    historicalPayloadDigestsVerified: true,
                     initialized: !!prior, observedMarkerCount: count,
                     observedEntityCount: entities.size,
                     fence: describe(state)
@@ -4849,6 +4936,7 @@
                   result = refuse('preview_fence_frozen', {
                     atomicPreviewTransaction: true,
                     markerInventoryVerified: true,
+                    historicalPayloadDigestsVerified: true,
                     fence: describe(next)
                   });
                 });
