@@ -6601,16 +6601,26 @@ function fastEnsureStateShape(s) {
 }
 
   
+  // Internal-only short-lived reuse. Never trust a prior parse unless its exact
+  // localStorage bytes are still current when sticky-field safeguards run.
+  const mergedSaveSourceByState = new WeakMap();
+
   function mergeState(nextState, options = {}) {
     const storageKey = options.storageKey || STORAGE_KEY;
     const allowHabitTagColorReset = Boolean(options.allowHabitTagColorReset);
     let existing = {};
+    let sourceForStickyCheck = null;
     if (options.existing && typeof options.existing === 'object') {
       existing = options.existing;
     } else {
       try {
         const raw = options.raw ?? localStorage.getItem(storageKey);
         existing = raw ? (parseTaskPointsStorageJson(raw, {}) || {}) : {};
+        // Do not trust a caller-supplied state object; only an actual decoded
+        // storage payload may be reused, and the bytes are checked at save time.
+        if (options.captureSaveSource === true) {
+          sourceForStickyCheck = { raw: raw ?? null, storageKey, parsed: existing };
+        }
       } catch (e) {
         console.warn('Failed to parse existing TaskPoints storage; saving fresh state.', e);
         existing = {};
@@ -6734,11 +6744,14 @@ function fastEnsureStateShape(s) {
 
 // 🔥 New: skip heavy normalize on “known-normalized” incremental saves
 if (options.assumeNormalized) {
-  return { state: fastEnsureStateShape(mergedSnapshot), storageKey };
+  const state = fastEnsureStateShape(mergedSnapshot);
+  if (sourceForStickyCheck) mergedSaveSourceByState.set(state, sourceForStickyCheck);
+  return { state, storageKey };
 }
 
 const normalized = normalizeState(mergedSnapshot);
 const merged = { ...mergedSnapshot, ...normalized };
+if (sourceForStickyCheck) mergedSaveSourceByState.set(merged, sourceForStickyCheck);
 return { state: merged, storageKey };
 
 
@@ -7148,11 +7161,20 @@ return { state: merged, storageKey };
     }
   }
 
-  function preserveStickyFieldsBeforeSave(candidateState, storageKey = STORAGE_KEY, options = {}) {
+  function preserveStickyFieldsBeforeSave(candidateState, storageKey = STORAGE_KEY, options = {}, verifiedSource = null) {
     const next = candidateState && typeof candidateState === 'object' ? { ...candidateState } : {};
     let latest = null;
     try {
-      latest = parseTaskPointsStorageJson(localStorage.getItem(storageKey) || '{}', {});
+      const currentRaw = localStorage.getItem(storageKey);
+      if (verifiedSource
+        && verifiedSource.storageKey === storageKey
+        && verifiedSource.raw === currentRaw
+        && verifiedSource.parsed
+        && typeof verifiedSource.parsed === 'object') {
+        latest = verifiedSource.parsed;
+      } else {
+        latest = parseTaskPointsStorageJson(currentRaw || '{}', {});
+      }
     } catch (_) {
       latest = null;
     }
@@ -7253,6 +7275,12 @@ return { state: merged, storageKey };
   }
 
   function saveStateSnapshot(state, options = {}) {
+    // A mergeAndSaveState call may supply its already-decoded storage snapshot.
+    // Reuse is permitted only after rechecking the exact current storage value.
+    const verifiedMergeSource = state && typeof state === 'object'
+      ? mergedSaveSourceByState.get(state) || null
+      : null;
+    if (verifiedMergeSource) mergedSaveSourceByState.delete(state);
     const debugEnabled = Boolean(global && global.TP_DEBUG_PERF);
     const storageKey = options.storageKey || STORAGE_KEY;
     const savePath = options.savePath || options.source || options.reason || options.caller || 'unknown';
@@ -7328,7 +7356,7 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
     const attemptSave = (candidate, trimmed, stage = 'initial', attemptOptions = {}) => {
       const stickyOptions = { ...options, ...attemptOptions };
       const endSticky = global.TaskPointsPerf?.span?.('storage.save.stickyProtection');
-      const candidateWithSticky = preserveStickyFieldsBeforeSave(candidate, storageKey, stickyOptions);
+      const candidateWithSticky = preserveStickyFieldsBeforeSave(candidate, storageKey, stickyOptions, verifiedMergeSource);
       endSticky?.({ savePath, stage });
       const storedBytes = getStorageKeySizeBytes(storageKey);
       const candidateBytes = getJsonSizeBytes(candidateWithSticky);
@@ -7714,7 +7742,8 @@ const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
   }
 
   function mergeAndSaveState(nextState, options = {}) {
-    const merged = mergeState(nextState, options);
+    // Capture the exact persisted source only for this synchronous save.
+    const merged = mergeState(nextState, { ...options, captureSaveSource: true });
     return saveStateSnapshot(merged.state, { ...options, storageKey: merged.storageKey });
   }
 
