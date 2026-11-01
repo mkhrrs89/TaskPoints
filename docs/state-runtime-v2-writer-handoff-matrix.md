@@ -402,3 +402,42 @@ numbers across different immutable synthetic writer markers; legitimate
 batch entities share one marker/sequence. Existing historical markers and
 tombstones remain untouched. The existing browser correction and
 simultaneous-writer scenarios provide real-engine coverage of this edge.
+
+
+### Historical payload digest preflight (November 1)
+
+The isolated preview writer's inventory scan previously checked that
+historical synthetic mutation JSON was canonical, that its SHA-256
+fingerprint *looked* valid, and that the latest materialized row matched
+the marker's JSON. It did not recompute SHA-256 for **every** historical
+payload. A structurally valid rewrite of both an old marker and its
+materialized row, without updating their fingerprint, could therefore
+escape the structural check.
+
+All preview audit, typed inspection, writer/replay and freeze operations
+now first capture a short read-only IndexedDB snapshot of historical
+synthetic marker payloads. The snapshot is hashed via WebCrypto **after
+the transaction has completed**, never while a transaction is active.
+The subsequent inventory scan compares those exact marker bytes and
+recomputed digests within the same IndexedDB transaction used for its
+normal operation. A concurrent synthetic writer, revision of existing
+payload evidence, missing fingerprint or mismatched digest makes the
+scan refuse rather than assuming the preflight is still current. The
+freeze decision still shares its final audit and fence update in one
+readwrite transaction.
+
+Real-browser regression coverage rewrites a valid-looking historical
+Task payload *and* its materialized row while retaining the original
+fingerprint. Audit, inspection, replay and freeze must all refuse;
+reload must retain the tampered evidence without repairing it, and the
+real V1 storage must be unchanged. Ordinary clean records still pass
+the audit. Existing structural checks and the earlier reverse-lexical
+sequence regression remain in place.
+
+This is **accidental-corruption consistency checking**, not a secure
+authentication mechanism: a malicious actor able to rewrite all
+IndexedDB records could also recompute an unkeyed SHA-256 hash. It
+does not fence old V1 tabs, make the synthetic rehearsal a production
+writer, or authorize V2 cutover. The extra scans are confined to the
+isolated dark-preview rehearsal; they are not a proposed foreground
+production mutation path.
