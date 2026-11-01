@@ -806,3 +806,23 @@ test('historical digest preflight never hashes in an open IDB transaction and re
   assert.match(preview,/markerInventoryVerified: true/);
   assert.match(preview,/canPromote: false/);
 });
+
+
+test('preview marker-only writers and retries share the strict immutable-ledger gate',()=>{
+  const code=read('state_runtime_v2.js');
+  const a=code.indexOf('async function rehearsePreviewDurableWriterFence(action, options = {})');
+  const b=code.indexOf('// Browser-native exclusive-lock *rehearsal*',a);
+  const p=code.slice(a,b);
+  const replay=p.indexOf('const finishReplay = () =>');
+  const writer=p.indexOf('const commitPreviewWriter = () =>');
+  assert.ok(replay>=0&&writer>replay);
+  const replayBody=p.slice(replay,writer);
+  assert.match(replayBody,/inspectAllWriterMarkers\(finishReplay\)/);
+  assert.doesNotMatch(replayBody,/else finishReplay\(\)/);
+  const newWrite=p.slice(writer);
+  assert.match(newWrite,/inspectAllWriterMarkers\(commitPreviewWriter\)/);
+  assert.doesNotMatch(newWrite,/else commitPreviewWriter\(\)/);
+  assert.match(p,/for\(let digestRetry=0;digestRetry<4;digestRetry\+\+\)/);
+  assert.match(p,/typedMarkerCount === historicalDigestProofs\.size/);
+  assert.match(p,/canPromote: false/);
+});
