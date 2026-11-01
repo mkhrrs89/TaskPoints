@@ -800,6 +800,9 @@ test('historical digest preflight never hashes in an open IDB transaction and re
   assert.match(preview,/historicalDigestProofs\.get\(row\.id\)\.digest\s*!== row\.payloadFingerprint/);
   assert.match(preview,/historicalDigestProofs\.get\(row\.id\)\.json !==/);
   assert.match(preview,/historicalPayloadDigestsVerified: true/);
+  assert.match(preview,/inventoryVerified: true/);
+  assert.match(preview,/inspectAllWriterMarkers\(finishInspection\)/);
+  assert.doesNotMatch(preview,/if \(item && hasAnySynthetic\)\s*inspectAllWriterMarkers\(finishInspection\)/);
   assert.match(preview,/markerInventoryVerified: true/);
   assert.match(preview,/canPromote: false/);
 });
