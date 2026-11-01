@@ -2753,7 +2753,8 @@ try {
     assert.equal(proof.read.fence.frozen,false);
     assert.equal(proof.read.fence.writersCommitted,2);
     assert.equal(proof.read.fence.lastWriterMarker,'audit-second');
-    assert.equal(proof.last.reason,'preview_writer_marker_present');
+    assert.equal(proof.last.reason,'fence_writer_inventory_inconsistent');
+    assert.equal(proof.last.canPromote,false);
     assert.equal(proof.v1,before);
     assert.equal(proof.authority,'legacy_only');
     await first.reload({waitUntil:'load'});
@@ -2763,6 +2764,76 @@ try {
     return {wholeMarkerAudit:true,oldMarkerLossDetected:true,
       freezeRefusesIncompleteLedger:true,readOnlyEvidencePreserved:true,
       reloadStillRefuses:true};
+  });
+
+  await run('preview marker lookup cannot report absent or present against corrupted earlier history',async context=>{
+    const page=await open(context);
+    const original=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const proof=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const initial=await runtime.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'earlier-corrupt',syntheticMutation:{
+          collection:'notes',entityId:'audit-marker-note',operation:'put',
+          value:'Immutable original'
+        }
+      });
+      const latest=await runtime.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'later-intact'
+      });
+      const intact=await runtime.rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker:'later-intact'
+      });
+      await new Promise((resolve,reject)=>{
+        const opening=indexedDB.open('taskpoints_v2_writer_fence_preview_v1',1);
+        opening.onerror=()=>reject(opening.error);
+        opening.onsuccess=()=>{
+          const db=opening.result,tx=db.transaction('control','readwrite');
+          const store=tx.objectStore('control');
+          const row=store.get('writer_marker:earlier-corrupt');
+          row.onsuccess=()=>{
+            if(!row.result){try{tx.abort()}catch(_){};return;}
+            store.put({...row.result,payloadFingerprint:'f'.repeat(64)});
+          };
+          row.onerror=()=>{try{tx.abort()}catch(_){}};
+          tx.oncomplete=()=>{db.close();resolve()};
+          tx.onabort=()=>{db.close();reject(tx.error||Error('corruption failed'))};
+        };
+      });
+      const last=await runtime.rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker:'later-intact'
+      });
+      const absent=await runtime.rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker:'never-committed'
+      });
+      const typed=await runtime.rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker:'earlier-corrupt'
+      });
+      const read=await runtime.rehearsePreviewDurableWriterFence('read');
+      return {initial,latest,intact,last,absent,typed,read,
+        v1:localStorage.getItem('taskpoints_v1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(proof.initial.reason,'preview_writer_recorded');
+    assert.equal(proof.latest.reason,'preview_writer_recorded');
+    assert.equal(proof.intact.reason,'preview_writer_marker_present');
+    assert.equal(proof.intact.inventoryVerified,true);
+    assert.equal(proof.intact.historicalPayloadDigestsVerified,true);
+    for(const result of [proof.last,proof.absent,proof.typed]){
+      assert.equal(result.reason,'fence_writer_inventory_inconsistent',JSON.stringify(result));
+      assert.equal(result.canPromote,false);
+    }
+    assert.equal(proof.read.fence.writersCommitted,2);
+    assert.equal(proof.read.fence.frozen,false);
+    assert.equal(proof.v1,original);
+    assert.equal(proof.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    const recovered=await page.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker:'later-intact'
+      }));
+    assert.equal(recovered.reason,'fence_writer_inventory_inconsistent');
+    return {noFalsePresentOrAbsent:true,oldTypedCorruptionBlocksMarkerOnlyLookup:true,
+      historicalHashRequired:true,evidenceRetainedAcrossReload:true,v1Untouched:true};
   });
 
   await run('preview writer inventory rejects malformed earlier fingerprints despite intact count',async context=>{
