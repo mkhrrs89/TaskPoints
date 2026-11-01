@@ -1147,8 +1147,10 @@ function buildLogNormalizeShape(state) {
     }
 
     function adapterDaily(rawInput) {
-      const storageState = cloneAuditState(rawInput || {});
-      const loaded = buildDailyLoadShape(storageState);
+      // buildDailyLoadShape only builds the page's loading shape; the next
+      // clone already isolates all nested arrays/objects. Cloning rawInput
+      // beforehand copied the complete history for no additional protection.
+      const loaded = buildDailyLoadShape(rawInput || {});
       let state = cloneAuditState(loaded);
       const migration = applySleepAndWorkMigrations(state);
       if (migration.changed) {
