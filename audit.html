@@ -178,6 +178,7 @@
 
   <script src="scoring_core.js"></script>
   <script src="audit_integrity.js"></script>
+  <script src="audit_selected_day_breakdown.js"></script>
 <script>
     const $ = (id) => document.getElementById(id);
 
@@ -2564,9 +2565,8 @@ if (!season) {
       }
       const snapshot = TaskPointsCore.buildDaySnapshot(dateKey, state);
       const totals = TaskPointsCore.computeDayTotals(snapshot);
-      const rollups = TaskPointsCore.buildRollups(state);
-      const dayBreakdowns = TaskPointsCore.buildDailyBreakdowns(state);
       const leaderboards = TaskPointsCore.computeLeaderboards(state);
+      const rollups = leaderboards.rollups || TaskPointsCore.buildRollups(state);
       const dayCompletions = (state.completions || []).filter(c => {
         if (!c || !c.completedAtISO) return false;
         return TaskPointsCore.dateKey(c.completedAtISO) === dateKey;
@@ -2576,7 +2576,14 @@ const { todayPoints: derivedActualTotal, inertia } =
   TaskPointsCore.deriveTodayWithInertia(rollups.dailyTotals, dateKey, state);
 const actualTotal = round2(Number(derivedActualTotal) || 0);
 
-      const dayBreak = dayBreakdowns[dateKey] || { total: 0, categories: {} };
+      // Compute only the selected date, independently of Log snapshot math.
+      // The old all-history path scanned every completion once per historical day.
+      const endSelectedDayBreakdown = window.TaskPointsPerf?.span?.('audit.selectedDayBreakdown');
+      const dayBreak = window.TaskPointsAuditSelectedDay.buildSelectedDayBreakdown(state, dateKey, {
+        normalizedState: snapshot.state,
+        dailyTotals: snapshot.rollups.dailyTotals
+      });
+      endSelectedDayBreakdown?.({ completionCount: state.completions?.length || 0, selectedDateKey: dateKey });
 
       const checks = [];
 
