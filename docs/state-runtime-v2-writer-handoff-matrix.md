@@ -445,3 +445,32 @@ does not fence old V1 tabs, make the synthetic rehearsal a production
 writer, or authorize V2 cutover. The extra scans are confined to the
 isolated dark-preview rehearsal; they are not a proposed foreground
 production mutation path.
+
+
+### Full-ledger marker inspection (November 1)
+
+The read-only `inspect_marker` recovery probe previously enforced the full
+inventory and historical digest check **only** when the caller supplied a
+typed synthetic mutation. A marker-only query (or a query for an absent
+marker) could claim `present`/`absent` even though another older marker had
+disappeared, or an older typed intent had been altered. The separate
+`audit` and `freeze` paths still refused, but the direct inspection result
+could mislead callers trying to resolve an uncertain commit.
+
+All `inspect_marker` outcomes that would otherwise be `present` or
+`absent` now pass the same complete historical inventory and SHA-256
+verification used for freeze. Successful lookups explicitly report
+`inventoryVerified:true` and `historicalPayloadDigestsVerified:true`.
+Missing-last-marker and malformed-control refusals remain their existing
+fail-closed results. A structurally valid latest marker cannot hide
+missing or cryptographically inconsistent earlier evidence, whether the
+caller supplies a typed payload, a marker-only fingerprint, or no payload.
+
+The Chromium/WebKit regression first verifies an ordinary marker-only
+lookup, then corrupts a previous typed marker's persisted hash without
+altering the latest marker. Lookups for the latest, the corrupted marker,
+and a never-committed marker must all refuse with
+`fence_writer_inventory_inconsistent`, including after reload. No
+inspection writes repairs, clears evidence, changes V1, or grants authority.
+This is a stricter diagnostic of the preview rehearsal, not production
+fencing of older V1 tabs.
