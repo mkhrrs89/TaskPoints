@@ -1940,6 +1940,114 @@ try {
       bothMarkersRetained:true,noDuplicateWrites:true,legacyOnly:true};
   });
 
+  await run('reverse lexical marker order preserves newest preview entities and duplicate sequences fail closed',async context=>{
+    const page=await open(context);
+    const originalV1=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const result=await page.evaluate(async()=>{
+      const r=window.TaskPointsStateRuntimeV2;
+      const initial=[
+        {collection:'notes',entityId:'lexical-note',operation:'put',
+          value:'first revision'},
+        {collection:'tasks',entityId:'lexical-task',operation:'put',
+          value:{title:'Before deletion'}}
+      ];
+      // Commit sequence z -> y -> a deliberately opposes IDB getAll key order.
+      // A batch also proves different entities legitimately share one sequence.
+      const first=await r.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'z-lexical-first',syntheticMutations:initial
+      });
+      const second=await r.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'y-lexical-second',syntheticMutation:{
+          collection:'notes',entityId:'lexical-note',operation:'put',
+          value:'newest revision'
+        }
+      });
+      const third=await r.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'a-lexical-third',syntheticMutation:{
+          collection:'tasks',entityId:'lexical-task',operation:'delete'
+        }
+      });
+      const auditBefore=await r.rehearsePreviewDurableWriterFence('audit');
+      const noteBefore=await r.rehearsePreviewDurableWriterFence('inspect_entity',{
+        collection:'notes',entityId:'lexical-note'
+      });
+      const taskBefore=await r.rehearsePreviewDurableWriterFence('inspect_entity',{
+        collection:'tasks',entityId:'lexical-task'
+      });
+      // Create a duplicate synthetic sequence without deleting any
+      // historical marker. The inventory must not silently pick a winner.
+      await new Promise((resolve,reject)=>{
+        const opening=indexedDB.open('taskpoints_v2_writer_fence_preview_v1',1);
+        opening.onerror=()=>reject(opening.error);
+        opening.onsuccess=()=>{
+          const db=opening.result,tx=db.transaction('control','readwrite');
+          const store=tx.objectStore('control');
+          const request=store.get('writer_marker:z-lexical-first');
+          request.onsuccess=()=>{
+            if(!request.result){try{tx.abort()}catch(_){};return;}
+            store.put({...request.result,syntheticSequence:2});
+          };
+          request.onerror=()=>{try{tx.abort()}catch(_){}};
+          tx.oncomplete=()=>{db.close();resolve()};
+          tx.onabort=()=>{db.close();reject(tx.error||Error('Sequence corruption aborted'))};
+        };
+      });
+      const auditAfter=await r.rehearsePreviewDurableWriterFence('audit');
+      const inspectAfter=await r.rehearsePreviewDurableWriterFence('inspect_entity',{
+        collection:'notes',entityId:'lexical-note'
+      });
+      const replayAfter=await r.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'y-lexical-second',syntheticMutation:{
+          collection:'notes',entityId:'lexical-note',operation:'put',
+          value:'newest revision'
+        }
+      });
+      const freeze=await r.rehearsePreviewDurableWriterFence('freeze',{
+        expectedEpoch:0
+      });
+      const fence=await r.rehearsePreviewDurableWriterFence('read');
+      return {first,second,third,auditBefore,noteBefore,taskBefore,
+        auditAfter,inspectAfter,replayAfter,freeze,fence,
+        v1:localStorage.getItem('taskpoints_v1'),
+        authority:r.getStatus().readAuthority};
+    });
+    for(const write of [result.first,result.second,result.third])
+      assert.equal(write.reason,'preview_writer_recorded',JSON.stringify(write));
+    assert.equal(result.auditBefore.reason,'preview_writer_inventory_consistent');
+    assert.equal(result.auditBefore.observedMarkerCount,3);
+    assert.equal(result.auditBefore.observedEntityCount,2);
+    assert.equal(result.noteBefore.reason,'preview_synthetic_entity_present');
+    assert.equal(result.noteBefore.entity.value,'newest revision');
+    assert.equal(result.noteBefore.entity.sequence,2);
+    assert.equal(result.taskBefore.reason,'preview_synthetic_entity_present');
+    assert.equal(result.taskBefore.entity.operation,'delete');
+    assert.equal(result.taskBefore.entity.sequence,3);
+    for(const refusal of [result.auditAfter,result.inspectAfter,
+      result.replayAfter,result.freeze]){
+      assert.equal(refusal.reason,'fence_writer_inventory_inconsistent',
+        JSON.stringify(refusal));
+      assert.equal(refusal.canPromote,false);
+    }
+    assert.equal(result.fence.fence.writersCommitted,3);
+    assert.equal(result.fence.fence.frozen,false);
+    assert.equal(result.fence.fence.epoch,0);
+    assert.equal(result.v1,originalV1);
+    assert.equal(result.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    const recovered=await page.evaluate(async()=>{
+      const r=window.TaskPointsStateRuntimeV2;
+      return {audit:await r.rehearsePreviewDurableWriterFence('audit'),
+        v1:localStorage.getItem('taskpoints_v1'),
+        authority:r.getStatus().readAuthority};
+    });
+    assert.equal(recovered.audit.reason,'fence_writer_inventory_inconsistent');
+    assert.equal(recovered.v1,originalV1);
+    assert.equal(recovered.authority,'legacy_only');
+    return {reverseLexicalOrderingHandled:true,latestNoteAndDeleteRetained:true,
+      legitimateBatchSequenceShared:true,duplicateSequenceDetected:true,
+      freezeAndReplayBlocked:true,reloadPreservesEvidence:true,v1Untouched:true};
+  });
+
   await run('missing materialized preview entity blocks audit freeze and typed replay',async context=>{
     const page=await open(context);
     const before=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
