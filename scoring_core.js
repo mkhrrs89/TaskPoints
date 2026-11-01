@@ -5816,8 +5816,10 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     '2026-06-14_exhibition_13_0129b7e2-8af6-4d7f-9ad1-502e7ff44193_63d43b6f-d36f-4b44-ba0d-87e9e1471499': ['0129b7e2-8af6-4d7f-9ad1-502e7ff44193', '63d43b6f-d36f-4b44-ba0d-87e9e1471499']
   });
 
-  function repairConfirmedJune2026LifetimeHistory(stateInput) {
-    const state = normalizeState(stateInput || {});
+  function repairConfirmedJune2026LifetimeHistory(stateInput, options = {}) {
+    // loadAppState can pass its already-normalized state. Preserve the
+    // original normalization path for direct callers and pending journal replay.
+    const state = options.alreadyNormalized === true ? stateInput : normalizeState(stateInput || {});
     const markers = state.historicalRepairMarkers && typeof state.historicalRepairMarkers === 'object'
       ? { ...state.historicalRepairMarkers }
       : {};
@@ -6022,7 +6024,11 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     let changed = false;
 
     const endHistoricalRepair = global.TaskPointsPerf?.span?.('storage.load.historicalRepair');
-    const june2026HistoryRepair = repairConfirmedJune2026LifetimeHistory(state);
+    const june2026HistoryRepair = repairConfirmedJune2026LifetimeHistory(state, {
+      // Pending habit deltas can introduce new completion rows; retain the
+      // historical normalize-again path when replaying those journal changes.
+      alreadyNormalized: pendingHabitDeltas.length === 0
+    });
     endHistoricalRepair?.({ changed: june2026HistoryRepair.changed });
     state = june2026HistoryRepair.state;
     changed = changed || june2026HistoryRepair.changed;
