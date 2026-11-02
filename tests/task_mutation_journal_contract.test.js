@@ -305,15 +305,15 @@ test('many pending completion patches do not rescan historical row IDs for each 
     {tasks:[],completions:rows},
     {schemaVersion:1,tasks:[],completionUpserts:updates,completionDeletes:[]}
   );
+  const replayReads=reads;
   assert.equal(result.completions.length,600);
   for(const update of updates){
     assert.equal(result.completions.find(row=>row.id===update.id)?.points,update.points);
   }
-  // The explicit lookups above are bounded, and only the replay's reads
-  // should be counted for this complexity guard.
-  // 48 independent findIndex scans across 600 source rows would far exceed
-  // 12,000 reads, while an indexed pass needs around 1,200.
-  assert.ok(reads<12000,'large replay performed excessive historical ID scans: '+reads);
+  // Exclude the test's own lookups: 48 independent scans across 600 source
+  // rows would exceed 12,000 ID reads. The indexed replay needs ~1,200.
+  assert.ok(replayReads<2500,
+    'large replay performed excessive historical ID scans: '+replayReads);
 });
 
 test('invalid multi-row completion batches reject all rows and preserve existing journal',()=>{
