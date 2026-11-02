@@ -115,6 +115,16 @@ test('task completion mutation is durable immediately and replays without a full
   assert.equal(loaded.completions[0].id, 'c1');
 });
 
+test('fast Task journal skips invalid single-row arrays as the previous normalizer did',()=>{
+  const h=makeHarness();
+  const invalidTask=[]; invalidTask.id='array-task';
+  const invalidCompletion=[]; invalidCompletion.id='array-completion';
+  h.core.journalTaskMutation({task:invalidTask,completionUpsert:invalidCompletion});
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null,
+    'an invalid array row may not become durable after the clone-pass optimization');
+  assert.equal(h.getSaveCalls(),0);
+});
+
 test('pending completion journal rows are cloned once rather than twice per foreground save',()=>{
   const rows=Array.from({length:320},(_,i)=>({
     id:'existing-scwm-'+i,source:'work',points:7.2,workHours:8,
