@@ -538,3 +538,38 @@ consistency during preview operations; they do not prove that a
 preexisting marker-only assertion could never have been tampered with.
 This is diagnostic hardening, not a production migration or a fence
 against nonparticipating V1 pages. The legacy storage remains primary.
+
+### Preview marker commit-sequence evidence (November 1)
+
+The preview control record already stores a writer count and the identifier
+of its last writer. Earlier typed synthetic intents also store a
+`syntheticSequence`, but marker-only acknowledgements historically stored
+**no commit sequence**. Thus an otherwise intact marker inventory could
+misleadingly accept a control record whose last-writer identifier had been
+repointed to an older marker. The next recovery lookup could trust a false
+latest-commit pointer.
+
+New preview marker rows now include a durable `writerSequence` equal to
+the incremented writer counter, alongside the existing typed
+`syntheticSequence` when appropriate. The full inventory audit checks
+positive, bounded, distinct known sequences, agreement between a typed
+marker's two sequence fields, and that the control's last writer actually
+owns the newest known sequence. Typed old-format markers remain verified
+using their original `syntheticSequence`.
+
+Older marker-only rows without `writerSequence` are retained as readable
+legacy preview evidence. They are never silently backfilled or modified.
+If a newer numbered marker exists, however, the control cannot point to
+an earlier unsequenced marker and pass the audit. A history consisting
+entirely of old unnumbered marker-only rows cannot be retroactively
+proven to be in precise commit order; this remains an explicit limitation
+rather than manufactured proof.
+
+Chromium/WebKit tests first verify numbered typed and marker-only
+acknowledgements, emulate one historical sequence-less marker, then
+corrupt only the control's last-writer pointer while leaving the three
+markers and writer count intact. Audit, inspection, replay, fresh writes
+and freeze must refuse before mutation, including after reload. A second
+regression refuses duplicated writer sequences. The original V1 snapshot
+and legacy authority remain unchanged. This protocol remains synthetic
+and preview-only: older V1 application tabs are not fenced or migrated.
