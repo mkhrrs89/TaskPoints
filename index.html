@@ -3584,7 +3584,7 @@ function getPlayerRecordText(playerId) {
   if (!playerId || playerId === 'YOU') return '0-0';
 
   if (window.TaskPointsCore?.computeRecord) {
-    const record = TaskPointsCore.computeRecord(getHomeScoreboardSeasonThreeState(), playerId, { includeToday: false, allowFallback: false });
+    const record = TaskPointsCore.computeRecord(getHomeScoreboardCurrentSeasonState(), playerId, { includeToday: false, allowFallback: false });
     return record.games ? `${record.wins}-${record.losses}` : '0-0';
   }
 
@@ -3593,7 +3593,7 @@ function getPlayerRecordText(playerId) {
     ? player.baseline
     : null;
 
-  const scopedState = getHomeScoreboardSeasonThreeState();
+  const scopedState = getHomeScoreboardCurrentSeasonState();
   const history = Array.isArray(scopedState.gameHistory) ? scopedState.gameHistory : [];
 
   let wins = 0;
@@ -3623,7 +3623,7 @@ function getYourRecordText() {
 
 function computeYourRecord(){
   if (window.TaskPointsCore?.computeRecord) {
-    return TaskPointsCore.computeRecord(getHomeScoreboardSeasonThreeState(), 'YOU', { includeToday: false, allowFallback: false });
+    return TaskPointsCore.computeRecord(getHomeScoreboardCurrentSeasonState(), 'YOU', { includeToday: false, allowFallback: false });
   }
   const matchupRecord = computeYourMatchupRecord();
   if (matchupRecord.games > 0) return matchupRecord;
@@ -4005,6 +4005,7 @@ function getAllParticipantIds(){
 const HOME_SCOREBOARD_SEASON_TWO_START = "2026-07-01";
 const HOME_SCOREBOARD_SEASON_THREE_START = "2026-09-01";
 const HOME_SCOREBOARD_SEASON_THREE_END = "2026-11-01";
+const HOME_SCOREBOARD_SEASON_FOUR_START = "2026-11-01";
 
 function getHomeScoreboardDateKey(row) {
   if (!row) return "";
@@ -4039,10 +4040,33 @@ function getHomeScoreboardSeasonThreeState() {
   };
 }
 
+// The live Home scoreboard follows the active standings season. Season 3 remains
+// independently queryable and its Sep-Oct history is not changed or erased.
+function getHomeScoreboardCurrentSeasonRows(rows, asOfKey = getGameDayKey(new Date())) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (asOfKey < HOME_SCOREBOARD_SEASON_FOUR_START) {
+    return getHomeScoreboardSeasonThreeRows(list);
+  }
+  return list.filter((row) => {
+    const key = getHomeScoreboardDateKey(row);
+    return key && key >= HOME_SCOREBOARD_SEASON_FOUR_START;
+  });
+}
+
+function getHomeScoreboardCurrentSeasonState(asOfKey = getGameDayKey(new Date())) {
+  const s = state || {};
+  return {
+    ...s,
+    matchups: getHomeScoreboardCurrentSeasonRows(s.matchups, asOfKey),
+    gameHistory: getHomeScoreboardCurrentSeasonRows(s.gameHistory, asOfKey),
+    completions: getHomeScoreboardCurrentSeasonRows(s.completions, asOfKey)
+  };
+}
+
 function getCanonicalRankingMap(){
   if (!window.TaskPointsCore?.computeCanonicalRankings) return new Map();
 
-  const scopedState = getHomeScoreboardSeasonThreeState();
+  const scopedState = getHomeScoreboardCurrentSeasonState();
   const rows = TaskPointsCore.computeCanonicalRankings(scopedState);
   const byId = new Map();
 
