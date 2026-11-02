@@ -936,3 +936,34 @@ test('exclusive lease rehearsal inventories non-taskpoints origin keys',()=>{
   assert.doesNotMatch(rehearsal,/currentInventory = captureLegacyNamespace\(\)/);
   assert.match(rehearsal,/canPromote: false/);
 });
+
+
+test('Main Work action batches atomic V1 journal writes without removing fallback',()=>{
+  const journal=read('task_mutation_journal.js');
+  const work=read('work_entry_fast_path.js');
+  const coreStart=journal.indexOf('function journalMutation(mutation = {})');
+  const coreEnd=journal.indexOf('function applyRecord(',coreStart);
+  const core=journal.slice(coreStart,coreEnd);
+  const workStart=work.indexOf('function journalRows(rows)');
+  const workEnd=work.indexOf('function runFastCommit(',workStart);
+  const batch=work.slice(workStart,workEnd);
+  assert.ok(coreStart>=0&&coreEnd>coreStart&&workStart>=0&&workEnd>workStart);
+  assert.match(core,/Object\.prototype\.hasOwnProperty\.call\(mutation, 'completionUpserts'\)/);
+  assert.match(core,/rows\.length > 64/);
+  assert.match(core,/seen\.has\(id\)/);
+  assert.match(core,/record\.completionUpserts = mergeById\(record\.completionUpserts, row\)/);
+  assert.match(core,/TASKPOINTS_TASK_COMPLETION_BATCH_INVALID/);
+  // One single journal commit after all rows have been validated/merged.
+  assert.equal((core.match(/writeRecord\(record\)/g)||[]).length,1);
+  assert.match(journal,/core\.journalTaskCompletionBatch = \(rows\) => journalMutation\(\{ completionUpserts: rows \}\)/);
+  assert.match(batch,/typeof core\.journalTaskCompletionBatch === 'function'/);
+  assert.match(batch,/core\.journalTaskCompletionBatch\(completeRows\)/);
+  assert.match(batch,/counters\.journaledCompletionUpserts \+= completeRows\.length/);
+  assert.match(batch,/return;/);
+  assert.match(batch,/core\.journalTaskMutation\(\{ completionUpsert: clone\(entry\) \}\)/);
+  // The existing confirmed full snapshot path stays active on failure.
+  assert.match(work,/workSaveConfirmed = saveFallback\(priorSave, 'journal-write-failed', true\)/);
+  assert.match(work,/if \(pending && scwm\.flush\?\.\(\) !== true\)/);
+  assert.match(read('state_runtime_v2.js'),/workEntryAtomicAdmissionVerified: false/);
+  assert.match(read('state_runtime_v2.js'),/work_entry_multirecord_admission_not_validated/);
+});
