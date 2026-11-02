@@ -35,14 +35,26 @@ test('Main Home capabilities coexist with V2 foreground-write and idle protectio
     'persistConfirmedHistoricalRepairs: true'
   ]) assert.ok(home.includes(feature), `Main capability missing: ${feature}`);
   for (const guard of [
-    'const latest = normalizeState(state);',
     "save('home-live-diff-capture');",
     'requiredQuietMs = Math.max(quietMs, Number(job.quietMs) || 0)',
     "home-live-diff-periodic-capture', run, { quietMs: 8000 }",
     'storageCache.parsed = state;',
     'completedAtISO: finalCompletion?.completedAtISO || null'
   ]) assert.ok(home.includes(guard), `V2 safeguard missing: ${guard}`);
-  assert.match(home, /const enteredLiveDiffPanel = nextIndex === 3 && homeGraphPanelIndex !== 3/);
+  // Main's perf improvement uses the same in-memory source directly rather
+  // than re-normalizing it. V2's safety property is avoiding load() (which
+  // can overwrite unflushed Habit/Task intents) and retaining explicit
+  // cross-tab revision rejection before saving an optional graph sample.
+  const liveDiffStart = home.indexOf('function captureLiveDiffPoint(){');
+  const liveDiffEnd = home.indexOf('function scheduleInitialHomeLiveDiffCapture()',liveDiffStart);
+  assert.ok(liveDiffStart >= 0 && liveDiffEnd > liveDiffStart);
+  const liveDiff = home.slice(liveDiffStart,liveDiffEnd);
+  assert.match(liveDiff, /const latest = (?:state|normalizeState\(state\));/);
+  assert.doesNotMatch(liveDiff, /normalizeState\(load\(\)\)/);
+  assert.match(liveDiff, /const storedRevision = readHomeStateRevision\(\)/);
+  assert.match(liveDiff, /storedRevision !== loadedStateRevision/);
+  assert.match(liveDiff, /save\('home-live-diff-capture'\)/);
+    assert.match(home, /const enteredLiveDiffPanel = nextIndex === 3 && homeGraphPanelIndex !== 3/);
   assert.match(home, /id="habitPts" class="input" style="width:100%;min-width:0"/);
 });
 
