@@ -765,3 +765,46 @@ change between observations. The new check does not move the Task journal
 to IndexedDB or alter foreground save behavior. Accordingly
 `productionWritersFenced:false`, `allLegacyWritersFenced:false`,
 `canPromote:false` and the nine-family handoff blockers remain intact.
+
+
+### Mandatory preview admission adapter for real Task completion batches (November 2)
+
+The previous `exercisePreviewSerializedSnapshotLease()` guard is voluntary:
+an explicit callback can choose to skip its prewrite guard. This is
+inadequate as an admission boundary even for a participating writer.
+
+V2 therefore adds `rehearsePreviewAdmittedTaskCompletionBatch(rows, token)`
+as an **explicit localhost/branch-preview-only** entry point. It validates
+and freezes an entire 1–64 row completion action before awaiting a lock.
+It then acquires the same exclusive cooperative writer lock, checks the
+dark mode/session epoch/reset generation, compares a supplied, exact
+*full-origin* localStorage inventory, checks V1 Task journal writability,
+and calls the existing **real, synchronous and atomic**
+`TaskPointsCore.journalTaskCompletionBatch()` *itself*. No caller-provided
+callback can omit the prewrite check. An immediate durable journal readback
+must contain every exact changed row before the adapter returns
+`confirmedDurable:true`. The original V1 snapshot is never directly
+rewritten by this adapter.
+
+Browser regression exercises an independent legacy-only tab writing
+`tp_projects_v1` while another tab holds an earlier source token.
+The stale action refuses without appending any journal row. After taking
+a fresh token, a two-completion Work/Sleep-like action commits through
+one synchronous journal `setItem`, and both rows are visible through
+the existing V1 overlay. Reusing the already-consumed token refuses.
+Duplicate/invalid completion batches are refused. A synthetic quota
+failure must retain prior journal bytes and never falsely acknowledge
+durability. The adapter distinguishes unconfirmed outcomes from durable
+commit, including a possible postwrite failure.
+
+**Critical scope boundary:** This is still a *developer-only V1 journal
+admission prototype*, not mandatory admission across TaskPoints. The
+production Task, Work, SCWM, Habit, Notes, Today, Game, settings and
+recovery writers remain unchanged and outside this protocol. A page
+running old code does not honor the Web Lock; a mutation may occur
+immediately after the inventory check. Therefore this work is a
+concrete migration stepping stone, but does **not** satisfy the
+production writer-fencing milestone or authorize V2 IndexedDB cutover.
+`allLegacyWritersFenced:false`, `productionWritersFenced:false`,
+`canPromote:false`, legacy read authority and the complete V1 fallback
+and recovery system remain intact.
