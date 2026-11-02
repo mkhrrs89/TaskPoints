@@ -8529,7 +8529,18 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
       }
 
       if (done.has(today) || failed.has(today)) continue;
-      const streak = countStreakEndingOn(done, yesterday);
+      let streak = countStreakEndingOn(done, yesterday);
+      if (streak <= 0 && habit.streakMultiplierEnabled === true
+        && (habit.category || 'habit') !== 'vice') {
+        // Yesterday may have been protected by a freeze. Keep the existing
+        // "streaks at risk" display accurate without altering pending journals.
+        const projectedHabit = {
+          ...habit,
+          doneKeys: Array.from(done),
+          failedKeys: Array.from(failed)
+        };
+        streak = getHabitFreezeStatus(projectedHabit, state, today).streak;
+      }
       if (streak <= 0) continue;
 
       const basePoints = roundPoints(Number(habit.pointsPerDay) || 0, 2);
