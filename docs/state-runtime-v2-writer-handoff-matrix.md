@@ -729,3 +729,39 @@ remain explicitly blocked. `workEntryAtomicAdmissionVerified` and
 `workEntryFallbackPathFenced` stay `false`, with the permanent
 `work_entry_multirecord_admission_not_validated` blocker. Existing
 journal, full save, rescue and emergency restore features are intact.
+
+
+### Full-origin prewrite admission rehearsal for actual Task journal (November 2)
+
+V2's explicit preview-only `exercisePreviewSerializedSnapshotLease()`
+already offers in-lock freshness guards for the V1 snapshot, Task and Habit
+journals, and Habit sidecars. None of these guards individually notices a
+legacy-only tab directly writing `tp_projects_v1`, Today data, Notes or other
+independent localStorage preferences.
+
+The **additive** `assertPreviewFullOriginInventoryUnchanged(expectedSerialized)`
+guard compares a caller's exact, sorted full-origin localStorage token with a
+fresh synchronous inventory while its explicit exclusive Web Lock callback
+is active. It fails closed if the callback is no longer active, the V2
+generation changes, the expected token is missing, enumeration is denied,
+or any observed key/value differs. The prior guards and their API remain
+available without alteration.
+
+Chromium/WebKit browser regressions now use a *real* V1 Task completion journal
+mutation, not merely a synthetic IDB marker: a paused preview writer holds
+the exclusive cooperative lock, an older legacy-only page changes
+`tp_projects_v1` without changing `taskpoints_v1`, and the resumed writer
+must reject its stale token **before** appending the Task journal row.
+The independent Projects change remains intact. After refreshing the
+source token, an explicit guarded callback can append a real, immediately
+readable Task-journal row while preserving V1 authority. Regression
+contracts pin the guard and its fail-closed outcomes.
+
+This is **not** an application-wide production writer admission protocol:
+the real Task journal does not automatically call the preview lease, and
+a non-cooperating old tab is still free to write before or after the
+last inventory check. The full-origin token can also encounter an ABA
+change between observations. The new check does not move the Task journal
+to IndexedDB or alter foreground save behavior. Accordingly
+`productionWritersFenced:false`, `allLegacyWritersFenced:false`,
+`canPromote:false` and the nine-family handoff blockers remain intact.
