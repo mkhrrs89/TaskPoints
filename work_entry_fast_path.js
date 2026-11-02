@@ -249,7 +249,12 @@
     if (typeof global.save !== 'function') return false;
     if (typeof core.journalTaskMutation !== 'function') return false;
     if (typeof core.assertTaskMutationJournalWritable !== 'function') return false;
-    return Boolean(snapshotScwmRows());
+    // Checking eligibility must not serialize every Work/Sleep/Calories/Mood
+    // completion. runFastCommit() already captures and fingerprints that
+    // exact before-image after the journal-writable preflight, so running
+    // snapshotScwmRows() here doubled expensive JSON work on each save.
+    // Keep the same unavailable-state fallback without a second full scan.
+    return Array.isArray(homeState()?.completions);
   }
 
   function saveFallback(originalSave, reason, requireConfirmedSave = false) {
