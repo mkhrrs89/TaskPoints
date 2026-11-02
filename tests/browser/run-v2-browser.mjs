@@ -98,6 +98,31 @@ async function run(name, test) {
   } finally { await context.close(); }
 }
 try {
+  await run('async browser safety predicate never treats an unresolved Promise as success',async context=>{
+    const page=await open(context);
+    await page.evaluate(()=>{window.__v2AsyncPredicateProbes=0;});
+    await waitForAsyncBrowserCondition(page,async()=>{
+      await new Promise(resolve=>setTimeout(resolve,15));
+      window.__v2AsyncPredicateProbes++;
+      return window.__v2AsyncPredicateProbes>=3;
+    },3500);
+    const count=await page.evaluate(()=>window.__v2AsyncPredicateProbes);
+    assert.equal(count,3,'must await three completed browser probes');
+    const prior=count;
+    await assert.rejects(
+      waitForAsyncBrowserCondition(page,async()=>{
+        await Promise.resolve();
+        window.__v2AsyncPredicateProbes++;
+        return false;
+      },160),
+      /async browser condition not confirmed before deadline/
+    );
+    const deniedProbes=await page.evaluate(()=>window.__v2AsyncPredicateProbes);
+    assert.ok(deniedProbes>prior,'false async probes must not satisfy the condition');
+    return {resolvedPredicateAwaited:true,unresolvedFalseCannotSucceed:true,
+      initialResolvedProbes:count};
+  });
+
   await run('real IndexedDB seed retains unrelated V1 completion only in V1', async context => {
     const page = await open(context);
     const p = await parity(page);
