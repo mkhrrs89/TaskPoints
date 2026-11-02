@@ -141,3 +141,17 @@ test('silver-week number has a thin white outline with no solid badge fill', () 
   assert.match(rule[1], /justify-content:\s*center/);
   assert.match(rule[1], /color:\s*#fff\s*!important/);
 });
+
+
+test('general Habits tag reset cannot erase the white outlined silver-week badge', () => {
+  const genericRule = styles.match(/\.habitRow \.flex\.items-center\.gap-2\.flex-wrap\.text-xs \.tag:not\(\.streak-pill\)([^,]*),/);
+  assert.ok(genericRule, 'general Habit metric styles must remain available');
+  assert.match(genericRule[1], /:not\(\.habit-silver-weeks\)/,
+    'silver week counter must not inherit border:none !important');
+  assert.match(home, /class="tag habit-silver-weeks"[^>]*style="[^"]*border:1px solid rgba\(255,255,255,\.95\) !important/);
+});
+
+test('Home requests updated CSS instead of a potentially stale iPhone stylesheet', () => {
+  assert.match(home, /href="styles\.css\?v=20261102-habit-week-border-2"/);
+  assert.equal((home.match(/href="styles\.css\?v=20261102-habit-week-border-2"/g) || []).length, 3);
+});
