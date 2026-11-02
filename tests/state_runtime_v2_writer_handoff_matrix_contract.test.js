@@ -318,6 +318,41 @@ const SOURCE_ANCHORS = [
     "function scheduleCompaction(reason = 'scheduled')",
     "deferred",
     "verified_compaction"
+  ],
+  [
+    "work_entry_fast_path_and_editor_fallback",
+    "work_entry_fast_path.js",
+    "function runFastCommit(name, original, thisArg, args)",
+    "synchronous",
+    "journal_and_sidecar"
+  ],
+  [
+    "work_entry_fast_path_and_editor_fallback",
+    "work_entry_fast_path.js",
+    "core.journalTaskMutation({ completionUpsert: clone(entry) });",
+    "synchronous",
+    "journal_and_sidecar"
+  ],
+  [
+    "work_entry_fast_path_and_editor_fallback",
+    "work_entry_fast_path.js",
+    "workSaveConfirmed = saveFallback(priorSave, 'journal-write-failed', true);",
+    "synchronous",
+    "snapshot_guard"
+  ],
+  [
+    "work_entry_fast_path_and_editor_fallback",
+    "work_entry_fast_path.js",
+    "if (pending && scwm.flush?.() !== true) {",
+    "synchronous",
+    "verified_compaction"
+  ],
+  [
+    "work_entry_fast_path_and_editor_fallback",
+    "work_entry_fast_path.js",
+    "const sleepAddWrapped = ready && wrapCommit('saveSleepScore');",
+    "synchronous",
+    "journal_and_sidecar"
   ]
 ];
 const FAMILIES = [
@@ -328,7 +363,8 @@ const FAMILIES = [
   'settings_import_reset_and_direct_storage',
   'notes_content_dirty_and_authority_flags',
   'emergency_recovery_and_restore',
-  'task_journal_and_idle_compaction'
+  'task_journal_and_idle_compaction',
+  'work_entry_fast_path_and_editor_fallback'
 ];
 const ALLOWED_TIMING = new Set(['synchronous','deferred','maintenance','lifecycle','destructive']);
 const ALLOWED_REQUIREMENTS = new Set([
@@ -356,9 +392,9 @@ test('every named unfenced writer family has pinned, classified real source evid
       '. Audit the new route; never infer this path was fenced or removed safely.');
   }
   assert.deepEqual([...foundFamilies].sort(),[...FAMILIES].sort());
-  assert.ok(SOURCE_ANCHORS.length >= 44,
+  assert.ok(SOURCE_ANCHORS.length >= 49,
     'Writer evidence inventory silently reduced without an explicit migration review');
-  assert.equal(sourceByFile.size,8,'One of the eight known writer-owner source files went missing');
+  assert.equal(sourceByFile.size,9,'One of the nine known writer-owner source files went missing');
 });
 
 test('writer evidence matrix agrees with runtime hard blockers and remains nonpromotable', () => {
@@ -375,6 +411,9 @@ test('writer evidence matrix agrees with runtime hard blockers and remains nonpr
   const gate=runtime.slice(gateStart,gateEnd);
   for(const evidence of [
     'all_legacy_writers_not_fenced',
+    'work_entry_multirecord_admission_not_validated',
+    'workEntryAtomicAdmissionVerified: false',
+    'workEntryFallbackPathFenced: false',
     'allLegacyWritersFenced: false',
     "canPromote: false",
     "mutationAuthority: 'legacy_only'",
