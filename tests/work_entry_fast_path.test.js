@@ -85,7 +85,7 @@ function makeHarness({ journalFails = false, preflightFails = false, targetedUi 
     clearTimeout() {},
     requestIdleCallback(fn) { timers.push(fn); return timers.length; },
     cancelIdleCallback() {},
-    save(savePath) { calls.fullSaves += 1; calls.lastSavePath = savePath || ''; return true; }
+    save(savePath) { calls.fullSaves += 1; calls.lastSavePath = savePath || ''; return true; },
     renderAll() { calls.renders += 1; }
   };
 
