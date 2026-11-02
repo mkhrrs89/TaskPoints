@@ -183,7 +183,7 @@ test('quota failure during a multi-row batch leaves neither row persisted or ack
   assert.equal(h.core.getTaskMutationJournalStatus().mutationGeneration,generation);
   assert.equal(h.getSaveCalls(),0);
   const pending=h.core.readPendingTaskMutations();
-  assert.deepEqual(pending.record.completionUpserts.map(row=>row.id),['previous']);
+  assert.deepEqual(Array.from(pending.record.completionUpserts,row=>row.id),['previous']);
 });
 
 test('task completion deletion replays and verified compaction clears the journal', () => {
