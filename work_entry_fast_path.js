@@ -3,7 +3,7 @@
 
   if (global.TaskPointsWorkEntryFastPath?.installed) return;
 
-  const VERSION = 4;
+  const VERSION = 5;
   const MAX_INSTALL_ATTEMPTS = 240;
   const INSTALL_RETRY_MS = 50;
   const POST_COMMIT_QUIET_MS = 3200;
@@ -50,6 +50,10 @@
   }
 
   function homeState() {
+    // Prefer Home's explicit live-state getter. A top-level `let state` is
+    // not guaranteed to be exposed by window or indirect eval.
+    const live = global.TaskPointsWorkEntryAccess?.getState?.();
+    if (live && typeof live === 'object') return live;
     if (global.__tpWorkEntryStateForTest && typeof global.__tpWorkEntryStateForTest === 'object') {
       return global.__tpWorkEntryStateForTest;
     }
@@ -322,12 +326,26 @@
       // alerts and left the editor open even after a successful write.
       if (workSaveHandled) return workSaveConfirmed;
       workSaveHandled = true;
-      const changed = changedScwmRows(before);
+      let changed = changedScwmRows(before);
       if (!changed.length) {
-        // No new journal row exists to prove durability. Confirm a normal
-        // full save instead of claiming success from a no-op.
-        workSaveConfirmed = saveFallback(priorSave, 'work-no-change', true);
-        return workSaveConfirmed;
+        // An unchanged Work edit is still a real Save action. Re-journal its
+        // known current row as an explicit durable acknowledgment, rather
+        // than compressing the entire app merely because the values match.
+        // The Home getter guarantees the row belongs to the live state.
+        const currentWorkRow = global.TaskPointsWorkEntryAccess?.getEditedRow?.(name);
+        const currentState = homeState();
+        if (currentWorkRow?.id && Array.isArray(currentState?.completions)
+          && currentState.completions.some(row => row === currentWorkRow)
+          && isScwmCompletion(currentWorkRow)) {
+          changed = [currentWorkRow];
+          counters.unchangedCommits += 1;
+          perfMark('workEntry.unchangedRowRejournal', { name, id: String(currentWorkRow.id) });
+        } else {
+          // Without a validated current Work row, preserve the original
+          // fully confirmed save fallback, never report an unverified success.
+          workSaveConfirmed = saveFallback(priorSave, 'work-no-change', true);
+          return workSaveConfirmed;
+        }
       }
       try {
         journalRows(changed);
