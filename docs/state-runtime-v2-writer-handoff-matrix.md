@@ -573,3 +573,34 @@ and freeze must refuse before mutation, including after reload. A second
 regression refuses duplicated writer sequences. The original V1 snapshot
 and legacy authority remain unchanged. This protocol remains synthetic
 and preview-only: older V1 application tabs are not fenced or migrated.
+
+### Dormant legacy-writer exclusion remains unproven (November 2)
+
+The read-only authority-cutover report and preview peer handshake now
+explicitly publish `silentLegacyWriterExclusionVerified:false` and
+`productionWriterAdmissionComplete:false`. The cutover report also
+publishes `legacyWriterQuietWindowProven:false` and keeps the hard
+`silent_or_suspended_legacy_writers_not_excluded` blocker even if the
+entire localStorage inventory is unchanged across two observations,
+the Habit pilot is consistent, and every observed V2 peer responds.
+
+These are deliberately negative safety facts, not an attempt to discover
+or disable old tabs. A BroadcastChannel handshake can only enumerate
+responding V2 participants; unresponsive, suspended and pre-V2 pages
+remain invisible. The legacy V1 writers do not share a mandatory writer
+admission lease. Passing a static writer evidence matrix or the isolated
+IndexedDB preview fence cannot fill that gap.
+
+A real Chromium/WebKit fixture opens a same-origin **legacy-only page**
+with no V2 runtime loaded, obtains two unchanged full-origin cutover
+audits and a preview peer observation, then resumes that old page to
+write an actual `taskpoints_v1` snapshot and independent `tp_projects_v1`
+data. The receiving V2 tab must observe both durable changes, keep V1
+authority, continue reporting old-tab exclusion as unproven and preserve
+the updated data after reload. No code is added to the live V1 writer
+path; this test demonstrates why snapshot quiescence is not fencing.
+
+This evidence does not simulate an actual iOS PWA process kill or prove
+the safety of a future handoff. Production multi-context writer admission,
+physical Safari lifecycle validation and off-device rollback remain
+non-negotiable blockers. V2 stays preview-only.
