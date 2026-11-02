@@ -5218,7 +5218,11 @@
     try {
       const initialRollback = await inspectLegacyRollbackSource();
       if (!initialRollback.sourceStable) return fail('rollback_source_unavailable');
-      initialInventoryFingerprint = await previewRecoveryFingerprint(captureLegacyNamespace());
+      // Use the complete origin keyspace, not recovery checkpoints' narrower
+      // taskpoints_* namespace. Notes, Projects, Today and game preferences
+      // are independently writable by old tabs while a Web Lock is held.
+      initialInventoryFingerprint = await previewRecoveryFingerprint(
+        JSON.parse(captureReadOnlyFullStorageInventory()));
     } catch (_) { return fail('legacy_inventory_unreadable'); }
     let result = fail('lock_unavailable');
     try {
@@ -5245,8 +5249,9 @@
           // revision or pilot parity. It still invalidates the handoff proof.
           let currentFingerprint, currentInventory;
           try {
-            currentInventory = captureLegacyNamespace();
-            currentFingerprint = await previewRecoveryFingerprint(currentInventory);
+            currentInventory = captureReadOnlyFullStorageInventory();
+            currentFingerprint = await previewRecoveryFingerprint(
+              JSON.parse(currentInventory));
             // An opt-out or off/on toggle during hashing invalidates this
             // diagnostic, even if the stored flag ends at its old value.
             if (!isDarkEnabled() || darkMirrorModeEpoch !== initialModeEpoch) {
@@ -5258,7 +5263,7 @@
             // pending*. Make one final synchronous read in the same turn
             // before reporting a completed rehearsal. This is a diagnostic
             // consistency check, NOT a durable cross-tab writer fence.
-            if (stableJson(captureLegacyNamespace()) !== stableJson(currentInventory)) {
+            if (captureReadOnlyFullStorageInventory() !== currentInventory) {
               result = fail('legacy_changed_during_lock_verification');
               return;
             }
