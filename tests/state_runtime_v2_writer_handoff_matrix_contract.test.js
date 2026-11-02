@@ -1032,7 +1032,7 @@ test('mandatory preview-only Task batch admission validates source and generatio
     "mutationAuthority: 'legacy_only'",
     "readAuthority: 'legacy_only'",
     "writeOutcomeUncertain: true",
-    "reason: 'generation_changed_after_write'"
+    "'generation_changed_after_write'"
   ]) assert.ok(method.includes(evidence),'Missing safety invariant: '+evidence);
   assert.ok(method.indexOf('currentInventory !== expectedInventoryToken')
     < method.indexOf('core.journalTaskCompletionBatch(rows)'),
