@@ -6,7 +6,7 @@ const vm = require('node:vm');
 
 const home = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const styles = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
-const start = home.indexOf('// Weekly silver milestones begin');
+const start = home.indexOf('// Silver weeks count only after an actual weekly threshold is reached,');
 const end = home.indexOf('function addHabitWeeklyCompleteClasses(', start);
 assert.ok(start >= 0 && end > start, 'weekly counter logic is present');
 
