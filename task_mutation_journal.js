@@ -113,13 +113,17 @@
     return current;
   }
 
-  function writeRecord(record) {
+  function writeRecord(record, alreadyNormalized = false) {
     if (!recoveryWriteAllowed()) {
       const error = new Error('TaskPoints paused task changes while recovery protection is active.');
       error.code = 'TASKPOINTS_TASK_MUTATION_JOURNAL_WRITE_LOCKED';
       throw error;
     }
-    const normalized = normalizeRecord(record) || emptyRecord();
+    // Both internal callers receive a fresh, fully normalized copy from
+    // readRecord(). Re-normalizing here cloned every pending Task and
+    // completion a second time on EACH foreground Work/Task interaction.
+    // Keep the original validation path for any future untrusted caller.
+    const normalized = alreadyNormalized ? record : (normalizeRecord(record) || emptyRecord());
     if (isEmpty(normalized)) storage.removeItem(JOURNAL_KEY);
     else storage.setItem(JOURNAL_KEY, JSON.stringify(normalized));
     invalidateReadCaches();
@@ -174,7 +178,7 @@
       if (!record.completionDeletes.includes(id)) record.completionDeletes.push(id);
     }
     record.updatedAtISO = new Date().toISOString();
-    const saved = writeRecord(record);
+    const saved = writeRecord(record, true);
     mutationGeneration += 1;
     try { core.noteStorageUserInteraction?.(); } catch (_) {}
     scheduleCompaction('mutation');
@@ -302,7 +306,7 @@
     record.completionUpserts = record.completionUpserts.filter((row) => !snapshot.completionUpserts.some((saved) => String(saved.id) === String(row.id) && sameRow(saved, row)));
     record.completionDeletes = record.completionDeletes.filter((id) => !snapshot.completionDeletes.includes(id));
     record.updatedAtISO = new Date().toISOString();
-    writeRecord(record);
+    writeRecord(record, true);
     return true;
   }
 
