@@ -4496,6 +4496,101 @@ try {
       integritySha256:true,corruptionRejected:true,authority:'legacy_only'};
   });
 
+  await run('explicit full-origin recovery checkpoint covers independent V1 keys but never enables restore',async context=>{
+    const page=await open(context);
+    const created=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      localStorage.setItem('tp_projects_v1','{"projects":[{"id":"checkpoint-project"}]}');
+      localStorage.setItem('v2_checkpoint_independent_preference','first');
+      const sourceV1=localStorage.getItem('taskpoints_v1');
+      const legacy=await runtime.createPreviewRecoveryCheckpoint();
+      const full=await runtime.createPreviewRecoveryCheckpoint({scope:'full_origin'});
+      return {legacy,full,sourceV1};
+    });
+    assert.equal(created.legacy.saved,true,JSON.stringify(created.legacy));
+    assert.equal(created.legacy.captureScope,'taskpoints_namespace');
+    assert.equal(created.full.saved,true,JSON.stringify(created.full));
+    assert.equal(created.full.verified,true);
+    assert.equal(created.full.sourceStable,true);
+    assert.equal(created.full.captureScope,'full_origin');
+    assert.equal(created.full.canAutoRestore,false);
+    await page.reload({waitUntil:'load'});
+    await page.evaluate(()=>window.V2BrowserFixture.start());
+    const inspected=await page.evaluate(async({legacyId,fullId})=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const legacy=await runtime.inspectPreviewRecoveryCheckpoint(legacyId);
+      const full=await runtime.inspectPreviewRecoveryCheckpoint(fullId);
+      const db=await new Promise((resolve,reject)=>{
+        const req=indexedDB.open('taskpoints_v2_recovery_checkpoints_preview',1);
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      const tx=db.transaction('snapshots','readonly');
+      const record=await new Promise((resolve,reject)=>{
+        const req=tx.objectStore('snapshots').get(fullId);
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      db.close();
+      localStorage.setItem('tp_projects_v1','{"projects":[{"id":"changed-project"}]}');
+      localStorage.removeItem('v2_checkpoint_independent_preference');
+      const fullPlan=await runtime.inspectPreviewRollbackPlan(fullId);
+      const legacyPlan=await runtime.inspectPreviewRollbackPlan(legacyId);
+      return {
+        legacy,full,fullPlan,legacyPlan,
+        included:new Map(record.entries).get('tp_projects_v1'),
+        prefIncluded:new Map(record.entries).get('v2_checkpoint_independent_preference'),
+        sourceV1:localStorage.getItem('taskpoints_v1'),
+        changedProjects:localStorage.getItem('tp_projects_v1'),
+        authority:runtime.getStatus().readAuthority
+      };
+    },{legacyId:created.legacy.checkpointId,fullId:created.full.checkpointId});
+    assert.equal(inspected.full.intact,true,JSON.stringify(inspected.full));
+    assert.equal(inspected.full.captureScope,'full_origin');
+    assert.equal(inspected.full.integrityCoverage,'metadata_and_payload');
+    assert.equal(inspected.legacy.intact,true);
+    assert.equal(inspected.legacy.captureScope,'taskpoints_namespace');
+    assert.equal(inspected.included,'{"projects":[{"id":"checkpoint-project"}]}');
+    assert.equal(inspected.prefIncluded,'first');
+    assert.equal(inspected.fullPlan.planValid,true,JSON.stringify(inspected.fullPlan));
+    assert.equal(inspected.fullPlan.fullOriginLocalStorageCovered,true);
+    assert.equal(inspected.fullPlan.captureScope,'full_origin');
+    assert.ok(inspected.fullPlan.counts.replaceChanged>=1);
+    assert.ok(inspected.fullPlan.counts.restoreMissing>=1);
+    assert.equal(inspected.fullPlan.canApply,false);
+    assert.ok(inspected.fullPlan.blockers.includes('production_writer_fencing_not_implemented'));
+    assert.equal(inspected.legacyPlan.fullOriginLocalStorageCovered,false);
+    assert.ok(inspected.legacyPlan.blockers.includes('rollback_checkpoint_excludes_non_taskpoints_keys'));
+    assert.equal(inspected.sourceV1,created.sourceV1);
+    assert.equal(inspected.changedProjects,'{"projects":[{"id":"changed-project"}]}');
+    assert.equal(inspected.authority,'legacy_only');
+    const tampered=await page.evaluate(async fullId=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const db=await new Promise((resolve,reject)=>{
+        const req=indexedDB.open('taskpoints_v2_recovery_checkpoints_preview',1);
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      const row=await new Promise((resolve,reject)=>{
+        const req=db.transaction('snapshots','readonly').objectStore('snapshots').get(fullId);
+        req.onsuccess=()=>resolve(req.result);req.onerror=reject;
+      });
+      // Trying to change the authenticated scope cannot turn a partial
+      // checkpoint into a full-origin recovery source.
+      row.captureScope='taskpoints_namespace';
+      const tx=db.transaction('snapshots','readwrite');
+      tx.objectStore('snapshots').put(row);
+      await new Promise((resolve,reject)=>{
+        tx.oncomplete=resolve;tx.onerror=reject;tx.onabort=reject;
+      });
+      db.close();
+      const result=await runtime.inspectPreviewRecoveryCheckpoint(fullId);
+      return {result,projects:localStorage.getItem('tp_projects_v1')};
+    },created.full.checkpointId);
+    assert.equal(tampered.result.intact,false);
+    assert.equal(tampered.result.reason,'checkpoint_integrity_failed');
+    assert.equal(tampered.projects,'{"projects":[{"id":"changed-project"}]}');
+    return {fullOriginCaptured:true,existingCheckpointsReadable:true,
+      scopeTamperRejected:true,neverRestores:true,legacyAuthorityUnchanged:true};
+  });
+
   await run('torn multi-key legacy capture is refused before writing an immutable checkpoint',async context=>{
     const page=await open(context);
     const evidence=await page.evaluate(async()=>{
