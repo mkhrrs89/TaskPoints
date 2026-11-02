@@ -243,6 +243,79 @@ test('multi-row batch preserves single-pass pending-journal merge contract',()=>
   assert.doesNotMatch(block,/mergeById\(/,'batch must not rescan all pending rows for each update');
 });
 
+test('large pending completion replay exactly matches legacy order and duplicate semantics',()=>{
+  const baseline={
+    tasks:[{id:'t1',title:'Original'}],
+    completions:Array.from({length:900},(_,i)=>({
+      id:'history-'+i,points:i,source:'work'
+    }))
+  };
+  // Legacy histories may have duplicated existing IDs. findIndex replaces
+  // only the first one, leaving subsequent duplicates untouched.
+  baseline.completions.splice(300,0,
+    {id:'legacy-duplicate',points:1},
+    {id:'legacy-duplicate',points:2});
+  const record={
+    schemaVersion:1,
+    tasks:[{id:'t1',title:'Latest'}],
+    completionDeletes:['history-40','history-41'],
+    completionUpserts:[
+      ...Array.from({length:25},(_,i)=>({id:'history-'+(i*9),points:1000+i})),
+      {id:'legacy-duplicate',points:20},
+      {id:'new-duplicate',points:1},
+      ...Array.from({length:18},(_,i)=>({id:'new-'+i,points:2000+i})),
+      {id:'new-duplicate',points:2},
+      {id:'legacy-duplicate',points:22},
+      {id:'new-2',points:4000}
+    ]
+  };
+  const oldCompletions=clone(baseline.completions);
+  const expected=oldCompletions.filter(row=>
+    !record.completionDeletes.includes(String(row?.id||'')));
+  for(const patch of record.completionUpserts){
+    const at=expected.findIndex(row=>String(row?.id||'')===String(patch.id));
+    if(at>=0)expected[at]=clone(patch);
+    else expected.unshift(clone(patch));
+  }
+  const h=makeHarness();
+  const result=h.core.applyPendingTaskMutations(baseline,record);
+  assert.deepEqual(result.completions,expected);
+  assert.deepEqual(baseline.completions,oldCompletions,'replay must not mutate original history');
+  assert.equal(result.tasks[0].title,'Latest');
+  assert.equal(result.completions.filter(row=>row.id==='legacy-duplicate').length,2);
+  assert.equal(result.completions.find(row=>row.id==='new-duplicate').points,2);
+  assert.equal(result.completions.find(row=>row.id==='new-2').points,4000);
+});
+
+test('many pending completion patches do not rescan historical row IDs for each patch',()=>{
+  let reads=0;
+  const rows=Array.from({length:600},(_,i)=>{
+    const row={points:i};
+    Object.defineProperty(row,'id',{
+      enumerable:true,
+      get(){reads++;return 'tracked-'+i;}
+    });
+    return row;
+  });
+  const h=makeHarness();
+  const updates=Array.from({length:48},(_,i)=>({
+    id:'tracked-'+(i*9),points:1000+i
+  }));
+  const result=h.core.applyPendingTaskMutations(
+    {tasks:[],completions:rows},
+    {schemaVersion:1,tasks:[],completionUpserts:updates,completionDeletes:[]}
+  );
+  assert.equal(result.completions.length,600);
+  for(const update of updates){
+    assert.equal(result.completions.find(row=>row.id===update.id)?.points,update.points);
+  }
+  // The explicit lookups above are bounded, and only the replay's reads
+  // should be counted for this complexity guard.
+  // 48 independent findIndex scans across 600 source rows would far exceed
+  // 12,000 reads, while an indexed pass needs around 1,200.
+  assert.ok(reads<12000,'large replay performed excessive historical ID scans: '+reads);
+});
+
 test('invalid multi-row completion batches reject all rows and preserve existing journal',()=>{
   const h=makeHarness();
   const base={id:'work-existing',source:'work',points:5};
