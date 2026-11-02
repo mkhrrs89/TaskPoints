@@ -171,3 +171,35 @@ test('unchanged Work score and hours can still be confirmed by the durable journ
   assert.equal(events.journal[0].completionUpsert.id, existing.id);
   assert.equal(events.fullSaves, 0, 'unchanged Work edits must not trigger a 2-second compressed snapshot save');
 });
+
+
+test('Home Work access follows replaced canonical state, not a stale completion reference', () => {
+  const start = home.indexOf('window.TaskPointsWorkEntryAccess = {');
+  const end = home.indexOf('\n};', start);
+  assert.ok(start >= 0 && end > start, 'real Home accessor source is present');
+  const source = home.slice(start, end + 3);
+  const row = {
+    id: 'work-history-1', title: 'Work Score (8) — Hours 8',
+    points: 8, workHours: 8, source: 'work'
+  };
+  const liveWindow = {};
+  const setup = new Function('window', 'firstRow',
+    'let state = { completions: [firstRow] };' +
+    'let workEditContext = firstRow;' +
+    'function resolveCompletionRef(ref) {' +
+      'return state.completions.find(entry => entry.id === ref?.id) || null;' +
+    '}' +
+    'function getTodayWorkEntry() { return state.completions[0] || null; }' +
+    source +
+    'return { access: window.TaskPointsWorkEntryAccess,' +
+      'replaceState: next => { state = next; } };'
+  )(liveWindow, row);
+  assert.equal(setup.access.getState().completions[0], row);
+  assert.equal(setup.access.getEditedRow('submitWorkEditModal'), row);
+  const newestRow = { ...row, points: 9, workHours: 9 };
+  const newerState = { completions: [newestRow] };
+  setup.replaceState(newerState);
+  assert.equal(setup.access.getState(), newerState);
+  assert.equal(setup.access.getEditedRow('submitWorkEditModal'), newestRow);
+  assert.equal(setup.access.getEditedRow('saveWorkScore'), newestRow);
+});
