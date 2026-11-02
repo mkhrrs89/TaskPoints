@@ -1005,6 +1005,51 @@ try {
       noProductionAuthorityChange:true};
   });
 
+  await run('nonpilot Task record migration aborts atomically on Task put failure and retries safely',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const before=localStorage.getItem('taskpoints_v1');
+      const put=IDBObjectStore.prototype.put;
+      let attempted=0;
+      IDBObjectStore.prototype.put=function(){
+        if(this.name==='tasks'){
+          attempted++;
+          throw new DOMException('synthetic Task store failure','QuotaExceededError');
+        }
+        return put.apply(this,arguments);
+      };
+      let failed;
+      try { failed=await runtime.rehearsePreviewTaskCollectionSeed(); }
+      finally { IDBObjectStore.prototype.put=put; }
+      const db=await runtime.open();
+      const rows=await new Promise((resolve,reject)=>{
+        const req=db.transaction('tasks','readonly').objectStore('tasks').getAll();
+        req.onsuccess=()=>resolve(req.result);req.onerror=reject;
+      });
+      const evidence=await new Promise((resolve,reject)=>{
+        const req=db.transaction('meta','readonly').objectStore('meta').get('task-preview');
+        req.onsuccess=()=>resolve(req.result);req.onerror=reject;
+      });
+      const recovered=await runtime.rehearsePreviewTaskCollectionSeed();
+      return {failed,attempted,rows,evidence,recovered,
+        unchanged:localStorage.getItem('taskpoints_v1')===before,
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.ok(result.attempted>0);
+    assert.equal(result.failed.stored,false,JSON.stringify(result.failed));
+    assert.equal(result.failed.verified,false);
+    assert.equal(result.failed.reason,'task_preview_write_failed');
+    assert.deepEqual(result.rows,[]);
+    assert.equal(result.evidence,undefined);
+    assert.equal(result.recovered.verified,true,JSON.stringify(result.recovered));
+    assert.equal(result.recovered.stored,true);
+    assert.equal(result.unchanged,true);
+    assert.equal(result.authority,'legacy_only');
+    return {incompleteTaskImportRolledBack:true,sourceUnchanged:true,
+      explicitRetrySafe:true,authorityUnchanged:true};
+  });
+
   await run('nonpilot Tasks preview preserves prior evidence rather than overwriting a newer legacy Task',async context=>{
     const page=await open(context);
     const legacy=await context.newPage();
