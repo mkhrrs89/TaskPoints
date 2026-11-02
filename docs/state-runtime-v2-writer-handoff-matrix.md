@@ -635,3 +635,40 @@ that wakes after the final check, or a value that changes and reverts
 between observations. It is therefore **not** a production writer
 admission fence and never sets `canPromote:true`. Production cutover
 still requires an approved strategy for unfenced old tabs.
+
+### Main Work Score fast-path admission boundary (November 2)
+
+After the one-way Main -> V2 sync, Main's `work_entry_fast_path.js`
+introduced an additional entry-point owner for Work, Sleep, Calories
+and Mood completions. The fast path intercepts a synchronous Home
+`save()` call, stores changed completion rows through the **V1 Task
+mutation journal** (`core.journalTaskMutation`) and, when that fails or
+cannot confirm a Work edit, can perform a **full snapshot fallback**
+through `global.save` and a pending SCWM flush.
+
+The original V2 writer evidence inventory recorded the journal sink
+(`task_mutation_journal.js`) and Home save functions, but it did not
+identify this new wrapper as a separate *admission entry point*.
+Future cutover fencing of only the underlying journal function would
+not by itself prove all Work and related editor fallback behavior has
+correct generation, epoch, idempotency and multi-context semantics.
+
+The V2-only reader/report now lists a ninth known unfenced writer family,
+`work_entry_fast_path_and_editor_fallback`, with additional permanent
+`work_entry_multirecord_admission_not_validated` blocker and explicit
+`workEntryAtomicAdmissionVerified:false` and
+`workEntryFallbackPathFenced:false` checks. This does not wrap, replace,
+slow or change any real Work or SCWM save behavior. The source-evidence
+contract pins real journal, fallback and flush paths. Chromium and WebKit
+verify an actual **synthetic Work completion** persisted by the current
+V1 Task journal, including verified compaction, reload and persistent
+refusal to promote V2 after that journal becomes empty.
+
+**Remaining proof obligation:** atomically capture the logical Work
+action across all changed completion rows, and show that journal failure
+fallback, direct legacy full saves, stale tabs, immediate-kill recovery
+and post-restore generations cannot acknowledge a newer V2 commit from
+an incomplete or replayed edit. Multiple per-row `journalRows` calls
+are not themselves one IndexedDB transaction. Existing V1 journaling
+and recovery safeguards remain authoritative, and nothing here changes
+Main or allows a V2 cutover.
