@@ -284,6 +284,17 @@
   }
 
   function journalRows(rows) {
+    // Prefer a single synchronous localStorage journal write per logical
+    // Work/SCWM action. A failed batch must go straight to the existing
+    // confirmed full-save fallback, never a partial per-row retry.
+    if (typeof core.journalTaskCompletionBatch === 'function') {
+      const completeRows = rows.map((entry) => clone(entry));
+      core.journalTaskCompletionBatch(completeRows);
+      counters.journaledCompletionUpserts += completeRows.length;
+      return;
+    }
+    // Preserve older hosts and integrations that do not have the new V2
+    // branch batch journal API; no existing feature is removed.
     for (const entry of rows) {
       core.journalTaskMutation({ completionUpsert: clone(entry) });
       counters.journaledCompletionUpserts += 1;
