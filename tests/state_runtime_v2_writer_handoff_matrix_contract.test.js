@@ -1048,3 +1048,39 @@ test('mandatory preview-only Task batch admission validates source and generatio
   assert.ok(!read('task_mutation_journal.js').includes('rehearsePreviewAdmittedTaskCompletionBatch'),
     'preview adapter must not intercept production Task journaling');
 });
+
+test('nonpilot Tasks store is additive, explicit, source-verified and cannot become authoritative',()=>{
+  const source=read('state_runtime_v2.js');
+  const begin=source.indexOf('async function rehearsePreviewTaskCollectionSeed()');
+  const end=source.indexOf('// A narrower stepping stone toward REQUIRED writer admission',begin);
+  assert.ok(begin>0&&end>begin);
+  const preview=source.slice(begin,end);
+  assert.match(source,/const DB_VERSION = 3/);
+  assert.match(source,/if \(!db\.objectStoreNames\.contains\('tasks'\)\) db\.createObjectStore\('tasks', \{ keyPath: 'id' \}\)/);
+  assert.match(source,/const STORE_NAMES = Object\.freeze\(\['habits', 'completions', 'mutations', 'meta'\]\)/);
+  for(const evidence of [
+    'if (!isWalTestPreviewHost())',
+    'if (!isDarkEnabled())',
+    'core.readPendingTaskMutations()',
+    'if (pending?.malformed)',
+    'core.readTaskPointsStoredState()',
+    'inventoryBefore !== inventoryAfter',
+    'await previewRecoveryFingerprint(tasks)',
+    'const generation = currentGeneration({ create: false })',
+    "db.transaction(['tasks','meta'], 'readwrite')",
+    "metaStore.get('task-preview')",
+    'task_preview_concurrent_conflict',
+    'task_preview_existing_evidence_preserved',
+    'task_preview_readback_mismatch',
+    'legacy_changed_after_seed',
+    'productionWritersFenced:false',
+    "mutationAuthority:'legacy_only'",
+    'canPromote:false'
+  ]) assert.ok(preview.includes(evidence),'Missing nonpilot migration safety invariant: '+evidence);
+  assert.ok(preview.indexOf('captureReadOnlyFullStorageInventory()')
+    < preview.indexOf("db.transaction(['tasks','meta'], 'readwrite')"));
+  assert.ok(!preview.includes('core.saveStateSnapshot('));
+  assert.ok(!preview.includes('core.journalTaskMutation('));
+  assert.ok(!preview.includes('canPromote:true'));
+  assert.match(source,/    rehearsePreviewTaskCollectionSeed,/);
+});
