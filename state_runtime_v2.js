@@ -3914,24 +3914,30 @@
     if (!id.startsWith('v1-preview:')) return refused('checkpoint_id_required');
     let db;
     try {
-      const verdict = await inspectPreviewRecoveryCheckpoint(id);
-      if (!verdict.intact) return refused(verdict.reason);
-      // Historical payload-only records remain inspectable, but their
-      // capture generation and timestamp were never cryptographically bound
-      // to the payload. A mutation-authority rollback rehearsal must never
-      // classify that provenance as an authenticated recovery source.
-      if (verdict.integrityCoverage !== 'metadata_and_payload')
+      // Read and authenticate the immutable checkpoint exactly once. A second
+      // IDB open/read after the initial verdict can observe a different valid
+      // record if external tooling replaces it during this asynchronous plan.
+      // One read also avoids duplicate SHA-256 work for large origin captures.
+      let record;
+      try {
+        db = await openPreviewRecoveryDb();
+        const tx = db.transaction(PREVIEW_RECOVERY_STORE, 'readonly');
+        record = await requestPromise(tx.objectStore(PREVIEW_RECOVERY_STORE).get(id));
+        if (!record) return refused('checkpoint_missing');
+        if (!await validPreviewRecoveryRecord(record))
+          return refused('checkpoint_integrity_failed');
+      } catch (_) { return refused('checkpoint_unreadable'); }
+      // Historical payload-only records can still be inspected, but their
+      // metadata was not authenticated and cannot support a rollback plan.
+      if (record.integrityVersion !== 2 && record.integrityVersion !== 3)
         return refused('checkpoint_provenance_unverified');
+      const captureScope = record.integrityVersion === 3
+        ? 'full_origin' : 'taskpoints_namespace';
       const before = await inspectLegacyRollbackSource();
       if (!before.sourceStable) return refused('legacy_source_' + before.reason);
-      const captureForPlan = () => verdict.captureScope === 'full_origin'
+      const captureForPlan = () => captureScope === 'full_origin'
         ? JSON.parse(captureReadOnlyFullStorageInventory()) : captureLegacyNamespace();
       const currentBefore = captureForPlan();
-      db = await openPreviewRecoveryDb();
-      const tx = db.transaction(PREVIEW_RECOVERY_STORE, 'readonly');
-      const record = await requestPromise(tx.objectStore(PREVIEW_RECOVERY_STORE).get(id));
-      if (!await validPreviewRecoveryRecord(record))
-        return refused('checkpoint_integrity_failed');
       const savedKeys = new Map(record.entries);
       const currentKeys = new Map(currentBefore);
       let removed = 0;
@@ -3953,12 +3959,12 @@
         reason: generationMatches ? 'dry_run_only' : 'checkpoint_generation_differs',
         checkpointId: id, mutationAuthority: 'legacy_only',
         readAuthority: 'legacy_only', capturedGeneration: record.generation,
-        generationMatches, captureScope: verdict.captureScope,
-        fullOriginLocalStorageCovered: verdict.captureScope === 'full_origin',
+        generationMatches, captureScope: captureScope,
+        fullOriginLocalStorageCovered: captureScope === 'full_origin',
         counts: { restoreMissing: restored, replaceChanged: replaced,
           removeNewer: removed, captured: savedKeys.size, current: currentKeys.size },
         blockers: [
-          ...(verdict.captureScope !== 'full_origin'
+          ...(captureScope !== 'full_origin'
             ? ['rollback_checkpoint_excludes_non_taskpoints_keys'] : []),
           // A local checkpoint cannot cover separate IndexedDBs,
           // independent off-device backup or dormant legacy writers.

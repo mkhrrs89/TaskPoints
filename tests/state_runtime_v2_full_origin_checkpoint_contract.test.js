@@ -33,7 +33,11 @@ test('full-origin rollback rehearsal accounts for non-taskpoints keys but never 
   const inspect=runtime.slice(runtime.indexOf('async function inspectPreviewRecoveryCheckpoint(idInput)'),
     runtime.indexOf('async function createPreviewRecoveryCheckpoint(options = {})'));
   assert.match(inspect,/captureScope: record\.integrityVersion === 3/);
-  assert.match(inspect,/captureForPlan = \(\) => verdict\.captureScope === 'full_origin'/);
+  assert.match(inspect,/captureForPlan = \(\) => captureScope === 'full_origin'/);
+  assert.match(inspect,/if \(!await validPreviewRecoveryRecord\(record\)\)/);
+  assert.doesNotMatch(inspect,/await inspectPreviewRecoveryCheckpoint\(id\)/);
+  assert.equal((inspect.match(/openPreviewRecoveryDb\(\)/g)||[]).length,2,
+    'checkpoint inspection and rollback plan each open the database once');
   assert.match(inspect,/JSON\.parse\(captureReadOnlyFullStorageInventory\(\)\)/);
   assert.match(inspect,/fullOriginLocalStorageCovered: verdict\.captureScope === 'full_origin'/);
   assert.match(inspect,/rollback_checkpoint_excludes_non_taskpoints_keys/);
