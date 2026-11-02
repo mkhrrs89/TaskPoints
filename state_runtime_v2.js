@@ -4333,10 +4333,45 @@
       assertPreviewGenerationCurrent();
       return true;
     };
+    // Preview admission must also account for independent V1 keys such as
+    // Projects, Today, Notes, game preferences and writer signal sidecars.
+    // Earlier snapshot/journal guards do not see these direct localStorage
+    // writes. An explicit caller supplies the *exact prior full-origin*
+    // inventory string; the comparison happens synchronously under this
+    // cooperative exclusive lock immediately before its intended write.
+    // An old tab can still write directly AFTER the check, so this is an
+    // admission building block, never a production-wide writer fence.
+    const assertPreviewFullOriginInventoryUnchanged = expectedSerialized => {
+      if (!callbackActive) {
+        const error = Error('state_runtime_v2_preview_full_origin_guard_outside_lock');
+        error.code = 'STATE_RUNTIME_V2_PREVIEW_FULL_ORIGIN_GUARD_INACTIVE';
+        throw error;
+      }
+      assertPreviewGenerationCurrent();
+      if (typeof expectedSerialized !== 'string' || !expectedSerialized.length) {
+        const error = Error('state_runtime_v2_preview_full_origin_token_required');
+        error.code = 'STATE_RUNTIME_V2_PREVIEW_FULL_ORIGIN_TOKEN_REQUIRED';
+        throw error;
+      }
+      let actual;
+      try { actual = captureReadOnlyFullStorageInventory(); }
+      catch (_) {
+        const error = Error('state_runtime_v2_preview_full_origin_unreadable');
+        error.code = 'STATE_RUNTIME_V2_PREVIEW_FULL_ORIGIN_UNREADABLE';
+        throw error;
+      }
+      if (actual !== expectedSerialized) {
+        const error = Error('state_runtime_v2_preview_full_origin_changed');
+        error.code = 'STATE_RUNTIME_V2_PREVIEW_FULL_ORIGIN_CHANGED';
+        throw error;
+      }
+      return true;
+    };
     const previewGuard = Object.freeze({
       assertPreviewGenerationCurrent, assertPreviewLegacySnapshotUnchanged,
       assertPreviewPrimaryJournalsUnchanged, assertPreviewHabitSidecarsUnchanged,
-      assertPreviewCompleteWriterSourcesUnchanged
+      assertPreviewCompleteWriterSourcesUnchanged,
+      assertPreviewFullOriginInventoryUnchanged
     });
     let result = refuse('exclusive_lock_unavailable');
     try {
@@ -4358,6 +4393,14 @@
                 ? 'serialized_operation_complete_tokens_required'
                 : error?.code === 'STATE_RUNTIME_V2_PREVIEW_COMPLETE_GUARD_INACTIVE'
                   ? 'serialized_operation_complete_guard_inactive'
+                : error?.code === 'STATE_RUNTIME_V2_PREVIEW_FULL_ORIGIN_CHANGED'
+                  ? 'serialized_operation_full_origin_changed'
+                : error?.code === 'STATE_RUNTIME_V2_PREVIEW_FULL_ORIGIN_UNREADABLE'
+                  ? 'serialized_operation_full_origin_unreadable'
+                : error?.code === 'STATE_RUNTIME_V2_PREVIEW_FULL_ORIGIN_TOKEN_REQUIRED'
+                  ? 'serialized_operation_full_origin_token_required'
+                : error?.code === 'STATE_RUNTIME_V2_PREVIEW_FULL_ORIGIN_GUARD_INACTIVE'
+                  ? 'serialized_operation_full_origin_guard_inactive'
                   : error?.code === 'STATE_RUNTIME_V2_PREVIEW_SNAPSHOT_CHANGED'
                     ? 'serialized_operation_snapshot_changed'
                 : error?.code === 'STATE_RUNTIME_V2_PREVIEW_SIDECARS_CHANGED'
