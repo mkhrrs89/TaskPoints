@@ -251,7 +251,7 @@ test('a bookmarked direct player link can open then close without browser histor
 });
 
 test('card/gallery and existing editors remain available and backed by same core data', () => {
-  assert.match(game, /script src="player_profile\\.js\\?v=20261102-1"/);
+  assert.match(game, /script src="player_profile\.js\?v=20261102-1"/);
   assert.match(game, /playerProfiles\.init\(\)/);
   assert.match(game, /function wireViewCardProfileLinks/);
   assert.match(game, /data-profile-open="YOU"/);
