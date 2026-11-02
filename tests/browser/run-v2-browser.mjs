@@ -281,11 +281,13 @@ try {
       const fromIndex=await read(db.transaction('completions','readonly')
         .objectStore('completions').index('by_habit_ids').getAll('h2'));
       return {version:db.version,habitIds:all[0]?.habitIds,
+        tasksStorePresent:db.objectStoreNames.contains('tasks'),
         sharedIndexRows:fromIndex.map(row=>row.id),
         legacy:localStorage.getItem('taskpoints_v1'),
         authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
     });
-    assert.equal(retry.version,2);
+    assert.equal(retry.version,3);
+    assert.equal(retry.tasksStorePresent, true);
     assert.deepEqual(retry.habitIds,['h1','h2']);
     assert.deepEqual(retry.sharedIndexRows,['shared-old']);
     assert.equal(retry.legacy,legacyBefore);
@@ -305,13 +307,13 @@ try {
     const upgrader=await context.newPage();
     await upgrader.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),{waitUntil:'load'});
     const newVersion=await upgrader.evaluate(()=>new Promise((resolve,reject)=>{
-      const req=indexedDB.open('taskpoints_state_v2',3);
+      const req=indexedDB.open('taskpoints_state_v2',4);
       req.onupgradeneeded=()=>{};
       req.onsuccess=()=>{const v=req.result.version;req.result.close();resolve(v);};
       req.onerror=()=>reject(req.error);
       req.onblocked=()=>reject(Error('existing V2 runtime refused to close for upgrade'));
     }));
-    assert.equal(newVersion,3);
+    assert.equal(newVersion,4);
     await page.waitForFunction(()=>window.TaskPointsStateRuntimeV2.getStatus().externalRevisionInvalidated,
       null,{timeout:10000});
     const stale=await page.evaluate(async()=>{
@@ -328,7 +330,7 @@ try {
     assert.equal(stale.candidate.eligible,false);
     assert.equal(stale.candidate.reason,'external_revision_invalidated');
     assert.equal(Object.hasOwn(stale.candidate,'habit'),false);
-    assert.ok(stale.openFailure,'stale version-2 open must not reopen a version-3 database');
+    assert.ok(stale.openFailure,'stale version-3 open must not reopen a version-4 database');
     assert.equal(stale.legacy,before.legacy);
     assert.equal(stale.wal,before.wal);
     assert.equal(stale.authority,'legacy_only');
@@ -336,7 +338,7 @@ try {
       newerSchemaUntouched:true,v1Retained:true};
   });
 
-  await run('real IndexedDB v1-to-v2 upgrade backfills cross-Habit completion index atomically', async context => {
+  await run('real IndexedDB v1-to-v3 upgrade preserves cross-Habit index and adds Tasks without a live cutover', async context => {
     const page=await context.newPage();
     page.on('pageerror',err=>console.warn('Upgrade fixture error: '+err.message));
     await page.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),{waitUntil:'load'});
@@ -361,12 +363,14 @@ try {
       const h2=await get(db.transaction('completions','readonly')
         .objectStore('completions').index('by_habit_ids').getAll('h2'));
       return {version:db.version,indexPresent:store.indexNames.contains('by_habit_ids'),
+        taskStoreReady:db.objectStoreNames.contains('tasks'),
         entries:all[0].entries,habitIds:all[0].habitIds,
         h1:h1.map(r=>r.id),h2:h2.map(r=>r.id),
         authority:runtime.getStatus().readAuthority,
         legacy:localStorage.getItem('taskpoints_v1')};
     });
-    assert.equal(changed.version,2);
+    assert.equal(changed.version,3);
+    assert.equal(changed.taskStoreReady,true);
     assert.equal(changed.indexPresent,true);
     assert.deepEqual(changed.habitIds,['h1','h2']);
     assert.deepEqual(changed.h1,['shared-old']);
