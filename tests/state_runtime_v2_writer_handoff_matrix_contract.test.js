@@ -315,7 +315,7 @@ const SOURCE_ANCHORS = [
   [
     "task_journal_and_idle_compaction",
     "task_mutation_journal.js",
-    "function scheduleCompaction(reason = 'scheduled')",
+    "function scheduleCompaction(reason = 'scheduled', knownJustWrittenRecord = null)",
     "deferred",
     "verified_compaction"
   ],
@@ -953,8 +953,14 @@ test('Main Work action batches atomic V1 journal writes without removing fallbac
   assert.match(core,/seen\.has\(id\)/);
   assert.match(core,/record\.completionUpserts = mergeById\(record\.completionUpserts, row\)/);
   assert.match(core,/TASKPOINTS_TASK_COMPLETION_BATCH_INVALID/);
-  // One single journal commit after all rows have been validated/merged.
-  assert.equal((core.match(/writeRecord\(record\)/g)||[]).length,1);
+  // One single synchronous journal commit after every validated row is
+  // merged. The writeRecord helper itself performs the only setItem.
+  const writeStart=journal.indexOf('function writeRecord(record, alreadyNormalized = false)');
+  const writeEnd=journal.indexOf('function mergeById(',writeStart);
+  assert.ok(writeStart>0&&writeEnd>writeStart);
+  assert.equal((core.match(/writeRecord\(record, true\)/g)||[]).length,1);
+  assert.match(journal.slice(writeStart,writeEnd),
+    /storage\.setItem\(JOURNAL_KEY, JSON\.stringify\(normalized\)\)/);
   assert.match(journal,/core\.journalTaskCompletionBatch = \(rows\) => journalMutation\(\{ completionUpserts: rows \}\)/);
   assert.match(batch,/typeof core\.journalTaskCompletionBatch === 'function'/);
   assert.match(batch,/core\.journalTaskCompletionBatch\(completeRows\)/);
