@@ -604,3 +604,34 @@ This evidence does not simulate an actual iOS PWA process kill or prove
 the safety of a future handoff. Production multi-context writer admission,
 physical Safari lifecycle validation and off-device rollback remain
 non-negotiable blockers. V2 stays preview-only.
+
+### Full-origin exclusive-lock rehearsal inventory (November 2)
+
+The preview-only `rehearseExclusiveWriterLease()` previously hashed
+`captureLegacyNamespace()`, which intentionally includes just
+`taskpoints_*` keys for its established recovery-checkpoint format.
+That was insufficient for an exclusive handoff diagnostic: a paused
+pre-V2 page can independently modify `tp_projects_v1`, Game preferences
+or other same-origin keys without changing the Habit pilot or V2 revision.
+The Web Lock does not exclude these noncooperating legacy writers.
+
+The exclusive *rehearsal only* now hashes the complete sorted origin
+`localStorage` inventory returned by the separate strict read-only
+`captureReadOnlyFullStorageInventory()` helper, before acquiring the
+exclusive Web Lock and while holding it. Following its awaited SHA-256
+it synchronously rescans the full origin, detecting visible changes
+during the digest window. The existing key-filtered recovery capture
+and checkpoint format are deliberately unchanged. The actual V1 writes,
+journals, compaction, rescue, and cutover policy are also unchanged.
+
+Chromium/WebKit regressions open a page with **no V2 runtime** and write
+the real independent `tp_projects_v1` key during (1) the initial hash
+preflight and (2) the in-lock hash. The rehearsal must refuse either
+interleaving, keep the original `taskpoints_v1` unchanged, and preserve
+the independent Projects write under legacy-only authority.
+
+Even this broader observation cannot exclude a dormant legacy writer
+that wakes after the final check, or a value that changes and reverts
+between observations. It is therefore **not** a production writer
+admission fence and never sets `canPromote:true`. Production cutover
+still requires an approved strategy for unfenced old tabs.
