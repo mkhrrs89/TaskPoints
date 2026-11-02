@@ -87,3 +87,14 @@ test('Home scoreboard follows Season 4 without altering Season 3 or historical G
   assert.deepEqual(Array.from(ctx.getHomeScoreboardCurrentSeasonState('2026-11-02').gameHistory, x => x.dateKey), ['2026-11-01']);
   assert.match(home, /const HOME_SCOREBOARD_SEASON_TWO_START = "2026-07-01"/);
 });
+
+test('Standings and Power Rankings show Season 4, lifetime/overall, then Seasons 3, 2 and 1', () => {
+  const displayed = (html, prefix) => Array.from(
+    html.matchAll(new RegExp('data-' + prefix + '-scope="(season[1-4]|lifetime|overall)"', 'g')),
+    match => match[1]
+  );
+  assert.deepEqual(displayed(standings, 'standings'),
+    ['season4', 'lifetime', 'season3', 'season2', 'season1']);
+  assert.deepEqual(displayed(rankings, 'rankings'),
+    ['season4', 'overall', 'season3', 'season2', 'season1']);
+});
