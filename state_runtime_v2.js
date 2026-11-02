@@ -4539,7 +4539,7 @@
     } catch (_) { return refuse('task_preview_evidence_unreadable'); }
     const sameEvidence = priorEvidence?.resetGeneration === generation
       && priorEvidence?.taskFingerprint === taskFingerprint
-      && priorEvidence?.sourceInventory === (await previewRecoveryFingerprint(JSON.parse(inventoryBefore)));
+      && priorEvidence?.sourceInventory === `${fnv1a(inventoryBefore)}:${inventoryBefore.length}`;
     if (priorEvidence && !sameEvidence)
       return refuse('task_preview_existing_evidence_preserved');
     if (!priorEvidence) {
