@@ -60,6 +60,21 @@ async function waitForAsyncBrowserCondition(page, predicate, timeoutMs = 12000) 
   }
   throw new Error('V2 async browser condition not confirmed before deadline');
 }
+// An uncooperative tab's localStorage write can be delayed in another page,
+// particularly in WebKit. Negative admission tests must first prove that the
+// actual changed bytes are observable to the would-be writer. This is a test
+// precondition, NOT a cross-tab fence: a write after this observation may still
+// race, and no V2 authority is granted.
+async function requireCrossTabStorageValue(observer, key, expected) {
+  await observer.waitForFunction(
+    ({key,value}) => localStorage.getItem(key) === value,
+    {key,value:expected}, {timeout:12000}
+  );
+  assert.equal(
+    await observer.evaluate(key => localStorage.getItem(key),key),expected,
+    'cross-tab storage update must be visible before judging writer admission'
+  );
+}
 async function parity(page) {
   const p = await page.evaluate(() => window.TaskPointsStateRuntimeV2.verifyParity());
   assert.equal(p.checked, true);
@@ -753,6 +768,13 @@ try {
     assert.equal(completed.canPromote,false);
     assert.equal(completed.productionWritersFenced,false);
     assert.equal(completed.allLegacyWritersKnown,false);
+    // A writer-side verified save can precede WebKit's peer-side storage
+    // visibility. Compare exact persisted bytes before asserting peer state.
+    const committedRaw=await writer.evaluate(()=>
+      localStorage.getItem('taskpoints_v1'));
+    await requireCrossTabStorageValue(peer,'taskpoints_v1',committedRaw);
+    await requireCrossTabStorageValue(peer,'tp_projects_v1',
+      'legacy-only-unfenced-project-update');
     const after=await peer.evaluate(()=>({
       state:window.V2BrowserFixture.rawLegacy(),
       project:localStorage.getItem('tp_projects_v1'),
@@ -932,6 +954,8 @@ try {
     // change Projects without altering the primary TaskPoints snapshot.
     await legacy.evaluate(()=>localStorage.setItem('tp_projects_v1',
       'changed-by-unfenced-legacy-projects'));
+    await requireCrossTabStorageValue(writer,'tp_projects_v1',
+      'changed-by-unfenced-legacy-projects');
     await writer.evaluate(()=>window.__releaseV2FullOriginWriter());
     const refused=await pending;
     assert.equal(refused.reason,'serialized_operation_full_origin_changed');
@@ -1151,6 +1175,7 @@ try {
     }
     const stale=await capture();
     await legacy.evaluate(()=>localStorage.setItem('tp_projects_v1','legacy-new-project-while-stale'));
+    await requireCrossTabStorageValue(writer,'tp_projects_v1','legacy-new-project-while-stale');
     const denied=await writer.evaluate(([source,rows])=>
       window.TaskPointsStateRuntimeV2.rehearsePreviewAdmittedTaskCompletionBatch(rows,source),
       [stale,rows]);
