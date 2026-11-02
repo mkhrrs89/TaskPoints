@@ -94,7 +94,9 @@ function makeHarness({ journalFails = false, batchFails = false, batchEnabled = 
     clearTimeout() {},
     requestIdleCallback(fn) { timers.push(fn); return timers.length; },
     cancelIdleCallback() {},
-    save(savePath) { calls.fullSaves += 1; calls.lastSavePath = savePath || ''; },
+    // The authoritative full-save stub must explicitly acknowledge durability.
+    // An undefined return is an unconfirmed save, not a successful fallback.
+    save(savePath) { calls.fullSaves += 1; calls.lastSavePath = savePath || ''; return true; },
     renderAll() { calls.renders += 1; }
   };
 
@@ -268,6 +270,22 @@ test('a journal write failure falls back to the original authoritative full save
   assert.equal(h.calls.lastSavePath, 'work-entry-fast-path-fallback');
   assert.equal(h.calls.renders, 1);
   assert.equal(h.context.TaskPointsWorkEntryFastPath.getStatus().counters.fallbackFullSaves, 1);
+});
+
+test('Work journal failure never labels an unconfirmed full-save fallback as durable', () => {
+  const h = makeHarness({ journalFails: true });
+  h.context.save = function unconfirmedFullSave(savePath) {
+    h.calls.fullSaves += 1;
+    h.calls.lastSavePath = savePath || '';
+    return undefined;
+  };
+  h.context.submitWorkEditModal();
+  assert.equal(h.calls.fullSaves, 1);
+  assert.equal(h.calls.lastSavePath, 'work-entry-fast-path-fallback');
+  assert.equal(h.calls.journal.length, 0);
+  const counters = h.context.TaskPointsWorkEntryFastPath.getStatus().counters;
+  assert.equal(counters.fallbackFullSaves, 0);
+  assert.equal(counters.fastCommits, 0);
 });
 
 test('recovery/journal preflight failures leave the original Work save and render untouched', () => {
