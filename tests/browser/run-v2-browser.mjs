@@ -937,6 +937,143 @@ try {
       freshJournalWritePreserved:true,unfencedLegacyWritesStillPossible:true};
   });
 
+  await run('mandatory preview Task admission checks all V1 source keys and confirms atomic readback',async context=>{
+    const writer=await open(context);
+    const legacy=await context.newPage();
+    await legacy.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const capture=()=>writer.evaluate(()=>{
+      const keys=[];
+      for(let i=0;i<localStorage.length;i++)keys.push(localStorage.key(i));
+      return JSON.stringify(keys.sort().map(key=>[key,localStorage.getItem(key)]));
+    });
+    const original=await writer.evaluate(()=>({
+      state:localStorage.getItem('taskpoints_v1'),
+      journal:localStorage.getItem('taskpoints_pending_task_mutations_v1')
+    }));
+    const rows=[
+      {id:'admitted-real-work',taskId:'synthetic-task',title:'Work Score',
+        source:'work',workHours:8,points:8.4,completedAtISO:'2026-11-02T12:00:00.000Z'},
+      {id:'admitted-real-sleep',taskId:'synthetic-task',title:'Sleep Score',
+        source:'metric',sleepRested:7,points:9,completedAtISO:'2026-11-02T12:01:00.000Z'}
+    ];
+    if(!await writer.evaluate(()=>typeof navigator.locks?.request==='function')){
+      const blocked=await writer.evaluate(([source,rows])=>
+        window.TaskPointsStateRuntimeV2.rehearsePreviewAdmittedTaskCompletionBatch(rows,source),
+        ['any',rows]);
+      assert.equal(blocked.reason,'lock_manager_unavailable');
+      return {unsupportedFailClosed:true};
+    }
+    const stale=await capture();
+    await legacy.evaluate(()=>localStorage.setItem('tp_projects_v1','legacy-new-project-while-stale'));
+    const denied=await writer.evaluate(([source,rows])=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewAdmittedTaskCompletionBatch(rows,source),
+      [stale,rows]);
+    assert.equal(denied.reason,'full_origin_changed',JSON.stringify(denied));
+    assert.equal(denied.committed,false);
+    const afterDenied=await writer.evaluate(()=>({
+      state:localStorage.getItem('taskpoints_v1'),
+      journal:localStorage.getItem('taskpoints_pending_task_mutations_v1')
+    }));
+    assert.equal(afterDenied.state,original.state);
+    assert.equal(afterDenied.journal,original.journal);
+    const fresh=await capture();
+    const invalid=await writer.evaluate(([source,rows])=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewAdmittedTaskCompletionBatch(rows,source),
+      [fresh,[rows[0],rows[0]]]);
+    assert.equal(invalid.reason,'invalid_completion_batch');
+    const result=await writer.evaluate(async ([source,rows])=>{
+      const originalSet=Storage.prototype.setItem;
+      let journalWrites=0;
+      Storage.prototype.setItem=function(key,value){
+        if(this===localStorage && key==='taskpoints_pending_task_mutations_v1')
+          journalWrites++;
+        return originalSet.call(this,key,value);
+      };
+      try{
+        const verdict=await window.TaskPointsStateRuntimeV2
+          .rehearsePreviewAdmittedTaskCompletionBatch(rows,source);
+        return {verdict,journalWrites};
+      }finally{ Storage.prototype.setItem=originalSet; }
+    },[fresh,rows]);
+    assert.equal(result.verdict.committed,true,JSON.stringify(result));
+    assert.equal(result.verdict.confirmedDurable,true);
+    assert.equal(result.verdict.reason,'preview_task_batch_admitted');
+    assert.equal(result.verdict.canPromote,false);
+    assert.equal(result.verdict.rowCount,2);
+    assert.equal(result.journalWrites,1);
+    const after=await writer.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const pending=core.readPendingTaskMutations();
+      const effective=core.readTaskPointsStoredState();
+      return {
+        snapshot:localStorage.getItem('taskpoints_v1'),
+        pending:pending.record.completionUpserts,
+        effective:effective.completions,
+        projects:localStorage.getItem('tp_projects_v1'),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority,
+        rawJournal:localStorage.getItem('taskpoints_pending_task_mutations_v1')
+      };
+    });
+    assert.equal(after.snapshot,original.state);
+    assert.equal(after.pending.filter(row=>rows.some(r=>r.id===row.id)).length,2);
+    for(const row of rows){
+      assert.equal(after.effective.find(item=>item.id===row.id)?.points,row.points);
+    }
+    assert.equal(after.projects,'legacy-new-project-while-stale');
+    assert.equal(after.authority,'legacy_only');
+    const replay=await writer.evaluate(([source,rows])=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewAdmittedTaskCompletionBatch(rows,source),
+      [fresh,rows]);
+    assert.equal(replay.reason,'full_origin_changed');
+    const afterReplay=await writer.evaluate(()=>
+      localStorage.getItem('taskpoints_pending_task_mutations_v1'));
+    assert.equal(afterReplay,after.rawJournal);
+    return {mandatorySourceCheck:true,legacyProjectsRaceRejected:true,
+      oneJournalWrite:true,atomicBatchVerified:true,staleRetryRejected:true,
+      originalV1Authoritative:true};
+  });
+
+  await run('mandatory preview Task admission preserves prior journal on quota denial',async context=>{
+    const page=await open(context);
+    if(!await page.evaluate(()=>typeof navigator.locks?.request==='function'))
+      return {unsupportedFailClosed:true};
+    const evidence=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const original=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const keys=[];
+      for(let i=0;i<localStorage.length;i++)keys.push(localStorage.key(i));
+      const token=JSON.stringify(keys.sort().map(key=>[key,localStorage.getItem(key)]));
+      const originalSet=Storage.prototype.setItem;
+      let attempts=0;
+      Storage.prototype.setItem=function(key,value){
+        if(this===localStorage&&key==='taskpoints_pending_task_mutations_v1'){
+          attempts++;
+          throw new DOMException('synthetic quota denial','QuotaExceededError');
+        }
+        return originalSet.call(this,key,value);
+      };
+      let result;
+      try {
+        result=await runtime.rehearsePreviewAdmittedTaskCompletionBatch([
+          {id:'quota-must-not-acknowledge',taskId:'synthetic-task',points:5}
+        ],token);
+      }finally{Storage.prototype.setItem=originalSet;}
+      return {result,attempts,original,
+        after:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(evidence.result.reason,'task_journal_write_failed',JSON.stringify(evidence));
+    assert.equal(evidence.result.committed,false);
+    assert.equal(evidence.result.confirmedDurable,false);
+    assert.equal(evidence.result.writeOutcomeUncertain,true);
+    assert.equal(evidence.attempts,1);
+    assert.equal(evidence.after,evidence.original);
+    assert.equal(evidence.authority,'legacy_only');
+    return {quotaFailureContained:true,previousJournalRetained:true,
+      noFalseDurabilityAcknowledgement:true};
+  });
+
   await run('serialized snapshot source guard denies unreadable state and missing tokens',async context=>{
     const page=await open(context);
     const supported=await page.evaluate(()=>typeof navigator.locks?.request==='function');
