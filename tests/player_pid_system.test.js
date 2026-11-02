@@ -87,9 +87,51 @@ test('PID fields and reservations survive packed storage round-trip', () => {
 
 test('Players UI exposes PID assignment without exposing the UUID as the human ID', () => {
   assert.match(gameSource, /PID \$\{escapeHtml\(p\.isYou \? "P000"/);
-  assert.match(gameSource, /Permanent once saved\. P000 is reserved for you\./);
+  assert.match(gameSource, /You can edit this later on the player page\. P000 is reserved for you\./);
   assert.match(gameSource, /data-act="save-pid"/);
   assert.match(gameSource, /TaskPointsCore\?\.assignPlayerPid\?\.\(state, id, input\.value\)/);
   assert.match(gameSource, /pid:\s*""/);
   assert.match(gameSource, /PID: P000/);
+});
+
+test('profile-authorized NPC PID changes are unique while earlier IDs remain retired', () => {
+  let state = core.normalizeState({
+    players: [
+      { id: 'npc-a', name: 'A', pid: 'P007' },
+      { id: 'npc-b', name: 'B', pid: 'P008' }
+    ],
+    gameHistory: [{ id: 'game-a', playerId: 'npc-a', score: 42 }],
+    matchups: [{ id: 'm-a', playerAId: 'npc-a', playerBId: 'npc-b' }]
+  });
+  const oldGames = structuredClone(state.gameHistory);
+  const oldMatchups = structuredClone(state.matchups);
+  const usual = core.assignPlayerPid(state, 'npc-a', '9');
+  assert.equal(usual.ok, false);
+  assert.equal(usual.error, 'pid_locked');
+
+  const edited = core.assignPlayerPid(state, 'npc-a', '9', { allowReassign: true });
+  assert.equal(edited.ok, true);
+  assert.equal(edited.pid, 'P009');
+  state = edited.state;
+  assert.equal(state.players[0].id, 'npc-a');
+  assert.equal(state.players[0].pid, 'P009');
+  assert.ok(state.reservedPlayerPids.includes('P007'));
+  assert.ok(state.reservedPlayerPids.includes('P009'));
+  assert.deepEqual(state.gameHistory, oldGames);
+  assert.deepEqual(state.matchups, oldMatchups);
+  assert.equal(core.resolvePlayerIdFromPid(state, 'P009'), 'npc-a');
+  assert.equal(core.resolvePlayerIdFromPid(state, 'P007'), '');
+
+  const used = core.assignPlayerPid(state, 'npc-a', 'P008', { allowReassign: true });
+  assert.equal(used.ok, false);
+  assert.equal(used.error, 'pid_in_use');
+  const retired = core.assignPlayerPid(state, 'npc-b', 'P007', { allowReassign: true });
+  assert.equal(retired.ok, false);
+  assert.equal(retired.error, 'pid_reserved');
+  const you = core.assignPlayerPid(state, 'npc-a', 'P000', { allowReassign: true });
+  assert.equal(you.ok, false);
+  assert.equal(you.error, 'pid_reserved_for_you');
+  const self = core.assignPlayerPid(state, 'YOU', 'P009', { allowReassign: true });
+  assert.equal(self.ok, false);
+  assert.equal(self.error, 'you_pid_locked');
 });
