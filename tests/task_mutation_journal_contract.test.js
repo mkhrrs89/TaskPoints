@@ -184,6 +184,65 @@ test('multi-row completion batch uses one durable journal write and one verified
   assert.ok(persisted.completions.some(r=>r.id==='sleep-batch'));
 });
 
+test('large multi-row batch replaces all old matching rows in order and retains unrelated pending work',()=>{
+  const existing=Array.from({length:480},(_,i)=>({
+    id:'history-'+i,points:i,source:'work',
+    completedAtISO:'2026-10-22T12:00:00.000Z'
+  }));
+  // Older, duplicated pending IDs must all disappear when one updated row
+  // supersedes them, without reordering unrelated history.
+  existing.splice(20,0,{id:'replace-a',points:1},{id:'replace-b',points:2});
+  existing.splice(350,0,{id:'replace-a',points:3});
+  const h=makeHarness({[JOURNAL_KEY]:JSON.stringify({
+    schemaVersion:1,
+    tasks:[{id:'older-pending-task',title:'Preserve me'}],
+    completionUpserts:existing,
+    completionDeletes:['replace-a','untouched-delete','replace-b'],
+    updatedAtISO:'2026-10-22T12:00:00.000Z'
+  })});
+  const replacement=[
+    {id:'replace-b',points:99,workHours:8.5,source:'work'},
+    {id:'fresh-work',points:8,workHours:8,source:'work'},
+    {id:'replace-a',points:98,workHours:7,source:'work'}
+  ];
+  let writes=0;
+  const originalSet=h.storage.setItem.bind(h.storage);
+  h.storage.setItem=(key,value)=>{
+    if(key===JOURNAL_KEY)writes++;
+    return originalSet(key,value);
+  };
+  h.core.journalTaskCompletionBatch(replacement);
+  assert.equal(writes,1,'batch action still uses exactly one synchronous journal write');
+  assert.equal(h.getSaveCalls(),0);
+  const pending=JSON.parse(h.storage.getItem(JOURNAL_KEY));
+  assert.deepEqual(Array.from(pending.completionUpserts,row=>row.id),[
+    ...existing.filter(row=>row.id!=='replace-a'&&row.id!=='replace-b').map(row=>row.id),
+    'replace-b','fresh-work','replace-a'
+  ]);
+  assert.deepEqual(Array.from(pending.completionDeletes),['untouched-delete']);
+  assert.deepEqual(Array.from(pending.tasks,row=>row.id),['older-pending-task']);
+  assert.equal(pending.completionUpserts.find(row=>row.id==='replace-b').points,99);
+  assert.equal(pending.completionUpserts.find(row=>row.id==='replace-a').points,98);
+  assert.equal(h.core.flushPendingTaskMutations(),true);
+  const persisted=JSON.parse(h.storage.getItem(STORAGE_KEY));
+  for(const row of replacement) {
+    assert.equal(persisted.completions.filter(item=>item.id===row.id).length,1);
+    assert.equal(persisted.completions.find(item=>item.id===row.id).points,row.points);
+  }
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+});
+
+test('multi-row batch preserves single-pass pending-journal merge contract',()=>{
+  const start=moduleSource.indexOf("if (Object.prototype.hasOwnProperty.call(mutation, 'completionUpserts')) {");
+  const end=moduleSource.indexOf('if (mutation.completionDeleteId)',start);
+  assert.ok(start>=0&&end>start);
+  const block=moduleSource.slice(start,end);
+  assert.match(block,/const seen = new Set\\(\\)/);
+  assert.equal((block.match(/record\\.completionUpserts\\s*=\\s*record\\.completionUpserts\\.filter\\(/g)||[]).length,1);
+  assert.equal((block.match(/record\\.completionDeletes\\s*=\\s*record\\.completionDeletes\\.filter\\(/g)||[]).length,1);
+  assert.doesNotMatch(block,/mergeById\\(/,'batch must not rescan all pending rows for each update');
+});
+
 test('invalid multi-row completion batches reject all rows and preserve existing journal',()=>{
   const h=makeHarness();
   const base={id:'work-existing',source:'work',points:5};
