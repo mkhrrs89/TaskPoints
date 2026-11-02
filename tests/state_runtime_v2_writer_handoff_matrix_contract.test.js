@@ -832,3 +832,22 @@ test('preview marker-only writers and retries share the strict immutable-ledger 
   assert.match(p,/typedMarkerCount === historicalDigestProofs\.size/);
   assert.match(p,/canPromote: false/);
 });
+
+
+test('preview writer sequence must identify the latest durable marker',()=>{
+  const code=read('state_runtime_v2.js');
+  const a=code.indexOf('async function rehearsePreviewDurableWriterFence(action, options = {})');
+  const b=code.indexOf('// Browser-native exclusive-lock *rehearsal*',a);
+  const p=code.slice(a,b);
+  assert.match(p,/writerSequence: next\.writersCommitted/);
+  assert.match(p,/const seenKnownWriterSequences = new Set\(\)/);
+  assert.match(p,/seenKnownWriterSequences\.has\(knownSequence\)/);
+  assert.match(p,/row\.syntheticSequence !== row\.writerSequence/);
+  assert.match(p,/const lastKnownSequence=lastMarkerRow/);
+  assert.match(p,/lastKnownSequence===state\.writersCommitted/);
+  assert.match(p,/const finalSequenceOwner=markers\.find/);
+  assert.match(p,/finalSequenceOwner\.id===lastKey/);
+  assert.match(p,/lastMarkerSequenceValid/);
+  assert.match(p,/markerWriterSequence: item/);
+  assert.match(p,/canPromote: false/);
+});
