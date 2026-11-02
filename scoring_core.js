@@ -339,9 +339,9 @@
     return Array.from(fieldSet);
   }
 
-  function packObjectArray(rows, preferredFields) {
+  function packObjectArray(rows, preferredFields, precomputedFields = null) {
     const list = Array.isArray(rows) ? rows : [];
-    const fields = getPackedArrayFields(list, preferredFields);
+    const fields = Array.isArray(precomputedFields) ? precomputedFields : getPackedArrayFields(list, preferredFields);
     const packedRows = list.map((row) => {
       if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
       return fields.map((field) => {
@@ -352,9 +352,9 @@
     return { fields, rows: packedRows };
   }
 
-  function packObjectArrayShortKeys(rows, preferredFields) {
+  function packObjectArrayShortKeys(rows, preferredFields, precomputedFields = null) {
     const list = Array.isArray(rows) ? rows : [];
-    const fields = getPackedArrayFields(list, preferredFields);
+    const fields = Array.isArray(precomputedFields) ? precomputedFields : getPackedArrayFields(list, preferredFields);
     const aliases = {};
     const fieldToAlias = {};
     fields.forEach((field, index) => {
@@ -404,8 +404,11 @@
 
   function getPackedArrayCandidate(rows, preferredFields) {
     const originalRaw = JSON.stringify(Array.isArray(rows) ? rows : []);
-    const fixedPacked = packObjectArray(rows, preferredFields);
-    const shortKeyPacked = packObjectArrayShortKeys(rows, preferredFields);
+    // Both candidate encodings use the same field set. Scan each historical
+    // collection once instead of rediscovering its keys for each format.
+    const fields = getPackedArrayFields(rows, preferredFields);
+    const fixedPacked = packObjectArray(rows, preferredFields, fields);
+    const shortKeyPacked = packObjectArrayShortKeys(rows, preferredFields, fields);
     const fixedRaw = JSON.stringify(fixedPacked);
     const shortKeyRaw = JSON.stringify(shortKeyPacked);
     const candidates = [
@@ -5827,6 +5830,7 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
       liveDiffSnapshots: src.liveDiffSnapshots && typeof src.liveDiffSnapshots === 'object' ? src.liveDiffSnapshots : {},
       youImageId:  typeof src.youImageId === "string" ? src.youImageId : "",
       youName: typeof src.youName === "string" ? src.youName : "",
+      youNotes: typeof src.youNotes === "string" ? src.youNotes : "",
       youRivalId: typeof src.youRivalId === "string" ? src.youRivalId : "",
       youPrimaryColor: normalizeHexColor(src.youPrimaryColor) || "#1a383b",
       youSecondaryColor: normalizeHexColor(src.youSecondaryColor) || "#254c52",
@@ -5896,8 +5900,10 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     '2026-06-14_exhibition_13_0129b7e2-8af6-4d7f-9ad1-502e7ff44193_63d43b6f-d36f-4b44-ba0d-87e9e1471499': ['0129b7e2-8af6-4d7f-9ad1-502e7ff44193', '63d43b6f-d36f-4b44-ba0d-87e9e1471499']
   });
 
-  function repairConfirmedJune2026LifetimeHistory(stateInput) {
-    const state = normalizeState(stateInput || {});
+  function repairConfirmedJune2026LifetimeHistory(stateInput, options = {}) {
+    // loadAppState can pass its already-normalized state. Preserve the
+    // original normalization path for direct callers and pending journal replay.
+    const state = options.alreadyNormalized === true ? stateInput : normalizeState(stateInput || {});
     const markers = state.historicalRepairMarkers && typeof state.historicalRepairMarkers === 'object'
       ? { ...state.historicalRepairMarkers }
       : {};
@@ -6061,6 +6067,7 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
   }
 
   function loadAppState(options = {}) {
+    const endLoadParse = global.TaskPointsPerf?.span?.('storage.load.parse');
     let parsed = {};
     let storageKeysFound = [];
     try {
@@ -6083,7 +6090,10 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
       console.error("Failed to parse stored state", e);
     }
 
+    endLoadParse?.({ preloaded: !!options.preloadedState });
+    const endLoadNormalize = global.TaskPointsPerf?.span?.('storage.load.normalize');
     let state = normalizeState(parsed);
+    endLoadNormalize?.();
     // This is the authoritative app-wide recovery point. Every page using the
     // shared loader sees pending taps before scoring, rendering, or saves.
     let pendingHabitDeltas = [];
@@ -6097,7 +6107,13 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     const shouldPersist = options.persistSync !== false;
     let changed = false;
 
-    const june2026HistoryRepair = repairConfirmedJune2026LifetimeHistory(state);
+    const endHistoricalRepair = global.TaskPointsPerf?.span?.('storage.load.historicalRepair');
+    const june2026HistoryRepair = repairConfirmedJune2026LifetimeHistory(state, {
+      // Pending habit deltas can introduce new completion rows; retain the
+      // historical normalize-again path when replaying those journal changes.
+      alreadyNormalized: pendingHabitDeltas.length === 0
+    });
+    endHistoricalRepair?.({ changed: june2026HistoryRepair.changed });
     state = june2026HistoryRepair.state;
     changed = changed || june2026HistoryRepair.changed;
 
@@ -6118,23 +6134,31 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
     const cutoff = Date.now() - THIRTY_DAYS_MS;
     const beforeCount = state.tasks.length;
+    const endLoadTaskPrune = global.TaskPointsPerf?.span?.('storage.load.expiredTrash');
     state.tasks = state.tasks.filter((task) => {
       if (!task || task.status !== 'trashed') return true;
       const deletedMs = isoToMs(task.deletedAtISO || task.deletedAt);
       return deletedMs >= cutoff;
     });
+    endLoadTaskPrune?.({ removed: beforeCount - state.tasks.length });
     if (state.tasks.length !== beforeCount) changed = true;
 
     if (shouldSync) {
+      const endDerivedSync = global.TaskPointsPerf?.span?.('storage.load.derivedSync');
       const derivedSync = syncDerivedPoints(state, { normalized: true });
+      endDerivedSync?.({ changed: derivedSync.changed });
       state = derivedSync.state;
       changed = changed || derivedSync.changed;
 
+      const endMatchupSync = global.TaskPointsPerf?.span?.('storage.load.matchupSync');
       const matchupSync = syncYouMatchups(state, { normalized: true });
+      endMatchupSync?.({ changed: matchupSync.changed });
       state = matchupSync.state;
       changed = changed || matchupSync.changed;
 
+      const endSeasonRepair = global.TaskPointsPerf?.span?.('storage.load.seasonRepair');
       const seasonRepair = repairSeasonChampionshipData(state, options);
+      endSeasonRepair?.({ ok: seasonRepair.ok });
       if (seasonRepair.ok) {
         const beforeSeasonRepair = JSON.stringify(state.currentSeason || null);
         state = seasonRepair.state;
@@ -6143,7 +6167,9 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     }
 
     if (changed && shouldPersist) {
+      const endLoadSave = global.TaskPointsPerf?.span?.('storage.load.persistRepair');
       mergeAndSaveState(state, { storageKey: STORAGE_KEY });
+      endLoadSave?.();
     }
 
     if (pendingHabitDeltas.length) schedulePendingHabitDeltaCompaction(state, { storageKey: STORAGE_KEY });
@@ -6291,7 +6317,7 @@ if (
   }
 
   const PROTECTED_HISTORY_KEYS = ['weightHistory', 'vo2MaxHistory', 'liveDiffHistory', 'liveDiffSnapshots'];
-  const STICKY_KEYS = ['youImageId', 'youName', 'youPrimaryColor', 'youSecondaryColor', 'habitTagColors', ...PROTECTED_HISTORY_KEYS];
+  const STICKY_KEYS = ['youImageId', 'youName', 'youNotes', 'youPrimaryColor', 'youSecondaryColor', 'habitTagColors', ...PROTECTED_HISTORY_KEYS];
 
   function shouldAllowStickyOverwrite(key, options = {}) {
     if (key === 'scoringSettings') return Boolean(options.allowScoringSettingsOverwrite);
@@ -6307,7 +6333,7 @@ if (
       if (typeof value !== 'string') return true;
       return value.trim() === '';
     }
-    if (key === 'youName') {
+    if (key === 'youName' || key === 'youNotes') {
       if (typeof value !== 'string') return true;
       return value.trim() === '';
     }
@@ -6644,6 +6670,7 @@ function fastEnsureStateShape(s) {
     notes: typeof src.notes === 'string' ? src.notes : '',
     youImageId: typeof src.youImageId === 'string' ? src.youImageId : '',
     youName: typeof src.youName === 'string' ? src.youName : '',
+    youNotes: typeof src.youNotes === 'string' ? src.youNotes : '',
     youRivalId: typeof src.youRivalId === 'string' ? src.youRivalId : '',
     youPrimaryColor: normalizeHexColor(src.youPrimaryColor) || '#1a383b',
     youSecondaryColor: normalizeHexColor(src.youSecondaryColor) || '#254c52',
@@ -6658,16 +6685,26 @@ function fastEnsureStateShape(s) {
 }
 
   
+  // Internal-only short-lived reuse. Never trust a prior parse unless its exact
+  // localStorage bytes are still current when sticky-field safeguards run.
+  const mergedSaveSourceByState = new WeakMap();
+
   function mergeState(nextState, options = {}) {
     const storageKey = options.storageKey || STORAGE_KEY;
     const allowHabitTagColorReset = Boolean(options.allowHabitTagColorReset);
     let existing = {};
+    let sourceForStickyCheck = null;
     if (options.existing && typeof options.existing === 'object') {
       existing = options.existing;
     } else {
       try {
         const raw = options.raw ?? localStorage.getItem(storageKey);
         existing = raw ? (parseTaskPointsStorageJson(raw, {}) || {}) : {};
+        // Do not trust a caller-supplied state object; only an actual decoded
+        // storage payload may be reused, and the bytes are checked at save time.
+        if (options.captureSaveSource === true) {
+          sourceForStickyCheck = { raw: raw ?? null, storageKey, parsed: existing };
+        }
       } catch (e) {
         console.warn('Failed to parse existing TaskPoints storage; saving fresh state.', e);
         existing = {};
@@ -6791,11 +6828,14 @@ function fastEnsureStateShape(s) {
 
 // 🔥 New: skip heavy normalize on “known-normalized” incremental saves
 if (options.assumeNormalized) {
-  return { state: fastEnsureStateShape(mergedSnapshot), storageKey };
+  const state = fastEnsureStateShape(mergedSnapshot);
+  if (sourceForStickyCheck) mergedSaveSourceByState.set(state, sourceForStickyCheck);
+  return { state, storageKey };
 }
 
 const normalized = normalizeState(mergedSnapshot);
 const merged = { ...mergedSnapshot, ...normalized };
+if (sourceForStickyCheck) mergedSaveSourceByState.set(merged, sourceForStickyCheck);
 return { state: merged, storageKey };
 
 
@@ -7205,11 +7245,20 @@ return { state: merged, storageKey };
     }
   }
 
-  function preserveStickyFieldsBeforeSave(candidateState, storageKey = STORAGE_KEY, options = {}) {
+  function preserveStickyFieldsBeforeSave(candidateState, storageKey = STORAGE_KEY, options = {}, verifiedSource = null) {
     const next = candidateState && typeof candidateState === 'object' ? { ...candidateState } : {};
     let latest = null;
     try {
-      latest = parseTaskPointsStorageJson(localStorage.getItem(storageKey) || '{}', {});
+      const currentRaw = localStorage.getItem(storageKey);
+      if (verifiedSource
+        && verifiedSource.storageKey === storageKey
+        && verifiedSource.raw === currentRaw
+        && verifiedSource.parsed
+        && typeof verifiedSource.parsed === 'object') {
+        latest = verifiedSource.parsed;
+      } else {
+        latest = parseTaskPointsStorageJson(currentRaw || '{}', {});
+      }
     } catch (_) {
       latest = null;
     }
@@ -7333,6 +7382,12 @@ return { state: merged, storageKey };
   }
 
   function saveStateSnapshot(state, options = {}) {
+    // A mergeAndSaveState call may supply its already-decoded storage snapshot.
+    // Reuse is permitted only after rechecking the exact current storage value.
+    const verifiedMergeSource = state && typeof state === 'object'
+      ? mergedSaveSourceByState.get(state) || null
+      : null;
+    if (verifiedMergeSource) mergedSaveSourceByState.delete(state);
     const debugEnabled = Boolean(global && global.TP_DEBUG_PERF);
     const storageKey = options.storageKey || STORAGE_KEY;
     const savePath = options.savePath || options.source || options.reason || options.caller || 'unknown';
@@ -7407,15 +7462,19 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
     };
     const attemptSave = (candidate, trimmed, stage = 'initial', attemptOptions = {}) => {
       const stickyOptions = { ...options, ...attemptOptions };
-      const candidateWithSticky = preserveStickyFieldsBeforeSave(candidate, storageKey, stickyOptions);
+      const endSticky = global.TaskPointsPerf?.span?.('storage.save.stickyProtection');
+      const candidateWithSticky = preserveStickyFieldsBeforeSave(candidate, storageKey, stickyOptions, verifiedMergeSource);
+      endSticky?.({ savePath, stage });
       const storedBytes = getStorageKeySizeBytes(storageKey);
       const candidateBytes = getJsonSizeBytes(candidateWithSticky);
       if (candidateBytes > TASKPOINTS_LARGE_SAVE_WARN_BYTES || (storedBytes > 0 && candidateBytes > storedBytes + (512 * 1024))) {
         recordQuotaFailureDiagnostics({ savePath, stage, storageKey, storedBytes, candidateBytes, snapshot: candidateWithSticky });
       }
       const interactiveFastSave = options.interactive === true && options.deferCompression === true;
+      const endPack = global.TaskPointsPerf?.span?.('storage.save.pack');
       const packedState = packTaskPointsStorageState(candidateWithSticky);
       const packedRawJson = JSON.stringify(packedState);
+      endPack?.({ savePath, stage, packedRawChars: packedRawJson.length });
       const packedInteractiveBytes = packedRawJson.length * 2;
       // Some journal-backed UI paths can safely leave canonical compaction for
       // a lifecycle/explicit flush. Once the packed snapshot grows beyond the
@@ -7442,6 +7501,7 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
       }
       // Do not invoke the LZ encoder for safe, small interactive writes.
       const useFastPacked = interactiveFastSave && packedInteractiveBytes < TASKPOINTS_INTERACTIVE_PACKED_SAFE_BYTES;
+      const endEncoding = global.TaskPointsPerf?.span?.('storage.save.encoding');
       const storagePlan = useFastPacked
         ? {
           packedState,
@@ -7455,6 +7515,7 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
           chosenBytes: packedRawJson.length * 2
         }
         : buildOptimizedTaskPointsStorageRaw(candidateWithSticky, { packedState, packedRawJson });
+      endEncoding?.({ savePath, stage, encoding: storagePlan.chosenEncoding });
       const packedCandidateBytes = storagePlan.packedRawChars * 2;
       const compressedCandidateBytes = storagePlan.compressedRawChars * 2;
       const chosenStorageBytes = storagePlan.chosenChars * 2;
@@ -7482,6 +7543,7 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
         recordQuotaFailureDiagnostics({ savePath, stage, storageKey, storedBytes, candidateBytes: chosenStorageBytes, packedCandidateBytes, compressedCandidateBytes, unpackedCandidateBytes: candidateBytes, packedRawChars: storagePlan.packedRawChars, compressedRawChars: storagePlan.compressedRawChars, chosenStorageEncoding: storagePlan.chosenEncoding, chosenStorageChars: storagePlan.chosenChars, chosenStorageBytes, snapshot: candidateWithSticky });
         throw err;
       }
+      const endVerification = global.TaskPointsPerf?.span?.('storage.save.verifyReadback');
       const savedRaw = localStorage.getItem(storageKey);
       const saved = savedRaw ? (parseTaskPointsStorageJson(savedRaw, {}) || {}) : {};
       const criticalArrays = ['completions', 'matchups', 'gameHistory', 'seasonHistory', 'weightHistory', 'vo2MaxHistory', 'reminders', 'players', 'habits'];
@@ -7495,6 +7557,7 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
           failed.push(key);
         }
       });
+      endVerification?.({ savePath, stage, failedFields: failed.length });
       if (failed.length) {
         if (typeof alert === 'function') {
           alert('Save verification failed: reminders, weightHistory, vo2MaxHistory, or live diff history were not preserved.');
@@ -7535,6 +7598,7 @@ const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
     : {})
 });
     const interactiveSaveStarted = Date.now();
+    const endPreflight = global.TaskPointsPerf?.span?.('storage.save.preflight');
     const initialStoredBytes = getStorageKeySizeBytes(storageKey);
     const initialCandidateBytes = getJsonSizeBytes(cleanedInitialCandidate);
     const shouldPrecompactGenerated = initialCandidateBytes > TASKPOINTS_LARGE_SAVE_WARN_BYTES
@@ -7542,6 +7606,7 @@ const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
     const initialCandidate = shouldPrecompactGenerated
       ? compactStateForLocalStorage(cleanedInitialCandidate)
       : cleanedInitialCandidate;
+    endPreflight?.({ savePath, precompacted: shouldPrecompactGenerated });
     try {
       return attemptSave(initialCandidate, shouldPrecompactGenerated, shouldPrecompactGenerated ? 'initial-generated-compacted' : 'initial', {
         allowGeneratedCacheClear: shouldPrecompactGenerated
@@ -7784,7 +7849,8 @@ const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
   }
 
   function mergeAndSaveState(nextState, options = {}) {
-    const merged = mergeState(nextState, options);
+    // Capture the exact persisted source only for this synchronous save.
+    const merged = mergeState(nextState, { ...options, captureSaveSource: true });
     return saveStateSnapshot(merged.state, { ...options, storageKey: merged.storageKey });
   }
 
@@ -7937,10 +8003,15 @@ const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
     const match = title.match(/^Work Score\s*\((\d+(?:\.\d+)?)\)/i);
     const score = match ? Number(match[1]) : null;
 
-    const hoursRaw = entry && Object.prototype.hasOwnProperty.call(entry, 'workHours')
-      ? Number(entry.workHours)
-      : 0;
-    const hours = Number.isFinite(hoursRaw) ? hoursRaw : 0;
+    // Legacy or compacted Work entries can retain hours in the title without
+    // a workHours property. Do not silently score those entries as 0 hours.
+    // Explicitly recorded workHours: 0 takes precedence over the title.
+    const titledHours = title.match(/\bHours?\s*[:=]?\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))/i);
+    const hasHours = entry && Object.prototype.hasOwnProperty.call(entry, 'workHours')
+      && entry.workHours !== '' && entry.workHours != null;
+    const rawHours = hasHours ? Number(entry.workHours)
+      : (titledHours ? Number(titledHours[1]) : 0);
+    const hours = Number.isFinite(rawHours) ? rawHours : 0;
 
     return { score, hours };
   }

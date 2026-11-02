@@ -3,7 +3,7 @@
 
   if (global.TaskPointsWorkEntryFastPath?.installed) return;
 
-  const VERSION = 3;
+  const VERSION = 4;
   const MAX_INSTALL_ATTEMPTS = 240;
   const INSTALL_RETRY_MS = 50;
   const POST_COMMIT_QUIET_MS = 3200;
@@ -252,12 +252,12 @@
     return Boolean(snapshotScwmRows());
   }
 
-  function saveFallback(originalSave, reason) {
+  function saveFallback(originalSave, reason, requireConfirmedSave = false) {
     counters.fallbacks += 1;
     perfMark('workEntry.fastPathFallback', { reason });
     if (typeof originalSave !== 'function') return false;
     try {
-      originalSave.call(global, 'work-entry-fast-path-fallback', {
+      const outcome = originalSave.call(global, 'work-entry-fast-path-fallback', {
         userInitiated: true,
         immediateWrite: true,
         workEntryFastPathFallbackReason: reason
@@ -266,8 +266,14 @@
       // That is unsafe as the *only* fallback if the durable journal failed.
       // Flush only that pending SCWM save; all successful journal paths stay fast.
       const scwm = global.TaskPointsScwmInteractionFastPath;
-      if (scwm?.getStatus?.().pendingSave === true && scwm.flush?.() !== true) {
+      const pending = scwm?.getStatus?.().pendingSave === true;
+      if (pending && scwm.flush?.() !== true) {
         throw new Error('TaskPoints SCWM fallback save could not be flushed');
+      }
+      // Work's editor now requires a real persistence acknowledgment, not an
+      // optimistic no-op. Older SCWM callers retain their existing behavior.
+      if (requireConfirmedSave && !pending && outcome !== true) {
+        throw new Error('TaskPoints Work fallback save did not confirm durable persistence');
       }
       counters.fallbackFullSaves += 1;
       return true;
@@ -302,11 +308,42 @@
     let commitResolved = false;
     let fastCommitSucceeded = false;
     let directRenderRequested = false;
+    const isWorkCommit = name === 'submitWorkEditModal' || name === 'saveWorkScore';
+    let workSaveHandled = false;
+    let workSaveConfirmed = false;
 
     const suppressedSave = function suppressedWorkEntryFullSave() {
       saveCalls += 1;
       counters.suppressedFullSaves += 1;
-      return undefined;
+      if (!isWorkCommit) return undefined;
+
+      // The Work editor checks save() synchronously. Journal the final row
+      // *before* returning true; the old deferred journal caused false failure
+      // alerts and left the editor open even after a successful write.
+      if (workSaveHandled) return workSaveConfirmed;
+      workSaveHandled = true;
+      const changed = changedScwmRows(before);
+      if (!changed.length) {
+        // No new journal row exists to prove durability. Confirm a normal
+        // full save instead of claiming success from a no-op.
+        workSaveConfirmed = saveFallback(priorSave, 'work-no-change', true);
+        return workSaveConfirmed;
+      }
+      try {
+        journalRows(changed);
+        workSaveConfirmed = true;
+        fastCommitSucceeded = true;
+        counters.fastCommits += 1;
+        perfMark('workEntry.fastCommitJournaled', {
+          name,
+          changedRows: changed.length,
+          suppressedSaveCalls: saveCalls
+        });
+      } catch (error) {
+        console.warn('TaskPoints could not journal the Work entry; falling back to a confirmed full save.', error);
+        workSaveConfirmed = saveFallback(priorSave, 'journal-write-failed', true);
+      }
+      return workSaveConfirmed;
     };
 
     const targetedRender = function targetedWorkEntryRender() {
@@ -339,6 +376,13 @@
     if (!saveCalls) {
       commitResolved = true;
       if (directRenderRequested && typeof priorRenderAll === 'function') priorRenderAll.call(global);
+      return result;
+    }
+
+    if (isWorkCommit && workSaveHandled) {
+      commitResolved = true;
+      if (fastCommitSucceeded) holdMaintenanceQuiet();
+      if (directRenderRequested) targetedRender.call(global);
       return result;
     }
 

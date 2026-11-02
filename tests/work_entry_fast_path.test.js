@@ -169,7 +169,7 @@ function makeHarness({ journalFails = false, preflightFails = false, targetedUi 
 }
 
 test('loader keeps the Work fast path outside the core worker while loading the current Home version', () => {
-  assert.match(guardSource, /work_entry_fast_path\.js\?v=20261015-2/);
+  assert.match(guardSource, /work_entry_fast_path\.js\?v=20261101-1/);
   assert.match(guardSource, /data-taskpoints-work-entry-fast-path/);
 });
 
@@ -188,7 +188,7 @@ test('editing a Work entry journals the completion and uses targeted score rende
   assert.ok(h.calls.idleTouches > 0);
 
   const status = h.context.TaskPointsWorkEntryFastPath.getStatus();
-  assert.equal(status.version, 3);
+  assert.equal(status.version, 4);
   assert.equal(status.counters.fastCommits, 1);
   assert.equal(status.counters.suppressedFullSaves, 1);
   assert.equal(status.counters.targetedRenders, 1);

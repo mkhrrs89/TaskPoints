@@ -150,15 +150,28 @@
   function evaluateReadOnlyPageVisits(state, adapters, helpers = {}) {
     const clone = helpers.clone || (value => JSON.parse(JSON.stringify(value)));
     const diff = helpers.diff || ((before, after) => JSON.stringify(before) === JSON.stringify(after) ? [] : [{ type: 'changed', key: 'state' }]);
+    // Normal callers retain the historical two-clone behavior and full
+    // results. Audit explicitly opts into the lightweight path: one isolated
+    // clone per adapter, compared against the original untouched state.
+    const reuseReadOnlyBaseline = helpers.reuseReadOnlyBaseline === true;
+    const retainFullResults = helpers.retainFullResults !== false;
+    const baseline = reuseReadOnlyBaseline ? (state || {}) : null;
     const results = (adapters || []).map(adapter => {
-      const baseline = clone(state || {});
-      const runResult = adapter.run(clone(baseline));
+      const before = reuseReadOnlyBaseline ? baseline : clone(state || {});
+      const runResult = adapter.run(clone(before));
       // An adapter may prepare a private display clone. Only the state that its
       // modeled page path would persist is relevant to this audit invariant.
       const persistedState = runResult && Object.prototype.hasOwnProperty.call(runResult, 'persistedState')
         ? runResult.persistedState
         : (runResult && runResult.state ? runResult.state : runResult);
-      return { adapter, diffs: diff(baseline, persistedState), runResult };
+      const diffs = diff(before, persistedState);
+      // Audit displays only mode and differences. Do not retain nine huge
+      // modeled states after their comparisons have completed.
+      return {
+        adapter,
+        diffs,
+        runResult: retainFullResults ? runResult : { mode: runResult?.mode }
+      };
     });
     return { results, failed: results.filter(result => result.diffs.length) };
   }
