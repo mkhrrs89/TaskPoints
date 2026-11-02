@@ -4591,6 +4591,40 @@ try {
       scopeTamperRejected:true,neverRestores:true,legacyAuthorityUnchanged:true};
   });
 
+  await run('full-origin checkpoint refuses a torn independent Projects key before saving',async context=>{
+    const page=await open(context);
+    const evidence=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      localStorage.setItem('tp_projects_v1','before-independent-project');
+      const originalV1=localStorage.getItem('taskpoints_v1');
+      const originalGet=Storage.prototype.getItem;
+      let injected=false;
+      Storage.prototype.getItem=function(key){
+        const value=originalGet.call(this,key);
+        if(this===localStorage && key==='tp_projects_v1' && !injected){
+          injected=true;
+          localStorage.setItem(key,'after-independent-project');
+        }
+        return value;
+      };
+      let result;
+      try { result=await runtime.createPreviewRecoveryCheckpoint({scope:'full_origin'}); }
+      finally { Storage.prototype.getItem=originalGet; }
+      return {
+        result,injected,legacy:localStorage.getItem('taskpoints_v1'),
+        projects:localStorage.getItem('tp_projects_v1'),
+        authority:runtime.getStatus().readAuthority
+      };
+    });
+    assert.equal(evidence.injected,true);
+    assert.equal(evidence.result.saved,false,JSON.stringify(evidence.result));
+    assert.equal(evidence.result.reason,'legacy_changed_during_capture');
+    assert.equal(evidence.result.canAutoRestore,false);
+    assert.equal(evidence.projects,'after-independent-project');
+    assert.equal(evidence.authority,'legacy_only');
+    return {independentProjectRaceRefused:true,legacyAuthorityPreserved:true};
+  });
+
   await run('torn multi-key legacy capture is refused before writing an immutable checkpoint',async context=>{
     const page=await open(context);
     const evidence=await page.evaluate(async()=>{
