@@ -4959,6 +4959,66 @@ try {
       pendingJournalRetained:true,cutoverStillBlocked:true};
   });
 
+  await run('Work Task-journal persistence cannot certify full writer admission',async context=>{
+    const page=await open(context);
+    const original=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const proof=await page.evaluate(async()=>{
+      const core=window.TaskPointsCore,rt=window.TaskPointsStateRuntimeV2;
+      const before=await rt.inspectAuthorityCutoverBarriers();
+      const work={id:'work-v2-admission-fixture',source:'work',
+        title:'Synthetic Work Score (8.3) — Hours 8.5',
+        workHours:8.5,points:8.3,
+        completedAtISO:'2026-11-02T12:00:00.000Z'};
+      core.journalTaskMutation({completionUpsert:work});
+      const rawJournal=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const pending=await rt.inspectAuthorityCutoverBarriers();
+      const flushed=core.flushPendingTaskMutations();
+      const stored=core.parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1'),{});
+      const after=await rt.inspectAuthorityCutoverBarriers();
+      return {before,pending,flushed,storedWork:stored.completions
+        .find(row=>row.id===work.id),after,rawJournal,
+        journalAfter:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        authority:rt.getStatus().readAuthority};
+    });
+    assert.equal(proof.before.checks.workEntryAtomicAdmissionVerified,false);
+    assert.equal(proof.before.checks.workEntryFallbackPathFenced,false);
+    assert.ok(proof.before.knownUnfencedWriterFamilies
+      .includes('work_entry_fast_path_and_editor_fallback'));
+    assert.ok(proof.before.blockers
+      .includes('work_entry_multirecord_admission_not_validated'));
+    assert.equal(proof.pending.taskJournal.reason,'pending');
+    assert.equal(proof.pending.taskJournal.completionUpserts,1);
+    assert.equal(proof.pending.checks.workEntryAtomicAdmissionVerified,false);
+    assert.equal(typeof proof.rawJournal,'string');
+    assert.equal(proof.flushed,true);
+    assert.equal(proof.storedWork.workHours,8.5);
+    assert.equal(proof.storedWork.points,8.3);
+    assert.equal(proof.journalAfter,null);
+    assert.equal(proof.after.taskJournal.reason,'absent');
+    assert.equal(proof.after.checks.taskJournalEmpty,true);
+    assert.equal(proof.after.checks.workEntryAtomicAdmissionVerified,false);
+    assert.equal(proof.after.checks.workEntryFallbackPathFenced,false);
+    assert.ok(proof.after.blockers
+      .includes('work_entry_multirecord_admission_not_validated'));
+    assert.equal(proof.after.canPromote,false);
+    assert.equal(proof.authority,'legacy_only');
+    assert.notEqual(await page.evaluate(()=>localStorage.getItem('taskpoints_v1')),original,
+      'Verified V1 Task journal compaction must retain the new work completion');
+    await page.reload({waitUntil:'load'});
+    const restored=await page.evaluate(async()=>{
+      const rt=window.TaskPointsStateRuntimeV2;
+      return {cutover:await rt.inspectAuthorityCutoverBarriers(),
+        completion:window.TaskPointsCore
+          .parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1'),{})
+          .completions.find(row=>row.id==='work-v2-admission-fixture')};
+    });
+    assert.equal(restored.completion.workHours,8.5);
+    assert.equal(restored.cutover.canPromote,false);
+    assert.ok(restored.cutover.blockers.includes('work_entry_multirecord_admission_not_validated'));
+    return {workCompletionDurableInV1:true,taskJournalClearedOnlyAfterFlush:true,
+      oldWorkWriterNotFenced:true,notPromotedAfterReload:true};
+  });
+
   await run('malformed Task journal blocks handoff without repair or stale snapshot overwrite',async context=>{
     const page=await open(context);
     const proof=await page.evaluate(async()=>{
