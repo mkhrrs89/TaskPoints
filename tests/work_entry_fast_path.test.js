@@ -188,7 +188,7 @@ test('editing a Work entry journals the completion and uses targeted score rende
   assert.ok(h.calls.idleTouches > 0);
 
   const status = h.context.TaskPointsWorkEntryFastPath.getStatus();
-  assert.equal(status.version, 3);
+  assert.equal(status.version, 4);
   assert.equal(status.counters.fastCommits, 1);
   assert.equal(status.counters.suppressedFullSaves, 1);
   assert.equal(status.counters.targetedRenders, 1);
