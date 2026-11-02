@@ -2952,7 +2952,7 @@ header,
 }
 
 /* Habits & Vices: make points, streak, Edit, Delete orange */
-.habitRow .flex.items-center.gap-2.flex-wrap.text-xs .tag:not(.streak-pill),
+.habitRow .flex.items-center.gap-2.flex-wrap.text-xs .tag:not(.streak-pill):not(.habit-silver-weeks),
 .habitRow .flex.items-center.gap-2.flex-wrap.text-xs button[data-act="habit-edit"],
 .habitRow .flex.items-center.gap-2.flex-wrap.text-xs button[data-act="habit-delete"]{
   color:#fb923c;
