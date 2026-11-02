@@ -39,7 +39,7 @@ test('full-origin rollback rehearsal accounts for non-taskpoints keys but never 
   assert.equal((inspect.match(/openPreviewRecoveryDb\(\)/g)||[]).length,2,
     'checkpoint inspection and rollback plan each open the database once');
   assert.match(inspect,/JSON\.parse\(captureReadOnlyFullStorageInventory\(\)\)/);
-  assert.match(inspect,/fullOriginLocalStorageCovered: verdict\.captureScope === 'full_origin'/);
+  assert.match(inspect,/fullOriginLocalStorageCovered: captureScope === 'full_origin'/);
   assert.match(inspect,/rollback_checkpoint_excludes_non_taskpoints_keys/);
   assert.match(inspect,/canApply: false/);
   assert.match(inspect,/production_writer_fencing_not_implemented/);
