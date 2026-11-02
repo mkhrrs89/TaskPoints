@@ -18,7 +18,7 @@ function extract(name) {
   }
   throw Error('unclosed '+name);
 }
-const context={Math,Number,Set,Array,Date, HABIT_STREAK_MULTIPLIER_RATE:1.01,HABIT_STREAK_TAPER_START_DATE_KEY:'2026-10-11'};
+const context={Math,Number,Set,Array,Date, HABIT_STREAK_MULTIPLIER_RATE:1.01,HABIT_STREAK_TAPER_START_DATE_KEY:'2026-10-11', HABIT_FREEZE_SPEND_START:'2026-11-02'};
 vm.createContext(context);
 vm.runInContext([
   extract('habitStreakMultiplierForDay'),
