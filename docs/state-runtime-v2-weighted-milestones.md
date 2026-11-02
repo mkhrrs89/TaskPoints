@@ -79,3 +79,38 @@ For current hard blockers consult
 `TaskPointsStateRuntimeV2.inspectAuthorityCutoverBarriers()` and
 `docs/state-runtime-v2-writer-handoff-matrix.md`. No green pilot test,
 short idle window or read-only peer report alone satisfies writer fencing.
+
+
+## Nonpilot Tasks record migration rehearsal — November 2
+
+V2 now upgrades its isolated `taskpoints_state_v2` IndexedDB schema
+from version 2 to version 3 by **adding** a `tasks` object store.
+It does not change the Habits/completions stores, their mutation ledger,
+existing legacy storage, image database or the authoritative read path.
+The existing V2 pilot transaction-store list remains unchanged.
+
+The explicit localhost/branch-preview-only
+`rehearsePreviewTaskCollectionSeed()` reads the **effective** V1 Tasks,
+including still-pending Task journal records. It requires a valid source
+journal, valid unique Task IDs, stable full-origin storage inventory,
+a current V2 pilot generation, and an unchanged runtime metadata revision.
+It writes individual Tasks and a separate `task-preview` evidence record
+in one IndexedDB transaction. Source and store values are verified again
+after commit and after reload. A repeat against the same source verifies
+rather than rewriting records. If V1 Tasks have changed since the prior
+preview, the old V2 evidence is preserved rather than silently overwritten.
+No automatic repair/resync is allowed.
+
+Browser tests cover the real journal overlay, per-record backfill,
+verified readback, reloading, idempotent repeat, and a newer legacy-only
+Task write that must block stale reseeding. A mismatch, malformed journal,
+generation change, or unstable source cannot authorize a successful
+preview claim. The metadata hash is not an off-device backup, an
+authenticity guarantee or a new runtime authority. A task preview is
+**not automatically refreshed** as users edit Tasks.
+
+This supplies concrete **partial engineering evidence** for the
+12-point nonpilot-collection milestone; it earns **zero additional
+percentage points** until full write admission, completion/matchup
+relationships, compatibility/export parity and real-device gates are met.
+The baseline remains 67/100.
