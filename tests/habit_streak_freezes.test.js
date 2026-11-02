@@ -93,7 +93,7 @@ test('a first missed day after only one completion does not spend a freeze', () 
 });
 
 test('when the last freeze is spent, the next miss resets streak and bonus', () => {
-  const h = habit(['2026-10-26', '2026-10-27', '2026-11-01', '2026-11-04']);
+  const h = habit(['2026-10-26', '2026-10-27', '2026-10-31', '2026-11-01', '2026-11-04']);
   const s = state(h);
   const out = status(h, s, '2026-11-04');
   assert.equal(out.earned, 1);
