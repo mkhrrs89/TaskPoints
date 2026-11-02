@@ -854,7 +854,10 @@ try {
   });
 
   await run('full-origin writer admission blocks a stale Task journal writer after independent Projects edit',async context=>{
-    const writer=await open(context),legacy=await open(context);
+    const writer=await open(context);
+    const legacy=await context.newPage();
+    await legacy.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
     if(!await writer.evaluate(()=>typeof navigator.locks?.request==='function')){
       const rejected=await writer.evaluate(()=>
         window.TaskPointsStateRuntimeV2.exercisePreviewSerializedSnapshotLease(()=>{}));
