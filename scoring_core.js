@@ -5722,12 +5722,13 @@ if (maxEntries !== null && finalSchedules.length > maxEntries) {
     if (!player || typeof player !== 'object' || Array.isArray(player)) return player;
     const greed = Number(player.greed);
     const streaky = Number(player.streaky);
+    const normalizedStreaky = player.streaky == null || !Number.isFinite(streaky) || streaky === 0 ? 50 : Math.min(100, Math.max(1, streaky));
     return {
       ...player,
       pid: normalizePlayerPid(player.pid),
       greed: Number.isFinite(greed) ? Math.min(100, Math.max(0, greed)) : 0,
-      // Placeholder: 0–100, not used in simulation or OVR.
-      streaky: Number.isFinite(streaky) ? Math.min(100, Math.max(0, streaky)) : 0
+      // Existing 0/absent values migrate to the new average rating of 50.
+      streaky: normalizedStreaky
     };
   }
 
@@ -9791,6 +9792,72 @@ function softCurbNpcScore(rawScore) {
   return Number(cappedScore.toFixed(1));
 }
   
+
+  // Season 4 starts November 1. Before it, the standings seasons begin on
+  // September 1, July 1 and June 1 respectively. Tournament results count;
+  // prior seasons never carry momentum into the next win/loss streak.
+  function getStreakySeasonStart(dateKeyStr) {
+    const key = String(dateKeyStr || '').slice(0, 10);
+    if (key >= '2026-11-01') return '2026-11-01';
+    if (key >= '2026-09-01') return '2026-09-01';
+    if (key >= '2026-07-01') return '2026-07-01';
+    return '2026-06-01';
+  }
+
+  function computeNpcWinLossStreak(state, playerId, beforeDateKey) {
+    if (!playerId || playerId === 'YOU') return 0;
+    const date = String(beforeDateKey || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return 0;
+    const seasonStart = getStreakySeasonStart(date);
+    const matches = Array.isArray(state?.matchups) ? state.matchups : [];
+    const results = [];
+    matches.forEach((matchup, index) => {
+      if (!matchup || matchup.completed === false || matchup.result === 'pending') return;
+      const key = String(matchup.dateKey || matchup.date || matchup.dateISO || '').slice(0, 10);
+      if (key < seasonStart || key >= date) return; // never use today's result
+      const aId = String(matchup.playerAId || '');
+      const bId = String(matchup.playerBId || '');
+      if (aId !== playerId && bId !== playerId) return;
+      // Null/undefined scores are unplayed, not zero-point games.
+      if (matchup.scoreA == null || matchup.scoreB == null ||
+          matchup.scoreA === '' || matchup.scoreB === '') return;
+      const a = Number(matchup.scoreA);
+      const b = Number(matchup.scoreB);
+      if (!Number.isFinite(a) || !Number.isFinite(b)) return;
+      results.push({
+        key,
+        order: index,
+        game: Number(matchup.gameNumber || matchup.seriesGameNumber) || 0,
+        result: a === b ? 0 : ((aId === playerId ? a > b : b > a) ? 1 : -1)
+      });
+    });
+    // Sort only that player's recorded season games, including tournament games.
+    results.sort((a, b) => b.key.localeCompare(a.key) || b.game - a.game || b.order - a.order);
+    if (!results.length || results[0].result === 0) return 0;
+    const direction = results[0].result;
+    let count = 0;
+    for (const result of results) {
+      if (result.result !== direction || count >= 10) break;
+      count++;
+    }
+    return count * direction;
+  }
+
+  function computeStreakyEffect(player, signedStreak) {
+    const rawRating = Number(player?.streaky);
+    const rating = player?.streaky == null || !Number.isFinite(rawRating) || rawRating <= 0
+      ? 50 : Math.max(1, Math.min(100, rawRating));
+    const streak = Number.isFinite(Number(signedStreak))
+      ? Math.max(-10, Math.min(10, Math.trunc(Number(signedStreak))))
+      : 0;
+    // At 100 Streaky: two consecutive wins ≈ +1.2, five +3, ten +6.
+    // Losses mirror wins; a lone win/loss has no effect.
+    const bonus = Math.abs(streak) >= 2
+      ? Number((streak * 0.6 * rating / 100).toFixed(3))
+      : 0;
+    return { rating, streak, bonus };
+  }
+
 function simulateAiScoreForPlayerCore(player, dateKey, options = {}) {
   if (!player) {
     return NPC_SCORE_LOW_SOFT_CAP_MIN;
@@ -9809,6 +9876,7 @@ function simulateAiScoreForPlayerCore(player, dateKey, options = {}) {
     typeof player.varianceTilt === "number" ? player.varianceTilt : (player.varianceTilt || 50)
   );
   const momentum = Number(player.momentum);
+  const streakyEffect = computeStreakyEffect(player, computeNpcWinLossStreak(state, player.id, dateKey));
 
   let riskyRating = Number(player.risky);
   if (isNaN(riskyRating)) riskyRating = 0;
@@ -9898,7 +9966,7 @@ if (poiseRating > 0 && Math.random() < poiseChance) {
     }
   }
 
-const score = baseline + finalUpside + Math.min(0, rawScore - baseline);
+const score = baseline + finalUpside + Math.min(0, rawScore - baseline) + streakyEffect.bonus;
 
   const cappedScore = softCurbNpcScore(score);
 
@@ -9906,6 +9974,10 @@ if (typeof context.captureEffects === "function") {
   context.captureEffects({
     intimidationApplied,
     poiseApplied,
+    streakyRating: streakyEffect.rating,
+    streakyStreak: streakyEffect.streak,
+    streakyBonus: streakyEffect.bonus,
+    streakySeasonStart: getStreakySeasonStart(dateKey),
 
     // The current player's score was affected by the opponent's intimidation.
     intimidatedByPlayerId: intimidationApplied ? opponentId : null,
@@ -10327,6 +10399,9 @@ return Number(cappedScore.toFixed(1));
     buildPersonalScoreHistoryCsv,
     roundPoints,
     computeMomentumEffects,
+    computeNpcWinLossStreak,
+    computeStreakyEffect,
+    getStreakySeasonStart,
 generateOpponentDripScheduleCore,
 softCurbNpcScore,
 simulateAiScoreForPlayerCore,

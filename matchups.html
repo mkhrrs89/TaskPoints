@@ -1146,6 +1146,18 @@ const matchup = {
         button.addEventListener("click", invoke);
       }
 
+function formatStreakyMatchupDetails(matchup) {
+  const parts = ['A', 'B'].map(side => {
+    const effects = matchup?.[`player${side}Effects`];
+    const bonus = Number(effects?.streakyBonus) || 0;
+    if (Math.abs(bonus) < 0.005) return '';
+    const id = matchup?.[`player${side}Id`];
+    const name = getName(id, matchup);
+    return `${name} Streaky ${bonus > 0 ? '+' : ''}${bonus.toFixed(1)} (${effects.streakyStreak > 0 ? 'W' : 'L'}${Math.abs(effects.streakyStreak)})`;
+  }).filter(Boolean);
+  return parts.length ? ` • ${parts.join(' · ')}` : '';
+}
+
 function makeCollapsibleSection(section, heading, bodyContent) {
   const headerButton = document.createElement("button");
   headerButton.type = "button";
@@ -1306,7 +1318,7 @@ dateKeys.forEach(key => {
               badge.className = "matchup-badge";
               badge.textContent = m.seasonMatchupLabel || "Tournament";
               summary.appendChild(badge);
-              summary.append(document.createTextNode(describeMatchup(m)));
+              summary.append(document.createTextNode(describeMatchup(m) + formatStreakyMatchupDetails(m)));
               if (m.seriesId && window.TaskPointsCore?.getSeriesStatusText) {
                 const series = state.currentSeason?.series?.[m.seriesId];
                 if (series) {
@@ -1316,7 +1328,7 @@ dateKeys.forEach(key => {
                 }
               }
             } else {
-              summary.textContent = describeMatchup(m);
+              summary.textContent = describeMatchup(m) + formatStreakyMatchupDetails(m);
             }
             li.appendChild(summary);
 

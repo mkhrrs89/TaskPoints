@@ -178,13 +178,14 @@
         { key: 'intimidation', label: 'INT', fallback: 0 },
         { key: 'poise', label: 'Poise', fallback: 0 },
         { key: 'greed', label: 'Greed', fallback: 0 },
-        { key: 'streaky', label: 'Streaky', fallback: 0 }
+        { key: 'streaky', label: 'Streaky', fallback: 50 }
       ];
       return fields.map(function(field) {
         var stored = Number(player[field.key]);
         var value = player[field.key] == null || !Number.isFinite(stored)
           ? field.fallback : stored;
         if (field.key === 'risky') value = value <= 10 ? value * 10 : value;
+        if (field.key === 'streaky') value = value <= 0 ? 50 : Math.min(100, Math.max(1, value));
         return { key: field.key, label: field.label, value: value };
       });
     }
@@ -196,7 +197,7 @@
           return '<label class="tp-profile-rating tp-profile-rating-edit">' +
             '<span>' + esc(field.label) + '</span>' +
             '<input name="' + att(field.key) + '" aria-label="' + att(field.label) +
-            '" type="number" inputmode="decimal" min="0" max="100" step="any" required value="' +
+            '" type="number" inputmode="decimal" min="' + (field.key === 'streaky' ? '1' : '0') + '" max="100" step="any" required value="' +
             att(field.value) + '"></label>';
         }).join('') + '</div>' +
         '<p class="tp-profile-rating-help">Risky is entered from 0–100, matching the existing player editor.</p>' +

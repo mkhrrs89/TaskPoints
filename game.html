@@ -1147,8 +1147,8 @@ textarea{
     <input id="playerGreed" type="number" min="0" max="100" class="input mt-1" value="25">
   </div>
   <div>
-    <label class="text-xs muted">Streaky (0–100)</label>
-    <input id="playerStreaky" type="number" min="0" max="100" class="input mt-1" value="0">
+    <label class="text-xs muted">Streaky (1–100)</label>
+    <input id="playerStreaky" type="number" min="1" max="100" class="input mt-1" value="50">
   </div>
   <div>
     <label class="text-xs muted">Active</label>
@@ -1266,7 +1266,7 @@ textarea{
           <li><strong>Style</strong>: Just flavor text for now (can inform future sim tweaks).</li>
           <li><strong>INT</strong>: Suppresses an opponent’s positive roll ceiling in NPC vs NPC matchups.</li>
           <li><strong>Poise</strong>: Lets a player resist pressure and play up against significantly higher-ranked opponents.</li>
-          <li><strong>Streaky</strong>: Reserved for future use; no game effect yet.</li>
+          <li><strong>Streaky</strong>: Win/loss streak sensitivity (1–100, average 50). Two or more consecutive wins boost the next NPC score; consecutive losses reduce it. Maximum effect at 10 games. Streaks reset each season and ignore points totals.</li>
         </ul>
       </div>
     </section>
@@ -2317,8 +2317,21 @@ participantIds.forEach(id => {
     }
   });
 
+  // The stored scoring effect describes the modifier *before* the NPC score taper.
+  const linesWithStreaks = lines.map((line, index) => {
+    const matchup = todaysMatchups[index];
+    const descriptions = ['A', 'B'].map(side => {
+      const effects = matchup?.[`player${side}Effects`];
+      const bonus = Number(effects?.streakyBonus) || 0;
+      if (Math.abs(bonus) < 0.005) return '';
+      const id = matchup?.[`player${side}Id`];
+      const name = namesById[id] || id;
+      return `${name} Streaky ${bonus > 0 ? '+' : ''}${bonus.toFixed(1)} (${effects.streakyStreak > 0 ? 'W' : 'L'}${Math.abs(effects.streakyStreak)})`;
+    }).filter(Boolean);
+    return descriptions.length ? `${line} • ${descriptions.join(' · ')}` : line;
+  });
   const byeLines = byeIds.map(id => `${namesById[id] || 'Unknown'} has no matchup scheduled.`);
-  const combined = [...lines, ...byeLines];
+  const combined = [...linesWithStreaks, ...byeLines];
 
   const outHtml = combined.length
     ? combined.map(l => `<div>• ${l}</div>`).join("")
@@ -3361,7 +3374,7 @@ card.innerHTML = `
 <p>INT: ${typeof p.intimidation === "number" ? `${p.intimidation}%` : "0%"}</p>
 <p>Poise: ${typeof p.poise === "number" ? `${p.poise}%` : "0%"}</p>
 <p>Greed: ${Number.isFinite(Number(p.greed)) ? `${Math.min(100, Math.max(0, Number(p.greed)))}%` : "0%"}</p>
-<p>Streaky: ${Number.isFinite(Number(p.streaky)) ? `${Math.min(100, Math.max(0, Number(p.streaky)))}%` : "0%"}</p>
+<p>Streaky: ${Number.isFinite(Number(p.streaky)) && Number(p.streaky) > 0 ? `${Math.min(100, Math.max(1, Number(p.streaky)))}` : "50"}</p>
 <p>Style: ${escapeHtml(p.style || "—")}</p>
         </div>
 
@@ -3515,7 +3528,7 @@ function buildPlayerEditorContent(player) {
       </div>
       <div class="player-editor-field">
         <label>Streaky</label>
-        <input data-field="streaky" type="number" min="0" max="100" value="${Number.isFinite(Number(player.streaky)) ? Math.min(100, Math.max(0, Number(player.streaky))) : 0}" />
+        <input data-field="streaky" type="number" min="1" max="100" value="${Number.isFinite(Number(player.streaky)) && Number(player.streaky) > 0 ? Math.min(100, Math.max(1, Number(player.streaky))) : 50}" />
       </div>
       <div class="player-editor-field">
         <label>Style</label>
@@ -3911,8 +3924,8 @@ const greed = greedInput
   ? Number(greedInput.value || 0)
   : (Number.isFinite(Number(player.greed)) ? Number(player.greed) : 0);
 const streaky = streakyInput
-  ? Number(streakyInput.value || 0)
-  : (Number.isFinite(Number(player.streaky)) ? Number(player.streaky) : 0);
+  ? Number(streakyInput.value || 50)
+  : (Number.isFinite(Number(player.streaky)) && Number(player.streaky) > 0 ? Number(player.streaky) : 50);
 
   const style = styleInput
     ? (styleInput.value || "").trim()
@@ -3942,7 +3955,7 @@ player.risky    = isNaN(risky) ? 3 : risky;
 player.intimidation = Math.min(100, Math.max(0, isNaN(intimidation) ? 0 : intimidation));
 player.poise = Math.min(100, Math.max(0, isNaN(poise) ? 0 : poise));
 player.greed = Math.min(100, Math.max(0, isNaN(greed) ? 0 : greed));
-player.streaky = Math.min(100, Math.max(0, isNaN(streaky) ? 0 : streaky));
+player.streaky = Math.min(100, Math.max(1, !Number.isFinite(streaky) || streaky === 0 ? 50 : streaky));
 player.style    = style || "balanced";
 player.rivalId = rivalId && rivalId !== player.id ? rivalId : "";
     player.primaryColor = primaryColor;
@@ -4018,7 +4031,7 @@ const risky = riskyInputRaw / 10;
 const intimidation = Number($("playerIntimidation").value || 0);
 const poise = Number($("playerPoise").value || 0);
 const greed = Number($("playerGreed").value || 25);
-const streaky = Number($("playerStreaky").value || 0);
+const streaky = Number($("playerStreaky").value || 50);
 
   const style = ($("playerStyle").value || "").trim();
   const primaryColor = normalizePlayerColor($("playerPrimaryColor").value, DEFAULT_PRIMARY_COLOR);
@@ -4053,7 +4066,7 @@ risky: isNaN(risky) ? 1.5 : risky,
 intimidation: Math.min(100, Math.max(0, isNaN(intimidation) ? 0 : intimidation)),
 poise: Math.min(100, Math.max(0, isNaN(poise) ? 0 : poise)),
 greed: Math.min(100, Math.max(0, isNaN(greed) ? 25 : greed)),
-streaky: Math.min(100, Math.max(0, isNaN(streaky) ? 0 : streaky)),
+streaky: Math.min(100, Math.max(1, !Number.isFinite(streaky) || streaky === 0 ? 50 : streaky)),
 
 style: style || "balanced",
 primaryColor,
@@ -4073,7 +4086,7 @@ $("playerRisky").value = "15";
 $("playerIntimidation").value = "0";
 $("playerPoise").value = "0";
 $("playerGreed").value = "25";
-$("playerStreaky").value = "0";
+$("playerStreaky").value = "50";
 $("playerStyle").value = "";
     $("playerRivalId").value = "";
     populateCreatePlayerRivalSelect();

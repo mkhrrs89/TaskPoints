@@ -768,8 +768,11 @@ function validateAndNormalizeValue(field, rawValue) {
     if (normalizedRisky > 10) normalizedRisky = 10;
     return { valid: true, value: normalizedRisky };
   }
-  if (field === "greed" || field === "streaky") {
+  if (field === "greed") {
     return { valid: true, value: clampNumber(numeric, 0, 100) };
+  }
+  if (field === "streaky") {
+    return { valid: true, value: clampNumber(numeric === 0 ? 50 : numeric, 1, 100) };
   }
   if (field === "intimidation" || field === "poise") {
   if (numeric < 0) return { valid: false, message: `${field === "intimidation" ? "Intimidation" : "Poise"} cannot be negative.` };
