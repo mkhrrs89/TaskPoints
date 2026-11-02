@@ -71,6 +71,7 @@ jobs:
           tests/state_runtime_v2_contract.test.js
           tests/state_runtime_v2_dark_contract.test.js
           tests/state_runtime_v2_export_contract.test.js
+          tests/state_runtime_v2_full_origin_checkpoint_contract.test.js
           tests/state_runtime_v2_failure_isolation_contract.test.js
           tests/state_runtime_v2_generation_contract.test.js
           tests/state_runtime_v2_pilot_compatibility_boundary_contract.test.js
