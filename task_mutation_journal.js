@@ -185,7 +185,10 @@
     const saved = writeRecord(record, true);
     mutationGeneration += 1;
     try { core.noteStorageUserInteraction?.(); } catch (_) {}
-    scheduleCompaction('mutation');
+    // saved is the exact successfully written normalized journal; avoid
+    // immediately re-reading and deep-cloning all pending rows just to
+    // schedule an idle compaction. persistPending() still reloads at execution.
+    scheduleCompaction('mutation', saved);
     return saved;
   }
 
@@ -635,10 +638,17 @@
     return runInIdleSlot(() => persistPending(reason), scheduledGeneration);
   }
 
-  function scheduleCompaction(reason = 'scheduled') {
+  function scheduleCompaction(reason = 'scheduled', knownJustWrittenRecord = null) {
     if (compactionScheduled || compactionRunning) return false;
-    const current = readRecord();
-    if (current.malformed || isEmpty(current.record)) return false;
+    // Foreground mutations already wrote and validated this exact journal
+    // synchronously. Startup, retries and other callers still read durable
+    // storage here. Actual idle compaction ALWAYS re-reads the current bytes.
+    if (knownJustWrittenRecord !== null) {
+      if (isEmpty(knownJustWrittenRecord)) return false;
+    } else {
+      const current = readRecord();
+      if (current.malformed || isEmpty(current.record)) return false;
+    }
     compactionScheduled = true;
     const scheduledGeneration = mutationGeneration;
     global.setTimeout?.(() => {
