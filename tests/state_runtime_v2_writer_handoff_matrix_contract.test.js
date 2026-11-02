@@ -851,3 +851,27 @@ test('preview writer sequence must identify the latest durable marker',()=>{
   assert.match(p,/markerWriterSequence: item/);
   assert.match(p,/canPromote: false/);
 });
+
+
+test('silent old-tab exclusion cannot be inferred from preview peers or stable V1 inventory',()=>{
+  const runtime=read('state_runtime_v2.js');
+  const peerStart=runtime.indexOf('async function inspectPreviewWriterPeers()');
+  const peerEnd=runtime.indexOf('function publishCommittedRevision(',peerStart);
+  const probe=runtime.slice(peerStart,peerEnd);
+  const cutoverStart=runtime.indexOf('async function inspectAuthorityCutoverBarriers()');
+  const cutoverEnd=runtime.indexOf('// Explicit forensic inspection',cutoverStart);
+  const gate=runtime.slice(cutoverStart,cutoverEnd);
+  assert.ok(peerStart>=0&&peerEnd>peerStart&&cutoverStart>=0&&cutoverEnd>cutoverStart);
+  assert.match(probe,/respondingPreviewTabsOnly: true/);
+  assert.match(probe,/silentLegacyWriterExclusionVerified: false/);
+  assert.match(probe,/productionWriterAdmissionComplete: false/);
+  assert.match(probe,/canPromote: false/);
+  assert.match(gate,/silent_or_suspended_legacy_writers_not_excluded/);
+  assert.match(gate,/silentLegacyWriterExclusionVerified: false/);
+  assert.match(gate,/productionWriterAdmissionComplete: false/);
+  assert.match(gate,/legacyWriterQuietWindowProven: false/);
+  assert.match(gate,/observedPeersOnly: peers\?\.respondingPreviewTabsOnly === true/);
+  assert.match(gate,/fullStorageBefore !== fullStorageAfter/);
+  assert.match(gate,/canPromote: false/);
+  assert.match(gate,/allLegacyWritersFenced: false/);
+});
