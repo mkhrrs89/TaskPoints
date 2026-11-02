@@ -144,3 +144,30 @@ test('Work preflight failure keeps the original Home save path and its failure a
   assert.equal(events.journal.length, 0);
   assert.equal(events.fullSaves, 1);
 });
+
+
+test('real Home exposes its live state and current Work row to the separate fast-path script', () => {
+  assert.match(home, /window\.TaskPointsWorkEntryAccess\s*=\s*\{/);
+  assert.match(home, /getState:\s*\(\)\s*=>\s*state/);
+  assert.match(home, /getEditedRow:\s*\(name\)\s*=>/);
+  assert.match(home, /state\.completions\.find\(\(row\)\s*=>\s*row\s*===\s*entry\)/);
+});
+
+test('unchanged Work score and hours can still be confirmed by the durable journal', () => {
+  const { ctx, fields, events, state } = makeHome({ fullSaveOutcome: false });
+  // Match exactly what the real Home Work handler will assign on Save.
+  const existing = state.completions[0];
+  existing.points = 8.08;
+  fields.workEditScoreInput.value = '8';
+  fields.workEditHoursInput.value = '8';
+  ctx.TaskPointsWorkEntryAccess = {
+    getState: () => state,
+    getEditedRow: () => state.completions.find(row => row.id === existing.id)
+  };
+  ctx.submitWorkEditModal();
+  assert.equal(events.alerts.length, 0);
+  assert.equal(events.closed, 1);
+  assert.equal(events.journal.length, 1);
+  assert.equal(events.journal[0].completionUpsert.id, existing.id);
+  assert.equal(events.fullSaves, 0, 'unchanged Work edits must not trigger a 2-second compressed snapshot save');
+});
