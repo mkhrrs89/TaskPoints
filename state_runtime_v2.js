@@ -4464,6 +4464,146 @@
   // records either a participating test writer marker or a freeze decision.
   // It NEVER writes V1 data or gates a production writer. Pre-V2 tabs do not
   // consult this record and remain capable of writing localStorage.
+  // A narrower stepping stone toward REQUIRED writer admission, rather
+  // than relying on the caller to invoke an optional freshness callback.
+  // This API is explicit, PREVIEW-HOST-ONLY and NEVER installs on the live
+  // V1 Task/Work/SCWM writer. Its only sink is the existing synchronous V1
+  // atomic Task completion journal; no primary-authority migration occurs.
+  //
+  // Every admitted action must pass the full-origin source token, generation,
+  // dark-mode epoch, exclusive cooperative lock, journal writeability and
+  // a synchronous durable readback. A nonparticipating old tab can still
+  // race after observation: therefore NO production-wide fencing claim.
+  async function rehearsePreviewAdmittedTaskCompletionBatch(rowsInput, expectedInventoryToken) {
+    const refuse = (reason, details = {}) => ({
+      checked: true, previewOnly: true, committed: false,
+      confirmedDurable: false, canPromote: false,
+      productionWritersFenced: false, mutationAuthority: 'legacy_only',
+      readAuthority: 'legacy_only', reason, ...details
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    if (typeof expectedInventoryToken !== 'string' || !expectedInventoryToken.length)
+      return refuse('full_origin_token_required');
+    const locks = global.navigator?.locks;
+    if (typeof locks?.request !== 'function') return refuse('lock_manager_unavailable');
+    if (typeof core.journalTaskCompletionBatch !== 'function'
+      || typeof core.assertTaskMutationJournalWritable !== 'function')
+      return refuse('atomic_task_journal_unavailable');
+    // Freeze the logical action *before* acquiring an asynchronous lock:
+    // changed caller objects cannot silently substitute a different write.
+    let rows;
+    try {
+      if (!Array.isArray(rowsInput) || !rowsInput.length || rowsInput.length > 64)
+        return refuse('invalid_completion_batch');
+      const json = JSON.stringify(rowsInput);
+      if (typeof json !== 'string' || json.length > 262144)
+        return refuse('invalid_completion_batch');
+      rows = JSON.parse(json);
+      const ids = new Set();
+      for (const row of rows) {
+        if (!row || typeof row !== 'object' || Array.isArray(row)
+          || typeof row.id !== 'string' || !row.id || row.id.length > 128
+          || ids.has(row.id)) return refuse('invalid_completion_batch');
+        ids.add(row.id);
+      }
+    } catch (_) { return refuse('invalid_completion_batch'); }
+    const originalEpoch = darkMirrorModeEpoch;
+    const expectedGeneration = currentGeneration({ create: false });
+    if (!expectedGeneration) return refuse('generation_unavailable');
+    let result = refuse('lock_not_available');
+    try {
+      await locks.request(EXCLUSIVE_WRITER_REHEARSAL_LOCK,
+        { mode: 'exclusive', ifAvailable: true }, lock => {
+          if (!lock) { result = refuse('lock_held_elsewhere'); return; }
+          if (!isDarkEnabled() || darkMirrorModeEpoch !== originalEpoch
+            || currentGeneration({ create: false }) !== expectedGeneration) {
+            result = refuse('generation_or_preview_changed_under_lock');
+            return;
+          }
+          let currentInventory;
+          try { currentInventory = captureReadOnlyFullStorageInventory(); }
+          catch (_) {
+            result = refuse('full_origin_unreadable');
+            return;
+          }
+          if (currentInventory !== expectedInventoryToken) {
+            result = refuse('full_origin_changed');
+            return;
+          }
+          // From here through the journal setItem/readback are synchronous.
+          // Our lock excludes COOPERATING tabs but not older V1 pages.
+          try { core.assertTaskMutationJournalWritable(); }
+          catch (_) {
+            result = refuse('task_journal_not_writable');
+            return;
+          }
+          let priorJournal;
+          try { priorJournal = global.localStorage.getItem('taskpoints_pending_task_mutations_v1'); }
+          catch (_) {
+            result = refuse('task_journal_unreadable');
+            return;
+          }
+          try {
+            core.journalTaskCompletionBatch(rows);
+          } catch (_) {
+            // Do not assert an unconfirmed failure rolled back a durable write:
+            // a custom host or a post-write error might already have saved it.
+            result = refuse('task_journal_write_failed', {
+              writeOutcomeUncertain: true
+            });
+            return;
+          }
+          // A journal API return value alone does NOT prove a durable write.
+          // Re-read exact synchronous storage and verify every changed row.
+          let verified = false;
+          try {
+            const after = global.localStorage.getItem('taskpoints_pending_task_mutations_v1');
+            if (typeof after === 'string' && after !== priorJournal) {
+              const stored = JSON.parse(after);
+              const upserts = Array.isArray(stored.completionUpserts)
+                ? stored.completionUpserts : [];
+              verified = rows.every(row =>
+                upserts.some(saved => saved?.id === row.id
+                  && stableJson(saved) === stableJson(row)));
+            }
+          } catch (_) {}
+          if (!verified) {
+            result = refuse('task_journal_readback_unverified', {
+              writeOutcomeUncertain: true
+            });
+            return;
+          }
+          // A reset/opt-out after the write cannot be undone or reported as
+          // a clean failure. Preserve the acknowledgement's uncertainty.
+          let unchanged = false;
+          try {
+            unchanged = isDarkEnabled() && darkMirrorModeEpoch === originalEpoch
+              && currentGeneration({ create: false }) === expectedGeneration;
+          } catch (_) {}
+          if (!unchanged) {
+            result = refuse('generation_changed_after_write', {
+              committed: true, writeOutcomeUncertain: true
+            });
+            return;
+          }
+          result = {
+            checked: true, previewOnly: true, committed: true,
+            confirmedDurable: true, reason: 'preview_task_batch_admitted',
+            rowCount: rows.length, lockHeldAfterReturn: false,
+            canPromote: false, productionWritersFenced: false,
+            mutationAuthority: 'legacy_only', readAuthority: 'legacy_only'
+          };
+        });
+    } catch (_) {
+      return refuse('lock_request_failed', {
+        writeOutcomeUncertain: result.writeOutcomeUncertain === true
+          || result.committed === true
+      });
+    }
+    return result;
+  }
+
   async function rehearsePreviewDurableWriterFence(action, options = {}) {
     const refuse = (reason, details = {}) => ({
       checked: true, reason, previewOnly: true, canPromote: false,
@@ -5648,6 +5788,7 @@
     inspectPreviewWriterPeers,
     exercisePreviewCooperativeWriterLease,
     exercisePreviewSerializedSnapshotLease,
+    rehearsePreviewAdmittedTaskCompletionBatch,
     rehearsePreviewDurableWriterFence,
     inspectPreservedParityMismatch,
     inspectLegacyRollbackSource,
