@@ -981,3 +981,27 @@ test('Main Work action batches atomic V1 journal writes without removing fallbac
   assert.match(read('state_runtime_v2.js'),/workEntryAtomicAdmissionVerified: false/);
   assert.match(read('state_runtime_v2.js'),/work_entry_multirecord_admission_not_validated/);
 });
+
+test('preview writer admission checks independent full-origin keys under its exclusive lease',()=>{
+  const source=read('state_runtime_v2.js');
+  const begin=source.indexOf('async function exercisePreviewSerializedSnapshotLease(operation)');
+  const end=source.indexOf('async function rehearsePreviewDurableWriterFence(action, options = {})',begin);
+  assert.ok(begin>0&&end>begin);
+  const rehearsal=source.slice(begin,end);
+  assert.match(rehearsal,/const assertPreviewFullOriginInventoryUnchanged = expectedSerialized =>/);
+  assert.match(rehearsal,/if \(!callbackActive\)/);
+  assert.match(rehearsal,/assertPreviewGenerationCurrent\(\)/);
+  assert.match(rehearsal,/actual = captureReadOnlyFullStorageInventory\(\)/);
+  assert.match(rehearsal,/actual !== expectedSerialized/);
+  assert.match(rehearsal,/STATE_RUNTIME_V2_PREVIEW_FULL_ORIGIN_CHANGED/);
+  assert.match(rehearsal,/serialized_operation_full_origin_changed/);
+  assert.match(rehearsal,/serialized_operation_full_origin_unreadable/);
+  assert.match(rehearsal,/serialized_operation_full_origin_token_required/);
+  assert.match(rehearsal,/assertPreviewFullOriginInventoryUnchanged\n    \}\)/);
+  assert.match(rehearsal,/mode: 'exclusive', ifAvailable: true/);
+  assert.match(rehearsal,/canPromote: false/);
+  assert.match(rehearsal,/productionWritersFenced: false/);
+  assert.match(rehearsal,/callbackActive = false/);
+  assert.ok(!read('task_mutation_journal.js').includes('assertPreviewFullOriginInventoryUnchanged'),
+    'the preview guard must not intercept the existing synchronous V1 Task journal');
+});
