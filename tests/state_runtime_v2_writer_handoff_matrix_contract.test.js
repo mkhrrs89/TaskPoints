@@ -1005,3 +1005,46 @@ test('preview writer admission checks independent full-origin keys under its exc
   assert.ok(!read('task_mutation_journal.js').includes('assertPreviewFullOriginInventoryUnchanged'),
     'the preview guard must not intercept the existing synchronous V1 Task journal');
 });
+
+test('mandatory preview-only Task batch admission validates source and generation before the actual journal write',()=>{
+  const source=read('state_runtime_v2.js');
+  const begin=source.indexOf('async function rehearsePreviewAdmittedTaskCompletionBatch(rowsInput, expectedInventoryToken)');
+  const end=source.indexOf('async function rehearsePreviewDurableWriterFence(action, options = {})',begin);
+  assert.ok(begin>0&&end>begin);
+  const method=source.slice(begin,end);
+  for(const evidence of [
+    'if (!isWalTestPreviewHost())',
+    'if (!isDarkEnabled())',
+    'const originalEpoch = darkMirrorModeEpoch',
+    'currentGeneration({ create: false })',
+    'typeof core.journalTaskCompletionBatch',
+    'typeof core.assertTaskMutationJournalWritable',
+    "mode: 'exclusive', ifAvailable: true",
+    'currentInventory = captureReadOnlyFullStorageInventory()',
+    'currentInventory !== expectedInventoryToken',
+    'core.assertTaskMutationJournalWritable()',
+    'core.journalTaskCompletionBatch(rows)',
+    "global.localStorage.getItem('taskpoints_pending_task_mutations_v1')",
+    'rows.every(row =>',
+    "reason: 'preview_task_batch_admitted'",
+    'confirmedDurable: true',
+    'productionWritersFenced: false',
+    "mutationAuthority: 'legacy_only'",
+    "readAuthority: 'legacy_only'",
+    "writeOutcomeUncertain: true",
+    "reason: 'generation_changed_after_write'"
+  ]) assert.ok(method.includes(evidence),'Missing safety invariant: '+evidence);
+  assert.ok(method.indexOf('currentInventory !== expectedInventoryToken')
+    < method.indexOf('core.journalTaskCompletionBatch(rows)'),
+    'freshness admission must precede the durable V1 journal write');
+  assert.ok(method.indexOf('core.journalTaskCompletionBatch(rows)')
+    < method.indexOf('rows.every(row =>'),
+    'readback may only verify a completed synchronous batch');
+  assert.ok(!method.includes('core.saveStateSnapshot('));
+  assert.ok(!method.includes('safeReplaceTaskPointsStorage('));
+  assert.ok(!method.includes('canPromote: true'));
+  assert.ok(source.includes('    rehearsePreviewAdmittedTaskCompletionBatch,'),
+    'preview adapter must only be available as an explicitly invoked API');
+  assert.ok(!read('task_mutation_journal.js').includes('rehearsePreviewAdmittedTaskCompletionBatch'),
+    'preview adapter must not intercept production Task journaling');
+});
