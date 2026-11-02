@@ -8558,6 +8558,7 @@ function renderHabitRow(h, days, wrap, options = {}) {
   const streak     = Number(h.__streak || 0);
   const failedStreak = Number(h.__failedStreak || 0);
   const completion = Number(h.__completion || 0);
+  const freezeEnabled = options.freezeEnabled === true;
   const streakBonusText = getHabitCurrentStreakBonusText(h, streak);
   const silverWeeks = Number(options.silverWeekCount) || 0;
 
@@ -8660,7 +8661,7 @@ const daysHtml = days.map(d => {
         ${failedStreak}d
       </div>
     ` : '')}
-      <span class="tag habit-silver-weeks" data-silver-weeks="${silverWeeks}" title="Weeks meeting the silver threshold since Oct 12, 2026" aria-label="${silverWeeks} silver ${silverWeeks === 1 ? 'week' : 'weeks'}" style="display:inline-flex;align-items:center;justify-content:center;min-width:20px;padding:1px 5px !important;border:1px solid rgba(255,255,255,.95) !important;border-radius:4px !important;background:transparent !important;color:#fff !important">${silverWeeks}</span>
+      <span class="tag habit-silver-weeks" data-silver-weeks="${silverWeeks}" title="${freezeEnabled ? 'Available streak freezes (earned by silver weeks; missed days spend one)' : 'Silver weeks completed since Oct 12, 2026 (enable the streak multiplier to use freezes)'}" aria-label="${silverWeeks} ${freezeEnabled ? 'available streak freezes' : 'silver weeks'}" style="display:inline-flex;align-items:center;justify-content:center;min-width:20px;padding:1px 5px !important;border:1px solid rgba(255,255,255,.95) !important;border-radius:4px !important;background:transparent !important;color:#fff !important">${silverWeeks}</span>
       <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60 text-orange-400">
         ${completion}%
       </div>
@@ -8797,6 +8798,19 @@ function renderHabits(){
 
   const { entries } = buildHabitRenderEntries(habits, sortMode);
   const silverWeekCounts = computeHabitSilverWeekCounts(habits, state.completions);
+  // The silver thresholds still grant exactly one credit per qualifying week.
+  // Only multiplier-enabled habits spend credits; others retain the legacy
+  // silver-week count without changing their streak behavior.
+  const freezeStatuses = new Map();
+  const currentFreezeDay = getCurrentTaskPointsDayKey();
+  habits.forEach(h => {
+    if (h.streakMultiplierEnabled !== true) return;
+    const status = TaskPointsCore?.getHabitFreezeStatus?.(h, state, currentFreezeDay);
+    if (!status) return;
+    freezeStatuses.set(String(h.id), status);
+    h.__streak = status.streak;
+    h.__failedStreak = status.streak ? 0 : h.__failedStreak;
+  });
   const visibleCompletionLookup = buildVisibleHabitCompletionLookup(habits, days, state.completions);
 
   // Render every visible habit inside the same left-rail geometry.
@@ -8878,7 +8892,8 @@ function renderHabits(){
       showTag: !isTaggedGroup,
       isGrouped: true,
       groupMoveTag: isTaggedGroup ? section.tag : '',
-      silverWeekCount: silverWeekCounts.get(String(h.id)) || 0,
+      silverWeekCount: freezeStatuses.get(String(h.id))?.balance ?? (silverWeekCounts.get(String(h.id)) || 0),
+      freezeEnabled: freezeStatuses.has(String(h.id)),
       visibleCompletionLookup,
       isWeeklyCompleteForVisibleWeek: isWeeklyComplete,
       previousIsWeeklyComplete: sectionRows[index - 1]?.isWeeklyComplete === true,
