@@ -4959,6 +4959,86 @@ try {
       pendingJournalRetained:true,cutoverStillBlocked:true};
   });
 
+  await run('Work-like two completion row change rehearses one atomic V2 preview intent',async context=>{
+    const page=await open(context);
+    const before=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const proof=await page.evaluate(async()=>{
+      const rt=window.TaskPointsStateRuntimeV2;
+      // This is a synthetic proxy for a multi-row SCWM Work/Sleep action.
+      // The actual Work fast path still writes the authoritative V1 journal.
+      const rows=[
+        {collection:'completions',entityId:'work-logical-action',
+          operation:'put',value:{id:'work-logical-action',source:'work',
+            workHours:8.5,points:8.3,completedAtISO:'2026-11-02T12:00:00.000Z'}},
+        {collection:'completions',entityId:'sleep-logical-action',
+          operation:'put',value:{id:'sleep-logical-action',source:'sleep',
+            points:7.7,completedAtISO:'2026-11-02T12:00:00.000Z'}}
+      ];
+      const first=await rt.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'two-scwm-rows-one-action',
+        syntheticMutations:rows
+      });
+      const work=await rt.rehearsePreviewDurableWriterFence('inspect_entity',{
+        collection:'completions',entityId:'work-logical-action'
+      });
+      const sleep=await rt.rehearsePreviewDurableWriterFence('inspect_entity',{
+        collection:'completions',entityId:'sleep-logical-action'
+      });
+      const replay=await rt.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'two-scwm-rows-one-action',
+        syntheticMutations:rows
+      });
+      const conflict=await rt.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'two-scwm-rows-one-action',
+        syntheticMutations:[rows[0],{...rows[1],
+          value:{...rows[1].value,points:9.1}}]
+      });
+      const audit=await rt.rehearsePreviewDurableWriterFence('audit');
+      const cutover=await rt.inspectAuthorityCutoverBarriers();
+      const read=await rt.rehearsePreviewDurableWriterFence('read');
+      return {first,work,sleep,replay,conflict,audit,cutover,read,
+        v1:localStorage.getItem('taskpoints_v1'),
+        authority:rt.getStatus().readAuthority};
+    });
+    assert.equal(proof.first.reason,'preview_writer_recorded');
+    assert.equal(proof.first.syntheticRecordCount,2);
+    assert.equal(proof.first.fence.writersCommitted,1);
+    for(const result of [proof.work,proof.sleep]){
+      assert.equal(result.reason,'preview_synthetic_entity_present',JSON.stringify(result));
+      assert.equal(result.entity.lastMarker,'two-scwm-rows-one-action');
+      assert.equal(result.entity.sequence,1);
+    }
+    assert.equal(proof.work.entity.value.workHours,8.5);
+    assert.equal(proof.sleep.entity.value.points,7.7);
+    assert.equal(proof.replay.reason,'preview_writer_replayed');
+    assert.equal(proof.replay.fence.writersCommitted,1);
+    assert.equal(proof.conflict.reason,'fence_writer_synthetic_mutation_mismatch');
+    assert.equal(proof.conflict.canPromote,false);
+    assert.equal(proof.audit.reason,'preview_writer_inventory_consistent');
+    assert.equal(proof.audit.observedMarkerCount,1);
+    assert.equal(proof.audit.observedEntityCount,2);
+    assert.equal(proof.read.fence.writersCommitted,1);
+    assert.equal(proof.cutover.checks.workEntryAtomicAdmissionVerified,false);
+    assert.ok(proof.cutover.blockers.includes('work_entry_multirecord_admission_not_validated'));
+    assert.equal(proof.v1,before);
+    assert.equal(proof.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    const after=await page.evaluate(async()=>{
+      const rt=window.TaskPointsStateRuntimeV2;
+      return {work:await rt.rehearsePreviewDurableWriterFence('inspect_entity',{
+          collection:'completions',entityId:'work-logical-action'}),
+        sleep:await rt.rehearsePreviewDurableWriterFence('inspect_entity',{
+          collection:'completions',entityId:'sleep-logical-action'}),
+        cutover:await rt.inspectAuthorityCutoverBarriers()};
+    });
+    assert.equal(after.work.reason,'preview_synthetic_entity_present');
+    assert.equal(after.sleep.reason,'preview_synthetic_entity_present');
+    assert.equal(after.cutover.canPromote,false);
+    return {twoRowsOneAtomicIntent:true,oneCounterIncrement:true,
+      typedReplayIdempotent:true,conflictingEditRejected:true,
+      bothRowsSurviveReload:true,realWorkWriterStillUnfenced:true};
+  });
+
   await run('Work Task-journal persistence cannot certify full writer admission',async context=>{
     const page=await open(context);
     const original=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
