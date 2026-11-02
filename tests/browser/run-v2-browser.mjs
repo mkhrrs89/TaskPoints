@@ -4689,6 +4689,93 @@ try {
       journalBlockerObserved:true,authority:'legacy_only'};
   });
 
+  await run('quiet peer probes cannot rule out later silent old-tab writes',async context=>{
+    const observer=await open(context);
+    const legacy=await context.newPage();
+    await legacy.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const older=await legacy.evaluate(()=>({
+      v1:localStorage.getItem('taskpoints_v1'),
+      noV2Runtime:!window.TaskPointsStateRuntimeV2
+    }));
+    assert.equal(older.noV2Runtime,true,
+      'Fixture must actually represent an older nonparticipating page');
+    // Two consecutive unchanging origin inventories and responsive V2
+    // probes cannot exclude a dormant legacy writer.
+    const before=await observer.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      return {
+        first:await runtime.inspectAuthorityCutoverBarriers(),
+        second:await runtime.inspectAuthorityCutoverBarriers(),
+        probe:await runtime.inspectPreviewWriterPeers(),
+        raw:localStorage.getItem('taskpoints_v1'),
+        authority:runtime.getStatus().readAuthority
+      };
+    });
+    for(const report of [before.first,before.second]){
+      assert.equal(report.reason,'authority_cutover_blocked',JSON.stringify(report));
+      assert.equal(report.canPromote,false);
+      assert.equal(report.checks.observedPeersOnly,true);
+      assert.equal(report.checks.silentLegacyWriterExclusionVerified,false);
+      assert.equal(report.checks.productionWriterAdmissionComplete,false);
+      assert.equal(report.checks.legacyWriterQuietWindowProven,false);
+      assert.equal(report.peers.silentLegacyWriterExclusionVerified,false);
+      assert.equal(report.peers.productionWriterAdmissionComplete,false);
+      assert.ok(report.blockers.includes('silent_or_suspended_legacy_writers_not_excluded'));
+      assert.ok(report.blockers.includes('all_legacy_writers_not_fenced'));
+    }
+    assert.equal(before.probe.silentLegacyWriterExclusionVerified,false);
+    assert.equal(before.probe.productionWriterAdmissionComplete,false);
+    assert.equal(before.probe.canPromote,false);
+    assert.equal(before.raw,older.v1);
+    assert.equal(before.authority,'legacy_only');
+    // The same still-open nonparticipating page resumes after the quiet
+    // audits, writes the actual canonical V1 snapshot and an independent
+    // legacy Projects key, and does not consult any V2 fencing protocol.
+    const changed=await legacy.evaluate(()=>{
+      const state=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      state.tasks.push({id:'post-quiescence-old-writer',
+        title:'Legacy tab wrote after two clean handoff observations'});
+      const raw=JSON.stringify(state);
+      const projects=JSON.stringify([{id:'old-only-project',
+        name:'Unfenced old tab project'}]);
+      localStorage.setItem('taskpoints_v1',raw);
+      localStorage.setItem('tp_projects_v1',projects);
+      return {raw,projects};
+    });
+    await observer.waitForFunction(({raw,projects})=>
+      localStorage.getItem('taskpoints_v1')===raw
+      && localStorage.getItem('tp_projects_v1')===projects,
+      changed,{timeout:15000,polling:75});
+    const after=await observer.evaluate(async()=>{
+      const rt=window.TaskPointsStateRuntimeV2;
+      return {report:await rt.inspectAuthorityCutoverBarriers(),
+        v1:localStorage.getItem('taskpoints_v1'),
+        projects:localStorage.getItem('tp_projects_v1'),
+        authority:rt.getStatus().readAuthority};
+    });
+    assert.equal(after.v1,changed.raw);
+    assert.equal(after.projects,changed.projects);
+    assert.equal(after.report.canPromote,false);
+    assert.equal(after.report.checks.silentLegacyWriterExclusionVerified,false);
+    assert.equal(after.report.checks.productionWriterAdmissionComplete,false);
+    assert.ok(after.report.blockers.includes('silent_or_suspended_legacy_writers_not_excluded'));
+    assert.equal(after.authority,'legacy_only');
+    await legacy.close();
+    await observer.reload({waitUntil:'load'});
+    const retained=await observer.evaluate(()=>({
+      v1:localStorage.getItem('taskpoints_v1'),
+      projects:localStorage.getItem('tp_projects_v1'),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    assert.equal(retained.v1,changed.raw);
+    assert.equal(retained.projects,changed.projects);
+    assert.equal(retained.authority,'legacy_only');
+    return {twoQuietAuditsNotAdmission:true,silentLegacyWriterSucceeded:true,
+      nonpilotLegacyKeysRetained:true,oldTabStillUnfenced:true,
+      originalWriterAuthorityPreserved:true,reloadRetainsData:true};
+  });
+
   await run('Task journal with pending task and completion changes explicitly blocks cutover',async context=>{
     const page=await open(context);
     const originalV1=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
