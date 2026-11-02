@@ -3785,6 +3785,16 @@
   // of earlier payload-only SHA-256 records rather than deleting or silently
   // rewriting historical recovery evidence.
   function previewRecoveryDigestPayload(record) {
+    // Full-origin capture scope is authenticated for new V3 records.
+    // Preserve the exact V1/V2 digest formats for existing checkpoints.
+    if (record.integrityVersion === 3 && record.captureScope === 'full_origin') {
+      return {
+        id: record.id, schemaVersion: record.schemaVersion,
+        integrityVersion: record.integrityVersion, captureScope: record.captureScope,
+        capturedAtISO: record.capturedAtISO, generation: record.generation,
+        entries: record.entries
+      };
+    }
     if (record.integrityVersion === 2) {
       return {
         id: record.id,
@@ -3806,12 +3816,15 @@
       || typeof record.generation !== 'string' || !record.generation
       || typeof record.fingerprint !== 'string')
       return false;
+    const fullOrigin = record.integrityVersion === 3
+      && record.captureScope === 'full_origin';
+    if (record.integrityVersion === 3 && !fullOrigin) return false;
     let previous = null;
     let hasLegacy = false;
     for (const entry of record.entries) {
       if (!Array.isArray(entry) || entry.length !== 2
         || typeof entry[0] !== 'string' || typeof entry[1] !== 'string'
-        || !entry[0].toLowerCase().startsWith('taskpoints_')
+        || (!fullOrigin && !entry[0].toLowerCase().startsWith('taskpoints_'))
         || (previous !== null && previous >= entry[0])) return false;
       if (entry[0] === (core.STORAGE_KEY || 'taskpoints_v1')) hasLegacy = true;
       previous = entry[0];
@@ -3876,7 +3889,9 @@
         capturedGeneration: record.generation, capturedAtISO: record.capturedAtISO,
         keyCount: record.entries.length,
         fingerprint: record.fingerprint,
-        integrityCoverage: record.integrityVersion === 2
+        captureScope: record.integrityVersion === 3
+          ? 'full_origin' : 'taskpoints_namespace',
+        integrityCoverage: record.integrityVersion === 2 || record.integrityVersion === 3
           ? 'metadata_and_payload' : 'legacy_payload_only'
       };
     } catch (_) { return refuse('checkpoint_unreadable'); }
@@ -3906,7 +3921,9 @@
         return refused('checkpoint_provenance_unverified');
       const before = await inspectLegacyRollbackSource();
       if (!before.sourceStable) return refused('legacy_source_' + before.reason);
-      const currentBefore = captureLegacyNamespace();
+      const captureForPlan = () => verdict.captureScope === 'full_origin'
+        ? JSON.parse(captureReadOnlyFullStorageInventory()) : captureLegacyNamespace();
+      const currentBefore = captureForPlan();
       db = await openPreviewRecoveryDb();
       const tx = db.transaction(PREVIEW_RECOVERY_STORE, 'readonly');
       const record = await requestPromise(tx.objectStore(PREVIEW_RECOVERY_STORE).get(id));
@@ -3925,7 +3942,7 @@
       const after = await inspectLegacyRollbackSource();
       if (!after.sourceStable
         || before.generation !== after.generation
-        || (await previewRecoveryFingerprint(currentBefore)) !== (await previewRecoveryFingerprint(captureLegacyNamespace())))
+        || (await previewRecoveryFingerprint(currentBefore)) !== (await previewRecoveryFingerprint(captureForPlan())))
         return refused('legacy_changed_during_plan');
       const generationMatches = before.generation === record.generation;
       return {
@@ -3933,10 +3950,16 @@
         reason: generationMatches ? 'dry_run_only' : 'checkpoint_generation_differs',
         checkpointId: id, mutationAuthority: 'legacy_only',
         readAuthority: 'legacy_only', capturedGeneration: record.generation,
-        generationMatches,
+        generationMatches, captureScope: verdict.captureScope,
+        fullOriginLocalStorageCovered: verdict.captureScope === 'full_origin',
         counts: { restoreMissing: restored, replaceChanged: replaced,
           removeNewer: removed, captured: savedKeys.size, current: currentKeys.size },
-        blockers: ['production_writer_fencing_not_implemented',
+        blockers: [
+          ...(verdict.captureScope !== 'full_origin'
+            ? ['rollback_checkpoint_excludes_non_taskpoints_keys'] : []),
+          // A local checkpoint cannot cover separate IndexedDBs,
+          // independent off-device backup or dormant legacy writers.
+          'production_writer_fencing_not_implemented',
           'external_checkpoint_backup_unverified',
           'rollback_restore_transaction_not_implemented']
       };
@@ -3948,17 +3971,25 @@
   // immutable; a failed write cannot replace another checkpoint. Evidence
   // stays separate from the V2 mirror (which may be reseeded), and no copy
   // is automatically restored into V1.
-  async function createPreviewRecoveryCheckpoint() {
+  async function createPreviewRecoveryCheckpoint(options = {}) {
     const fail = (reason, extras = {}) => ({
       checked: true, saved: false, sourceStable: false,
       canAutoRestore: false, reason,
       mutationAuthority: 'legacy_only', readAuthority: 'legacy_only', ...extras
     });
+    const captureScope = options?.scope === 'full_origin'
+      ? 'full_origin' : 'taskpoints_namespace';
+    if (options?.scope != null && !['full_origin', 'taskpoints_namespace'].includes(options.scope))
+      return fail('invalid_checkpoint_scope');
+    const capture = () => captureScope === 'full_origin'
+      ? JSON.parse(captureReadOnlyFullStorageInventory()) : captureLegacyNamespace();
     const source = await inspectLegacyRollbackSource();
     if (!source.sourceStable) return fail('legacy_source_' + source.reason);
     let db;
     try {
-      const entries = captureLegacyNamespace();
+      const entries = capture();
+      if (!entries.some(([key]) => key === (core.STORAGE_KEY || 'taskpoints_v1')))
+        return fail('legacy_missing_during_capture');
       const generation = currentGeneration({ create: false });
       if (!generation || generation !== source.generation)
         return fail('generation_changed_before_capture');
@@ -3968,7 +3999,7 @@
       // before persisting a checkpoint that could be torn across versions.
       // An inconsistent attempt must not become an immutable recovery copy.
       const capturedPayloadFingerprint = await previewRecoveryFingerprint(entries);
-      if (await previewRecoveryFingerprint(captureLegacyNamespace())
+      if (await previewRecoveryFingerprint(capture())
           !== capturedPayloadFingerprint)
         return fail('legacy_changed_during_capture');
       const captureSource = await inspectLegacyRollbackSource();
@@ -3977,7 +4008,8 @@
       const id = `v1-preview:${global.crypto?.randomUUID?.() || `${Date.now()}:${Math.random().toString(36).slice(2)}`}`;
       const record = {
         id, schemaVersion: PREVIEW_RECOVERY_SCHEMA,
-        integrityVersion: 2,
+        integrityVersion: captureScope === 'full_origin' ? 3 : 2,
+        ...(captureScope === 'full_origin' ? { captureScope } : {}),
         capturedAtISO: nowIso(), generation, entries
       };
       record.fingerprint = await previewRecoveryFingerprint(previewRecoveryDigestPayload(record));
@@ -3994,7 +4026,7 @@
       const after = await inspectLegacyRollbackSource();
       let sameInventory = false;
       try {
-        sameInventory = await previewRecoveryFingerprint(captureLegacyNamespace())
+        sameInventory = await previewRecoveryFingerprint(capture())
           === capturedPayloadFingerprint;
       } catch (_) {}
       const stillCurrent = after.sourceStable && after.generation === generation && sameInventory;
@@ -4002,7 +4034,7 @@
         checked: true, saved: true, verified: true,
         sourceStable: stillCurrent,
         reason: stillCurrent ? 'checkpoint_saved_and_current' : 'checkpoint_saved_but_source_changed',
-        checkpointId: id, keyCount: entries.length,
+        checkpointId: id, keyCount: entries.length, captureScope,
         canAutoRestore: false,
         mutationAuthority: 'legacy_only', readAuthority: 'legacy_only'
       };
