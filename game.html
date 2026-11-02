@@ -229,6 +229,27 @@
   }
 }
 
+/* Stats Guide is closed in the HTML before scripts initialize, on every viewport. */
+#playerStatsGuide .mobile-collapsible-header {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+#playerStatsGuide .mobile-collapsible-header h2 { margin-bottom: 0; }
+#playerStatsGuide .mobile-collapsible-chevron { transition: transform .2s ease; }
+#playerStatsGuide[data-collapsed="true"] .mobile-collapsible-chevron { transform: rotate(-90deg); }
+#playerStatsGuide .mobile-collapsible-body { margin-top: .5rem; }
+#playerStatsGuide .mobile-collapsible-body[hidden] { display: none !important; }
+
 /* Mobile tweaks */
 @media (max-width: 640px) {
   /* 2-column card view grid on mobile */
@@ -864,41 +885,18 @@ textarea{
             <a href="records.html"      class="btn btn-teal btn-toolbar nav-btn">Records</a>
           </div>
         </div>
-        <a href="projects.html" class="btn btn-teal btn-toolbar nav-btn">Projects</a>
         <a href="season.html" class="btn btn-teal btn-toolbar nav-btn">Season</a>
         <a href="settings.html" class="btn btn-teal btn-toolbar nav-btn">Settings</a>
       </div>
 
     </header>
 
-<!-- Player Stats Guide -->
-<section id="playerStatsGuide" class="card mb-6 mobile-collapsible" data-collapsed="false">
-  <button type="button" class="mobile-collapsible-header">
-    <h2 class="font-semibold text-lg mb-2">Player Stats Guide</h2>
-    <span class="mobile-collapsible-chevron">▾</span>
-  </button>
-
-  <div class="mobile-collapsible-body">
-    <ul class="text-sm space-y-2">
-      <li><strong>Baseline Δ</strong>: Difference between a player’s average score and their baseline (positive = above baseline).</li>
-      <li><strong>PPD</strong>: Points per day in the TaskPoints app (includes habits, flex actions, sleep, etc.).</li>
-      <li><strong>Baseline</strong>: Their “default” nightly performance.</li>
-      <li><strong>Variance</strong>: How swingy they are night-to-night.</li>
-      <li><strong>Momentum</strong>: How much recent good/bad nights affect next game.</li>
-      <li><strong>Risky</strong>: How much they chase boom-or-bust lines.</li>
-      <li><strong>Variance Tilt</strong>: What % of their swings land <em>above</em> baseline (0% = always below, 100% = always above).</li>
-      <li><strong>Style</strong>: Just flavor text for now (can inform future sim tweaks).</li>
-      <li><strong>INT</strong>: Suppresses an opponent’s positive roll ceiling in NPC vs NPC matchups.</li>
-      <li><strong>Poise</strong>: Lets a player resist pressure and play up against significantly higher-ranked opponents.</li>
-      <li><strong>Streaky</strong>: Reserved for future use; no game effect yet.</li>
-    </ul>
-  </div>
-</section>
 
 
-<div class="grid gap-6 md:grid-cols-2 mb-6">
 
-<!-- LEFT: Create player -->
+<div class="mb-6">
+
+<!-- Create player -->
 <section class="card mb-6">
   <button
     type="button"
@@ -1061,92 +1059,25 @@ textarea{
   </div>
 </div>
 
-  <!-- RIGHT: Simulate Today -->
-  <section class="card mb-6">
-    <h2 class="font-semibold text-lg mb-3">Simulate Today</h2>
-    <button
-      id="openSimulationConfirmBtn"
-      type="button"
-      class="w-full btn btn-teal rounded-2xl px-4 py-2 font-semibold"
-      aria-haspopup="dialog"
-      aria-controls="runSimulationConfirmModal"
-      aria-expanded="false"
-    >
-      Run Simulation
-    </button>
-
-    <div id="simResults" class="mt-3 text-sm opacity-85"></div>
-  </section>
-
 </div>
-
-<div
-  id="runSimulationConfirmModal"
-  class="create-player-modal"
-  aria-hidden="true"
->
-  <div
-    class="card create-player-modal-panel"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="runSimulationConfirmTitle"
-    tabindex="-1"
-  >
-    <button
-      type="button"
-      class="create-player-modal-close"
-      id="closeSimulationConfirmModalBtn"
-      aria-label="Close run simulation confirmation"
-    >
-      ✕
-    </button>
-
-    <div class="space-y-3">
-      <div>
-        <div class="muted text-[11px] uppercase tracking-wide">Confirmation</div>
-        <h3 id="runSimulationConfirmTitle" class="font-semibold text-xl mt-1">Run Simulation?</h3>
-      </div>
-      <p class="text-sm opacity-80">Are you sure you want to run today’s simulation?</p>
-      <div class="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
-        <button
-          type="button"
-          class="btn btn-ghost"
-          id="cancelSimulationConfirmBtn"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          class="btn btn-teal"
-          id="confirmRunSimulationBtn"
-        >
-          Run Simulation
-        </button>
-      </div>
-    </div>
-  </div>
-</div>
-
 
     <!-- Players list -->
     <section class="mb-10">
       <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
-        <div class="flex items-center gap-3">
-          <h2 class="text-lg font-semibold">Players</h2>
-
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-2 min-w-0">
           <!-- View toggle -->
           <div class="inline-flex rounded-full border border-zinc-700 overflow-hidden text-xs">
             <button
               id="viewCardBtn"
               type="button"
-              class="px-3 py-1 bg-zinc-800 text-white"
+              class="px-3 py-1 bg-zinc-900/40"
             >
               Card view
             </button>
             <button
               id="viewGalleryBtn"
               type="button"
-              class="px-3 py-1 bg-zinc-900/40"
+              class="px-3 py-1 bg-zinc-800 text-white"
             >
               Gallery view
             </button>
@@ -1157,7 +1088,7 @@ textarea{
             <label for="groupActiveToggle" class="opacity-70">Group active players</label>
           </div>
 
-          <div id="galleryColumnsControl" class="hidden items-center gap-2 text-xs sm:hidden">
+          <div id="galleryColumnsControl" class="flex items-center gap-2 text-xs sm:hidden">
             <label for="galleryColumnsSelect" class="opacity-70">Mobile columns</label>
             <select id="galleryColumnsSelect" class="input px-2 py-1 text-xs">
               <option value="2">2</option>
@@ -1188,13 +1119,36 @@ textarea{
       </div>
 
       <!-- NOTE: we’ll control the grid classes from JS now -->
-      <div id="playersList" class="grid gap-4"></div>
+      <div id="playersList" class="grid gap-4 gallery-view"></div>
 
       <div id="noPlayersMsg" class="text-sm opacity-60 mt-3 hidden">
         No players yet. Create your first fake hooper above.
       </div>
     </section>
 
+    <!-- Player Stats Guide -->
+    <section id="playerStatsGuide" class="card mb-6 mobile-collapsible" data-collapsed="true">
+      <button type="button" class="mobile-collapsible-header" aria-controls="playerStatsGuideBody" aria-expanded="false">
+        <h2 class="font-semibold text-lg mb-2">Player Stats Guide</h2>
+        <span class="mobile-collapsible-chevron">▾</span>
+      </button>
+    
+      <div id="playerStatsGuideBody" class="mobile-collapsible-body" hidden>
+        <ul class="text-sm space-y-2">
+          <li><strong>Baseline Δ</strong>: Difference between a player’s average score and their baseline (positive = above baseline).</li>
+          <li><strong>PPD</strong>: Points per day in the TaskPoints app (includes habits, flex actions, sleep, etc.).</li>
+          <li><strong>Baseline</strong>: Their “default” nightly performance.</li>
+          <li><strong>Variance</strong>: How swingy they are night-to-night.</li>
+          <li><strong>Momentum</strong>: How much recent good/bad nights affect next game.</li>
+          <li><strong>Risky</strong>: How much they chase boom-or-bust lines.</li>
+          <li><strong>Variance Tilt</strong>: What % of their swings land <em>above</em> baseline (0% = always below, 100% = always above).</li>
+          <li><strong>Style</strong>: Just flavor text for now (can inform future sim tweaks).</li>
+          <li><strong>INT</strong>: Suppresses an opponent’s positive roll ceiling in NPC vs NPC matchups.</li>
+          <li><strong>Poise</strong>: Lets a player resist pressure and play up against significantly higher-ranked opponents.</li>
+          <li><strong>Streaky</strong>: Reserved for future use; no game effect yet.</li>
+        </ul>
+      </div>
+    </section>
 
   <div id="playerEditorModal" class="player-editor-modal" aria-hidden="true">
     <div
@@ -1640,7 +1594,7 @@ if (rebuildGameHistoryFromMatchupsIfNeeded()) {
 }
     
 let editingPlayerId = null;
-let viewMode = "card"; // "card" | "gallery"
+let viewMode = "gallery"; // "card" | "gallery"
 const GALLERY_COLUMNS_STORAGE_KEY = "taskpoints_gallery_columns";
 let galleryColumns = loadGalleryColumns();
 const PLAYER_SORT_STORAGE_KEY = "taskpoints_player_sort_mode";
@@ -2126,7 +2080,7 @@ function simulateToday() {
       ? byeIds.map(id => `${namesById[id] || 'Unknown'} has no matchup scheduled.`).join('<br>')
       : 'No matchups scheduled for today.';
 
-    $('simResults').innerHTML = `
+    if ($('simResults')) $('simResults').innerHTML = `
       <h3 class="font-semibold mb-1">Matchups for ${todayKey}</h3>
       <div>${byeText}</div>
     `;
@@ -2249,7 +2203,7 @@ participantIds.forEach(id => {
     ? combined.map(l => `<div>• ${l}</div>`).join("")
     : `<div>No matchups created.</div>`;
 
-  $('simResults').innerHTML = `
+  if ($('simResults')) $('simResults').innerHTML = `
     <h3 class="font-semibold mb-1">Matchups for ${todayKey}</h3>
     ${outHtml}
   `;
@@ -2276,7 +2230,7 @@ function maybeAutoSimToday(){
   const hasToday = state.gameHistory.some(g => g.date === todayKey);
   if (hasToday) return;
 
-  // Run one sim for today (this will also update #simResults)
+  // Run one sim for today; results are now shown in the regular matchup views.
   simulateToday();
 }
 
@@ -4210,98 +4164,24 @@ function setupCreatePlayerModal() {
   modal.dataset.init = "true";
 }
 
-function setupSimulationConfirmModal() {
-  const modal = $("runSimulationConfirmModal");
-  const openBtn = $("openSimulationConfirmBtn");
-  const closeBtn = $("closeSimulationConfirmModalBtn");
-  const cancelBtn = $("cancelSimulationConfirmBtn");
-  const confirmBtn = $("confirmRunSimulationBtn");
-  const panel = modal?.querySelector(".create-player-modal-panel");
-  if (!modal || !openBtn || !closeBtn || !cancelBtn || !confirmBtn || modal.dataset.init === "true") return;
-
-  const closeModal = ({ returnFocus = true } = {}) => {
-    modal.classList.remove("is-open");
-    modal.setAttribute("aria-hidden", "true");
-    openBtn.setAttribute("aria-expanded", "false");
-    window.unlockScrollForModal?.();
-    if (returnFocus) {
-      openBtn.focus({ preventScroll: true });
-    }
-  };
-
-  const openModal = () => {
-    if (confirmBtn.disabled) return;
-    modal.classList.add("is-open");
-    modal.setAttribute("aria-hidden", "false");
-    openBtn.setAttribute("aria-expanded", "true");
-    window.lockScrollForModal?.();
-    window.requestAnimationFrame(() => {
-      (confirmBtn || panel)?.focus?.({ preventScroll: true });
-    });
-  };
-
-  openBtn.addEventListener("click", openModal);
-  closeBtn.addEventListener("click", () => closeModal());
-  cancelBtn.addEventListener("click", () => closeModal());
-  modal.addEventListener("click", () => closeModal());
-  panel?.addEventListener("click", (event) => event.stopPropagation());
-  modal.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closeModal();
-  });
-  confirmBtn.addEventListener("click", () => {
-    if (confirmBtn.disabled) return;
-    confirmBtn.disabled = true;
-    confirmBtn.setAttribute("aria-disabled", "true");
-    try {
-      closeModal({ returnFocus: false });
-      simulateToday();
-    } finally {
-      confirmBtn.disabled = false;
-      confirmBtn.removeAttribute("aria-disabled");
-    }
-  });
-
-  window.openSimulationConfirmModal = openModal;
-  window.closeSimulationConfirmModal = closeModal;
-  modal.dataset.init = "true";
-}
-
 // ----- Collapsible panel (Player Stats Guide) -----
 function setupMobileCollapsibles() {
-  const sections = document.querySelectorAll("#playerStatsGuide.mobile-collapsible");
+  document.querySelectorAll("#playerStatsGuide.mobile-collapsible").forEach((sec) => {
+    if (sec.dataset.init === "true") return;
+    const header = sec.querySelector(".mobile-collapsible-header");
+    const body = sec.querySelector(".mobile-collapsible-body");
+    if (!header || !body) return;
 
-  function syncForViewport() {
-    const isMobile = window.matchMedia("(max-width: 640px)").matches;
-
-    sections.forEach((sec) => {
-      // Wire header click once
-      if (!sec.dataset.init) {
-        const header = sec.querySelector(".mobile-collapsible-header");
-        if (header) {
-          header.addEventListener("click", () => {
-            // Toggle on ALL viewports
-            const collapsed = sec.dataset.collapsed === "true";
-            sec.dataset.collapsed = collapsed ? "false" : "true";
-          });
-        }
-        sec.dataset.init = "true";
-      }
-
-      const isStatsGuide = sec.id === "playerStatsGuide";
-
-      // Default per viewport:
-      // mobile → collapsed
-      // desktop → collapsed
-      if (isMobile) {
-        sec.dataset.collapsed = "true";
-      } else {
-        sec.dataset.collapsed = isStatsGuide ? "true" : "false";
-      }
-    });
-  }
-
-  syncForViewport();
-  window.addEventListener("resize", syncForViewport);
+    const setCollapsed = (collapsed) => {
+      sec.dataset.collapsed = collapsed ? "true" : "false";
+      body.hidden = collapsed;
+      header.setAttribute("aria-expanded", String(!collapsed));
+    };
+    // Honor HTML's initial collapsed state. Never open it for one frame.
+    setCollapsed(sec.dataset.collapsed !== "false");
+    header.addEventListener("click", () => setCollapsed(sec.dataset.collapsed !== "true"));
+    sec.dataset.init = "true";
+  });
 }
 
 
@@ -4341,7 +4221,6 @@ playerProfiles.init();
 
 setupPlayerEditorModal();
 setupCreatePlayerModal();
-setupSimulationConfirmModal();
 setupMobileCollapsibles();
 
 
