@@ -8323,12 +8323,12 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
     const empty = { balance: 0, earned: 0, spent: 0, streak: 0, protectedDays: [] };
     if (!habit || habit.streakMultiplierEnabled !== true
       || (habit.category || 'habit') === 'vice'
-      || !/^\\d{4}-\\d{2}-\\d{2}$/.test(String(asOfDayKey))) return empty;
+      || !/^\d{4}-\d{2}-\d{2}$/.test(String(asOfDayKey))) return empty;
 
     const done = new Set((Array.isArray(habit.doneKeys) ? habit.doneKeys : [])
-      .filter(key => /^\\d{4}-\\d{2}-\\d{2}$/.test(String(key))));
+      .filter(key => /^\d{4}-\d{2}-\d{2}$/.test(String(key))));
     const failed = new Set((Array.isArray(habit.failedKeys) ? habit.failedKeys : [])
-      .filter(key => /^\\d{4}-\\d{2}-\\d{2}$/.test(String(key))));
+      .filter(key => /^\d{4}-\d{2}-\d{2}$/.test(String(key))));
     const fractions = new Map();
     for (const entry of (Array.isArray(state?.completions) ? state.completions : [])) {
       if (entry?.source !== 'habit' || String(entry.habitId || '') !== String(habit.id)
