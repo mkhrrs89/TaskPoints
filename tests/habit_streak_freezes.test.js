@@ -7,6 +7,7 @@ global.window = global;
 require('../scoring_core.js');
 const core = global.TaskPointsCore;
 const home = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+const streaksPage = fs.readFileSync(path.join(__dirname, '..', 'streaks.html'), 'utf8');
 
 function keys(first, last) {
   const result = [];
@@ -178,4 +179,10 @@ test('Home indexes completion rows once for all habit freeze status calculations
   assert.match(home, /const completedRowsByHabit = new Map\(\)/);
   assert.match(home, /completedRowsByHabit\.get\(id\)\.push\(completion\)/);
   assert.match(home, /getHabitFreezeStatus\?\.\(/);
+});
+
+test('Streaks completed table follows canonical freeze-aware streak length', () => {
+  assert.match(streaksPage, /currentStreak = core\.getHabitFreezeStatus\(projectedHabit, state, todayKey\)\.streak/);
+  assert.match(streaksPage, /if \(currentStreak > 0\) current\.push\(makeRow\(habit, currentStreak, todayKey, state\)\)/);
+  assert.match(streaksPage, /src="scoring_core\.js\?v=20261102-habit-freezes-1"/);
 });
