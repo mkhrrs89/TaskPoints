@@ -99,7 +99,7 @@ test('no configured threshold cannot earn new weeks; Vices remain unchanged', ()
 
 test('counter renders a visible silver stat without replacing the silver slab logic', () => {
   assert.match(home, /const silverWeekCounts = computeHabitSilverWeekCounts\(habits, state\.completions\)/);
-  assert.match(home, /silverWeekCount: silverWeekCounts\.get\(String\(h\.id\)\) \|\| 0/);
+  assert.match(home, /silverWeekCount: freezeStatuses\.get\(String\(h\.id\)\)\?\.balance \?\? \(silverWeekCounts\.get\(String\(h\.id\)\) \|\| 0\)/);
   assert.match(home, /class="tag habit-silver-weeks"/);
   assert.match(home, /isWeeklyComplete: isHabitWeeklyCompleteForDays\(h, days\)/);
   assert.match(styles, /\.habitRow \.habitLeft \.tag\.habit-silver-weeks/);
