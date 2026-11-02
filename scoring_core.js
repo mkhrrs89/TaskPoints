@@ -8530,10 +8530,11 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
 
       if (done.has(today) || failed.has(today)) continue;
       let streak = countStreakEndingOn(done, yesterday);
-      if (streak <= 0 && habit.streakMultiplierEnabled === true
+      if (habit.streakMultiplierEnabled === true
         && (habit.category || 'habit') !== 'vice') {
-        // Yesterday may have been protected by a freeze. Keep the existing
-        // "streaks at risk" display accurate without altering pending journals.
+        // A freeze preserves the accumulated streak even when yesterday (or
+        // an earlier day) was missed. Keep "streaks at risk" in sync with
+        // the Home streak display, including pending journal overlays.
         const projectedHabit = {
           ...habit,
           doneKeys: Array.from(done),
