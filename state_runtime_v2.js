@@ -258,6 +258,10 @@
         webLocksSupported: peer.webLocksSupported === true
       })),
       respondingPreviewTabsOnly: true,
+      // No broadcast response can prove that a suspended or old-version
+      // page is absent; even responding V2 tabs still use V1 writers.
+      silentLegacyWriterExclusionVerified: false,
+      productionWriterAdmissionComplete: false,
       allLegacyWritersKnown: false,
       productionWritersFenced: false,
       canPromote: false, mutationAuthority: 'legacy_only', readAuthority: 'legacy_only'
@@ -3486,6 +3490,8 @@
   async function inspectAuthorityCutoverBarriers() {
     const hardBlockers = [
       'all_legacy_writers_not_fenced',
+      // An empty observation window cannot exclude old or sleeping tabs.
+      'silent_or_suspended_legacy_writers_not_excluded',
       'nonpilot_authoritative_collections_not_migrated',
       'independent_off_device_rollback_not_verified',
       'physical_safari_pwa_lifecycle_not_validated',
@@ -3510,6 +3516,11 @@
         noObservedBridgeFailures: pilot?.checks?.noObservedBridgeFailures === true,
         stableLegacyRollbackSource: rollback?.sourceStable === true,
         observedPeersOnly: peers?.respondingPreviewTabsOnly === true,
+        // A green two-pass V1 inventory is only an instantaneous observation.
+        // Nonresponding and pre-V2 pages have no mandatory admission gate.
+        silentLegacyWriterExclusionVerified: false,
+        productionWriterAdmissionComplete: false,
+        legacyWriterQuietWindowProven: false,
         allLegacyWritersFenced: false,
         allAuthoritativeCollectionsMigrated: false,
         independentOffDeviceRollbackVerified: false,
@@ -3541,7 +3552,9 @@
           canRestoreFromCheckpoint: rollback.canRestoreFromCheckpoint === true } : null,
         peers: peers ? { reason: peers.reason,
           observedPeerCount: peers.observedPeerCount,
-          respondingPreviewTabsOnly: peers.respondingPreviewTabsOnly === true } : null
+          respondingPreviewTabsOnly: peers.respondingPreviewTabsOnly === true,
+          silentLegacyWriterExclusionVerified: false,
+          productionWriterAdmissionComplete: false } : null
       };
     };
     const modeEpoch = darkMirrorModeEpoch;
