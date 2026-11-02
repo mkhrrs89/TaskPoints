@@ -5,7 +5,9 @@
   if (!global || !core || global.TaskPointsStateRuntimeV2?.__installedModule) return;
 
   const DB_NAME = 'taskpoints_state_v2';
-  const DB_VERSION = 2;
+  // V3 adds a *non-authoritative*, explicitly seeded Task preview store.
+  // Pilot Habits/Completions, metadata and existing transactions are unchanged.
+  const DB_VERSION = 3;
   const COMPLETION_HABIT_INDEX = 'by_habit_ids';
   const EXCLUSIVE_WRITER_REHEARSAL_LOCK = 'taskpoints_v2_writer_handoff_rehearsal_v1';
   const PEER_COORDINATION_CHANNEL = 'taskpoints_v2_preview_writer_peers_v1';
@@ -505,6 +507,7 @@
     if (!db.objectStoreNames.contains('habits')) db.createObjectStore('habits', { keyPath: 'id' });
     if (!db.objectStoreNames.contains('completions')) db.createObjectStore('completions', { keyPath: 'id' });
     if (!db.objectStoreNames.contains('mutations')) db.createObjectStore('mutations', { keyPath: 'id' });
+    if (!db.objectStoreNames.contains('tasks')) db.createObjectStore('tasks', { keyPath: 'id' });
     if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'id' });
     const completions = upgradeTransaction.objectStore('completions');
     if (!completions.indexNames.contains(COMPLETION_HABIT_INDEX)) {
@@ -4464,6 +4467,158 @@
   // records either a participating test writer marker or a freeze decision.
   // It NEVER writes V1 data or gates a production writer. Pre-V2 tabs do not
   // consult this record and remain capable of writing localStorage.
+  // First nonpilot record-level collection: Tasks (preview migration ONLY).
+  // This does not change V1 reads/writes or completion authority. It does
+  // not backfill automatically: an explicit preview-host call must observe
+  // a stable V1 snapshot AND its real pending Task journal, then materialize
+  // whole Task objects into an isolated V2 records store in one transaction.
+  // Neither an interrupted/partial import nor a later stale tab can silently
+  // overwrite an existing same-generation Task preview. No auto-repair.
+  async function rehearsePreviewTaskCollectionSeed() {
+    const refuse = (reason, detail = {}) => ({
+      checked: true, previewOnly: true, verified: false, stored: false,
+      canPromote: false, productionWritersFenced: false,
+      mutationAuthority: 'legacy_only', readAuthority: 'legacy_only',
+      reason, ...detail
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    if (typeof core.readTaskPointsStoredState !== 'function'
+      || typeof core.readPendingTaskMutations !== 'function')
+      return refuse('legacy_task_reader_unavailable');
+    const expectedEpoch = darkMirrorModeEpoch;
+    const generation = currentGeneration({ create: false });
+    if (!generation) return refuse('generation_unavailable');
+    let inventoryBefore, inventoryAfter, tasks, taskSignature;
+    try {
+      inventoryBefore = captureReadOnlyFullStorageInventory();
+      const pending = core.readPendingTaskMutations();
+      if (pending?.malformed) return refuse('legacy_task_journal_malformed');
+      const state = core.readTaskPointsStoredState();
+      if (!state || !Array.isArray(state.tasks))
+        return refuse('legacy_tasks_missing');
+      tasks = clone(state.tasks);
+      const ids = new Set();
+      for (const task of tasks) {
+        if (!task || typeof task !== 'object' || Array.isArray(task)
+          || task.id == null || String(task.id) === ''
+          || ids.has(String(task.id))) return refuse('legacy_task_ids_invalid');
+        ids.add(String(task.id));
+      }
+      taskSignature = stableJson(tasks);
+      inventoryAfter = captureReadOnlyFullStorageInventory();
+    } catch (_) { return refuse('legacy_task_capture_unreadable'); }
+    if (inventoryBefore !== inventoryAfter)
+      return refuse('legacy_changed_during_capture');
+    let taskFingerprint;
+    try { taskFingerprint = await previewRecoveryFingerprint(tasks); }
+    catch (_) { return refuse('task_fingerprint_unavailable'); }
+    const stillSameSource = () => {
+      if (!isDarkEnabled() || darkMirrorModeEpoch !== expectedEpoch
+        || currentGeneration({ create: false }) !== generation) return false;
+      return captureReadOnlyFullStorageInventory() === inventoryBefore;
+    };
+    try { if (!stillSameSource()) return refuse('legacy_changed_before_seed'); }
+    catch (_) { return refuse('legacy_unreadable_before_seed'); }
+    let db, initialMeta;
+    try {
+      db = await open();
+      if (!db) return refuse('dark_disabled');
+      initialMeta = await readMeta(db);
+    } catch (_) { return refuse('task_preview_db_unavailable'); }
+    if (initialMeta?.schemaVersion !== SCHEMA_VERSION
+      || initialMeta.resetGeneration !== generation
+      || initialMeta.legacyMissing === true)
+      return refuse('pilot_meta_not_ready');
+    try { if (!stillSameSource()) return refuse('legacy_changed_before_seed'); }
+    catch (_) { return refuse('legacy_unreadable_before_seed'); }
+    let priorEvidence = null;
+    try {
+      const tx = db.transaction(['tasks','meta'], 'readonly');
+      priorEvidence = await requestPromise(tx.objectStore('meta').get('task-preview'));
+    } catch (_) { return refuse('task_preview_evidence_unreadable'); }
+    const sameEvidence = priorEvidence?.resetGeneration === generation
+      && priorEvidence?.taskFingerprint === taskFingerprint
+      && priorEvidence?.sourceInventory === (await previewRecoveryFingerprint(JSON.parse(inventoryBefore)));
+    if (priorEvidence && !sameEvidence)
+      return refuse('task_preview_existing_evidence_preserved');
+    if (!priorEvidence) {
+      let commitError = null;
+      try {
+        if (!stillSameSource()) return refuse('legacy_changed_before_seed');
+        const tx = db.transaction(['tasks','meta'], 'readwrite');
+        const metaStore = tx.objectStore('meta');
+        const req = metaStore.get(RUNTIME_META_ID);
+        const evidenceReq = metaStore.get('task-preview');
+        let have = 0, currentMeta, currentEvidence;
+        const check = () => {
+          if (++have !== 2) return;
+          if (stableJson(currentMeta || null) !== stableJson(initialMeta)
+            || currentEvidence
+            || !isDarkEnabled()
+            || darkMirrorModeEpoch !== expectedEpoch
+            || currentGeneration({ create: false }) !== generation) {
+            commitError = 'task_preview_concurrent_conflict';
+            try { tx.abort(); } catch (_) {}
+            return;
+          }
+          try {
+            if (!stillSameSource()) {
+              commitError = 'legacy_changed_before_commit';
+              tx.abort(); return;
+            }
+            const store = tx.objectStore('tasks');
+            store.clear();
+            tasks.forEach((task,index) =>
+              store.put({id:String(task.id),legacyIndex:index,value:task}));
+            metaStore.put({
+              id:'task-preview', schemaVersion:1, resetGeneration:generation,
+              taskFingerprint, sourceInventory:
+                // This digest is metadata only, never authority proof.
+                `${fnv1a(inventoryBefore)}:${inventoryBefore.length}`,
+              taskCount:tasks.length, capturedAtISO:nowIso()
+            });
+          } catch (_) {
+            commitError = 'task_preview_write_failed';
+            try { tx.abort(); } catch (_) {}
+          }
+        };
+        req.onsuccess = () => { currentMeta=req.result; check(); };
+        evidenceReq.onsuccess = () => { currentEvidence=evidenceReq.result; check(); };
+        await transactionPromise(tx);
+      } catch (_) { return refuse(commitError || 'task_preview_write_failed'); }
+    }
+    // Every success claim is backed by a NEW, read-only IDB readback and
+    // source verification. A concurrent V1 edit during IDB commit keeps
+    // the preview evidence, but the returned status refuses current parity.
+    try {
+      const tx = db.transaction(['tasks','meta'], 'readonly');
+      const storedReq = tx.objectStore('tasks').getAll();
+      const evidenceReq = tx.objectStore('meta').get('task-preview');
+      const [rows, evidence] = await Promise.all([
+        requestPromise(storedReq), requestPromise(evidenceReq)
+      ]);
+      const ordered = rows.slice()
+        .sort((a,b)=>a.legacyIndex-b.legacyIndex)
+        .map(row=>row.value);
+      if (stableJson(ordered) !== taskSignature
+        || evidence?.taskFingerprint !== taskFingerprint
+        || evidence?.resetGeneration !== generation
+        || evidence?.taskCount !== tasks.length)
+        return refuse('task_preview_readback_mismatch');
+      if (!stillSameSource()) return refuse('legacy_changed_after_seed');
+      return {
+        checked:true, previewOnly:true, verified:true,
+        stored:priorEvidence == null, reason:priorEvidence
+          ? 'task_preview_already_verified' : 'task_preview_seed_verified',
+        taskCount:tasks.length, taskFingerprint,
+        resetGeneration:generation,
+        canPromote:false, productionWritersFenced:false,
+        mutationAuthority:'legacy_only', readAuthority:'legacy_only'
+      };
+    } catch (_) { return refuse('task_preview_readback_failed'); }
+  }
+
   // A narrower stepping stone toward REQUIRED writer admission, rather
   // than relying on the caller to invoke an optional freshness callback.
   // This API is explicit, PREVIEW-HOST-ONLY and NEVER installs on the live
@@ -5789,6 +5944,7 @@
     exercisePreviewCooperativeWriterLease,
     exercisePreviewSerializedSnapshotLease,
     rehearsePreviewAdmittedTaskCompletionBatch,
+    rehearsePreviewTaskCollectionSeed,
     rehearsePreviewDurableWriterFence,
     inspectPreservedParityMismatch,
     inspectLegacyRollbackSource,
