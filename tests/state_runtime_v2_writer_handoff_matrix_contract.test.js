@@ -951,7 +951,15 @@ test('Main Work action batches atomic V1 journal writes without removing fallbac
   assert.match(core,/Object\.prototype\.hasOwnProperty\.call\(mutation, 'completionUpserts'\)/);
   assert.match(core,/rows\.length > 64/);
   assert.match(core,/seen\.has\(id\)/);
-  assert.match(core,/record\.completionUpserts = mergeById\(record\.completionUpserts, row\)/);
+  // All batch IDs are validated before one linear scan; the legacy
+  // single-row journal path still uses mergeById for compatibility.
+  const batchCoreStart=core.indexOf("if (Object.prototype.hasOwnProperty.call(mutation, 'completionUpserts'))");
+  const batchCoreEnd=core.indexOf('if (mutation.completionDeleteId)',batchCoreStart);
+  assert.ok(batchCoreStart>=0&&batchCoreEnd>batchCoreStart);
+  const batchCore=core.slice(batchCoreStart,batchCoreEnd);
+  assert.match(batchCore,/record\\.completionUpserts = record\\.completionUpserts\\.filter\\(/);
+  assert.match(batchCore,/for \\(const row of rows\\) record\\.completionUpserts\\.push\\(clone\\(row\\)\\)/);
+  assert.doesNotMatch(batchCore,/mergeById\\(/);
   assert.match(core,/TASKPOINTS_TASK_COMPLETION_BATCH_INVALID/);
   // One single synchronous journal commit after every validated row is
   // merged. The writeRecord helper itself performs the only setItem.
