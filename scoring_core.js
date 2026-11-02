@@ -9837,7 +9837,7 @@ function softCurbNpcScore(rawScore) {
     const direction = results[0].result;
     let count = 0;
     for (const result of results) {
-      if (result.result !== direction || count >= 10) break;
+      if (result.result !== direction) break;
       count++;
     }
     return count * direction;
@@ -9848,12 +9848,13 @@ function softCurbNpcScore(rawScore) {
     const rating = player?.streaky == null || !Number.isFinite(rawRating) || rawRating <= 0
       ? 50 : Math.max(1, Math.min(100, rawRating));
     const streak = Number.isFinite(Number(signedStreak))
-      ? Math.max(-10, Math.min(10, Math.trunc(Number(signedStreak))))
+      ? Math.trunc(Number(signedStreak))
       : 0;
+    const cappedStreak = Math.sign(streak) * Math.min(10, Math.abs(streak));
     // At 100 Streaky: two consecutive wins ≈ +1.2, five +3, ten +6.
     // Losses mirror wins; a lone win/loss has no effect.
     const bonus = Math.abs(streak) >= 2
-      ? Number((streak * 0.6 * rating / 100).toFixed(3))
+      ? Number((cappedStreak * 0.6 * rating / 100).toFixed(3))
       : 0;
     return { rating, streak, bonus };
   }
