@@ -114,3 +114,26 @@ This supplies concrete **partial engineering evidence** for the
 percentage points** until full write admission, completion/matchup
 relationships, compatibility/export parity and real-device gates are met.
 The baseline remains 67/100.
+
+
+## Read-only nonpilot Tasks parity inspection — November 2
+
+The explicit preview-host-only `inspectPreviewTaskCollectionParity()`
+compares the **effective** current V1 Tasks (including pending Task journal
+overlays) with every per-record V2 Task value and the original seed evidence.
+It checks unique Task IDs, stable full-origin source inventory, runtime and
+checkpoint generations, per-row identity, ordering and payload equality.
+It returns a fail-closed diagnostic for missing seed evidence, newer V1-only
+Tasks, altered V2 rows, malformed source journals or generation changes.
+
+The inspector is strictly read-only: it does not reseed, repair, compact,
+replace, or clean data. Browser regressions cover an intact preview after
+reload, an updated V1 Task journal that leaves older V2 rows intact, and
+corrupted V2 Task data that cannot be silently accepted or overwritten.
+No normal Task interaction invokes the inspector; there is no foreground
+full-origin serialization added to the live app.
+
+**Limitations:** matching parity is an observation, not a cross-tab writer
+fence or future-write guarantee. The local preview evidence is not an
+off-device backup, V2 Tasks are not production authoritative, and the
+12-point nonpilot collection milestone remains uncredited.

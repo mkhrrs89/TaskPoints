@@ -4625,6 +4625,104 @@
     } catch (_) { return refuse('task_preview_readback_failed'); }
   }
 
+  // Independent preview-only nonpilot Tasks parity inspector. It reads the
+  // effective V1 Tasks (including pending Task journal overlays) and the
+  // isolated V2 Task rows without writing, reseeding, repairing, or promoting.
+  async function inspectPreviewTaskCollectionParity() {
+    const refuse = (reason, detail = {}) => ({
+      checked: true, previewOnly: true, match: false, reason,
+      canPromote: false, productionWritersFenced: false,
+      mutationAuthority: 'legacy_only', readAuthority: 'legacy_only',
+      ...detail
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    if (typeof core.readTaskPointsStoredState !== 'function'
+      || typeof core.readPendingTaskMutations !== 'function')
+      return refuse('legacy_task_reader_unavailable');
+    const expectedEpoch = darkMirrorModeEpoch;
+    const generation = currentGeneration({ create: false });
+    if (!generation) return refuse('generation_unavailable');
+    let sourceInventory, tasks, taskFingerprint;
+    try {
+      sourceInventory = captureReadOnlyFullStorageInventory();
+      const pending = core.readPendingTaskMutations();
+      if (pending?.malformed) return refuse('legacy_task_journal_malformed');
+      const state = core.readTaskPointsStoredState();
+      if (!state || !Array.isArray(state.tasks))
+        return refuse('legacy_tasks_missing');
+      tasks = clone(state.tasks);
+      const ids = new Set();
+      for (const task of tasks) {
+        if (!task || typeof task !== 'object' || Array.isArray(task)
+          || task.id == null || !String(task.id) || ids.has(String(task.id)))
+          return refuse('legacy_task_ids_invalid');
+        ids.add(String(task.id));
+      }
+      if (captureReadOnlyFullStorageInventory() !== sourceInventory)
+        return refuse('legacy_changed_during_capture');
+      taskFingerprint = await previewRecoveryFingerprint(tasks);
+    } catch (_) { return refuse('legacy_task_capture_unreadable'); }
+    const sourceCurrent = () => isDarkEnabled()
+      && darkMirrorModeEpoch === expectedEpoch
+      && currentGeneration({ create: false }) === generation
+      && captureReadOnlyFullStorageInventory() === sourceInventory;
+    try {
+      if (!sourceCurrent()) return refuse('legacy_changed_before_inspection');
+    } catch (_) { return refuse('legacy_unreadable_before_inspection'); }
+    let db, rows, evidence, meta;
+    try {
+      db = await open();
+      if (!db) return refuse('dark_disabled');
+      const tx = db.transaction(['tasks', 'meta'], 'readonly');
+      [rows, evidence, meta] = await Promise.all([
+        requestPromise(tx.objectStore('tasks').getAll()),
+        requestPromise(tx.objectStore('meta').get('task-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID))
+      ]);
+    } catch (_) { return refuse('task_preview_read_unavailable'); }
+    try {
+      if (!sourceCurrent()) return refuse('legacy_changed_during_inspection');
+      if (meta?.schemaVersion !== SCHEMA_VERSION
+        || meta.resetGeneration !== generation || meta.legacyMissing === true)
+        return refuse('pilot_meta_not_ready');
+      if (!evidence) return refuse('task_preview_missing');
+      if (evidence.schemaVersion !== 1
+        || evidence.resetGeneration !== generation)
+        return refuse('task_preview_generation_mismatch');
+      const inventorySignature = `${fnv1a(sourceInventory)}:${sourceInventory.length}`;
+      if (evidence.taskFingerprint !== taskFingerprint
+        || evidence.sourceInventory !== inventorySignature)
+        return refuse('task_preview_source_stale');
+      if (evidence.taskCount !== tasks.length)
+        return refuse('task_preview_evidence_mismatch');
+      // Never accept a matching metadata fingerprint as proof of actual rows.
+      const seen = new Set();
+      const ordered = rows.slice().sort((a, b) => a.legacyIndex - b.legacyIndex);
+      if (ordered.length !== tasks.length)
+        return refuse('task_preview_record_mismatch',
+          { expectedCount: tasks.length, actualCount: ordered.length });
+      for (let index = 0; index < ordered.length; index += 1) {
+        const row = ordered[index];
+        if (!row || typeof row.id !== 'string'
+          || seen.has(row.id) || row.legacyIndex !== index
+          || !row.value || String(row.value.id) !== row.id
+          || stableJson(row.value) !== stableJson(tasks[index]))
+          return refuse('task_preview_record_mismatch',
+            { expectedCount: tasks.length, actualCount: ordered.length });
+        seen.add(row.id);
+      }
+      if (!sourceCurrent()) return refuse('legacy_changed_during_inspection');
+      return {
+        checked: true, previewOnly: true, match: true,
+        reason: 'task_preview_parity_verified', taskCount: tasks.length,
+        resetGeneration: generation, canPromote: false,
+        productionWritersFenced: false,
+        mutationAuthority: 'legacy_only', readAuthority: 'legacy_only'
+      };
+    } catch (_) { return refuse('task_preview_parity_unreadable'); }
+  }
+
   // A narrower stepping stone toward REQUIRED writer admission, rather
   // than relying on the caller to invoke an optional freshness callback.
   // This API is explicit, PREVIEW-HOST-ONLY and NEVER installs on the live
@@ -5951,6 +6049,7 @@
     exercisePreviewSerializedSnapshotLease,
     rehearsePreviewAdmittedTaskCompletionBatch,
     rehearsePreviewTaskCollectionSeed,
+    inspectPreviewTaskCollectionParity,
     rehearsePreviewDurableWriterFence,
     inspectPreservedParityMismatch,
     inspectLegacyRollbackSource,

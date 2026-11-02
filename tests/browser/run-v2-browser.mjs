@@ -1068,6 +1068,107 @@ try {
       noProductionAuthorityChange:true};
   });
 
+  await run('nonpilot Tasks parity inspector detects stale journal and remains read-only across reload',async context=>{
+    const page=await open(context);
+    const captured=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const core=window.TaskPointsCore;
+      const missing=await runtime.inspectPreviewTaskCollectionParity();
+      core.journalTaskMutation({
+        task:{id:'task-parity-journal-only',title:'Task only in pending journal',points:6}
+      });
+      const legacyBefore=localStorage.getItem('taskpoints_v1');
+      const journalBefore=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const seeded=await runtime.rehearsePreviewTaskCollectionSeed();
+      const matched=await runtime.inspectPreviewTaskCollectionParity();
+      return {missing,seeded,matched,legacyBefore,journalBefore,
+        legacyAfter:localStorage.getItem('taskpoints_v1'),
+        journalAfter:localStorage.getItem('taskpoints_pending_task_mutations_v1')};
+    });
+    assert.equal(captured.missing.reason,'task_preview_missing');
+    assert.equal(captured.missing.match,false);
+    assert.equal(captured.seeded.verified,true,JSON.stringify(captured.seeded));
+    assert.equal(captured.matched.match,true,JSON.stringify(captured.matched));
+    assert.equal(captured.matched.taskCount,2);
+    assert.equal(captured.matched.canPromote,false);
+    assert.equal(captured.legacyAfter,captured.legacyBefore);
+    assert.equal(captured.journalAfter,captured.journalBefore);
+    await page.reload({waitUntil:'load'});
+    await page.evaluate(()=>window.V2BrowserFixture.start());
+    const after=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const restored=await runtime.inspectPreviewTaskCollectionParity();
+      window.TaskPointsCore.journalTaskMutation({
+        task:{id:'newer-legacy-only-task',title:'New task since preview',points:5}
+      });
+      const sourceBefore=localStorage.getItem('taskpoints_v1');
+      const journalBefore=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const stale=await runtime.inspectPreviewTaskCollectionParity();
+      const db=await runtime.open();
+      const rows=await new Promise((resolve,reject)=>{
+        const req=db.transaction('tasks','readonly').objectStore('tasks').getAll();
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      return {restored,stale,rows,sourceBefore,journalBefore,
+        sourceAfter:localStorage.getItem('taskpoints_v1'),
+        journalAfter:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(after.restored.match,true,JSON.stringify(after.restored));
+    assert.equal(after.stale.match,false);
+    assert.equal(after.stale.reason,'task_preview_source_stale',JSON.stringify(after.stale));
+    assert.equal(after.rows.length,2);
+    assert.ok(!after.rows.some(row=>row.id==='newer-legacy-only-task'));
+    assert.equal(after.sourceAfter,after.sourceBefore);
+    assert.equal(after.journalAfter,after.journalBefore);
+    assert.equal(after.authority,'legacy_only');
+    return {realPendingTaskJournalCompared:true,reloadSafe:true,
+      staleSourceDetected:true,priorV2RowsPreserved:true,noAuthorityChange:true};
+  });
+
+  await run('nonpilot Tasks parity inspector refuses corrupt rows without altering V1 or healing V2',async context=>{
+    const page=await open(context);
+    const evidence=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const seeded=await runtime.rehearsePreviewTaskCollectionSeed();
+      const baseline=await runtime.inspectPreviewTaskCollectionParity();
+      const db=await runtime.open();
+      const row=await new Promise((resolve,reject)=>{
+        const request=db.transaction('tasks','readonly').objectStore('tasks').get('synthetic-task');
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      const corrupt={...row,value:{...row.value,title:'Corrupt preview title'}};
+      await new Promise((resolve,reject)=>{
+        const tx=db.transaction('tasks','readwrite');
+        tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+        tx.objectStore('tasks').put(corrupt);
+      });
+      const original=localStorage.getItem('taskpoints_v1');
+      const journal=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const mismatch=await runtime.inspectPreviewTaskCollectionParity();
+      const stored=await new Promise((resolve,reject)=>{
+        const request=db.transaction('tasks','readonly').objectStore('tasks').get('synthetic-task');
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      return {seeded,baseline,mismatch,stored,original,journal,
+        after:localStorage.getItem('taskpoints_v1'),
+        afterJournal:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(evidence.seeded.verified,true);
+    assert.equal(evidence.baseline.match,true);
+    assert.equal(evidence.mismatch.match,false);
+    assert.equal(evidence.mismatch.reason,'task_preview_record_mismatch',JSON.stringify(evidence.mismatch));
+    assert.equal(evidence.stored.value.title,'Corrupt preview title');
+    assert.equal(evidence.original,evidence.after);
+    assert.equal(evidence.journal,evidence.afterJournal);
+    assert.equal(evidence.authority,'legacy_only');
+    return {corruptRecordRejected:true,noAutoRepair:true,
+      originalV1Preserved:true,legacyAuthority:true};
+  });
+
   await run('nonpilot Task record migration aborts atomically on Task put failure and retries safely',async context=>{
     const page=await open(context);
     const result=await page.evaluate(async()=>{
