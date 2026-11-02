@@ -9,6 +9,11 @@ const profileCode = fs.readFileSync(path.join(root, 'player_profile.js'), 'utf8'
 const game = fs.readFileSync(path.join(root, 'game.html'), 'utf8');
 const core = fs.readFileSync(path.join(root, 'scoring_core.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
+const pidEngine = (() => {
+  const scope = {};
+  new Function('window', core)(scope);
+  return scope.TaskPointsCore;
+})();
 
 function fixture(count = 2, directHash = '') {
   const state = {
@@ -47,6 +52,7 @@ function fixture(count = 2, directHash = '') {
       if (sel === '#tpProfileEditRatings') return this.ratingsEditButton;
       if (sel === '#tpPlayerRatingsForm') return this.pendingRatingsForm;
       if (sel === '#tpProfileRatingsError') return { set textContent(value) { calls.ratingError = value; } };
+      if (sel === '#tpProfilePidError') return { set textContent(value) { calls.pidError = value; } };
       if (sel === '[name="baseline"]') return { focus() { calls.ratingFocused = true; } };
       return null;
     }
@@ -96,6 +102,7 @@ function fixture(count = 2, directHash = '') {
     getYouStats: () => ({ record: '10-3', avgPPD: 17.5, games: 13 }),
     getRecord: () => ({ wins: 3, losses: 2, games: 5 }),
     getPlayerPid: (_state, id) => state.players.find(p => p.id === id)?.pid,
+    assignPlayerPid: (snapshot, id, input, options) => pidEngine.assignPlayerPid(snapshot, id, input, options),
     todayKey: () => '2026-10-28',
     cachedImageUrl: id => 'blob:existing-' + id,
     loadImageUrl: id => { calls.photos.push(id); return Promise.resolve('blob:' + id); },
@@ -244,7 +251,7 @@ test('a bookmarked direct player link can open then close without browser histor
 });
 
 test('card/gallery and existing editors remain available and backed by same core data', () => {
-  assert.match(game, /script src="player_profile\.js"/);
+  assert.match(game, /script src="player_profile\\.js\\?v=20261102-1"/);
   assert.match(game, /playerProfiles\.init\(\)/);
   assert.match(game, /function wireViewCardProfileLinks/);
   assert.match(game, /data-profile-open="YOU"/);
@@ -575,4 +582,66 @@ test('inline ratings submit event saves on profile, existing advanced/photo edit
   assert.equal(f.calls.editNpc.length, 0);
   assert.match(game, /editNpc: \(id\) => openPlayerEditor\(id\)/);
   assert.match(game, /function buildPlayerEditorContent\(player\)/);
+});
+
+
+test('NPC player page exposes editable PID while YOU remains P000 and read-only', () => {
+  const f = fixture();
+  f.controller.open('npc1');
+  assert.match(f.screen.innerHTML, /name="pid" value="P001"/);
+  assert.match(f.screen.innerHTML, /Previously used PIDs stay reserved/);
+  f.controller.open('YOU');
+  assert.match(f.screen.innerHTML, /name="pid" value="P000" readonly/);
+});
+
+test('saving an edited PID changes the NPC PID without changing UUID, matchup history, or another player', () => {
+  const f = fixture();
+  f.controller.open('npc1');
+  const originalOtherPlayer = structuredClone(f.state.players[1]);
+  const originalGames = structuredClone(f.state.gameHistory);
+  const first = f.state.players[0];
+  const ok = f.controller.saveForm(f.makeForm({
+    name: 'Updated NPC', pid: '27', notes: 'New notes',
+    style: 'grinder', rivalId: '', primaryColor: '#112233',
+    secondaryColor: '#334455', active: true
+  }));
+  assert.equal(ok, true);
+  assert.strictEqual(f.state.players[0], first);
+  assert.equal(f.state.players[0].pid, 'P027');
+  assert.equal(f.state.players[0].id, 'npc1');
+  assert.ok(f.state.reservedPlayerPids.includes('P001'));
+  assert.ok(f.state.reservedPlayerPids.includes('P027'));
+  assert.deepEqual(f.state.players[1], originalOtherPlayer);
+  assert.deepEqual(f.state.gameHistory, originalGames);
+  assert.match(f.screen.innerHTML, /PID P027/);
+  assert.equal(f.calls.save.length, 1);
+});
+
+test('PID collisions and P000 are refused before other player fields mutate', () => {
+  for (const attempted of ['P002', 'P000', 'not-a-pid']) {
+    const f = fixture();
+    f.controller.open('npc1');
+    const result = f.controller.saveForm(f.makeForm({
+      name: 'Should not save', pid: attempted, notes: 'Should not save',
+      style: 'new style', rivalId: '', primaryColor: '#112233',
+      secondaryColor: '#334455', active: true
+    }));
+    assert.equal(result, false, attempted);
+    assert.equal(f.calls.save.length, 0);
+    assert.equal(f.state.players[0].name, 'NPC 1');
+    assert.equal(f.state.players[0].pid, 'P001');
+    assert.ok(f.calls.pidError, attempted);
+  }
+});
+
+test('a cleared assigned PID cannot silently erase player identity', () => {
+  const f = fixture();
+  f.controller.open('npc1');
+  assert.equal(f.controller.saveForm(f.makeForm({
+    name: 'NPC 1', pid: '', notes: '',
+    style: '', rivalId: '', primaryColor: '#112233', secondaryColor: '#334455',
+    active: true
+  })), false);
+  assert.equal(f.state.players[0].pid, 'P001');
+  assert.equal(f.calls.save.length, 0);
 });
