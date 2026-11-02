@@ -17,7 +17,11 @@ test('nonpilot Tasks inspector requires preview host and never mutates any sourc
   assert.match(source,/core\.readPendingTaskMutations\(\)/);
   assert.match(source,/core\.readTaskPointsStoredState\(\)/);
   assert.match(source,/db\.transaction\(\['tasks', 'meta'\], 'readonly'\)/);
-  assert.doesNotMatch(source,/\b(?:put|add|delete|clear|setItem|removeItem|saveStateSnapshot|journalTaskMutation)\s*\(/);
+  // Set.add() is bookkeeping for duplicate detection, not a storage write.
+  // Restrict mutation bans to browser persistence APIs and canonical saves.
+  assert.doesNotMatch(source,/\b(?:setItem|removeItem|saveStateSnapshot|journalTaskMutation)\s*\(/);
+  assert.doesNotMatch(source,/\.objectStore\([^)]*\)\.(?:put|add|delete|clear)\s*\(/);
+  assert.doesNotMatch(source,/\b(?:store|metaStore|localStorage)\.(?:put|add|delete|clear|setItem|removeItem)\s*\(/);
   assert.match(source,/mutationAuthority: 'legacy_only'/);
   assert.match(source,/canPromote: false/);
 });
