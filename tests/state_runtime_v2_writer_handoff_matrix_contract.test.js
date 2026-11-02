@@ -957,9 +957,9 @@ test('Main Work action batches atomic V1 journal writes without removing fallbac
   const batchCoreEnd=core.indexOf('if (mutation.completionDeleteId)',batchCoreStart);
   assert.ok(batchCoreStart>=0&&batchCoreEnd>batchCoreStart);
   const batchCore=core.slice(batchCoreStart,batchCoreEnd);
-  assert.match(batchCore,/record\\.completionUpserts = record\\.completionUpserts\\.filter\\(/);
-  assert.match(batchCore,/for \\(const row of rows\\) record\\.completionUpserts\\.push\\(clone\\(row\\)\\)/);
-  assert.doesNotMatch(batchCore,/mergeById\\(/);
+  assert.match(batchCore,/record\.completionUpserts = record\.completionUpserts\.filter\(/);
+  assert.match(batchCore,/for \(const row of rows\) record\.completionUpserts\.push\(clone\(row\)\)/);
+  assert.doesNotMatch(batchCore,/mergeById\(/);
   assert.match(core,/TASKPOINTS_TASK_COMPLETION_BATCH_INVALID/);
   // One single synchronous journal commit after every validated row is
   // merged. The writeRecord helper itself performs the only setItem.
