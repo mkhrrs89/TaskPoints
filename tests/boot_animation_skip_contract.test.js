@@ -33,7 +33,7 @@ test('early splash controller reveals the app immediately on skip', () => {
 
 test('a skip requested before appRoot exists is completed before scoring core runs', () => {
   const readyIndex = html.indexOf('id="tp-boot-skip-ready"');
-  const coreIndex = html.indexOf('<script src="scoring_core.js"></script>');
+  const coreIndex = html.indexOf('<script src="scoring_core.js?v=20261102-habit-freezes-1"></script>');
   assert.ok(readyIndex > 0 && coreIndex > readyIndex);
   assert.match(html.slice(readyIndex, coreIndex), /__tpBootRevealPending/);
   assert.match(html.slice(readyIndex, coreIndex), /__tpCompleteBootView/);
