@@ -853,6 +853,87 @@ try {
       unrelatedCompletionRetained:true,lockReleased:true};
   });
 
+  await run('full-origin writer admission blocks a stale Task journal writer after independent Projects edit',async context=>{
+    const writer=await open(context),legacy=await open(context);
+    if(!await writer.evaluate(()=>typeof navigator.locks?.request==='function')){
+      const rejected=await writer.evaluate(()=>
+        window.TaskPointsStateRuntimeV2.exercisePreviewSerializedSnapshotLease(()=>{}));
+      assert.equal(rejected.reason,'lock_manager_unavailable');
+      return {unsupportedFailClosed:true};
+    }
+    const capture=()=>writer.evaluate(()=>{
+      const keys=[];
+      for(let i=0;i<localStorage.length;i++)keys.push(localStorage.key(i));
+      return JSON.stringify(keys.sort().map(key=>[key,localStorage.getItem(key)]));
+    });
+    const original=await writer.evaluate(()=>({
+      snapshot:localStorage.getItem('taskpoints_v1'),
+      taskJournal:localStorage.getItem('taskpoints_pending_task_mutations_v1')
+    }));
+    const staleToken=await capture();
+    const pending=writer.evaluate(expected=>
+      window.TaskPointsStateRuntimeV2.exercisePreviewSerializedSnapshotLease(async guard=>{
+        window.__v2FullOriginWriterReady=true;
+        await new Promise(resolve=>{window.__releaseV2FullOriginWriter=resolve;});
+        guard.assertPreviewFullOriginInventoryUnchanged(expected);
+        window.TaskPointsCore.journalTaskMutation({
+          completionUpsert:{id:'must-not-journal-stale-full-origin',taskId:'t1',points:8}
+        });
+      }),staleToken);
+    await writer.waitForFunction(()=>window.__v2FullOriginWriterReady===true,
+      null,{timeout:12000});
+    // A legacy-only tab ignores the cooperative Web Lock but can still
+    // change Projects without altering the primary TaskPoints snapshot.
+    await legacy.evaluate(()=>localStorage.setItem('tp_projects_v1',
+      'changed-by-unfenced-legacy-projects'));
+    await writer.evaluate(()=>window.__releaseV2FullOriginWriter());
+    const refused=await pending;
+    assert.equal(refused.reason,'serialized_operation_full_origin_changed');
+    assert.equal(refused.canPromote,false);
+    const afterRefusal=await writer.evaluate(()=>({
+      snapshot:localStorage.getItem('taskpoints_v1'),
+      taskJournal:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+      projects:localStorage.getItem('tp_projects_v1')
+    }));
+    assert.equal(afterRefusal.snapshot,original.snapshot);
+    assert.equal(afterRefusal.taskJournal,original.taskJournal,
+      'the stale caller must not append even one Task journal record');
+    assert.equal(afterRefusal.projects,'changed-by-unfenced-legacy-projects');
+    // A refreshed explicit caller may commit the actual V1 Task journal.
+    // This is not automatic wiring: production Task writes are still
+    // unfenced and V2 read/mutation authority remains legacy_only.
+    const freshToken=await capture();
+    const accepted=await writer.evaluate(token=>
+      window.TaskPointsStateRuntimeV2.exercisePreviewSerializedSnapshotLease(guard=>{
+        guard.assertPreviewFullOriginInventoryUnchanged(token);
+        window.TaskPointsCore.journalTaskMutation({
+          completionUpsert:{id:'accepted-full-origin-task-journal',taskId:'t1',
+            points:5,completedAtISO:'2026-11-02T12:00:00.000Z'}
+        });
+      }),freshToken);
+    assert.equal(accepted.reason,'serialized_snapshot_rehearsed',
+      JSON.stringify(accepted));
+    assert.equal(accepted.canPromote,false);
+    const verified=await writer.evaluate(()=>{
+      const pending=window.TaskPointsCore.readPendingTaskMutations();
+      const effective=window.TaskPointsCore.readTaskPointsStoredState();
+      return {
+        pending:pending.record.completionUpserts.some(row=>
+          row.id==='accepted-full-origin-task-journal'),
+        effective:effective.completions.some(row=>
+          row.id==='accepted-full-origin-task-journal'),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority,
+        projects:localStorage.getItem('tp_projects_v1')
+      };
+    });
+    assert.equal(verified.pending,true);
+    assert.equal(verified.effective,true);
+    assert.equal(verified.authority,'legacy_only');
+    assert.equal(verified.projects,'changed-by-unfenced-legacy-projects');
+    return {staleCrossTabProjectsWriteDetected:true,realTaskJournalProtected:true,
+      freshJournalWritePreserved:true,unfencedLegacyWritesStillPossible:true};
+  });
+
   await run('serialized snapshot source guard denies unreadable state and missing tokens',async context=>{
     const page=await open(context);
     const supported=await page.evaluate(()=>typeof navigator.locks?.request==='function');
