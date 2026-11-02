@@ -6,7 +6,7 @@ const path=require('node:path');
 
 const runtime=fs.readFileSync(path.join(__dirname,'..','state_runtime_v2.js'),'utf8');
 const start=runtime.indexOf('async function inspectPreviewTaskCollectionParity()');
-const end=runtime.indexOf('// A narrower stepping stone toward REQUIRED writer admission',start);
+const end=runtime.indexOf('async function inspectPreviewTaskRecord(idInput)',start);
 const source=runtime.slice(start,end);
 
 test('nonpilot Tasks inspector requires preview host and never mutates any source',()=>{
@@ -17,6 +17,7 @@ test('nonpilot Tasks inspector requires preview host and never mutates any sourc
   assert.match(source,/core\.readPendingTaskMutations\(\)/);
   assert.match(source,/core\.readTaskPointsStoredState\(\)/);
   assert.match(source,/db\.transaction\(\['tasks', 'meta'\], 'readonly'\)/);
+  assert.doesNotMatch(source,/\b(?:tasksStore|mutationsStore)\.(?:put|add|delete|clear)\s*\(/);
   // Set.add() is bookkeeping for duplicate detection, not a storage write.
   // Restrict mutation bans to browser persistence APIs and canonical saves.
   assert.doesNotMatch(source,/\b(?:setItem|removeItem|saveStateSnapshot|journalTaskMutation)\s*\(/);
@@ -28,7 +29,7 @@ test('nonpilot Tasks inspector requires preview host and never mutates any sourc
 
 test('targeted Task read uses one IDB get and never implies collection-wide parity',()=>{
   const start=runtime.indexOf('async function inspectPreviewTaskRecord(idInput)');
-  const end=runtime.indexOf('// A narrower stepping stone toward REQUIRED writer admission',start);
+  const end=runtime.indexOf('async function rehearsePreviewTaskRecordUpdate(',start);
   assert.ok(start>=0 && end>start);
   const snippet=runtime.slice(start,end);
   assert.match(snippet,/db\.transaction\(\['tasks', 'meta'\], 'readonly'\)/);
