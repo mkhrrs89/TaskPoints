@@ -5618,7 +5618,11 @@ try {
     assert.equal(report.checks.physicalSafariPwaLifecycleValidated,false);
     assert.equal(report.checks.productionMultiContextHandoffValidated,false);
     assert.equal(report.rollback.canRestoreFromCheckpoint,false);
-    assert.equal(report.knownUnfencedWriterFamilies.length,8);
+    assert.equal(report.knownUnfencedWriterFamilies.length,9);
+    assert.ok(report.knownUnfencedWriterFamilies.includes('work_entry_fast_path_and_editor_fallback'));
+    assert.equal(report.checks.workEntryAtomicAdmissionVerified,false);
+    assert.equal(report.checks.workEntryFallbackPathFenced,false);
+    assert.ok(report.blockers.includes('work_entry_multirecord_admission_not_validated'));
     for(const blocker of [
       'all_legacy_writers_not_fenced',
       'nonpilot_authoritative_collections_not_migrated',
@@ -5632,7 +5636,7 @@ try {
     }));
     assert.equal(after.v1,v1Before);
     assert.equal(after.authority,'legacy_only');
-    return {greenPilotStillBlocked:true,eightWriterFamiliesEnumerated:true,
+    return {greenPilotStillBlocked:true,nineWriterFamiliesEnumerated:true,
       existingLegacyStatePreserved:true,nonpilotCutoverProhibited:true};
   });
 
