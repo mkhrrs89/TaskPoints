@@ -4717,6 +4717,11 @@
                     }
                     const markerIds = new Set();
                     const seenSyntheticSequences = new Set();
+                    // All NEW markers carry a sequence, even marker-only
+                    // acknowledgements. Legacy typed records have only
+                    // syntheticSequence; older marker-only records remain
+                    // readable without manufacturing missing history.
+                    const seenKnownWriterSequences = new Set();
                     const expectedEntities = new Map();
                     const lastKey = 'writer_marker:' + state.lastWriterMarker;
                     const markersValid = markers.every(row => {
@@ -4729,6 +4734,12 @@
                         || row.epoch < 0 || row.epoch > state.epoch
                         || !validPayloadFingerprint(row.payloadFingerprint)
                         || !syntheticMarkerValid(row)
+                        || (owns(row,'writerSequence')
+                          && (!Number.isSafeInteger(row.writerSequence)
+                            || row.writerSequence < 1
+                            || row.writerSequence > state.writersCommitted
+                            || (owns(row,'syntheticSequence')
+                              && row.syntheticSequence !== row.writerSequence)))
                         || (historicalMarkerSnapshots.has(row.id)
                           && historicalMarkerSnapshots.get(row.id)!==stableJson(row))
                         || ((owns(row,'syntheticMutationJson')
@@ -4749,6 +4760,16 @@
                           && row.payloadFingerprint === null))
                         return false;
                       markerIds.add(row.id);
+                      const knownSequence=owns(row,'writerSequence')
+                        ? row.writerSequence
+                        : owns(row,'syntheticSequence') ? row.syntheticSequence : null;
+                      if(knownSequence!==null){
+                        if(!Number.isSafeInteger(knownSequence)
+                          || knownSequence < 1
+                          || knownSequence > state.writersCommitted
+                          || seenKnownWriterSequences.has(knownSequence)) return false;
+                        seenKnownWriterSequences.add(knownSequence);
+                      }
                       const entries=storedSyntheticEntries(row);
                       if (entries.length) {
                         const keys=entries.map(syntheticEntityKeyFor);
@@ -4804,8 +4825,27 @@
                     const typedMarkerCount = markers.filter(row =>
                       owns(row,'syntheticMutationJson')
                         || owns(row,'syntheticMutationBatchJson')).length;
+                    const lastMarkerRow=markers.find(row=>row.id===lastKey);
+                    const lastKnownSequence=lastMarkerRow
+                      ? (owns(lastMarkerRow,'writerSequence')
+                        ? lastMarkerRow.writerSequence
+                        : owns(lastMarkerRow,'syntheticSequence')
+                          ? lastMarkerRow.syntheticSequence : null) : null;
+                    // The control pointer cannot refer to an earlier
+                    // numbered marker. If a legacy marker has no sequence,
+                    // it cannot supersede a known marker at the final count.
+                    const finalSequenceOwner=markers.find(row=>
+                      row.writerSequence===state.writersCommitted
+                        || row.syntheticSequence===state.writersCommitted);
+                    const lastMarkerSequenceValid=state.writersCommitted===0
+                      || (lastMarkerRow
+                        && (lastKnownSequence===null
+                          || lastKnownSequence===state.writersCommitted)
+                        && (!finalSequenceOwner
+                          || finalSequenceOwner.id===lastKey));
                     const inventoryValid = Array.isArray(records)
                       && typedMarkerCount === historicalDigestProofs.size
+                      && lastMarkerSequenceValid
                       && markers.filter(row=>historicalMarkerSnapshots.has(row.id)).length
                         === historicalMarkerSnapshots.size
                       && markers.length === state.writersCommitted
@@ -4937,6 +4977,9 @@
                         inventoryVerified: true,
                         historicalPayloadDigestsVerified: true,
                         markerEpoch: item ? item.epoch : null,
+                        markerWriterSequence: item
+                          ? (item.writerSequence ?? item.syntheticSequence ?? null)
+                          : null,
                         markerPayloadFingerprint: item ? item.payloadFingerprint : null,
                         syntheticMutationPresent:
                           !!(item?.syntheticMutationJson || item?.syntheticMutationBatchJson),
@@ -5084,6 +5127,7 @@
                       });
                     }
                     store.put({ id: markerId, generation, epoch: state.epoch,
+                      writerSequence: next.writersCommitted,
                       payloadFingerprint: effectivePayloadFingerprint,
                       ...(hasSyntheticMutation ? {
                         syntheticMutationJson, syntheticEntityKey,
