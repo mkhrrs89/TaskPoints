@@ -672,3 +672,22 @@ an incomplete or replayed edit. Multiple per-row `journalRows` calls
 are not themselves one IndexedDB transaction. Existing V1 journaling
 and recovery safeguards remain authoritative, and nothing here changes
 Main or allows a V2 cutover.
+
+### Two-row Work-like logical mutation rehearsal (November 2)
+
+A further Chromium/WebKit test takes two synthetic SCWM-style completion
+changes (a Work Score plus a Sleep Score), records them under **one**
+`syntheticMutations` marker in the isolated preview IndexedDB ledger,
+and proves that a single immutable intent materializes both rows with
+one durable sequence number. The same batch replay is idempotent; a
+changed second row under the same marker is refused. Both rows survive
+reload, and the read-only cutover report still blocks actual Work
+writer promotion. This connects the existing generic atomic-batch
+prototype to a concrete Main-origin workflow requirement without
+routing live `work_entry_fast_path.js` through V2.
+
+Passing this test is **not** proof of an atomic real Work action:
+the live Work entry adapter still uses the V1 journal/fallback, with
+possible multiple synchronous per-row journal appends. Real writer
+admission, cross-tab fencing, immediate-kill replay, fallback/rollback
+and off-device recovery remain required before cutover.
