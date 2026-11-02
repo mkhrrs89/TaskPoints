@@ -3413,7 +3413,11 @@
     'settings_import_reset_and_direct_storage',
     'notes_content_dirty_and_authority_flags',
     'emergency_recovery_and_restore',
-    'task_journal_and_idle_compaction'
+    'task_journal_and_idle_compaction',
+    // Main's Work/SCWM fast path can persist through the Task journal or
+    // switch to a synchronous full-snapshot fallback. It is a distinct
+    // admission route even though its journal sink is already inventoried.
+    'work_entry_fast_path_and_editor_fallback'
   ]);
 
   // Observe EVERY origin-localStorage key, including tp_projects_v1 and
@@ -3496,7 +3500,11 @@
       'independent_off_device_rollback_not_verified',
       'physical_safari_pwa_lifecycle_not_validated',
       'production_multi_context_handoff_not_validated',
-      'task_journal_compaction_handoff_not_validated'
+      'task_journal_compaction_handoff_not_validated',
+      // Work commit interception can journal several changed rows one by
+      // one, or fall back to a full snapshot save. Neither path is fenced
+      // by V2 or yet proven as one cross-context atomic logical action.
+      'work_entry_multirecord_admission_not_validated'
     ];
     const snapshot = (reason, pilot, rollback, peers, extra = [], taskJournal = null) => {
       // Even a completely green Habit pilot and all responsive V2 preview
@@ -3511,6 +3519,8 @@
         // Empty after verified compaction is necessary, NOT an admission
         // guarantee against a paused old tab or an idle callback resuming.
         taskJournalCompactionHandoffValidated: false,
+        workEntryAtomicAdmissionVerified: false,
+        workEntryFallbackPathFenced: false,
         mirrorQueueStable: pilot?.checks?.mirrorQueueStable === true,
         noObservedMirrorFailures: pilot?.checks?.noObservedMirrorFailures === true,
         noObservedBridgeFailures: pilot?.checks?.noObservedBridgeFailures === true,
