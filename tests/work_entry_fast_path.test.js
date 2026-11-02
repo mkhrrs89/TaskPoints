@@ -8,11 +8,13 @@ const ROOT = path.join(__dirname, '..');
 const source = fs.readFileSync(path.join(ROOT, 'work_entry_fast_path.js'), 'utf8');
 const guardSource = fs.readFileSync(path.join(ROOT, 'habit_completion_source_guard.js'), 'utf8');
 
-function makeHarness({ journalFails = false, preflightFails = false, targetedUi = true } = {}) {
+function makeHarness({ journalFails = false, batchFails = false, batchEnabled = false,
+  twoRowWorkSave = false, preflightFails = false, targetedUi = true } = {}) {
   const calls = {
     fullSaves: 0,
     renders: 0,
     journal: [],
+    batches: [],
     storageTouches: 0,
     idleTouches: 0,
     scwmRefreshes: 0,
@@ -51,6 +53,13 @@ function makeHarness({ journalFails = false, preflightFails = false, targetedUi 
     noteStorageUserInteraction() { calls.storageTouches += 1; },
     isStorageMaintenanceQuiet() { return true; }
   };
+
+  if (batchEnabled) {
+    core.journalTaskCompletionBatch = function journalTaskCompletionBatch(rows) {
+      if (journalFails || batchFails) throw new Error('quota');
+      calls.batches.push(JSON.parse(JSON.stringify(rows)));
+    };
+  }
 
   const document = {
     readyState: 'complete',
@@ -117,6 +126,11 @@ function makeHarness({ journalFails = false, preflightFails = false, targetedUi 
       source: 'work'
     };
     state.completions.unshift(entry);
+    if (twoRowWorkSave) {
+      state.completions.unshift({id:'work-side-effect',
+        source:'work',title:'Companion Work completion',workHours:8,
+        points:8,completedAtISO:'2026-08-15T12:05:00.000Z'});
+    }
     context.save();
     context.renderAll();
   };
@@ -313,4 +327,40 @@ test('when SCWM defers the emergency fallback, flush it before returning after j
   assert.equal(h.calls.fullSaves, 1);
   assert.equal(h.calls.lastSavePath, 'work-entry-fast-path-fallback');
   assert.equal(pending, null);
+});
+
+
+test('two Work completion edits use the atomic batch journal once when available',()=>{
+  const h=makeHarness({batchEnabled:true,twoRowWorkSave:true});
+  h.context.saveWorkScore();
+  assert.equal(h.calls.batches.length,1);
+  assert.equal(h.calls.journal.length,0,'no per-row journal append after batch acknowledgement');
+  assert.deepEqual(h.calls.batches[0].map(r=>r.id).sort(),
+    ['work-new','work-side-effect']);
+  assert.equal(h.calls.fullSaves,0);
+  assert.equal(h.context.TaskPointsWorkEntryFastPath.getStatus()
+    .counters.journaledCompletionUpserts,2);
+});
+
+test('atomic Work batch error never writes an individual row and retains full save fallback',()=>{
+  const h=makeHarness({batchEnabled:true,batchFails:true,twoRowWorkSave:true});
+  // The existing original-save fallback is still allowed to confirm
+  // persistence synchronously; it must not fake a journal acknowledgement.
+  h.context.save=function savedConfirmed(){h.calls.fullSaves++;return true};
+  h.context.saveWorkScore();
+  assert.equal(h.calls.batches.length,0);
+  assert.equal(h.calls.journal.length,0);
+  assert.equal(h.calls.fullSaves,1);
+  assert.equal(h.context.TaskPointsWorkEntryFastPath.getStatus()
+    .counters.fallbackFullSaves,1);
+  assert.equal(h.context.TaskPointsWorkEntryFastPath.getStatus()
+    .counters.journaledCompletionUpserts,0);
+});
+
+test('older Work integrations still use their existing per-row Task journal',()=>{
+  const h=makeHarness({twoRowWorkSave:true});
+  h.context.saveWorkScore();
+  assert.equal(h.calls.batches.length,0);
+  assert.equal(h.calls.journal.length,2);
+  assert.equal(h.calls.fullSaves,0);
 });
