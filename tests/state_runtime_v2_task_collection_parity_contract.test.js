@@ -26,6 +26,22 @@ test('nonpilot Tasks inspector requires preview host and never mutates any sourc
   assert.match(source,/canPromote: false/);
 });
 
+test('targeted Task read uses one IDB get and never implies collection-wide parity',()=>{
+  const start=runtime.indexOf('async function inspectPreviewTaskRecord(idInput)');
+  const end=runtime.indexOf('// A narrower stepping stone toward REQUIRED writer admission',start);
+  assert.ok(start>=0 && end>start);
+  const snippet=runtime.slice(start,end);
+  assert.match(snippet,/db\.transaction\(\['tasks', 'meta'\], 'readonly'\)/);
+  assert.match(snippet,/tx\.objectStore\('tasks'\)\.get\(id\)/);
+  assert.doesNotMatch(snippet,/tx\.objectStore\('tasks'\)\.getAll\(/);
+  assert.match(snippet,/collectionParityVerified: false/);
+  assert.match(snippet,/record\.legacyIndex === expectedIndex/);
+  assert.match(snippet,/evidence\.taskFingerprint !== fingerprint/);
+  assert.match(snippet,/currentGeneration\(\{ create: false \}\) === generation/);
+  assert.match(snippet,/canPromote: false/);
+  assert.match(runtime,/inspectPreviewTaskCollectionParity,\s*inspectPreviewTaskRecord,/);
+});
+
 test('Task parity checks identity, payload, source inventory and generation without trusting metadata alone',()=>{
   assert.match(source,/previewRecoveryFingerprint\(tasks\)/);
   assert.match(source,/evidence\.taskFingerprint !== taskFingerprint/);

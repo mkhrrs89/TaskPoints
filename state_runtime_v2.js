@@ -4723,6 +4723,100 @@
     } catch (_) { return refuse('task_preview_parity_unreadable'); }
   }
 
+  // A single-record preview read is a narrower building block than a full
+  // Task collection scan. It authenticates the existing seed evidence and
+  // current V1 source but inspects only ONE V2 Task row using IDB.get().
+  // The result is deliberately not a claim of collection-wide parity.
+  async function inspectPreviewTaskRecord(idInput) {
+    const refuse = (reason, detail = {}) => ({
+      checked: true, previewOnly: true, recordVerified: false,
+      collectionParityVerified: false, reason,
+      canPromote: false, productionWritersFenced: false,
+      mutationAuthority: 'legacy_only', readAuthority: 'legacy_only',
+      ...detail
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    if ((typeof idInput !== 'string' && typeof idInput !== 'number')
+      || !String(idInput) || String(idInput).length > 256)
+      return refuse('task_id_required');
+    if (typeof core.readTaskPointsStoredState !== 'function'
+      || typeof core.readPendingTaskMutations !== 'function')
+      return refuse('legacy_task_reader_unavailable');
+    const id = String(idInput);
+    const expectedEpoch = darkMirrorModeEpoch;
+    const generation = currentGeneration({ create: false });
+    if (!generation) return refuse('generation_unavailable');
+    let inventory, tasks, expectedIndex, fingerprint;
+    try {
+      inventory = captureReadOnlyFullStorageInventory();
+      const pending = core.readPendingTaskMutations();
+      if (pending?.malformed) return refuse('legacy_task_journal_malformed');
+      const state = core.readTaskPointsStoredState();
+      if (!state || !Array.isArray(state.tasks)) return refuse('legacy_tasks_missing');
+      tasks = clone(state.tasks);
+      const ids = new Set();
+      for (const task of tasks) {
+        if (!task || typeof task !== 'object' || Array.isArray(task)
+          || task.id == null || !String(task.id) || ids.has(String(task.id)))
+          return refuse('legacy_task_ids_invalid');
+        ids.add(String(task.id));
+      }
+      expectedIndex = tasks.findIndex(task => String(task.id) === id);
+      if (captureReadOnlyFullStorageInventory() !== inventory)
+        return refuse('legacy_changed_during_capture');
+      fingerprint = await previewRecoveryFingerprint(tasks);
+    } catch (_) { return refuse('legacy_task_capture_unreadable'); }
+    const sourceCurrent = () => isDarkEnabled()
+      && darkMirrorModeEpoch === expectedEpoch
+      && currentGeneration({ create: false }) === generation
+      && captureReadOnlyFullStorageInventory() === inventory;
+    try {
+      if (!sourceCurrent()) return refuse('legacy_changed_before_read');
+    } catch (_) { return refuse('legacy_unreadable_before_read'); }
+    let db, record, evidence, meta;
+    try {
+      db = await open();
+      if (!db) return refuse('dark_disabled');
+      const tx = db.transaction(['tasks', 'meta'], 'readonly');
+      [record, evidence, meta] = await Promise.all([
+        requestPromise(tx.objectStore('tasks').get(id)),
+        requestPromise(tx.objectStore('meta').get('task-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID))
+      ]);
+    } catch (_) { return refuse('task_record_read_unavailable'); }
+    try {
+      if (!sourceCurrent()) return refuse('legacy_changed_during_read');
+      if (meta?.schemaVersion !== SCHEMA_VERSION
+        || meta.resetGeneration !== generation || meta.legacyMissing === true)
+        return refuse('pilot_meta_not_ready');
+      if (!evidence) return refuse('task_preview_missing');
+      if (evidence.schemaVersion !== 1 || evidence.resetGeneration !== generation)
+        return refuse('task_preview_generation_mismatch');
+      const inventorySignature = `${fnv1a(inventory)}:${inventory.length}`;
+      if (evidence.taskFingerprint !== fingerprint
+        || evidence.sourceInventory !== inventorySignature)
+        return refuse('task_preview_source_stale');
+      if (evidence.taskCount !== tasks.length)
+        return refuse('task_preview_evidence_mismatch');
+      const expected = expectedIndex < 0 ? null : tasks[expectedIndex];
+      const matches = expected === null ? !record
+        : Boolean(record && record.id === id
+          && record.legacyIndex === expectedIndex
+          && record.value && String(record.value.id) === id
+          && stableJson(record.value) === stableJson(expected));
+      if (!matches) return refuse('task_preview_record_mismatch');
+      if (!sourceCurrent()) return refuse('legacy_changed_after_read');
+      return {
+        checked: true, previewOnly: true, recordVerified: true,
+        collectionParityVerified: false, exists: expected !== null,
+        taskId: id, reason: 'task_preview_record_verified',
+        canPromote: false, productionWritersFenced: false,
+        mutationAuthority: 'legacy_only', readAuthority: 'legacy_only'
+      };
+    } catch (_) { return refuse('task_record_verification_unreadable'); }
+  }
+
   // A narrower stepping stone toward REQUIRED writer admission, rather
   // than relying on the caller to invoke an optional freshness callback.
   // This API is explicit, PREVIEW-HOST-ONLY and NEVER installs on the live
@@ -6050,6 +6144,7 @@
     rehearsePreviewAdmittedTaskCompletionBatch,
     rehearsePreviewTaskCollectionSeed,
     inspectPreviewTaskCollectionParity,
+    inspectPreviewTaskRecord,
     rehearsePreviewDurableWriterFence,
     inspectPreservedParityMismatch,
     inspectLegacyRollbackSource,

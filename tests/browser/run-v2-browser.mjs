@@ -1169,6 +1169,84 @@ try {
       originalV1Preserved:true,legacyAuthority:true};
   });
 
+  await run('targeted preview Task read verifies one row without a V2 collection scan',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const seeded=await runtime.rehearsePreviewTaskCollectionSeed();
+      const all=IDBObjectStore.prototype.getAll;
+      let blockedScans=0;
+      IDBObjectStore.prototype.getAll=function(){
+        if(this.name==='tasks'){
+          blockedScans++;
+          throw new Error('targeted Task lookup attempted a full collection scan');
+        }
+        return all.apply(this,arguments);
+      };
+      let found,absent;
+      try {
+        found=await runtime.inspectPreviewTaskRecord('synthetic-task');
+        absent=await runtime.inspectPreviewTaskRecord('not-a-task');
+      } finally {IDBObjectStore.prototype.getAll=all; }
+      return {seeded,found,absent,blockedScans,authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(result.seeded.verified,true,JSON.stringify(result.seeded));
+    assert.equal(result.found.recordVerified,true,JSON.stringify(result.found));
+    assert.equal(result.found.exists,true);
+    assert.equal(result.found.collectionParityVerified,false);
+    assert.equal(result.absent.recordVerified,true);
+    assert.equal(result.absent.exists,false);
+    assert.equal(result.blockedScans,0);
+    assert.equal(result.authority,'legacy_only');
+    return {singleRecordRead:true,noTasksGetAll:true,absenceVerified:true,
+      collectionNotCertified:true,noAuthorityChange:true};
+  });
+
+  await run('targeted preview Task read denies stale V1 and corrupted V2 without repair',async context=>{
+    const page=await open(context);
+    const evidence=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const core=window.TaskPointsCore;
+      const missing=await runtime.inspectPreviewTaskRecord('synthetic-task');
+      const seeded=await runtime.rehearsePreviewTaskCollectionSeed();
+      const intact=await runtime.inspectPreviewTaskRecord('synthetic-task');
+      const db=await runtime.open();
+      await new Promise((resolve,reject)=>{
+        const tx=db.transaction('tasks','readwrite');
+        tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);tx.onerror=()=>reject(tx.error);
+        tx.objectStore('tasks').put({
+          id:'synthetic-task',legacyIndex:0,
+          value:{id:'synthetic-task',title:'V2-only corruption'}
+        });
+      });
+      const corrupted=await runtime.inspectPreviewTaskRecord('synthetic-task');
+      const before=localStorage.getItem('taskpoints_v1');
+      core.journalTaskMutation({
+        task:{id:'task-only-after-seed',title:'New legacy Task',points:6}
+      });
+      const stale=await runtime.inspectPreviewTaskRecord('synthetic-task');
+      const stored=await new Promise((resolve,reject)=>{
+        const req=db.transaction('tasks','readonly').objectStore('tasks').get('synthetic-task');
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      return {missing,seeded,intact,corrupted,stale,stored,
+        v1Unchanged:localStorage.getItem('taskpoints_v1')===before,
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(evidence.missing.reason,'task_preview_missing');
+    assert.equal(evidence.seeded.verified,true);
+    assert.equal(evidence.intact.recordVerified,true);
+    assert.equal(evidence.corrupted.recordVerified,false);
+    assert.equal(evidence.corrupted.reason,'task_preview_record_mismatch');
+    assert.equal(evidence.stale.recordVerified,false);
+    assert.equal(evidence.stale.reason,'task_preview_source_stale');
+    assert.equal(evidence.stored.value.title,'V2-only corruption');
+    assert.equal(evidence.v1Unchanged,true);
+    assert.equal(evidence.authority,'legacy_only');
+    return {recordTamperingRejected:true,staleJournalRejected:true,
+      noAutoRepair:true,v1StillPrimary:true};
+  });
+
   await run('nonpilot Task record migration aborts atomically on Task put failure and retries safely',async context=>{
     const page=await open(context);
     const result=await page.evaluate(async()=>{

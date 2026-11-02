@@ -137,3 +137,22 @@ full-origin serialization added to the live app.
 fence or future-write guarantee. The local preview evidence is not an
 off-device backup, V2 Tasks are not production authoritative, and the
 12-point nonpilot collection milestone remains uncredited.
+
+
+## Targeted Task record lookup in isolated V2 preview
+
+An additional preview-only `inspectPreviewTaskRecord(id)` exercises a
+single-record IndexedDB `get`, instead of loading the entire V2 Tasks
+object store. It checks effective V1 Task-journal state, original source
+fingerprint, reset generation, metadata, exact Task ID, legacy order index,
+and the selected V2 record's payload. It handles a verified absent Task,
+and explicitly denies missing seed evidence, V1 journal changes and
+tampered V2 rows without repairing them.
+
+The result has `recordVerified` but **always**
+`collectionParityVerified:false`: a targeted read cannot rule out
+unexpected extra rows elsewhere in the V2 store. Browser tests prohibit
+`tasks.getAll()` during the targeted call and check corruption/stale-source
+denial. This is future read-path groundwork only, not a foreground
+optimization: source validation still requires effective V1 snapshot
+parsing, and V1 remains the sole production authority.
