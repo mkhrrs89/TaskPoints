@@ -152,6 +152,6 @@ test('general Habits tag reset cannot erase the white outlined silver-week badge
 });
 
 test('Home requests updated CSS instead of a potentially stale iPhone stylesheet', () => {
-  assert.match(home, /href="styles\.css\?v=20261102-habit-week-border-2"/);
-  assert.equal((home.match(/href="styles\.css\?v=20261102-habit-week-border-2"/g) || []).length, 3);
+  assert.match(home, /href="styles\.css\?v=20261102-freeze-white-bubbles-1"/);
+  assert.equal((home.match(/href="styles\.css\?v=20261102-freeze-white-bubbles-1"/g) || []).length, 3);
 });

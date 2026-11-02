@@ -206,14 +206,14 @@ Nothing visible on the page is built here. === -->
   
   <!-- Your app scripts + CSS -->
 <link rel="preload" href="assets/tailwind.css" as="style">
-<link rel="preload" href="styles.css?v=20261102-habit-week-border-2" as="style">
+<link rel="preload" href="styles.css?v=20261102-freeze-white-bubbles-1" as="style">
 
 <link rel="stylesheet" href="assets/tailwind.css" media="print" onload="this.media='all'">
-<link rel="stylesheet" href="styles.css?v=20261102-habit-week-border-2" media="print" onload="this.media='all'">
+<link rel="stylesheet" href="styles.css?v=20261102-freeze-white-bubbles-1" media="print" onload="this.media='all'">
 
 <noscript>
   <link rel="stylesheet" href="assets/tailwind.css">
-  <link rel="stylesheet" href="styles.css?v=20261102-habit-week-border-2">
+  <link rel="stylesheet" href="styles.css?v=20261102-freeze-white-bubbles-1">
 </noscript>
   <style>
 
@@ -8559,6 +8559,7 @@ function renderHabitRow(h, days, wrap, options = {}) {
   const failedStreak = Number(h.__failedStreak || 0);
   const completion = Number(h.__completion || 0);
   const freezeEnabled = options.freezeEnabled === true;
+  const protectedDayKeys = new Set(options.protectedDays || []);
   const streakBonusText = getHabitCurrentStreakBonusText(h, streak);
   const silverWeeks = Number(options.silverWeekCount) || 0;
 
@@ -8583,9 +8584,10 @@ const daysHtml = days.map(d => {
   const on = status !== 'off';
   const isIcy = status === 'on' && Array.isArray(h.iceKeys) && h.iceKeys.includes(d.key);
   const isHalfCompleteNormalHabit = status === 'half' && !isShowerHabit(h);
-  const isPastIncomplete = !on && d.key < dateKey(new Date());
+  const isFreezeProtected = status === 'off' && protectedDayKeys.has(d.key);
+  const isPastIncomplete = !on && !isFreezeProtected && d.key < dateKey(new Date());
   const styleAttr = getHabitBubbleStyleAttrForHabit(h, status);
-  return `<div class="habitDay ${status}${isHalfCompleteNormalHabit ? ' habit-half' : ''}${isIcy ? ' icy' : ''}${isPastIncomplete ? ' past-incomplete' : ''}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
+  return `<div class="habitDay ${status}${isHalfCompleteNormalHabit ? ' habit-half' : ''}${isIcy ? ' icy' : ''}${isPastIncomplete ? ' past-incomplete' : ''}${isFreezeProtected ? ' streak-freeze-used' : ''}"${styleAttr}${isFreezeProtected ? ' title="Streak freeze used"' : ''} data-habit="${h.id}" data-day="${d.key}">
     ${d.date.getDate()}
   </div>`;
 }).join('');
@@ -8905,6 +8907,7 @@ function renderHabits(){
       groupMoveTag: isTaggedGroup ? section.tag : '',
       silverWeekCount: freezeStatuses.get(String(h.id))?.balance ?? (silverWeekCounts.get(String(h.id)) || 0),
       freezeEnabled: freezeStatuses.has(String(h.id)),
+      protectedDays: freezeStatuses.get(String(h.id))?.protectedDays || [],
       visibleCompletionLookup,
       isWeeklyCompleteForVisibleWeek: isWeeklyComplete,
       previousIsWeeklyComplete: sectionRows[index - 1]?.isWeeklyComplete === true,
@@ -9990,7 +9993,7 @@ function getHabitBubbleStatusClass(h, dayKey, visibleLookup = null) {
 function applyCanonicalHabitBubbleVisual(bubble, habit, dayKey, statusClass) {
   // This is deliberately exhaustive: a bubble is a projection of canonical state,
   // never an incremental collection of classes from previous taps.
-  bubble.classList.remove('on', 'off', 'half', 'failed', 'habit-half', 'icy', 'past-incomplete', 'past-failed');
+  bubble.classList.remove('on', 'off', 'half', 'failed', 'habit-half', 'icy', 'past-incomplete', 'past-failed', 'streak-freeze-used');
   const primary = ['on', 'off', 'half', 'failed'].includes(statusClass) ? statusClass : 'off';
   bubble.classList.add(primary);
   const isVice = (habit.category || 'habit') === 'vice';

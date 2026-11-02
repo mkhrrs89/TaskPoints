@@ -2892,6 +2892,13 @@ header,
 }
 .habitDay.off{background:transparent}
 
+/* A genuinely spent streak freeze: a missed, scoreless day stays visually distinct. */
+.habitDay.off.streak-freeze-used{
+  background: #ffffff !important;
+  color: #000000 !important;
+  border-color: #ffffff !important;
+}
+
 /* Make sure the bubble can hold overlays */
 .habitDay{ position: relative; overflow: hidden; }
 
