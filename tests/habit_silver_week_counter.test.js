@@ -122,3 +122,22 @@ test('removing a qualifying completion recalculates the count rather than granti
   item.doneKeys = ['2026-10-12'];
   assert.equal(count([item], [], '2026-10-18').get(item.id), 0);
 });
+
+
+test('silver-week badge displays only the count, retaining its tooltip and accessible label', () => {
+  const rendered = home.match(/<span class="tag habit-silver-weeks"[^>]*>[^<]*<\/span>/);
+  assert.ok(rendered, 'habit week counter should remain present');
+  assert.match(rendered[0], /data-silver-weeks="\$\{silverWeeks\}"/);
+  assert.match(rendered[0], /aria-label="\$\{silverWeeks\} silver/);
+  assert.match(rendered[0], />\$\{silverWeeks\}<\/span>$/);
+  assert.doesNotMatch(rendered[0], /\$\{silverWeeks\} wk/);
+});
+
+test('silver-week number has a thin white outline with no solid badge fill', () => {
+  const rule = styles.match(/\.habitRow \.habitLeft \.tag\.habit-silver-weeks\s*\{([^}]+)\}/);
+  assert.ok(rule, 'the habit week badge style is present');
+  assert.match(rule[1], /border:\s*1px solid rgba\(255, 255, 255, 0\.95\)\s*!important/);
+  assert.match(rule[1], /background:\s*transparent\s*!important/);
+  assert.match(rule[1], /justify-content:\s*center/);
+  assert.match(rule[1], /color:\s*#fff\s*!important/);
+});
