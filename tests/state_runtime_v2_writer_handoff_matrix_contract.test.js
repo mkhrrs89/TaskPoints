@@ -875,3 +875,25 @@ test('silent old-tab exclusion cannot be inferred from preview peers or stable V
   assert.match(gate,/canPromote: false/);
   assert.match(gate,/allLegacyWritersFenced: false/);
 });
+
+
+test('exclusive lease rehearsal inventories non-taskpoints origin keys',()=>{
+  const runtime=read('state_runtime_v2.js');
+  const inventoryStart=runtime.indexOf('function captureReadOnlyFullStorageInventory()');
+  const cutoverStart=runtime.indexOf('async function inspectAuthorityCutoverBarriers()');
+  const rehearsalStart=runtime.indexOf('async function rehearseExclusiveWriterLease()');
+  const rehearsalEnd=runtime.indexOf('// Stage-C *comparison harness*',rehearsalStart);
+  assert.ok(inventoryStart>0&&cutoverStart>inventoryStart
+    &&rehearsalStart>cutoverStart&&rehearsalEnd>rehearsalStart);
+  const inventory=runtime.slice(inventoryStart,cutoverStart);
+  const rehearsal=runtime.slice(rehearsalStart,rehearsalEnd);
+  assert.match(inventory,/const entries = \[\.\.\.keys\]\.sort\(\)\.map/);
+  assert.match(rehearsal,/JSON\.parse\(captureReadOnlyFullStorageInventory\(\)\)/);
+  assert.match(rehearsal,/currentInventory = captureReadOnlyFullStorageInventory\(\)/);
+  assert.match(rehearsal,/captureReadOnlyFullStorageInventory\(\) !== currentInventory/);
+  assert.match(rehearsal,/legacy_changed_under_lock/);
+  assert.match(rehearsal,/legacy_changed_during_lock_verification/);
+  assert.doesNotMatch(rehearsal,/previewRecoveryFingerprint\(captureLegacyNamespace\(\)\)/);
+  assert.doesNotMatch(rehearsal,/currentInventory = captureLegacyNamespace\(\)/);
+  assert.match(rehearsal,/canPromote: false/);
+});
