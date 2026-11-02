@@ -2922,6 +2922,160 @@ try {
       reloadStillRefuses:true};
   });
 
+  await run('latest writer pointer cannot name an earlier marker or hide legacy sequencing',async context=>{
+    const page=await open(context);
+    const originalV1=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const proof=await page.evaluate(async()=>{
+      const rt=window.TaskPointsStateRuntimeV2;
+      const typed=await rt.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'sequence-typed-one',syntheticMutation:{
+          collection:'notes',entityId:'sequence-safety-note',
+          operation:'put',value:'First durable intent'
+        }
+      });
+      const olderMarker=await rt.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'sequence-marker-two'
+      });
+      const latest=await rt.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'sequence-marker-three'
+      });
+      const a=await rt.rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker:'sequence-typed-one'
+      });
+      const b=await rt.rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker:'sequence-marker-two'
+      });
+      const c=await rt.rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker:'sequence-marker-three'
+      });
+      const clean=await rt.rehearsePreviewDurableWriterFence('audit');
+      // Simulate an old preview marker persisted before the optional
+      // sequence field was added. It must stay readable, not migrated.
+      await new Promise((resolve,reject)=>{
+        const opening=indexedDB.open('taskpoints_v2_writer_fence_preview_v1',1);
+        opening.onerror=()=>reject(opening.error);
+        opening.onsuccess=()=>{
+          const db=opening.result,tx=db.transaction('control','readwrite');
+          const store=tx.objectStore('control'),request=store.get('writer_marker:sequence-marker-two');
+          request.onsuccess=()=>{
+            const legacy={...request.result};
+            delete legacy.writerSequence;
+            store.put(legacy);
+          };
+          request.onerror=()=>{try{tx.abort()}catch(_){}};
+          tx.oncomplete=()=>{db.close();resolve()};
+          tx.onabort=()=>{db.close();reject(tx.error||Error('legacy marker setup failed'))};
+        };
+      });
+      const legacyAudit=await rt.rehearsePreviewDurableWriterFence('audit');
+      const legacyMarker=await rt.rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker:'sequence-marker-two'
+      });
+      await new Promise((resolve,reject)=>{
+        const opening=indexedDB.open('taskpoints_v2_writer_fence_preview_v1',1);
+        opening.onerror=()=>reject(opening.error);
+        opening.onsuccess=()=>{
+          const db=opening.result,tx=db.transaction('control','readwrite');
+          const store=tx.objectStore('control'),request=store.get('writer_fence');
+          request.onsuccess=()=>{
+            // All three markers remain intact and counter remains 3.
+            // Only the last-pointer is moved back to the older marker.
+            store.put({...request.result,lastWriterMarker:'sequence-marker-two'});
+          };
+          request.onerror=()=>{try{tx.abort()}catch(_){}};
+          tx.oncomplete=()=>{db.close();resolve()};
+          tx.onabort=()=>{db.close();reject(tx.error||Error('pointer tamper failed'))};
+        };
+      });
+      const audit=await rt.rehearsePreviewDurableWriterFence('audit');
+      const inspect=await rt.rehearsePreviewDurableWriterFence('inspect_marker',{
+        marker:'sequence-marker-three'
+      });
+      const replay=await rt.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'sequence-marker-three'
+      });
+      const fresh=await rt.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'sequence-four-must-not-exist'
+      });
+      const freeze=await rt.rehearsePreviewDurableWriterFence('freeze',{expectedEpoch:0});
+      const fence=await rt.rehearsePreviewDurableWriterFence('read');
+      return {typed,olderMarker,latest,a,b,c,clean,legacyAudit,
+        legacyMarker,audit,inspect,replay,fresh,freeze,fence,
+        v1:localStorage.getItem('taskpoints_v1'),
+        authority:rt.getStatus().readAuthority};
+    });
+    for(const result of [proof.typed,proof.olderMarker,proof.latest])
+      assert.equal(result.reason,'preview_writer_recorded',JSON.stringify(result));
+    for(const [result,sequence] of [[proof.a,1],[proof.b,2],[proof.c,3]]){
+      assert.equal(result.reason,'preview_writer_marker_present');
+      assert.equal(result.markerWriterSequence,sequence);
+    }
+    assert.equal(proof.clean.reason,'preview_writer_inventory_consistent');
+    assert.equal(proof.legacyAudit.reason,'preview_writer_inventory_consistent');
+    assert.equal(proof.legacyMarker.reason,'preview_writer_marker_present');
+    assert.equal(proof.legacyMarker.markerWriterSequence,null);
+    for(const result of [proof.audit,proof.inspect,proof.replay,proof.fresh,proof.freeze]){
+      assert.equal(result.reason,'fence_writer_inventory_inconsistent',JSON.stringify(result));
+      assert.equal(result.canPromote,false);
+    }
+    assert.equal(proof.fence.fence.writersCommitted,3);
+    assert.equal(proof.fence.fence.lastWriterMarker,'sequence-marker-two');
+    assert.equal(proof.fence.fence.frozen,false);
+    assert.equal(proof.v1,originalV1);
+    assert.equal(proof.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    const reopened=await page.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('audit'));
+    assert.equal(reopened.reason,'fence_writer_inventory_inconsistent');
+    return {newSequencesDurable:true,oldMarkerBackwardCompatible:true,
+      shiftedLastPointerRejected:true,freezeAndReplayBlocked:true,
+      evidenceSurvivesReload:true,legacyAuthorityUntouched:true};
+  });
+
+  await run('duplicate preview writer sequences cannot pass inventory audit',async context=>{
+    const page=await open(context);
+    const proof=await page.evaluate(async()=>{
+      const rt=window.TaskPointsStateRuntimeV2;
+      const v1=localStorage.getItem('taskpoints_v1');
+      const one=await rt.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'unique-writer-one'
+      });
+      const two=await rt.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:0,marker:'unique-writer-two'
+      });
+      await new Promise((resolve,reject)=>{
+        const opening=indexedDB.open('taskpoints_v2_writer_fence_preview_v1',1);
+        opening.onerror=()=>reject(opening.error);
+        opening.onsuccess=()=>{
+          const db=opening.result,tx=db.transaction('control','readwrite');
+          const store=tx.objectStore('control'),request=store.get('writer_marker:unique-writer-one');
+          request.onsuccess=()=>{
+            store.put({...request.result,writerSequence:2});
+          };
+          request.onerror=()=>{try{tx.abort()}catch(_){}};
+          tx.oncomplete=()=>{db.close();resolve()};
+          tx.onabort=()=>{db.close();reject(tx.error||Error('sequence corruption failed'))};
+        };
+      });
+      const audit=await rt.rehearsePreviewDurableWriterFence('audit');
+      const freeze=await rt.rehearsePreviewDurableWriterFence('freeze',{expectedEpoch:0});
+      const read=await rt.rehearsePreviewDurableWriterFence('read');
+      return {one,two,audit,freeze,read,v1,
+        finalV1:localStorage.getItem('taskpoints_v1'),
+        authority:rt.getStatus().readAuthority};
+    });
+    assert.equal(proof.one.reason,'preview_writer_recorded');
+    assert.equal(proof.two.reason,'preview_writer_recorded');
+    assert.equal(proof.audit.reason,'fence_writer_inventory_inconsistent');
+    assert.equal(proof.freeze.reason,'fence_writer_inventory_inconsistent');
+    assert.equal(proof.read.fence.frozen,false);
+    assert.equal(proof.read.fence.writersCommitted,2);
+    assert.equal(proof.finalV1,proof.v1);
+    assert.equal(proof.authority,'legacy_only');
+    return {duplicateSequenceRejected:true,freezeBlocked:true,
+      noLegacyDataWrite:true};
+  });
+
   await run('marker-only writer and retry require complete historical ledger',async context=>{
     const page=await open(context);
     const originalV1=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
