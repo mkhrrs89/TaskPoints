@@ -2666,6 +2666,21 @@ target.source = "metric";
 let workEditContext = null;
 let workEditOptions = null;
 
+// Expose the live Home state to the separately loaded Work journal fast path.
+// Home's top-level `let state` is not a window property, and indirect eval
+// is not a reliable contract for retrieving it across script wrappers.
+window.TaskPointsWorkEntryAccess = {
+  getState: () => state,
+  getEditedRow: (name) => {
+    const entry = name === 'submitWorkEditModal'
+      ? resolveCompletionRef(workEditContext, 'Work Score')
+      : (name === 'saveWorkScore' ? getTodayWorkEntry() : null);
+    if (!entry || !entry.id || !entry.title?.startsWith('Work Score')) return null;
+    // Do not journal a detached/stale editor object as if it were current.
+    return state.completions.find((row) => row === entry) || null;
+  }
+};
+
 function promptEditWorkEntry(entry, options = {}) {
   if (!entry) return;
 
