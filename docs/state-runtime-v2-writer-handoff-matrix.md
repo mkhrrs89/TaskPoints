@@ -691,3 +691,41 @@ the live Work entry adapter still uses the V1 journal/fallback, with
 possible multiple synchronous per-row journal appends. Real writer
 admission, cross-tab fencing, immediate-kill replay, fallback/rollback
 and off-device recovery remain required before cutover.
+
+### V2-branch atomic V1 Work completion journal (November 2)
+
+V2 now contains a **real implementation change**, in addition to the
+synthetic preview batch rehearsal. `task_mutation_journal.js` exposes
+`TaskPointsCore.journalTaskCompletionBatch(rows)` as an additive API
+which validates a nonempty, bounded (up to 64), unique-ID completion
+batch and folds every new row into one pending Task-journal record
+**before exactly one synchronous localStorage `setItem`**. This keeps
+the established V1 Task-journal storage schema, overlay, verified
+compaction, retention of other pending rows and recovery protections.
+The existing `journalTaskMutation` API remains supported unchanged.
+
+`work_entry_fast_path.js` now uses that batch method when available;
+for older hosts without it, its existing per-row adapter remains intact.
+A failed batch goes directly to the preexisting confirmed full-save
+fallback; it never performs a partial per-row retry after a quota or
+validation failure. This avoids acknowledgements of only the first of
+several changed Work/Sleep/Calories/Mood completion rows when the process
+is interrupted between multiple synchronous journal calls. The batch
+write itself is one synchronous storage operation, so a normal quota
+failure preserves the prior journal bytes. Changed-row counter updates
+occur only after a successful journal acknowledgement.
+
+Unit and real-browser regressions cover one-write multi-row journaling,
+duplicate/invalid input rejection, quota-denied batch preservation,
+pending-row visibility after reload before compaction, verified
+compaction to V1, fallback behavior and older host compatibility.
+
+**This does not imply production V2 writer authority.** The batch is
+still a V1 localStorage journal, not a V2 IndexedDB mutation. Other
+tabs can still race read/modify/write of the Task journal because
+they do not hold a mandatory same-origin writer admission lease.
+Recovery/reset generation handling and the irreversible V2 cutover
+remain explicitly blocked. `workEntryAtomicAdmissionVerified` and
+`workEntryFallbackPathFenced` stay `false`, with the permanent
+`work_entry_multirecord_admission_not_validated` blocker. Existing
+journal, full save, rescue and emergency restore features are intact.
