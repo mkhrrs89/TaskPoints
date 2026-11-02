@@ -279,7 +279,8 @@ test('large pending completion replay exactly matches legacy order and duplicate
   }
   const h=makeHarness();
   const result=h.core.applyPendingTaskMutations(baseline,record);
-  assert.deepEqual(result.completions,expected);
+  // VM realm arrays have different prototypes; compare canonical row data.
+  assert.deepEqual(clone(result.completions),expected);
   assert.deepEqual(baseline.completions,oldCompletions,'replay must not mutate original history');
   assert.equal(result.tasks[0].title,'Latest');
   assert.equal(result.completions.filter(row=>row.id==='legacy-duplicate').length,2);
