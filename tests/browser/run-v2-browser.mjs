@@ -46,6 +46,20 @@ async function settled(page, count) {
   assert.equal(status.bridge.failures, 0, JSON.stringify(status.bridge));
   return status;
 }
+// waitForFunction must not accept an async predicate here: returning a
+// Promise can be treated as a truthy condition before the IndexedDB read
+// resolves. Await each browser probe on the Node side before acting on a
+// supposed durable commit (especially before closing a writer tab).
+async function waitForAsyncBrowserCondition(page, predicate, timeoutMs = 12000) {
+  const deadline = Date.now() + timeoutMs;
+  let observed = false;
+  while (Date.now() < deadline) {
+    observed = await page.evaluate(predicate);
+    if (observed === true) return;
+    await page.waitForTimeout(40);
+  }
+  throw new Error('V2 async browser condition not confirmed before deadline');
+}
 async function parity(page) {
   const p = await page.evaluate(() => window.TaskPointsStateRuntimeV2.verifyParity());
   assert.equal(p.checked, true);
@@ -3764,11 +3778,15 @@ try {
       return 'launched_without_await';
     });
     assert.equal(launched,'launched_without_await');
-    await observer.waitForFunction(async()=>{
+    // Do not close the writer tab until a separate tab has AWAITED a
+    // durable marker read and its committed aggregate writer counter.
+    await waitForAsyncBrowserCondition(observer,async()=>{
       const report=await window.TaskPointsStateRuntimeV2
         .rehearsePreviewDurableWriterFence('inspect_marker',{marker:'uncertain-commit'});
-      return report.reason==='preview_writer_marker_present';
-    },null,{timeout:12000});
+      return report.reason==='preview_writer_marker_present'
+        && report.fence?.writersCommitted===1
+        && report.fence?.lastWriterMarker==='uncertain-commit';
+    });
     await origin.close();
     const restarted=await open(context);
     const evidence=await restarted.evaluate(()=>
@@ -6770,7 +6788,7 @@ try {
     assert.notEqual(first.previous,first.after);
     assert.equal(first.importedName,'Imported Synthetic Habit');
     await page.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
-    await page.waitForFunction(async()=> (await window.TaskPointsStateRuntimeV2.getHabit('h1'))?.name==='Imported Synthetic Habit');
+    await waitForAsyncBrowserCondition(page,async()=> (await window.TaskPointsStateRuntimeV2.getHabit('h1'))?.name==='Imported Synthetic Habit');
     await parity(page);
     const restored=await page.evaluate(backup=>{
       const core=window.TaskPointsCore;
@@ -6788,7 +6806,7 @@ try {
     assert.equal(restored.name,'Synthetic h1');
     assert.equal(restored.taskRows,1);
     await page.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
-    await page.waitForFunction(async()=> (await window.TaskPointsStateRuntimeV2.getHabit('h1'))?.name==='Synthetic h1');
+    await waitForAsyncBrowserCondition(page,async()=> (await window.TaskPointsStateRuntimeV2.getHabit('h1'))?.name==='Synthetic h1');
     await parity(page);
     return {importAndRestoreGenerationsRotated:true,unrelatedTaskPreserved:true};
   });
@@ -9887,7 +9905,7 @@ try {
     assert.equal(result.sidecarsAfter,1,'preserve old sidecar evidence without replaying it');
     assert.equal(result.legacyRows,0);
     await page.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
-    await page.waitForFunction(async()=> (await window.TaskPointsStateRuntimeV2.getCompletionsForHabit('h3')).length===0);
+    await waitForAsyncBrowserCondition(page,async()=> (await window.TaskPointsStateRuntimeV2.getCompletionsForHabit('h3')).length===0);
     const p=await parity(page);
     assert.equal(p.actualCounts.completions,0);
     return {staleEvidencePreserved:true,ignoredAcrossGeneration:true,parity:p.match};
