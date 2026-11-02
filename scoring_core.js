@@ -8312,8 +8312,81 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
     return state.habits.find(h => h && h.id === habitId) || null;
   }
 
-  function getHabitStreakDayForKey(habit, dayKeyStr) {
+  // One freeze is earned the instant a silver-week threshold is reached.
+  // Existing silver weeks (since Oct 12) are carried forward, but missed
+  // days are charged only after the feature launches. This is a read-only
+  // projection of canonical habit/completion history, not separate storage.
+  const HABIT_FREEZE_EARN_START = '2026-10-12';
+  const HABIT_FREEZE_SPEND_START = '2026-11-02';
+
+  function getHabitFreezeStatus(habit, state, asOfDayKey = todayKey()) {
+    const empty = { balance: 0, earned: 0, spent: 0, streak: 0, protectedDays: [] };
+    if (!habit || habit.streakMultiplierEnabled !== true
+      || (habit.category || 'habit') === 'vice'
+      || !/^\\d{4}-\\d{2}-\\d{2}$/.test(String(asOfDayKey))) return empty;
+
+    const done = new Set((Array.isArray(habit.doneKeys) ? habit.doneKeys : [])
+      .filter(key => /^\\d{4}-\\d{2}-\\d{2}$/.test(String(key))));
+    const failed = new Set((Array.isArray(habit.failedKeys) ? habit.failedKeys : [])
+      .filter(key => /^\\d{4}-\\d{2}-\\d{2}$/.test(String(key))));
+    const fractions = new Map();
+    for (const entry of (Array.isArray(state?.completions) ? state.completions : [])) {
+      if (entry?.source !== 'habit' || String(entry.habitId || '') !== String(habit.id)
+        || !entry.dayKey || fractions.has(entry.dayKey)) continue;
+      fractions.set(entry.dayKey, getHabitCompletionFraction(entry));
+    }
+    // The start of an existing pre-launch streak must remain intact.
+    const beforeStart = addDaysToDateKey(HABIT_FREEZE_EARN_START, -1);
+    let streak = getHabitStreakDayForKey(habit, beforeStart);
+    let balance = 0, earned = 0, spent = 0;
+    let eligible = streak >= 2;
+    const weeklyTotals = new Map(), earnedWeekKeys = new Set();
+    const protectedDays = [];
+    const thresholdRaw = Number(habit.daysPerCompleteWeek);
+    const threshold = Number.isFinite(thresholdRaw) && thresholdRaw > 0 && thresholdRaw <= 7
+      ? Math.round(thresholdRaw) : 0;
+    // Spend only on *closed* days; today's incompletion is not yet a miss.
+    // A historical completion is evaluated as of its own date.
+    const lastClosed = addDaysToDateKey(asOfDayKey, -1);
+    for (let key = HABIT_FREEZE_EARN_START; key <= asOfDayKey; key = addDaysToDateKey(key, 1)) {
+      const complete = done.has(key) && !failed.has(key);
+      if (complete) {
+        streak += 1;
+        if (streak >= 2) eligible = true;
+        if (threshold) {
+          const weekKey = addDaysToDateKey(key, -((fromKey(key).getDay() + 6) % 7));
+          const sum = (weeklyTotals.get(weekKey) || 0) + (fractions.get(key) ?? 1);
+          weeklyTotals.set(weekKey, sum);
+          if (sum >= threshold && !earnedWeekKeys.has(weekKey)) {
+            earnedWeekKeys.add(weekKey);
+            balance += 1;
+            earned += 1;
+          }
+        }
+      } else if (key <= lastClosed) {
+        const freezeCanSpend = key >= HABIT_FREEZE_SPEND_START
+          && (!habit.streakMultiplierStartDateKey
+              || key >= habit.streakMultiplierStartDateKey)
+          && eligible && streak >= 2 && balance > 0;
+        if (freezeCanSpend) {
+          balance -= 1;
+          spent += 1;
+          protectedDays.push(key);
+        } else {
+          streak = 0;
+          eligible = false;
+        }
+      }
+    }
+    return { balance, earned, spent, streak, protectedDays };
+  }
+
+  function getHabitStreakDayForKey(habit, dayKeyStr, state = null) {
     if (!habit || !dayKeyStr) return 0;
+    if (state && dayKeyStr >= HABIT_FREEZE_SPEND_START
+      && habit.streakMultiplierEnabled === true && (habit.category || 'habit') !== 'vice') {
+      return getHabitFreezeStatus(habit, state, dayKeyStr).streak;
+    }
 
     const doneKeys = Array.isArray(habit.doneKeys) ? habit.doneKeys : [];
     if (!doneKeys.length) return 0;
@@ -8346,7 +8419,7 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
     // This is the important part: old days stay normal.
     if (dayKeyStr < startKey) return null;
 
-    const streakDay = getHabitStreakDayForKey(habit, dayKeyStr);
+    const streakDay = getHabitStreakDayForKey(habit, dayKeyStr, state);
     if (streakDay <= 1) return null;
 
     const storedPoints = Number(entry?.points);
@@ -10246,6 +10319,7 @@ softCurbNpcScore,
 simulateAiScoreForPlayerCore,
     deriveCompletionPoints,
     pointsForCompletion,
+    getHabitFreezeStatus,
     getAtRiskStreakRows,
     syncDerivedPoints,
     computeMatchupRecord,
