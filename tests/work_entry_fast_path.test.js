@@ -210,8 +210,8 @@ test('large SCWM histories are fingerprinted only once before a fast save',()=>{
     }
   });
   h.context.saveWorkScore();
-  assert.equal(fingerprints,initialCount+(initialCount+1),
-    'one before-image pass + one change-detection pass, not two before-image passes');
+  assert.equal(fingerprints,initialCount*2,
+    'fingerprint existing rows once before and after; newly inserted IDs skip unnecessary fingerprinting');
   assert.equal(h.calls.fullSaves,0);
   assert.equal(h.calls.journal.length,1);
   assert.equal(h.calls.journal[0].completionUpsert.id,'work-new');
@@ -233,7 +233,7 @@ test('editing a Work entry journals the completion and uses targeted score rende
   assert.ok(h.calls.idleTouches > 0);
 
   const status = h.context.TaskPointsWorkEntryFastPath.getStatus();
-  assert.equal(status.version, 4);
+  assert.equal(h.context.TaskPointsWorkEntryFastPath.version, 4);
   assert.equal(status.counters.fastCommits, 1);
   assert.equal(status.counters.suppressedFullSaves, 1);
   assert.equal(status.counters.targetedRenders, 1);
