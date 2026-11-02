@@ -115,6 +115,77 @@ test('task completion mutation is durable immediately and replays without a full
   assert.equal(loaded.completions[0].id, 'c1');
 });
 
+test('multi-row completion batch uses one durable journal write and one verified compaction',()=>{
+  const h=makeHarness();
+  let journalWrites=0;
+  const originalSet=h.storage.setItem.bind(h.storage);
+  h.storage.setItem=(key,value)=>{
+    if(key===JOURNAL_KEY)journalWrites++;
+    return originalSet(key,value);
+  };
+  const entries=[
+    {id:'work-batch',source:'work',title:'Work Score',workHours:8.5,
+      points:8.3,completedAtISO:'2026-11-02T12:00:00.000Z'},
+    {id:'sleep-batch',source:'metric',title:'Sleep Score',sleepRested:7,
+      points:9,completedAtISO:'2026-11-02T12:01:00.000Z'}
+  ];
+  const saved=h.core.journalTaskCompletionBatch(entries);
+  assert.equal(journalWrites,1,'one user action must produce one synchronous journal write');
+  assert.equal(h.getSaveCalls(),0);
+  assert.equal(saved.completionUpserts.length,2);
+  const pending=JSON.parse(h.storage.getItem(JOURNAL_KEY));
+  assert.equal(pending.completionUpserts.length,2);
+  const effective=h.core.readTaskPointsStoredState();
+  assert.ok(effective.completions.some(r=>r.id==='work-batch'&&r.workHours===8.5));
+  assert.ok(effective.completions.some(r=>r.id==='sleep-batch'&&r.sleepRested===7));
+  assert.equal(h.core.flushPendingTaskMutations(),true);
+  assert.equal(h.getSaveCalls(),1);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+  const persisted=JSON.parse(h.storage.getItem(STORAGE_KEY));
+  assert.ok(persisted.completions.some(r=>r.id==='work-batch'));
+  assert.ok(persisted.completions.some(r=>r.id==='sleep-batch'));
+});
+
+test('invalid multi-row completion batches reject all rows and preserve existing journal',()=>{
+  const h=makeHarness();
+  const base={id:'work-existing',source:'work',points:5};
+  h.core.journalTaskMutation({completionUpsert:base});
+  const raw=h.storage.getItem(JOURNAL_KEY);
+  for(const rows of [[],[base,{id:'work-existing',points:7}],
+    [base,null],[base,{points:1}],null,
+    Array.from({length:65},(_,i)=>({id:'overflow-'+i,points:1}))]){
+    assert.throws(()=>h.core.journalTaskCompletionBatch(rows),error=>
+      error?.code==='TASKPOINTS_TASK_COMPLETION_BATCH_INVALID');
+    assert.equal(h.storage.getItem(JOURNAL_KEY),raw);
+  }
+  assert.equal(h.getSaveCalls(),0);
+});
+
+test('quota failure during a multi-row batch leaves neither row persisted or acknowledged',()=>{
+  const h=makeHarness();
+  h.core.journalTaskMutation({completionUpsert:{id:'previous',points:3}});
+  const raw=h.storage.getItem(JOURNAL_KEY);
+  const generation=h.core.getTaskMutationJournalStatus().mutationGeneration;
+  const originalSet=h.storage.setItem.bind(h.storage);
+  let attempts=0;
+  h.storage.setItem=(key,value)=>{
+    if(key===JOURNAL_KEY){
+      attempts++;
+      throw Object.assign(new Error('Quota exceeded'),{name:'QuotaExceededError'});
+    }
+    return originalSet(key,value);
+  };
+  assert.throws(()=>h.core.journalTaskCompletionBatch([
+    {id:'work-unsaved',points:8},{id:'sleep-unsaved',points:7}
+  ]),/Quota exceeded/);
+  assert.equal(attempts,1,'a failed batch must never fall through to per-row writes');
+  assert.equal(h.storage.getItem(JOURNAL_KEY),raw);
+  assert.equal(h.core.getTaskMutationJournalStatus().mutationGeneration,generation);
+  assert.equal(h.getSaveCalls(),0);
+  const pending=h.core.readPendingTaskMutations();
+  assert.deepEqual(pending.record.completionUpserts.map(row=>row.id),['previous']);
+});
+
 test('task completion deletion replays and verified compaction clears the journal', () => {
   const h = makeHarness();
   const task = { id: 't1', title: 'Task', status: 'trashed', counts: 0 };
