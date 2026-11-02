@@ -115,6 +115,34 @@ test('task completion mutation is durable immediately and replays without a full
   assert.equal(loaded.completions[0].id, 'c1');
 });
 
+test('pending completion journal rows are cloned once rather than twice per foreground save',()=>{
+  const rows=Array.from({length:320},(_,i)=>({
+    id:'existing-scwm-'+i,source:'work',points:7.2,workHours:8,
+    completedAtISO:'2026-10-25T12:00:00.000Z'
+  }));
+  const h=makeHarness({[JOURNAL_KEY]:JSON.stringify({
+    schemaVersion:1,tasks:[],completionUpserts:rows,
+    completionDeletes:[],updatedAtISO:'2026-10-25T12:01:00.000Z'
+  })});
+  const initial=h.storage.getItem(JOURNAL_KEY);
+  let cloneCalls=0;
+  h.context.structuredClone=(value)=>{
+    if(typeof value?.id==='string'&&value.id.startsWith('existing-scwm-'))cloneCalls++;
+    return clone(value);
+  };
+  h.core.journalTaskCompletionBatch([{
+    id:'new-fast-work',source:'work',points:8.4,workHours:8.25,
+    completedAtISO:'2026-11-02T12:00:00.000Z'
+  }]);
+  assert.equal(cloneCalls,rows.length,
+    'readRecord normalizes each pending row once; the writer must not clone all rows again');
+  const after=JSON.parse(h.storage.getItem(JOURNAL_KEY));
+  assert.equal(after.completionUpserts.length,rows.length+1);
+  assert.ok(after.completionUpserts.some(row=>row.id==='new-fast-work'));
+  assert.notEqual(initial,h.storage.getItem(JOURNAL_KEY));
+  assert.equal(h.getSaveCalls(),0,'no full-state serialization during journal append');
+});
+
 test('multi-row completion batch uses one durable journal write and one verified compaction',()=>{
   const h=makeHarness();
   let journalWrites=0;
