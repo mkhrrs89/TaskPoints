@@ -216,13 +216,44 @@
     const completions = (Array.isArray(state.completions) ? state.completions : [])
       .filter((entry) => !deleteIds.has(String(entry?.id || '')))
       .map((entry) => entry);
-    for (const patch of record.completionUpserts) {
-      const id = String(patch.id);
-      const at = completions.findIndex((entry) => String(entry?.id || '') === id);
-      if (at >= 0) completions[at] = clone(patch);
-      else completions.unshift(clone(patch));
+    if (record.completionUpserts.length < 8) {
+      // Single-row interaction replays stay cheap; indexing the entire
+      // completion history would cost more than a handful of lookups.
+      for (const patch of record.completionUpserts) {
+        const id = String(patch.id);
+        const at = completions.findIndex((entry) => String(entry?.id || '') === id);
+        if (at >= 0) completions[at] = clone(patch);
+        else completions.unshift(clone(patch));
+      }
+      state.completions = completions;
+    } else {
+      // When an un-compacted journal contains many completion edits,
+      // findIndex for every patch repeatedly scans the full history.
+      // Record the FIRST existing index so duplicate legacy IDs behave
+      // exactly like findIndex, and hold new IDs in a front buffer so we
+      // never shift the large array for each insertion.
+      const existingIndex = new Map();
+      for (let i = 0; i < completions.length; i += 1) {
+        const id = String(completions[i]?.id || '');
+        if (!existingIndex.has(id)) existingIndex.set(id, i);
+      }
+      const front = [];
+      const frontIndex = new Map();
+      for (const patch of record.completionUpserts) {
+        const id = String(patch.id);
+        if (frontIndex.has(id)) {
+          front[frontIndex.get(id)] = clone(patch);
+        } else if (existingIndex.has(id)) {
+          completions[existingIndex.get(id)] = clone(patch);
+        } else {
+          frontIndex.set(id, front.length);
+          front.push(clone(patch));
+        }
+      }
+      // Legacy unshift order is newest unseen ID first. Repeated IDs
+      // replace their prior first insertion rather than duplicating it.
+      state.completions = front.length ? front.reverse().concat(completions) : completions;
     }
-    state.completions = completions;
     return state;
   }
 
