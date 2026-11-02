@@ -3362,7 +3362,7 @@ function buildPlayerEditorContent(player) {
           <label>PID</label>
           <div class="flex items-center justify-between gap-2 rounded-lg border border-slate-600/60 px-2 py-2 text-sm">
             <strong>${escapeHtml(playerPid)}</strong>
-            <span class="text-[10px] uppercase tracking-wide opacity-60">Permanent</span>
+            <span class="text-[10px] uppercase tracking-wide opacity-60">Edit on player page</span>
           </div>
         </div>
       `
@@ -3373,7 +3373,7 @@ function buildPlayerEditorContent(player) {
             <input data-field="pid" inputmode="numeric" autocomplete="off" autocapitalize="characters" placeholder="P001" maxlength="8" />
             <button type="button" data-act="save-pid" data-id="${player.id}" class="rounded-lg border border-emerald-500/70 px-2 py-1 text-xs whitespace-nowrap">Save PID</button>
           </div>
-          <p class="text-[10px] opacity-60 mt-1">Permanent once saved. P000 is reserved for you.</p>
+          <p class="text-[10px] opacity-60 mt-1">You can edit this later on the player page. P000 is reserved for you.</p>
         </div>
       `;
 
@@ -4317,6 +4317,7 @@ const playerProfiles = window.TaskPointsPlayerProfiles.create({
   getRecord: (id) => TaskPointsCore?.computeRecord?.(state, id, { includeToday: false, allowFallback: false }),
   getCanonicalStat: (id) => canonicalPlayerSummaryCache.get(String(id)),
   getPlayerPid: (currentState, id) => TaskPointsCore?.getPlayerPid?.(currentState, id),
+  assignPlayerPid: (currentState, id, pid, options) => TaskPointsCore?.assignPlayerPid?.(currentState, id, pid, options),
   todayKey: () => getGameDayKey(),
   cachedImageUrl: getCachedImageUrl,
   loadImageUrl,
