@@ -237,10 +237,10 @@ test('multi-row batch preserves single-pass pending-journal merge contract',()=>
   const end=moduleSource.indexOf('if (mutation.completionDeleteId)',start);
   assert.ok(start>=0&&end>start);
   const block=moduleSource.slice(start,end);
-  assert.match(block,/const seen = new Set\\(\\)/);
-  assert.equal((block.match(/record\\.completionUpserts\\s*=\\s*record\\.completionUpserts\\.filter\\(/g)||[]).length,1);
-  assert.equal((block.match(/record\\.completionDeletes\\s*=\\s*record\\.completionDeletes\\.filter\\(/g)||[]).length,1);
-  assert.doesNotMatch(block,/mergeById\\(/,'batch must not rescan all pending rows for each update');
+  assert.match(block,/const seen = new Set\(\)/);
+  assert.equal((block.match(/record\.completionUpserts\s*=\s*record\.completionUpserts\.filter\(/g)||[]).length,1);
+  assert.equal((block.match(/record\.completionDeletes\s*=\s*record\.completionDeletes\.filter\(/g)||[]).length,1);
+  assert.doesNotMatch(block,/mergeById\(/,'batch must not rescan all pending rows for each update');
 });
 
 test('invalid multi-row completion batches reject all rows and preserve existing journal',()=>{
