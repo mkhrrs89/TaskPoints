@@ -170,11 +170,17 @@
         error.code = 'TASKPOINTS_TASK_COMPLETION_BATCH_INVALID';
         throw error;
       }
-      for (const row of rows) {
-        const id = String(row.id);
-        record.completionUpserts = mergeById(record.completionUpserts, row);
-        record.completionDeletes = record.completionDeletes.filter(entryId => entryId !== id);
-      }
+      // Replace every batch ID in one pass instead of scanning the entire
+      // pending journal once per changed row (up to 64 times per action).
+      // Removing ALL old matches matches mergeById's duplicate cleanup, and
+      // appending the validated rows retains its previous final ordering.
+      record.completionUpserts = record.completionUpserts.filter(
+        (entry) => !seen.has(String(entry?.id || ''))
+      );
+      for (const row of rows) record.completionUpserts.push(clone(row));
+      record.completionDeletes = record.completionDeletes.filter(
+        (entryId) => !seen.has(entryId)
+      );
     }
     if (mutation.completionDeleteId) {
       const id = String(mutation.completionDeleteId);
