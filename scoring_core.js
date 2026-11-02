@@ -8530,7 +8530,8 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
 
       if (done.has(today) || failed.has(today)) continue;
       let streak = countStreakEndingOn(done, yesterday);
-      if (habit.streakMultiplierEnabled === true
+      if (today >= HABIT_FREEZE_SPEND_START
+        && habit.streakMultiplierEnabled === true
         && (habit.category || 'habit') !== 'vice') {
         // A freeze preserves the accumulated streak even when yesterday (or
         // an earlier day) was missed. Keep "streaks at risk" in sync with
