@@ -128,7 +128,7 @@ test('silver-week badge displays only the count, retaining its tooltip and acces
   const rendered = home.match(/<span class="tag habit-silver-weeks"[^>]*>[^<]*<\/span>/);
   assert.ok(rendered, 'habit week counter should remain present');
   assert.match(rendered[0], /data-silver-weeks="\$\{silverWeeks\}"/);
-  assert.match(rendered[0], /aria-label="\$\{silverWeeks\} silver/);
+  assert.match(rendered[0], /aria-label="\$\{silverWeeks\} \$\{freezeEnabled \?/);
   assert.match(rendered[0], />\$\{silverWeeks\}<\/span>$/);
   assert.doesNotMatch(rendered[0], /\$\{silverWeeks\} wk/);
 });
