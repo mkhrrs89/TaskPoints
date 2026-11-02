@@ -169,7 +169,7 @@ function makeHarness({ journalFails = false, preflightFails = false, targetedUi 
 }
 
 test('loader keeps the Work fast path outside the core worker while loading the current Home version', () => {
-  assert.match(guardSource, /work_entry_fast_path\.js\?v=20261015-2/);
+  assert.match(guardSource, /work_entry_fast_path\.js\?v=20261101-1/);
   assert.match(guardSource, /data-taskpoints-work-entry-fast-path/);
 });
 
