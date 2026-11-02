@@ -5641,7 +5641,7 @@ if (maxEntries !== null && finalSchedules.length > maxEntries) {
     return player?.id ? String(player.id) : '';
   }
 
-  function assignPlayerPid(stateInput, playerId, pidInput) {
+  function assignPlayerPid(stateInput, playerId, pidInput, options = {}) {
     const state = normalizeState(stateInput || {});
     const playerKey = String(playerId || '');
     const pid = normalizePlayerPid(pidInput);
@@ -5666,9 +5666,15 @@ if (maxEntries !== null && finalSchedules.length > maxEntries) {
     const player = state.players[playerIndex];
     const existingPid = normalizePlayerPid(player?.pid);
     if (existingPid) {
-      return existingPid === pid
-        ? { ok: true, changed: false, pid: existingPid, playerId: playerKey, state }
-        : { ok: false, changed: false, error: 'pid_locked', pid: existingPid, state };
+      if (existingPid === pid) {
+        return { ok: true, changed: false, pid: existingPid, playerId: playerKey, state };
+      }
+      // Standard initial assignment remains locked. Only the explicit edit
+      // control on a player profile may opt into a reassignment. Old PIDs stay
+      // reserved, preserving historical identity and preventing accidental reuse.
+      if (options.allowReassign !== true) {
+        return { ok: false, changed: false, error: 'pid_locked', pid: existingPid, state };
+      }
     }
 
     const currentOwner = state.players.find((entry, index) => (
@@ -5698,7 +5704,8 @@ if (maxEntries !== null && finalSchedules.length > maxEntries) {
       players: nextPlayers,
       reservedPlayerPids: Array.from(new Set([
         ...(Array.isArray(state.reservedPlayerPids) ? state.reservedPlayerPids : []),
-        pid
+        pid,
+        ...(existingPid ? [existingPid] : [])
       ]))
     });
 
