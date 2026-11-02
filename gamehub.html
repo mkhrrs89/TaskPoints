@@ -980,7 +980,7 @@ renderAvatarInto(avatarSlot, {
       { key: 'varianceTilt', label: 'Variance Tilt', get: (p)=> Number(p.varianceTilt) },
       { key: 'momentum', label: 'Momentum', get: (p)=> Number(p.momentum) },
       { key: 'risky', label: 'Risky', get: (p)=> getNormalizedRisky(p.risky) },
-      { key: 'streaky', label: 'Streaky', get: (p)=> Number(p.streaky ?? 0) },
+      { key: 'streaky', label: 'Streaky', get: (p)=> Number(p.streaky) > 0 ? Number(p.streaky) : 50 },
     ];
 
     const sortedBy = (def, dir) => {
@@ -1177,7 +1177,7 @@ if (existingIdx !== -1) {
     const t = Number(p.varianceTilt);
     const m = Number(p.momentum);
     const r = getNormalizedRisky(p.risky);
-    const s = Number(p.streaky ?? 0);
+    const s = Number(p.streaky) > 0 ? Number(p.streaky) : 50;
 
     const parts = [];
     if (Number.isFinite(b)) parts.push(`B ${b}`);
@@ -1384,7 +1384,7 @@ const oppStats = standingsRows.find(r => r.id === oppId) || (oppP ? computePlaye
       set('muOppMom',  Number.isFinite(Number(oppP.momentum)) ? String(oppP.momentum) : '—');
       const r = getNormalizedRisky(oppP.risky);
       set('muOppRisk', Number.isFinite(r) ? r.toFixed(1) : '—');
-      set('muOppStreaky', Number.isFinite(Number(oppP.streaky ?? 0)) ? String(oppP.streaky ?? 0) : '—');
+      set('muOppStreaky', String(Number(oppP.streaky) > 0 ? oppP.streaky : 50));
     } else {
       set('muOppBase', '—');
       set('muOppVar',  '—');
@@ -1471,7 +1471,7 @@ function setHTML(id, html){
       const varianceTilt = Number(p.varianceTilt);
       const momentum = Number(p.momentum);
       const riskyNorm = getNormalizedRisky(p.risky);
-      const streaky = Number(p.streaky ?? 0);
+      const streaky = Number(p.streaky) > 0 ? Number(p.streaky) : 50;
 
       const lookup = {
         baseline: Number.isFinite(baseline) ? baseline : '',
@@ -1479,7 +1479,7 @@ function setHTML(id, html){
         varianceTilt: Number.isFinite(varianceTilt) ? varianceTilt : '',
         momentum: Number.isFinite(momentum) ? momentum : '',
         risky: Number.isFinite(riskyNorm) ? riskyNorm.toFixed(1) : '',
-        streaky: Number.isFinite(streaky) ? streaky : 0
+        streaky: Number.isFinite(streaky) && streaky > 0 ? Math.min(100, streaky) : 50
       };
 
       inputs.forEach(input => {

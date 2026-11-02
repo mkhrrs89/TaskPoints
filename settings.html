@@ -3327,7 +3327,7 @@ return {
   risky: getNormalizedRisky(player.risky),
   intimidation: Number(player.intimidation) || 0,
   poise: Number(player.poise) || 0,
-  streaky: Number(player.streaky) || 0,
+  streaky: Number(player.streaky) > 0 ? Number(player.streaky) : 50,
   high,
   low,
   aboveBaselinePct: (aboveBaseline / total) * 100,

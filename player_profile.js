@@ -159,7 +159,7 @@
         ['Baseline', player.baseline], ['Variance', player.variance],
         ['Variance Tilt', player.varianceTilt], ['Momentum', player.momentum],
         ['Risky', player.risky], ['INT', player.intimidation],
-        ['Poise', player.poise], ['Greed', player.greed], ['Streaky', player.streaky]
+        ['Poise', player.poise], ['Greed', player.greed], ['Streaky', Number(player.streaky) > 0 ? player.streaky : 50]
       ];
       return '<div class="tp-profile-ratings">' + labels.map(function(pair) {
         return '<div class="tp-profile-rating"><span>' + esc(pair[0]) +
@@ -227,7 +227,7 @@
         var input = form.elements.namedItem(field.key);
         var raw = String(input?.value == null ? '' : input.value).trim();
         var number = raw === '' ? NaN : Number(raw);
-        if (!Number.isFinite(number) || number < 0 || number > 100) {
+        if (!Number.isFinite(number) || number < (field.key === 'streaky' ? 1 : 0) || number > 100) {
           return { valid: false, field: field.key };
         }
         values[field.key] = field.key === 'risky' ? number / 10 : number;
@@ -238,7 +238,9 @@
     function reportInvalidRating(form, fieldName) {
       var input = form.elements.namedItem(fieldName);
       var error = screen?.querySelector('#tpProfileRatingsError');
-      if (error) error.textContent = 'Enter a number from 0 to 100 for every rating.';
+      if (error) error.textContent = fieldName === 'streaky'
+        ? 'Streaky must be between 1 and 100.'
+        : 'Enter a number from 0 to 100 for every other rating.';
       input?.focus?.({ preventScroll: true });
     }
 

@@ -412,7 +412,7 @@ test('color theme remains scoped to player profiles and does not affect game car
 
 function ratingsForm(values = {}) {
   const defaults = { baseline: '51', variance: '12', varianceTilt: '50', momentum: '50',
-    risky: '30', intimidation: '0', poise: '0', greed: '0', streaky: '0' };
+    risky: '30', intimidation: '0', poise: '0', greed: '0', streaky: '50' };
   const data = { ...defaults, ...values };
   const inputs = Object.fromEntries(Object.entries(data).map(([key, val]) =>
     [key, { value: val, focus() {} }]));
@@ -644,4 +644,14 @@ test('a cleared assigned PID cannot silently erase player identity', () => {
   })), false);
   assert.equal(f.state.players[0].pid, 'P001');
   assert.equal(f.calls.save.length, 0);
+});
+
+test('Streaky inline rating editor rejects zero now that its scale is 1–100', () => {
+  const f = fixture();
+  f.controller.open('npc1');
+  f.controller.editRatings();
+  assert.equal(f.controller.saveRatingsForm(ratingsForm({ streaky: '0' })), false);
+  assert.equal(f.calls.save.length, 0);
+  assert.equal(f.controller.saveRatingsForm(ratingsForm({ streaky: '1' })), true);
+  assert.equal(f.state.players[0].streaky, 1);
 });
