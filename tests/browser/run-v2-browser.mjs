@@ -1247,6 +1247,112 @@ try {
       noAutoRepair:true,v1StillPrimary:true};
   });
 
+  await run('preview Task update commits one V2 record and one idempotent receipt atomically',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const seeded=await api.rehearsePreviewTaskCollectionSeed();
+      const v1Before=localStorage.getItem('taskpoints_v1');
+      const journalBefore=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(key=>[key,localStorage.getItem(key)]));
+      const next={id:'synthetic-task',title:'Only changed in preview IndexedDB'};
+      const changed=await api.rehearsePreviewTaskRecordUpdate(next,token,'one-update');
+      const retry=await api.rehearsePreviewTaskRecordUpdate(next,token,'one-update');
+      const changedIntent=await api.rehearsePreviewTaskRecordUpdate(
+        {...next,title:'Conflicting intent'},token,'one-update');
+      const secondAction=await api.rehearsePreviewTaskRecordUpdate(
+        {...next,title:'Second attempt'},token,'second-update');
+      const parity=await api.inspectPreviewTaskCollectionParity();
+      const record=await api.inspectPreviewTaskRecord('synthetic-task');
+      const db=await api.open();
+      const row=await new Promise((resolve,reject)=>{
+        const q=db.transaction('tasks','readonly').objectStore('tasks').get('synthetic-task');
+        q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error);
+      });
+      const receipt=await new Promise((resolve,reject)=>{
+        const q=db.transaction('mutations','readonly').objectStore('mutations')
+          .get('task-preview-action:one-update');
+        q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error);
+      });
+      return {seeded,changed,retry,changedIntent,secondAction,parity,record,row,receipt,
+        v1Same:v1Before===localStorage.getItem('taskpoints_v1'),
+        journalSame:journalBefore===localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(result.seeded.verified,true,JSON.stringify(result.seeded));
+    assert.equal(result.changed.reason,'task_preview_update_verified',JSON.stringify(result.changed));
+    assert.equal(result.changed.committed,true);
+    assert.equal(result.changed.confirmedDurable,true);
+    assert.equal(result.retry.reason,'task_preview_update_replayed',JSON.stringify(result.retry));
+    assert.equal(result.retry.committed,false);
+    assert.equal(result.retry.confirmedDurable,true);
+    assert.equal(result.changedIntent.reason,'task_action_id_conflict');
+    assert.equal(result.secondAction.reason,'task_preview_target_stale');
+    assert.equal(result.row.value.title,'Only changed in preview IndexedDB');
+    assert.equal(result.receipt.taskId,'synthetic-task');
+    assert.equal(result.receipt.type,'task-preview-update');
+    assert.equal(result.parity.match,false,'V2-only edit must NOT fake V1 parity');
+    assert.equal(result.parity.reason,'task_preview_record_mismatch');
+    assert.equal(result.record.recordVerified,false);
+    assert.equal(result.record.reason,'task_preview_record_mismatch');
+    assert.equal(result.v1Same,true);
+    assert.equal(result.journalSame,true);
+    assert.equal(result.authority,'legacy_only');
+    return {atomicTaskAndReceipt:true,verifiedReadback:true,duplicateIdempotent:true,
+      competingIntentRejected:true,parityFailClosed:true,noV1Writes:true};
+  });
+
+  await run('preview Task atomic failure cannot leave a partial V2 row or receipt',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const seeded=await api.rehearsePreviewTaskCollectionSeed();
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(key=>[key,localStorage.getItem(key)]));
+      const next={id:'synthetic-task',title:'Atomic-only update'};
+      const before=localStorage.getItem('taskpoints_v1');
+      const add=IDBObjectStore.prototype.add;
+      let injected=false,failed;
+      IDBObjectStore.prototype.add=function(value){
+        if(this.name==='mutations' && value?.type==='task-preview-update'){
+          injected=true;
+          throw new DOMException('synthetic receipt quota','QuotaExceededError');
+        }
+        return add.apply(this,arguments);
+      };
+      try {
+        failed=await api.rehearsePreviewTaskRecordUpdate(next,token,'quota-retry');
+      } finally { IDBObjectStore.prototype.add=add; }
+      const db=await api.open();
+      const read=async(store,key)=>new Promise((resolve,reject)=>{
+        const q=db.transaction(store,'readonly').objectStore(store).get(key);
+        q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error);
+      });
+      const beforeRetry=await read('tasks','synthetic-task');
+      const missingReceipt=await read('mutations','task-preview-action:quota-retry');
+      const recovered=await api.rehearsePreviewTaskRecordUpdate(next,token,'quota-retry');
+      const after=await read('tasks','synthetic-task');
+      const receipt=await read('mutations','task-preview-action:quota-retry');
+      return {seeded,failed,injected,beforeRetry,missingReceipt,recovered,after,receipt,
+        v1Same:before===localStorage.getItem('taskpoints_v1'),
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(result.seeded.verified,true);
+    assert.equal(result.injected,true);
+    assert.equal(result.failed.committed,false);
+    assert.equal(result.failed.reason,'task_preview_atomic_write_failed');
+    assert.equal(result.beforeRetry.value.title,'Synthetic task');
+    assert.equal(result.missingReceipt,undefined);
+    assert.equal(result.recovered.confirmedDurable,true);
+    assert.equal(result.after.value.title,'Atomic-only update');
+    assert.equal(result.receipt.type,'task-preview-update');
+    assert.equal(result.v1Same,true);
+    assert.equal(result.authority,'legacy_only');
+    return {rollbackOfTaskAndReceipt:true,explicitRetrySafe:true,
+      noV1Impact:true,authorityUnchanged:true};
+  });
+
   await run('nonpilot Task record migration aborts atomically on Task put failure and retries safely',async context=>{
     const page=await open(context);
     const result=await page.evaluate(async()=>{

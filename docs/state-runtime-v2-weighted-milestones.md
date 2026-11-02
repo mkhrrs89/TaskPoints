@@ -156,3 +156,28 @@ unexpected extra rows elsewhere in the V2 store. Browser tests prohibit
 denial. This is future read-path groundwork only, not a foreground
 optimization: source validation still requires effective V1 snapshot
 parsing, and V1 remains the sole production authority.
+
+
+## Atomic Task record update rehearsal — November 2
+
+The explicit preview-only `rehearsePreviewTaskRecordUpdate(task, token, actionId)`
+exercises a real single-record update in isolated V2 IndexedDB. It freezes
+caller Task bytes before asynchronous hashing, requires an exact full-origin
+V1 source token, an effective V1 Tasks journal snapshot, current generation,
+unchanged original Task seed evidence and an unchanged original V2 Task row.
+The modified Task record and a namespaced, SHA-256-bound idempotency receipt
+commit in **one IndexedDB readwrite transaction**. A separate readonly
+transaction verifies exact stored bytes before acknowledging durability.
+
+A replay with the identical action ID and exact payload performs no write;
+conflicting action IDs or edited Task bytes fail closed. Simulated quota
+failure in the receipt write aborts the entire Task+receipt transaction, and
+an explicit retry is safe. Browser tests assert V1 localStorage/journals
+remain byte-for-byte unchanged and a V2-only edit causes the existing parity
+inspector to report a mismatch rather than silently treating V2 as current.
+
+**This is intentionally a divergent V2-only sandbox edit**, not a live Task
+save or general migration. It does not resync to V1, amend the original seed
+evidence, install any production writer hook, exclude old tabs or establish
+physical-device recovery. The complete nonpilot collection milestone
+remains uncredited; V1 is still the only authority.

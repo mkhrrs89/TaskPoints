@@ -42,6 +42,27 @@ test('targeted Task read uses one IDB get and never implies collection-wide pari
   assert.match(runtime,/inspectPreviewTaskCollectionParity,\s*inspectPreviewTaskRecord,/);
 });
 
+test('preview Task update requires single atomic row/receipt transaction and refuses V1 mutation',()=>{
+  const start=runtime.indexOf('async function rehearsePreviewTaskRecordUpdate(');
+  const end=runtime.indexOf('// A narrower stepping stone toward REQUIRED writer admission',start);
+  assert.ok(start>=0 && end>start);
+  const update=runtime.slice(start,end);
+  assert.match(update,/isWalTestPreviewHost\(\)/);
+  assert.match(update,/db\.transaction\(\['tasks', 'mutations', 'meta'\], 'readwrite'\)/);
+  assert.match(update,/tasksStore\.put\(/);
+  assert.match(update,/mutationsStore\.add\(receipt\)/);
+  assert.match(update,/transactionPromise\(tx\)/);
+  assert.match(update,/db\.transaction\(\['tasks', 'mutations'\], 'readonly'\)/);
+  assert.match(update,/previousReceipt/);
+  assert.match(update,/task_preview_target_stale/);
+  assert.match(update,/legacy_changed_after_preview_commit/);
+  assert.match(update,/collectionParityVerified: false/);
+  assert.match(update,/canPromote: false/);
+  assert.doesNotMatch(update,/\b(?:journalTaskMutation|journalTaskCompletionBatch|saveStateSnapshot)\s*\(/);
+  assert.doesNotMatch(update,/localStorage\.(?:setItem|removeItem|clear)\s*\(/);
+  assert.match(runtime,/inspectPreviewTaskRecord,\s*rehearsePreviewTaskRecordUpdate,/);
+});
+
 test('Task parity checks identity, payload, source inventory and generation without trusting metadata alone',()=>{
   assert.match(source,/previewRecoveryFingerprint\(tasks\)/);
   assert.match(source,/evidence\.taskFingerprint !== taskFingerprint/);
