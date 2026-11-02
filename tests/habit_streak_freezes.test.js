@@ -147,3 +147,29 @@ test('Home displays balance for enabled habits and keeps silver count for disabl
   assert.match(home, /h\.__streak = status\.streak/);
   assert.match(home, /Available streak freezes/);
 });
+
+
+test('shared at-risk streak display retains the full protected streak and next-day bonus', () => {
+  const h = habit(keys('2026-10-12', '2026-11-01'));
+  const s = state(h);
+  const rows = core.getAtRiskStreakRows(s, { todayKey: '2026-11-03', pendingDeltas: [] });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].streak, 21, 'a protected November 2 miss keeps the previously earned streak');
+  assert.equal(rows[0].bonus, 2.32);
+  assert.equal(rows[0].pointsAtRisk, 2.32);
+});
+
+test('edited history never changes stored snapshots merely by reading freeze balances', () => {
+  const h = habit(keys('2026-10-12', '2026-11-01'));
+  const s = state(h);
+  const before = JSON.stringify(s);
+  const first = status(h, s, '2026-11-04');
+  const second = status(h, s, '2026-11-04');
+  assert.deepEqual(first, second, 'repeated renders do not burn additional freezes');
+  assert.equal(JSON.stringify(s), before, 'balance calculations do not mutate canonical data');
+});
+
+test('Home uses the 5am TaskPoints day key for charging missed days', () => {
+  assert.match(home, /const currentFreezeDay = getCurrentTaskPointsDayKey\(\)/);
+  assert.match(home, /getHabitFreezeStatus\?\.\(h, state, currentFreezeDay\)/);
+});
