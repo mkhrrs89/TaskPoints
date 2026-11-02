@@ -141,8 +141,12 @@
   function journalMutation(mutation = {}) {
     const current = assertJournalWritable();
     let record = current.record;
-    if (mutation.task?.id) record.tasks = mergeById(record.tasks, mutation.task);
-    if (mutation.completionUpsert?.id) {
+    if (mutation.task?.id && typeof mutation.task === 'object'
+      && !Array.isArray(mutation.task)) {
+      record.tasks = mergeById(record.tasks, mutation.task);
+    }
+    if (mutation.completionUpsert?.id && typeof mutation.completionUpsert === 'object'
+      && !Array.isArray(mutation.completionUpsert)) {
       const id = String(mutation.completionUpsert.id);
       record.completionUpserts = mergeById(record.completionUpserts, mutation.completionUpsert);
       record.completionDeletes = record.completionDeletes.filter((entryId) => entryId !== id);
