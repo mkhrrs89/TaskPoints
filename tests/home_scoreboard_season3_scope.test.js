@@ -17,9 +17,9 @@ function functionSource(name) {
   throw new Error(`could not find end of ${name}`);
 }
 
-test('Home scoreboard rank, record, and PPD use the Season 3 ranking window', () => {
+test('Home scoreboard rank, record, and PPD use the existing September–October Season 3 window', () => {
   assert.match(html, /const HOME_SCOREBOARD_SEASON_THREE_START = "2026-09-01";/);
-  assert.match(html, /const HOME_SCOREBOARD_SEASON_THREE_END = "2026-10-01";/);
+  assert.match(html, /const HOME_SCOREBOARD_SEASON_THREE_END = "2026-11-01";/);
 
   const rows = functionSource('getHomeScoreboardSeasonThreeRows');
   assert.match(rows, /key >= HOME_SCOREBOARD_SEASON_THREE_START/);
