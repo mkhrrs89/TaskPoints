@@ -8802,10 +8802,21 @@ function renderHabits(){
   // Only multiplier-enabled habits spend credits; others retain the legacy
   // silver-week count without changing their streak behavior.
   const freezeStatuses = new Map();
+  const completedRowsByHabit = new Map();
+  // Build once per Home paint, rather than scanning thousands of history
+  // rows again for every single streak multiplier habit.
+  for (const completion of (Array.isArray(state.completions) ? state.completions : [])) {
+    if (completion?.source !== 'habit' || completion.habitId == null) continue;
+    const id = String(completion.habitId);
+    if (!completedRowsByHabit.has(id)) completedRowsByHabit.set(id, []);
+    completedRowsByHabit.get(id).push(completion);
+  }
   const currentFreezeDay = getCurrentTaskPointsDayKey();
   habits.forEach(h => {
     if (h.streakMultiplierEnabled !== true) return;
-    const status = TaskPointsCore?.getHabitFreezeStatus?.(h, state, currentFreezeDay);
+    const status = TaskPointsCore?.getHabitFreezeStatus?.(
+      h, { completions: completedRowsByHabit.get(String(h.id)) || [] }, currentFreezeDay
+    );
     if (!status) return;
     freezeStatuses.set(String(h.id), status);
     h.__streak = status.streak;
