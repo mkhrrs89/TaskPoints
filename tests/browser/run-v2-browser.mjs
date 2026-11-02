@@ -937,6 +937,103 @@ try {
       freshJournalWritePreserved:true,unfencedLegacyWritesStillPossible:true};
   });
 
+  await run('nonpilot Tasks preview seeds real effective V1 Task rows into isolated records without switching authority',async context=>{
+    const page=await open(context);
+    const seeded=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const core=window.TaskPointsCore;
+      const oldState=localStorage.getItem('taskpoints_v1');
+      // This Task is durable only in the existing V1 Task journal.
+      core.journalTaskMutation({
+        task:{id:'journal-only-task',title:'Pending task stays visible',points:7}
+      });
+      const expected=core.readTaskPointsStoredState().tasks;
+      const first=await runtime.rehearsePreviewTaskCollectionSeed();
+      const second=await runtime.rehearsePreviewTaskCollectionSeed();
+      const db=await runtime.open();
+      const tx=db.transaction(['tasks','meta'],'readonly');
+      const rows=await new Promise((resolve,reject)=>{
+        const req=tx.objectStore('tasks').getAll();
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      const meta=await new Promise((resolve,reject)=>{
+        const req=tx.objectStore('meta').get('task-preview');
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      return {first,second,rows,meta,expected,
+        oldState,snapshot:localStorage.getItem('taskpoints_v1'),
+        journal:core.readPendingTaskMutations(),
+        authority:runtime.getStatus().readAuthority,
+        version:db.version};
+    });
+    assert.equal(seeded.first.verified,true,JSON.stringify(seeded.first));
+    assert.equal(seeded.first.stored,true);
+    assert.equal(seeded.first.taskCount,2);
+    assert.equal(seeded.first.canPromote,false);
+    assert.equal(seeded.second.reason,'task_preview_already_verified',JSON.stringify(seeded.second));
+    assert.equal(seeded.second.stored,false);
+    assert.equal(seeded.version,3);
+    assert.equal(seeded.meta.taskCount,2);
+    assert.equal(seeded.meta.resetGeneration,seeded.first.resetGeneration);
+    assert.deepEqual(seeded.rows
+      .sort((a,b)=>a.legacyIndex-b.legacyIndex).map(row=>row.value),seeded.expected);
+    assert.equal(seeded.snapshot,seeded.oldState,
+      'nonpilot Tasks preview must never overwrite V1 snapshot');
+    assert.ok(seeded.journal.record.tasks.some(row=>row.id==='journal-only-task'));
+    assert.equal(seeded.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.evaluate(()=>window.V2BrowserFixture.start());
+    const afterReload=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const result=await runtime.rehearsePreviewTaskCollectionSeed();
+      const db=await runtime.open();
+      const rows=await new Promise((resolve,reject)=>{
+        const req=db.transaction('tasks','readonly').objectStore('tasks').getAll();
+        req.onsuccess=()=>resolve(req.result);req.onerror=reject;
+      });
+      return {result,count:rows.length,authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(afterReload.result.reason,'task_preview_already_verified');
+    assert.equal(afterReload.count,2);
+    assert.equal(afterReload.authority,'legacy_only');
+    return {nonpilotTaskStorePresent:true,atomicCopyVerified:true,
+      legacyJournalOverlayPreserved:true,repeatSafe:true,reloadSafe:true,
+      noProductionAuthorityChange:true};
+  });
+
+  await run('nonpilot Tasks preview preserves prior evidence rather than overwriting a newer legacy Task',async context=>{
+    const page=await open(context);
+    const legacy=await context.newPage();
+    await legacy.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const first=await page.evaluate(()=>window.TaskPointsStateRuntimeV2.rehearsePreviewTaskCollectionSeed());
+    assert.equal(first.verified,true,JSON.stringify(first));
+    await legacy.evaluate(()=>{
+      const raw=localStorage.getItem('taskpoints_v1');
+      const state=JSON.parse(raw);
+      state.tasks.push({id:'newer-legacy-task',title:'Must not be silently copied'});
+      localStorage.setItem('taskpoints_v1',JSON.stringify(state));
+    });
+    const after=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const blocked=await runtime.rehearsePreviewTaskCollectionSeed();
+      const db=await runtime.open();
+      const rows=await new Promise((resolve,reject)=>{
+        const req=db.transaction('tasks','readonly').objectStore('tasks').getAll();
+        req.onsuccess=()=>resolve(req.result);req.onerror=reject;
+      });
+      return {blocked,rows,authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(after.blocked.reason,'task_preview_existing_evidence_preserved',
+      JSON.stringify(after.blocked));
+    assert.equal(after.blocked.verified,false);
+    assert.equal(after.rows.length,1);
+    assert.equal(after.rows.some(row=>row.id==='newer-legacy-task'),false);
+    assert.equal(after.authority,'legacy_only');
+    return {staleSeedRefused:true,previousPreviewEvidencePreserved:true,
+      V1LegacyTaskUnaffected:true,authorityUnchanged:true};
+  });
+
   await run('mandatory preview Task admission checks all V1 source keys and confirms atomic readback',async context=>{
     const writer=await open(context);
     const legacy=await context.newPage();
