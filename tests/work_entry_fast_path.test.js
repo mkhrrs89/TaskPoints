@@ -187,6 +187,35 @@ test('loader keeps the Work fast path outside the core worker while loading the 
   assert.match(guardSource, /data-taskpoints-work-entry-fast-path/);
 });
 
+test('large SCWM histories are fingerprinted only once before a fast save',()=>{
+  const h=makeHarness();
+  const historySize=800;
+  for(let i=0;i<historySize;i++){
+    h.state.completions.push({
+      id:'scwm-history-'+i,source:'work',title:'Work Score history '+i,
+      points:7.5,workHours:8,completedAtISO:'2026-09-01T12:00:00.000Z'
+    });
+  }
+  const initialCount=h.state.completions.filter(row=>row.source==='work').length;
+  let fingerprints=0;
+  // Count the actual JSON serializations performed inside the wrapped
+  // foreground commit. An eligibility check must never fingerprint the
+  // entire history a second time.
+  h.context.JSON=Object.assign(Object.create(JSON),{
+    stringify(value,...args){
+      if(value && typeof value==='object' && value.source==='work') fingerprints++;
+      return JSON.stringify(value,...args);
+    }
+  });
+  h.context.saveWorkScore();
+  assert.equal(fingerprints,initialCount+(initialCount+1),
+    'one before-image pass + one change-detection pass, not two before-image passes');
+  assert.equal(h.calls.fullSaves,0);
+  assert.equal(h.calls.journal.length,1);
+  assert.equal(h.calls.journal[0].completionUpsert.id,'work-new');
+  assert.equal(h.context.TaskPointsWorkEntryFastPath.getStatus().counters.fastCommits,1);
+});
+
 test('editing a Work entry journals the completion and uses targeted score rendering', () => {
   const h = makeHarness();
   h.context.submitWorkEditModal();
