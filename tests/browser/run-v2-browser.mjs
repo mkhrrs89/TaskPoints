@@ -4015,6 +4015,144 @@ try {
       stableRetrySafe:true,authority:'legacy_only'};
   });
 
+  await run('unfenced legacy Projects key invalidates exclusive preview lease',async context=>{
+    const candidate=await open(context);
+    const legacy=await context.newPage();
+    await legacy.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const baseline=await candidate.evaluate(()=>({
+      v1:localStorage.getItem('taskpoints_v1'),
+      projects:localStorage.getItem('tp_projects_v1'),
+      locks:typeof navigator.locks?.request==='function'
+    }));
+    if(!baseline.locks){
+      const denied=await candidate.evaluate(()=>
+        window.TaskPointsStateRuntimeV2.rehearseExclusiveWriterLease());
+      assert.equal(denied.reason,'lock_manager_unavailable');
+      assert.equal(denied.canPromote,false);
+      await legacy.close();
+      return {unsupportedFailsClosed:true};
+    }
+    const pending=candidate.evaluate(async()=>{
+      const original=SubtleCrypto.prototype.digest;
+      let held=false;
+      SubtleCrypto.prototype.digest=function(){
+        if(!held){
+          held=true;
+          const self=this,args=arguments;
+          window.__projectsPreflightPaused=true;
+          return new Promise((resolve,reject)=>{
+            window.__resumeProjectsPreflight=()=>
+              Promise.resolve(original.apply(self,args)).then(resolve,reject);
+          });
+        }
+        return original.apply(this,arguments);
+      };
+      try{return await window.TaskPointsStateRuntimeV2.rehearseExclusiveWriterLease();}
+      finally{
+        SubtleCrypto.prototype.digest=original;
+        delete window.__resumeProjectsPreflight;
+      }
+    });
+    await candidate.waitForFunction(()=>window.__projectsPreflightPaused===true,
+      null,{timeout:12000});
+    assert.equal(await legacy.evaluate(()=>Boolean(window.TaskPointsStateRuntimeV2)),false);
+    const changed=await legacy.evaluate(()=>{
+      const value=JSON.stringify([{id:'unfenced-project-after-capture',
+        name:'Old tab can save non-taskpoints namespace'}]);
+      localStorage.setItem('tp_projects_v1',value);
+      return value;
+    });
+    await candidate.waitForFunction(expected=>
+      localStorage.getItem('tp_projects_v1')===expected,
+      changed,{timeout:15000,polling:75});
+    await candidate.evaluate(()=>window.__resumeProjectsPreflight());
+    const refusal=await pending;
+    assert.equal(refusal.reason,'legacy_changed_under_lock',JSON.stringify(refusal));
+    assert.equal(refusal.lockAcquired,false);
+    assert.equal(refusal.canPromote,false);
+    const after=await candidate.evaluate(()=>({
+      v1:localStorage.getItem('taskpoints_v1'),
+      projects:localStorage.getItem('tp_projects_v1'),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    assert.equal(after.v1,baseline.v1);
+    assert.equal(after.projects,changed);
+    assert.equal(after.authority,'legacy_only');
+    await legacy.close();
+    return {fullOriginInventoryChecked:true,unfencedProjectsWriteDetected:true,
+      oldTabStillCanWrite:true,realV1Preserved:true,noPromotion:true};
+  });
+
+  await run('unfenced legacy Projects write inside lock digest invalidates lease',async context=>{
+    const candidate=await open(context);
+    const legacy=await context.newPage();
+    await legacy.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const baseline=await candidate.evaluate(()=>({
+      v1:localStorage.getItem('taskpoints_v1'),
+      locks:typeof navigator.locks?.request==='function'
+    }));
+    if(!baseline.locks){
+      const denied=await candidate.evaluate(()=>
+        window.TaskPointsStateRuntimeV2.rehearseExclusiveWriterLease());
+      assert.equal(denied.reason,'lock_manager_unavailable');
+      await legacy.close();
+      return {unsupportedFailsClosed:true};
+    }
+    const pending=candidate.evaluate(async()=>{
+      const original=SubtleCrypto.prototype.digest;
+      let calls=0;
+      SubtleCrypto.prototype.digest=function(){
+        calls++;
+        const self=this,args=arguments;
+        if(calls===2){
+          window.__projectsInsideDigestPaused=true;
+          return new Promise((resolve,reject)=>{
+            window.__resumeProjectsInsideDigest=()=>
+              Promise.resolve(original.apply(self,args)).then(resolve,reject);
+          });
+        }
+        return original.apply(self,args);
+      };
+      try{return {report:await window.TaskPointsStateRuntimeV2.rehearseExclusiveWriterLease(),
+        digests:calls};}
+      finally{
+        SubtleCrypto.prototype.digest=original;
+        delete window.__resumeProjectsInsideDigest;
+      }
+    });
+    await candidate.waitForFunction(()=>window.__projectsInsideDigestPaused===true,
+      null,{timeout:12000});
+    const changed=await legacy.evaluate(()=>{
+      const value=JSON.stringify([{id:'inside-lock-new-project',
+        name:'Independent V1 Projects writer'}]);
+      localStorage.setItem('tp_projects_v1',value);
+      return value;
+    });
+    await candidate.waitForFunction(expected=>
+      localStorage.getItem('tp_projects_v1')===expected,
+      changed,{timeout:15000,polling:75});
+    await candidate.evaluate(()=>window.__resumeProjectsInsideDigest());
+    const result=await pending;
+    assert.equal(result.digests,2);
+    assert.equal(result.report.reason,'legacy_changed_during_lock_verification',
+      JSON.stringify(result));
+    assert.equal(result.report.lockAcquired,false);
+    assert.equal(result.report.canPromote,false);
+    const after=await candidate.evaluate(()=>({
+      v1:localStorage.getItem('taskpoints_v1'),
+      projects:localStorage.getItem('tp_projects_v1'),
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    assert.equal(after.v1,baseline.v1);
+    assert.equal(after.projects,changed);
+    assert.equal(after.authority,'legacy_only');
+    await legacy.close();
+    return {realIndependentProjectsKeyCaughtDuringDigest:true,
+      heldLockNotExclusion:true,v1Unchanged:true,authorityLegacy:true};
+  });
+
   await run('pending legacy journal blocks writer-lock rehearsal despite matching pilot storage',async context=>{
     const page=await open(context);
     const evidence=await page.evaluate(async()=>{
