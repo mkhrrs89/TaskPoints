@@ -143,6 +143,31 @@
       record.completionUpserts = mergeById(record.completionUpserts, mutation.completionUpsert);
       record.completionDeletes = record.completionDeletes.filter((entryId) => entryId !== id);
     }
+    // One foreground Work/SCWM action can affect several completion rows.
+    // Prepare and validate the WHOLE action before the single synchronous
+    // journal setItem: a kill or quota error cannot leave only the first row
+    // of this logical action acknowledged as durable.
+    if (Object.prototype.hasOwnProperty.call(mutation, 'completionUpserts')) {
+      const rows = mutation.completionUpserts;
+      const seen = new Set();
+      if (!Array.isArray(rows) || !rows.length || rows.length > 64
+        || rows.some((row) => {
+          const id = String(row?.id || '');
+          if (!row || typeof row !== 'object' || Array.isArray(row) || !id
+            || seen.has(id)) return true;
+          seen.add(id);
+          return false;
+        })) {
+        const error = new Error('Invalid atomic Task completion batch; no rows were saved.');
+        error.code = 'TASKPOINTS_TASK_COMPLETION_BATCH_INVALID';
+        throw error;
+      }
+      for (const row of rows) {
+        const id = String(row.id);
+        record.completionUpserts = mergeById(record.completionUpserts, row);
+        record.completionDeletes = record.completionDeletes.filter(entryId => entryId !== id);
+      }
+    }
     if (mutation.completionDeleteId) {
       const id = String(mutation.completionDeleteId);
       record.completionUpserts = record.completionUpserts.filter((entry) => String(entry?.id || '') !== id);
@@ -686,6 +711,10 @@
   core.applyPendingTaskMutations = applyRecord;
   core.assertTaskMutationJournalWritable = assertJournalWritable;
   core.journalTaskMutation = journalMutation;
+  // V2-branch migration stepping stone. This remains an ordinary V1
+  // synchronous journal until real multi-context writer admission is proven.
+  // Older journalTaskMutation callers and all recovery formats stay intact.
+  core.journalTaskCompletionBatch = (rows) => journalMutation({ completionUpserts: rows });
   core.schedulePendingTaskMutationCompaction = scheduleCompaction;
   core.flushPendingTaskMutations = () => persistPending('explicit-flush');
   core.clearPendingTaskMutations = () => {
