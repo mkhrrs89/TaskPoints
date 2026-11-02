@@ -283,6 +283,13 @@
         '="edit-ratings" aria-controls="tpProfileRatingsContent" aria-expanded="' +
         String(editingRatings) + '" class="tp-profile-inline-edit" ' +
         (editingRatings ? 'hidden' : '') + '>Edit ratings</button>';
+      var pidField = player.isYou
+        ? '<label>PID<input name="pid" value="P000" readonly aria-label="PID (permanent)"></label>' +
+          '<p class="tp-profile-note">Your PID is permanently P000.</p>'
+        : '<label>PID<input name="pid" value="' + att(pid === 'Unassigned' ? '' : pid) +
+          '" placeholder="P001" inputmode="text" autocapitalize="characters" autocomplete="off" maxlength="16"></label>' +
+          '<p class="tp-profile-note">You can change this PID. Previously used PIDs stay reserved; P000 is yours.</p>' +
+          '<p id="tpProfilePidError" role="alert" class="tp-profile-rating-error"></p>';
       var extraFields = player.isYou ? '' :
         '<label>Playing style<input name="style" value="' + att(player.style || '') + '"></label>';
       var activeField = player.isYou ? '' :
@@ -309,6 +316,7 @@
         '<form id="tpPlayerProfileForm" class="tp-profile-form">',
         '<label>Name<input name="name" autocomplete="off" ' + (player.isYou ? '' : 'required') +
           ' value="' + att(player.isYou ? st.youName || '' : player.name || '') + '"></label>',
+        pidField,
         '<label>Notes / biography<textarea name="notes" rows="4" placeholder="Player background, personality, or other notes">' +
           esc(player.notes || '') + '</textarea></label>',
         extraFields,
@@ -362,6 +370,36 @@
         }
       }
       var st = deps.getState();
+      var pidAssignment = null;
+      if (id !== 'YOU') {
+        var pidInput = form.elements.namedItem('pid');
+        var currentPid = deps.getPlayerPid(st, id) || '';
+        var requestedPid = pidInput ? String(pidInput.value || '').trim() : currentPid;
+        if (!requestedPid && currentPid) {
+          var clearError = screen?.querySelector('#tpProfilePidError');
+          if (clearError) clearError.textContent = 'A saved PID cannot be cleared. Enter a different unique PID.';
+          pidInput?.focus?.({ preventScroll: true });
+          return false;
+        }
+        if (requestedPid && requestedPid !== currentPid) {
+          pidAssignment = deps.assignPlayerPid?.(st, id, requestedPid, { allowReassign: true });
+          if (!pidAssignment?.ok) {
+            var pidMessages = {
+              invalid_pid: 'Enter a PID such as P027 or 27.',
+              pid_in_use: 'That PID is already assigned to another player.',
+              pid_reserved: 'That PID was previously used and remains reserved.',
+              pid_reserved_for_you: 'P000 is reserved for your player.',
+              you_pid_locked: 'Your PID is permanently P000.',
+              player_not_found: 'This player could not be found.',
+              pid_locked: 'This PID cannot be changed.'
+            };
+            var pidError = screen?.querySelector('#tpProfilePidError');
+            if (pidError) pidError.textContent = pidMessages[pidAssignment?.error] || 'Unable to save that PID.';
+            pidInput?.focus?.({ preventScroll: true });
+            return false;
+          }
+        }
+      }
       var primary = deps.normalizeColor(value('primaryColor'), '#FFFFFF');
       var secondary = deps.normalizeColor(value('secondaryColor'), '#808080');
       var options = {};
@@ -376,6 +414,13 @@
       } else {
         var target = st.players.find(function(row) { return String(row?.id || '') === id; });
         if (!target) return false;
+        // Apply PID only after all validation succeeds. The internal player
+        // UUID and all matchups/history stay untouched; the retired PID remains
+        // reserved through the same canonical PID assignment engine.
+        if (pidAssignment?.changed) {
+          target.pid = pidAssignment.pid;
+          st.reservedPlayerPids = pidAssignment.state.reservedPlayerPids;
+        }
         if (pendingRatings) applyRatings(target, pendingRatings.values);
         target.name = name;
         target.notes = value('notes');
