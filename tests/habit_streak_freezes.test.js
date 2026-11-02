@@ -141,7 +141,7 @@ test('freeze threshold earns one as soon as met, never twice in one week', () =>
 
 test('Home displays balance for enabled habits and keeps silver count for disabled habits', () => {
   assert.match(home, /const freezeStatuses = new Map\(\)/);
-  assert.match(home, /getHabitFreezeStatus\?\.\(h, state, currentFreezeDay\)/);
+  assert.match(home, /getHabitFreezeStatus\?\.\(\s*h,\s*\{ completions: completedRowsByHabit\.get\(String\(h\.id\)\) \|\| \[\] \}, currentFreezeDay\s*\)/);
   assert.match(home, /silverWeekCount: freezeStatuses\.get\(String\(h\.id\)\)\?\.balance \?\?/);
   assert.match(home, /freezeEnabled: freezeStatuses\.has\(String\(h\.id\)\)/);
   assert.match(home, /h\.__streak = status\.streak/);
@@ -171,5 +171,11 @@ test('edited history never changes stored snapshots merely by reading freeze bal
 
 test('Home uses the 5am TaskPoints day key for charging missed days', () => {
   assert.match(home, /const currentFreezeDay = getCurrentTaskPointsDayKey\(\)/);
-  assert.match(home, /getHabitFreezeStatus\?\.\(h, state, currentFreezeDay\)/);
+  assert.match(home, /getHabitFreezeStatus\?\.\(\s*h,\s*\{ completions: completedRowsByHabit\.get\(String\(h\.id\)\) \|\| \[\] \}, currentFreezeDay\s*\)/);
+});
+
+test('Home indexes completion rows once for all habit freeze status calculations', () => {
+  assert.match(home, /const completedRowsByHabit = new Map\(\)/);
+  assert.match(home, /completedRowsByHabit\.get\(id\)\.push\(completion\)/);
+  assert.match(home, /getHabitFreezeStatus\?\.\(/);
 });
