@@ -5039,6 +5039,94 @@ try {
       bothRowsSurviveReload:true,realWorkWriterStillUnfenced:true};
   });
 
+  await run('V2 Work batch V1 journal interruption leaves two rows together',async context=>{
+    const page=await open(context);
+    const initial=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
+    const written=await page.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const rows=[
+        {id:'batch-interrupted-work',source:'work',
+          workHours:8.25,points:8.4,
+          completedAtISO:'2026-11-02T12:00:00.000Z'},
+        {id:'batch-interrupted-sleep',source:'metric',
+          sleepRested:7,points:9.2,
+          completedAtISO:'2026-11-02T12:01:00.000Z'}
+      ];
+      let writes=0;
+      const prior=Storage.prototype.setItem;
+      Storage.prototype.setItem=function(key,value){
+        if(this===localStorage && key==='taskpoints_pending_task_mutations_v1')writes++;
+        return prior.call(this,key,value);
+      };
+      try{core.journalTaskCompletionBatch(rows);}
+      finally{Storage.prototype.setItem=prior;}
+      const raw=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      return {writes,raw,
+        beforeCompaction:localStorage.getItem('taskpoints_v1')};
+    });
+    assert.equal(written.writes,1);
+    assert.equal(written.beforeCompaction,initial);
+    assert.deepEqual(JSON.parse(written.raw).completionUpserts.map(x=>x.id).sort(),
+      ['batch-interrupted-sleep','batch-interrupted-work']);
+    // Simulate lifecycle interruption after the durable single write, but
+    // BEFORE the asynchronous/full-snapshot compaction has run.
+    await page.reload({waitUntil:'load'});
+    const resumed=await page.evaluate(async()=>{
+      const core=window.TaskPointsCore,rt=window.TaskPointsStateRuntimeV2;
+      const seen=core.readPendingTaskMutations();
+      const effective=core.readTaskPointsStoredState();
+      let failures=0;
+      const oldSet=Storage.prototype.setItem;
+      Storage.prototype.setItem=function(key,value){
+        if(this===localStorage&&key==='taskpoints_pending_task_mutations_v1'){
+          failures++;
+          throw new DOMException('Synthetic journal quota refusal','QuotaExceededError');
+        }
+        return oldSet.call(this,key,value);
+      };
+      try{
+        try{core.journalTaskCompletionBatch([
+          {id:'must-not-save-work',source:'work',points:11},
+          {id:'must-not-save-sleep',source:'metric',points:12}
+        ]);}catch(error){
+          if(error?.name!=='QuotaExceededError')throw error;
+        }
+      }finally{Storage.prototype.setItem=oldSet;}
+      const afterFailure=core.readPendingTaskMutations();
+      const afterFailureRaw=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const flushed=core.flushPendingTaskMutations();
+      const storage=core.parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1'),{});
+      const cutover=await rt.inspectAuthorityCutoverBarriers();
+      return {seen:seen.record.completionUpserts.map(r=>r.id),
+        effective:effective.completions.map(r=>r.id),
+        failures,afterFailureRaw,afterFailure:
+          afterFailure.record.completionUpserts.map(r=>r.id),
+        flushed,stored:storage.completions.map(r=>r.id),
+        journalAfter:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        cutover,authority:rt.getStatus().readAuthority};
+    });
+    for(const id of ['batch-interrupted-work','batch-interrupted-sleep']){
+      assert.ok(resumed.seen.includes(id));
+      assert.ok(resumed.effective.includes(id));
+      assert.ok(resumed.afterFailure.includes(id));
+      assert.ok(resumed.stored.includes(id));
+    }
+    for(const id of ['must-not-save-work','must-not-save-sleep']){
+      assert.ok(!resumed.afterFailure.includes(id));
+      assert.ok(!resumed.stored.includes(id));
+    }
+    assert.equal(resumed.failures,1);
+    assert.equal(resumed.afterFailureRaw,written.raw);
+    assert.equal(resumed.flushed,true);
+    assert.equal(resumed.journalAfter,null);
+    assert.equal(resumed.authority,'legacy_only');
+    assert.equal(resumed.cutover.canPromote,false);
+    assert.equal(resumed.cutover.checks.workEntryAtomicAdmissionVerified,false);
+    return {oneJournalWriteForWholeAction:true,killReloadRecoversBothRows:true,
+      quotaRefusalLeavesNeitherNewRow:true,verifiedCompactionRetainedBoth:true,
+      productionAuthorityStillLegacy:true};
+  });
+
   await run('Work Task-journal persistence cannot certify full writer admission',async context=>{
     const page=await open(context);
     const original=await page.evaluate(()=>localStorage.getItem('taskpoints_v1'));
