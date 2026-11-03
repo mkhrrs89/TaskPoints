@@ -3415,6 +3415,182 @@
     }
   }
 
+  // EXPLICIT PREVIEW ONLY: supply the index metadata missing from older V2
+  // completion packs. This is NOT a V1 migration, user action, or live repair.
+  // Values, IDs, history order, WAL and V1 authority must remain untouched.
+  // Process a small bounded batch so metadata maintenance is never a giant
+  // synchronous foreground write. Every existing metadata conflict refuses.
+  async function rehearsePreviewCompletionIndexBackfill() {
+    const refuse = (reason, extra = {}) => ({
+      checked: true, previewOnly: true, applied: false,
+      confirmedDurable: false, canPromote: false,
+      productionWritersFenced: false, readAuthority: 'legacy_only',
+      mutationAuthority: 'legacy_only', reason, ...extra
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    const modeEpoch = darkMirrorModeEpoch;
+    const generation = currentGeneration({ create: false });
+    if (!generation) return refuse('generation_unavailable');
+    // Any maintenance attempt invalidates previously cached index proofs.
+    previewHabitIndexProof = null;
+    previewHabitIndexAuditEpoch += 1;
+    let inventory, source;
+    try {
+      inventory = captureReadOnlyFullStorageInventory();
+      source = parseLegacyStateWithPending();
+      if (source.missing) return refuse('legacy_unavailable');
+      if (captureReadOnlyFullStorageInventory() !== inventory)
+        return refuse('legacy_changed_during_capture');
+    } catch (_) { return refuse('legacy_unreadable'); }
+    const sourceCurrent = () => isDarkEnabled()
+      && darkMirrorModeEpoch === modeEpoch
+      && currentGeneration({ create: false }) === generation
+      && captureReadOnlyFullStorageInventory() === inventory;
+    let db, habitRows, completionRows, meta;
+    try {
+      db = await open();
+      if (!db) return refuse('v2_unavailable');
+      const tx = db.transaction(['habits', 'completions', 'meta'], 'readonly');
+      [habitRows, completionRows, meta] = await Promise.all([
+        requestPromise(tx.objectStore('habits').getAll()),
+        requestPromise(tx.objectStore('completions').getAll()),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID))
+      ]);
+    } catch (_) { return refuse('v2_source_unreadable'); }
+    try {
+      if (!sourceCurrent()) return refuse('legacy_changed_during_read');
+      if (!meta || meta.schemaVersion !== SCHEMA_VERSION
+        || meta.resetGeneration !== generation || meta.legacyMissing === true
+        || !Number.isSafeInteger(Number(meta.revision))
+        || Number(meta.revision) < 0)
+        return refuse('pilot_meta_not_ready');
+      const seen = new Set(), missing = [];
+      for (const row of completionRows) {
+        if (!row || typeof row.id !== 'string' || !row.id || seen.has(row.id))
+          return refuse('completion_pack_invalid');
+        seen.add(row.id);
+        const entries = Array.isArray(row.entries) ? row.entries
+          : Object.prototype.hasOwnProperty.call(row, 'value') ? [row] : [];
+        if (!entries.length || entries.some(entry =>
+          !entry || !entry.value || typeof entry.value !== 'object'
+          || Array.isArray(entry.value) || !Number.isFinite(Number(entry.sequence))
+          || (entry.value.id != null && String(entry.value.id) !== row.id)))
+          return refuse('completion_pack_invalid');
+        const expected = completionHabitIdsForRow(row);
+        if (typeof row.habitIds === 'undefined') {
+          missing.push({ id: row.id, row: withCompletionHabitIds(row) });
+        } else if (!Array.isArray(row.habitIds)
+          || stableJson(row.habitIds) !== stableJson(expected)) {
+          return refuse('existing_index_metadata_invalid');
+        }
+      }
+      const habits = habitRows.slice().sort((a,b) =>
+        Number(a.legacyIndex || 0) - Number(b.legacyIndex || 0)
+      ).map(row => clone(row.value));
+      const completions = unpackCompletionRows(completionRows);
+      if (pilotCompletions({completions}).length !== completions.length)
+        return refuse('unexpected_nonpilot_completions');
+      if (stableJson(paritySubset({ habits, completions }))
+        !== stableJson(paritySubset(sourceSubset(source.state))))
+        return refuse('legacy_pilot_parity_mismatch');
+      if (!sourceCurrent()) return refuse('legacy_changed_after_parity');
+      if (stableJson(await readMeta(db)) !== stableJson(meta))
+        return refuse('v2_revision_changed_during_validation');
+      if (!missing.length) return {
+        ...refuse('already_indexed', { pending: 0 }),
+        checked: true, alreadyCurrent: true
+      };
+      const batch = missing.slice(0, 64);
+      const revision = Number(meta.revision) + 1;
+      if (!Number.isSafeInteger(revision)) return refuse('revision_exhausted');
+      const nextMeta = {
+        ...meta, revision, updatedAtISO: nowIso()
+      };
+      let abortReason = null;
+      const tx = db.transaction(['completions', 'meta'], 'readwrite');
+      const metaRequest = tx.objectStore('meta').get(RUNTIME_META_ID);
+      metaRequest.onsuccess = () => {
+        try {
+          if (stableJson(metaRequest.result || null) !== stableJson(meta)) {
+            abortReason = 'v2_revision_changed_before_write';
+            tx.abort(); return;
+          }
+          if (!sourceCurrent()) {
+            abortReason = 'legacy_changed_before_write';
+            tx.abort(); return;
+          }
+          const store = tx.objectStore('completions');
+          // Re-read the exact packed rows in this same serialized transaction
+          // before overwriting only their missing habitIds metadata.
+          let remaining = batch.length;
+          for (const item of batch) {
+            const request = store.get(item.id);
+            request.onsuccess = () => {
+              if (stableJson(request.result) !== stableJson(
+                completionRows.find(row => row.id === item.id))) {
+                abortReason = 'completion_pack_changed_before_write';
+                tx.abort(); return;
+              }
+              remaining -= 1;
+              if (remaining === 0) {
+                try {
+                  if (!sourceCurrent()) {
+                    abortReason = 'legacy_changed_before_write';
+                    tx.abort(); return;
+                  }
+                  for (const target of batch) store.put(target.row);
+                  tx.objectStore('meta').put(nextMeta);
+                } catch (_) {
+                  abortReason = 'index_backfill_write_unavailable';
+                  tx.abort();
+                }
+              }
+            };
+          }
+        } catch (_) {
+          abortReason = 'index_backfill_guard_unreadable';
+          tx.abort();
+        }
+      };
+      try { await transactionPromise(tx); }
+      catch (_) { return refuse(abortReason || 'index_backfill_transaction_aborted'); }
+
+      // A committed transaction is not automatically proof of a durable,
+      // unchanged source. Read every written row + meta back before success.
+      let verifiedRows, verifiedMeta;
+      try {
+        const check = db.transaction(['completions', 'meta'], 'readonly');
+        [verifiedRows, verifiedMeta] = await Promise.all([
+          Promise.all(batch.map(item =>
+            requestPromise(check.objectStore('completions').get(item.id)))),
+          requestPromise(check.objectStore('meta').get(RUNTIME_META_ID))
+        ]);
+      } catch (_) {
+        return refuse('index_backfill_readback_unavailable', {
+          applied: true, committedButUnverified: true
+        });
+      }
+      if (!sourceCurrent() || stableJson(verifiedMeta) !== stableJson(nextMeta)
+        || verifiedRows.some((row,i) =>
+          stableJson(row) !== stableJson(batch[i].row))) {
+        return refuse('index_backfill_readback_changed', {
+          applied: true, committedButUnverified: true
+        });
+      }
+      lastKnownRevision = revision;
+      publishCommittedRevision(revision, 'v2-preview-index-backfill', generation);
+      return {
+        checked: true, previewOnly: true, applied: true,
+        confirmedDurable: true, reason: 'index_metadata_backfilled',
+        updatedRows: batch.length, remainingRows: missing.length - batch.length,
+        revision, generation, canPromote: false,
+        productionWritersFenced: false, readAuthority: 'legacy_only',
+        mutationAuthority: 'legacy_only'
+      };
+    } catch (_) { return refuse('index_backfill_validation_unreadable'); }
+  }
+
   // Keep at most ONE audited index proof: the full-origin snapshot can be
   // several MiB, so never accumulate a per-Habit cache of source inventories.
   // This evidence lives only in this preview tab and is invalidated when an
@@ -7738,6 +7914,7 @@
     verifyParity,
     inspectPilotReadiness,
     inspectPilotCompletionIndexCoverage,
+    rehearsePreviewCompletionIndexBackfill,
     inspectPreviewHabitCompletionIndexParity,
     readPreviewIndexedHabitCompletions,
     inspectMutationHandoffPrerequisites,
