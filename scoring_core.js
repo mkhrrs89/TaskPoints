@@ -8320,6 +8320,9 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
   const HABIT_FREEZE_EARN_START = '2026-10-12';
   const HABIT_FREEZE_SPEND_START = '2026-11-02';
 
+  // Manual freezes are per-habit, user-selected missed dates. A manual date
+  // uses one earned silver credit but never adds a completion or awards points.
+  // Manual dates may precede the automatic-spend launch date.
   function getHabitFreezeStatus(habit, state, asOfDayKey = todayKey()) {
     const empty = { balance: 0, earned: 0, spent: 0, streak: 0, protectedDays: [] };
     if (!habit || habit.streakMultiplierEnabled !== true
@@ -8336,56 +8339,119 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
         || !entry.dayKey || fractions.has(entry.dayKey)) continue;
       fractions.set(entry.dayKey, getHabitCompletionFraction(entry));
     }
-    // The start of an existing pre-launch streak must remain intact.
-    const beforeStart = addDaysToDateKey(HABIT_FREEZE_EARN_START, -1);
-    let streak = getHabitStreakDayForKey(habit, beforeStart);
-    let balance = 0, earned = 0, spent = 0;
-    let eligible = streak >= 2;
-    const weeklyTotals = new Map(), earnedWeekKeys = new Set();
-    const protectedDays = [];
+    const lastClosed = addDaysToDateKey(asOfDayKey, -1);
+    const isComplete = key => done.has(key) && !failed.has(key);
+    const manualDays = new Set((Array.isArray(habit.manualStreakFreezeDays) ? habit.manualStreakFreezeDays : [])
+      .filter(key => /^\d{4}-\d{2}-\d{2}$/.test(String(key))
+        && key <= lastClosed && !isComplete(key)));
+
+    // First compute all silver-week credits, including credits earned TODAY.
+    // Reserve credits for manually selected days before charging automatic misses.
+    // Manual spending is allowed retroactively, even before credits existed.
     const thresholdRaw = Number(habit.daysPerCompleteWeek);
     const threshold = Number.isFinite(thresholdRaw) && thresholdRaw > 0 && thresholdRaw <= 7
       ? Math.round(thresholdRaw) : 0;
-    // Spend only on *closed* days; today's incompletion is not yet a miss.
-    // A historical completion is evaluated as of its own date.
-    const lastClosed = addDaysToDateKey(asOfDayKey, -1);
+    const weeklyTotals = new Map();
+    const earnedWeekKeys = new Set();
+    const earnedOnDay = new Set();
     for (let key = HABIT_FREEZE_EARN_START; key <= asOfDayKey; key = addDaysToDateKey(key, 1)) {
-      const complete = done.has(key) && !failed.has(key);
-      if (complete) {
+      if (!threshold || !isComplete(key)) continue;
+      const weekKey = addDaysToDateKey(key, -((fromKey(key).getDay() + 6) % 7));
+      const total = (weeklyTotals.get(weekKey) || 0) + (fractions.get(key) ?? 1);
+      weeklyTotals.set(weekKey, total);
+      if (total >= threshold && !earnedWeekKeys.has(weekKey)) {
+        earnedWeekKeys.add(weekKey);
+        earnedOnDay.add(key);
+      }
+    }
+    const earned = earnedWeekKeys.size;
+    const autoBudget = Math.max(0, earned - manualDays.size);
+
+    // If a user selects an earlier date, scan back to that date. For the
+    // preceding uninterrupted history, reuse the existing streak baseline.
+    // Existing automatic-only behavior retains its original Oct 12 anchor.
+    const firstManualDay = manualDays.size ? [...manualDays].sort()[0] : null;
+    const scanStart = firstManualDay && firstManualDay < HABIT_FREEZE_EARN_START
+      ? firstManualDay : HABIT_FREEZE_EARN_START;
+    const beforeStart = addDaysToDateKey(scanStart, -1);
+    let streak = getHabitStreakDayForKey(habit, beforeStart);
+    let eligible = streak >= 2;
+    let availableAuto = 0, autoSpent = 0;
+    const protectedDays = [];
+    const manualProtectedDays = [];
+
+    for (let key = scanStart; key <= asOfDayKey; key = addDaysToDateKey(key, 1)) {
+      if (earnedOnDay.has(key)) availableAuto += 1;
+      if (isComplete(key)) {
         streak += 1;
         if (streak >= 2) eligible = true;
-        if (threshold) {
-          const weekKey = addDaysToDateKey(key, -((fromKey(key).getDay() + 6) % 7));
-          const sum = (weeklyTotals.get(weekKey) || 0) + (fractions.get(key) ?? 1);
-          weeklyTotals.set(weekKey, sum);
-          if (sum >= threshold && !earnedWeekKeys.has(weekKey)) {
-            earnedWeekKeys.add(weekKey);
-            balance += 1;
-            earned += 1;
-          }
-        }
       } else if (key <= lastClosed) {
-        const freezeCanSpend = key >= HABIT_FREEZE_SPEND_START
-          && (!habit.streakMultiplierStartDateKey
-              || key >= habit.streakMultiplierStartDateKey)
-          && eligible && streak >= 2 && balance > 0;
-        if (freezeCanSpend) {
-          balance -= 1;
-          spent += 1;
+        if (manualDays.has(key)) {
+          // Explicit manual overrides are not constrained by the automatic
+          // feature launch date or multiplier activation date.
+          manualProtectedDays.push(key);
           protectedDays.push(key);
         } else {
-          streak = 0;
-          eligible = false;
+          const freezeCanSpend = key >= HABIT_FREEZE_SPEND_START
+            && (!habit.streakMultiplierStartDateKey
+                || key >= habit.streakMultiplierStartDateKey)
+            && eligible && streak >= 2 && availableAuto > 0 && autoSpent < autoBudget;
+          if (freezeCanSpend) {
+            availableAuto -= 1;
+            autoSpent += 1;
+            protectedDays.push(key);
+          } else {
+            streak = 0;
+            eligible = false;
+          }
         }
       }
     }
-    return { balance, earned, spent, streak, protectedDays };
+
+    // A backfilled/completed manually selected day is dormant, not charged.
+    // The original manual choice remains saved so it can be explicitly undone.
+    const spent = manualDays.size + autoSpent;
+    return {
+      balance: Math.max(0, earned - spent),
+      earned, spent, streak, protectedDays, manualProtectedDays
+    };
+  }
+
+  function getHabitManualFreezeEligibility(habit, state, dayKeyStr, asOfDayKey = todayKey()) {
+    const day = String(dayKeyStr || '');
+    const asOf = String(asOfDayKey || '');
+    if (!habit || habit.streakMultiplierEnabled !== true || (habit.category || 'habit') === 'vice')
+      return { ok: false, reason: 'disabled' };
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !/^\d{4}-\d{2}-\d{2}$/.test(asOf) || day >= asOf)
+      return { ok: false, reason: 'not_closed' };
+    const manuallySelected = Array.isArray(habit.manualStreakFreezeDays) && habit.manualStreakFreezeDays.includes(day);
+    if (manuallySelected)
+      return { ok: false, reason: 'already_manual' };
+    if (Array.isArray(habit.doneKeys) && habit.doneKeys.includes(day)
+      && !(Array.isArray(habit.failedKeys) && habit.failedKeys.includes(day)))
+      return { ok: false, reason: 'completed' };
+    const current = getHabitFreezeStatus(habit, state, asOf);
+    if (current.protectedDays.includes(day)) return { ok: false, reason: 'already_auto', status: current };
+    if (current.balance < 1) return { ok: false, reason: 'no_credits', status: current };
+    const previewHabit = {
+      ...habit,
+      manualStreakFreezeDays: [...(habit.manualStreakFreezeDays || []), day]
+    };
+    const next = getHabitFreezeStatus(previewHabit, state, asOf);
+    if (!next.manualProtectedDays.includes(day) || next.spent !== current.spent + 1
+      || next.balance !== current.balance - 1
+      || current.protectedDays.some(key => !next.protectedDays.includes(key))) {
+      return { ok: false, reason: 'would_change_other_freezes', status: current };
+    }
+    return { ok: true, status: current, nextStatus: next };
   }
 
   function getHabitStreakDayForKey(habit, dayKeyStr, state = null) {
     if (!habit || !dayKeyStr) return 0;
-    if (state && dayKeyStr >= HABIT_FREEZE_SPEND_START
-      && habit.streakMultiplierEnabled === true && (habit.category || 'habit') !== 'vice') {
+    if (state && habit.streakMultiplierEnabled === true && (habit.category || 'habit') !== 'vice'
+      && (dayKeyStr >= HABIT_FREEZE_SPEND_START
+        || (Array.isArray(habit.manualStreakFreezeDays)
+          && habit.manualStreakFreezeDays.some(key => key < dayKeyStr)))) {
       return getHabitFreezeStatus(habit, state, dayKeyStr).streak;
     }
 
@@ -10409,6 +10475,7 @@ simulateAiScoreForPlayerCore,
     deriveCompletionPoints,
     pointsForCompletion,
     getHabitFreezeStatus,
+    getHabitManualFreezeEligibility,
     getAtRiskStreakRows,
     syncDerivedPoints,
     computeMatchupRecord,
