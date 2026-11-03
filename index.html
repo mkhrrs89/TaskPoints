@@ -8400,7 +8400,15 @@ function findHabitCompletionForDay(habitId, dayKey, visibleLookup = null) {
     : null;
 }
 
-function isHabitWeeklyCompleteForDays(h, days, visibleLookup = null) {
+function isHabitWeeklyCompleteForDays(h, days, visibleLookup = null, protectedDays = null) {
+  // Render uses one already-computed freeze status per habit. Direct row
+  // refreshes obtain the status only when a cached day list was not passed.
+  const freezeKeys = protectedDays ?? (
+    h.streakMultiplierEnabled === true
+      ? (TaskPointsCore?.getHabitFreezeStatus?.(h, state, getCurrentTaskPointsDayKey())?.protectedDays || [])
+      : []
+  );
+  const protectedDayKeys = new Set(freezeKeys);
   h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
   const weeklyThresholdRaw = Number(h.daysPerCompleteWeek);
   const hasValidWeeklyThreshold = Number.isFinite(weeklyThresholdRaw)
@@ -8408,7 +8416,9 @@ function isHabitWeeklyCompleteForDays(h, days, visibleLookup = null) {
     && weeklyThresholdRaw <= 7;
   const weeklyThreshold = hasValidWeeklyThreshold ? Math.round(weeklyThresholdRaw) : 0;
   const completedCountForVisibleWeek = days.reduce((count, d) => {
-    if (!h.doneKeys.includes(d.key)) return count;
+    // A white frozen day counts as ONE toward silver, but is never a
+    // completion and never awards habit points or an extra streak day.
+    if (!h.doneKeys.includes(d.key)) return count + (protectedDayKeys.has(d.key) ? 1 : 0);
 
     const completion = findHabitCompletionForDay(h.id, d.key, visibleLookup);
 
@@ -8588,7 +8598,7 @@ function renderHabitRow(h, days, wrap, options = {}) {
   const isGrouped = options.isGrouped ?? false;
 
   const isWeeklyCompleteForVisibleWeek = options.isWeeklyCompleteForVisibleWeek
-    ?? isHabitWeeklyCompleteForDays(h, days, options.visibleCompletionLookup);
+    ?? isHabitWeeklyCompleteForDays(h, days, options.visibleCompletionLookup, options.protectedDays);
   const appendRow = options.appendRow
     ?? ((rowToAppend) => wrap.appendChild(rowToAppend));
 
@@ -9047,7 +9057,9 @@ function renderHabits(){
 
     const sectionRows = section.habits.map(h => ({
       h,
-      isWeeklyComplete: isHabitWeeklyCompleteForDays(h, days, visibleCompletionLookup)
+      isWeeklyComplete: isHabitWeeklyCompleteForDays(
+        h, days, visibleCompletionLookup, freezeStatuses.get(String(h.id))?.protectedDays || []
+      )
     }));
     const appendSectionRow = createHabitWeekCompleteAppender(body);
 
