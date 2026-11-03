@@ -306,3 +306,32 @@ interleaved Habit + Task changes and malformed journal refusal. Neither
 a successful scoped audit nor the compatibility snapshot establishes
 full multi-collection export parity, off-device backup or writer exclusion;
 `fullExportVerified` and `canPromote` remain false.
+
+
+## Whole compatibility projection and reload integrity — November 3
+
+The preview-host-only `inspectPreviewWholeCompatibilityProjection()`
+performs a read-only check that a V2 compatibility snapshot would retain
+**all** effective V1 JSON properties, including Tasks, settings, metadata,
+nonpilot completions and exact interleaved completion ordering. It clones
+the V1 source, replays pending Habit and Task journals with their existing
+production logic, and reads V2 Habits and completion rows without seeding
+or repairing either store. It applies only the established narrow
+normalizations for Habit derived cache, missing `timeOfDay` and full
+`completionFraction`. Nonpilot source values and positions remain exact.
+
+A second read of runtime metadata (also after async SHA-256 fingerprinting)
+rejects concurrent V2 revisions; full-origin inventory and generation
+are checked before and after IDB reads. A matching result returns a
+normalized SHA-256 fingerprint suitable for comparing the same projected
+compatibility data across reloads or journal compaction. It always reports
+`fullExportVerified: false` and `canPromote: false` because production
+backup/import, nonpilot IDB authority, writer fencing and independent
+recovery have not yet been proven.
+
+Browser coverage verifies a pending Task edit, completion deletion and
+Work/metric upserts alongside a Habit completion; full snapshot
+top-level keys, mixed ordering and stable fingerprint after reload.
+A missing V1 source must fail closed while preserving V2 Task seed
+evidence, and source restoration must restore a matching projection.
+No live storage write path or authority flag is changed.

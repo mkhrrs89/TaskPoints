@@ -5949,6 +5949,153 @@
     } catch (_) { return refuse('mixed_completion_export_unreadable'); }
   }
 
+  // PREVIEW-HOST-ONLY snapshot projection audit. This is deliberately
+  // read-only: it never invokes seedFromLegacy() or the compatibility
+  // builder, and it never treats V2's nonpilot preview rows as authoritative.
+  // It validates every retained V1 field and mixed completion position,
+  // while comparing V2 Habit fields using existing, narrowly documented
+  // parity normalization. It does NOT certify a production export or backup.
+  async function inspectPreviewWholeCompatibilityProjection() {
+    const refuse = (reason, detail = {}) => ({
+      checked: true, previewOnly: true, match: false,
+      wholeProjectionVerified: false, fullExportVerified: false,
+      canPromote: false, productionWritersFenced: false,
+      readAuthority: 'legacy_only', mutationAuthority: 'legacy_only',
+      comparisonScope: 'effective_v1_full_snapshot_plus_v2_pilot_overlay',
+      reason, ...detail
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    const generation = currentGeneration({ create: false });
+    if (!generation) return refuse('generation_unavailable');
+    const modeEpoch = darkMirrorModeEpoch;
+    let inventory, effective;
+    try {
+      inventory = captureReadOnlyFullStorageInventory();
+      const source = parseLegacyStateWithPending();
+      if (source.missing) return refuse('legacy_unavailable');
+      effective = applyTaskJournalToCompatibilitySource(source.state);
+      if (!effective || !Array.isArray(effective.habits)
+        || !Array.isArray(effective.tasks)
+        || !Array.isArray(effective.completions))
+        return refuse('legacy_snapshot_invalid');
+      if (captureReadOnlyFullStorageInventory() !== inventory)
+        return refuse('legacy_changed_during_capture');
+    } catch (error) {
+      const message = String(error?.message || error);
+      if (message.includes('compatibility_task_journal_malformed'))
+        return refuse('legacy_task_journal_malformed');
+      if (message.includes('compatibility_task_journal_unavailable'))
+        return refuse('legacy_task_journal_unavailable');
+      return refuse('legacy_snapshot_unreadable');
+    }
+    const sourceCurrent = () => isDarkEnabled()
+      && darkMirrorModeEpoch === modeEpoch
+      && currentGeneration({ create: false }) === generation
+      && captureReadOnlyFullStorageInventory() === inventory;
+    try {
+      if (!sourceCurrent()) return refuse('legacy_changed_before_inspection');
+    } catch (_) { return refuse('legacy_unreadable_before_inspection'); }
+
+    let db, habitRows, completionRows, meta;
+    try {
+      db = await open();
+      if (!db) return refuse('dark_disabled');
+      const tx = db.transaction(['habits','completions','meta'], 'readonly');
+      [habitRows, completionRows, meta] = await Promise.all([
+        requestPromise(tx.objectStore('habits').getAll()),
+        requestPromise(tx.objectStore('completions').getAll()),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID))
+      ]);
+    } catch (_) { return refuse('v2_snapshot_projection_unreadable'); }
+
+    try {
+      if (!sourceCurrent()) return refuse('legacy_changed_during_inspection');
+      if (!meta || meta.schemaVersion !== SCHEMA_VERSION
+        || meta.resetGeneration !== generation || meta.legacyMissing === true)
+        return refuse('pilot_meta_not_ready');
+      const sorted = habitRows.slice().sort(
+        (a,b) => Number(a?.legacyIndex) - Number(b?.legacyIndex)
+      );
+      if (sorted.length !== effective.habits.length)
+        return refuse('pilot_habit_count_mismatch');
+      const seenHabits = new Set();
+      for (let index=0;index<sorted.length;index++) {
+        const row = sorted[index], legacy = effective.habits[index];
+        if (!row || row.legacyIndex !== index
+          || String(row.id) !== String(legacy?.id)
+          || seenHabits.has(String(row.id)))
+          return refuse('pilot_habit_identity_mismatch');
+        seenHabits.add(String(row.id));
+      }
+      const habits = sorted.map(row=>clone(row.value));
+      const completions = unpackCompletionRows(completionRows);
+      if (stableJson(paritySubset({habits,completions}))
+        !== stableJson(paritySubset(effective)))
+        return refuse('pilot_parity_mismatch');
+
+      const candidate = {
+        ...effective, habits,
+        completions: mergeCompatibilityCompletions(effective.completions, completions)
+      };
+      const expectedKeys = Object.keys(effective).sort();
+      if (stableJson(Object.keys(candidate).sort()) !== stableJson(expectedKeys))
+        return refuse('snapshot_top_level_fields_mismatch');
+      // Inspect all source data, not only completions. Only the established
+      // Habit derived-cache/default and pilot full-fraction equivalences
+      // are normalized. Nonpilot completions, Tasks, settings, and every
+      // unrelated JSON field must remain exact in payload and ordering.
+      const normalize = state => ({
+        ...state,
+        habits: state.habits.map(normalizeHabitForParity),
+        completions: state.completions.map(row => isPilotCompletion(row)
+          ? normalizePilotCompletionForParity(row) : row)
+      });
+      const expected = normalize(effective), actual = normalize(candidate);
+      if (stableJson(expected) !== stableJson(actual)) {
+        if (stableJson(expected.completions) !== stableJson(actual.completions))
+          return refuse('mixed_completion_projection_mismatch', {
+            expectedCount: expected.completions.length,
+            actualCount: actual.completions.length
+          });
+        if (stableJson(expected.habits) !== stableJson(actual.habits))
+          return refuse('habit_projection_mismatch');
+        return refuse('nonpilot_source_field_mismatch');
+      }
+      const metaAfter = await readMeta(db);
+      if (!sourceCurrent()) return refuse('legacy_changed_after_inspection');
+      if (stableJson(metaAfter) !== stableJson(meta))
+        return refuse('v2_revision_changed_during_inspection');
+      const normalizedFingerprint = await previewRecoveryFingerprint(actual);
+      if (!sourceCurrent()) return refuse('legacy_changed_after_fingerprint');
+      // Re-read meta after SHA-256, since digest calculation is asynchronous.
+      if (stableJson(await readMeta(db)) !== stableJson(meta))
+        return refuse('v2_revision_changed_after_fingerprint');
+      if (!sourceCurrent()) return refuse('legacy_changed_after_inspection');
+      return {
+        checked: true, previewOnly: true, match: true,
+        wholeProjectionVerified: true, fullExportVerified: false,
+        comparisonScope: 'effective_v1_full_snapshot_plus_v2_pilot_overlay',
+        normalizedFingerprint,
+        topLevelFieldCount: expectedKeys.length,
+        habitCount: effective.habits.length,
+        taskCount: effective.tasks.length,
+        completionCount: effective.completions.length,
+        nonpilotCompletionCount: effective.completions.filter(
+          row=>!isPilotCompletion(row)
+        ).length,
+        // The preview store can contain divergent Task rows; those are
+        // deliberately NOT promoted into the compatibility projection.
+        v2NonpilotPreviewCompletionCount: completions.filter(
+          row=>!isPilotCompletion(row)
+        ).length,
+        reason: 'whole_compatibility_projection_verified',
+        canPromote: false, productionWritersFenced: false,
+        readAuthority: 'legacy_only', mutationAuthority: 'legacy_only'
+      };
+    } catch (_) { return refuse('whole_compatibility_projection_unreadable'); }
+  }
+
   // A narrower stepping stone toward REQUIRED writer admission, rather
   // than relying on the caller to invoke an optional freshness callback.
   // This API is explicit, PREVIEW-HOST-ONLY and NEVER installs on the live
@@ -7283,6 +7430,7 @@
     rehearsePreviewTaskLinkedCompletionBatch,
     inspectPreviewTaskCompletionOrderParity,
     inspectPreviewMixedCompletionExport,
+    inspectPreviewWholeCompatibilityProjection,
     rehearsePreviewDurableWriterFence,
     inspectPreservedParityMismatch,
     inspectLegacyRollbackSource,

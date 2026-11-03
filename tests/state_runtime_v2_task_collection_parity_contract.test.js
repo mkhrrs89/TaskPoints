@@ -189,6 +189,30 @@ test('mixed completion export inspector is preview-only, read-only and non-promo
   assert.match(runtime,/inspectPreviewTaskCompletionOrderParity,\s*inspectPreviewMixedCompletionExport,/);
 });
 
+test('whole snapshot preview verifies all V1 fields and mixed completion chronology without writes',()=>{
+  const begin=runtime.indexOf('async function inspectPreviewWholeCompatibilityProjection()');
+  const end=runtime.indexOf('// A narrower stepping stone toward REQUIRED writer admission',begin);
+  assert.ok(begin>=0&&end>begin);
+  const body=runtime.slice(begin,end);
+  assert.match(body,/isWalTestPreviewHost\(\)/);
+  assert.match(body,/applyTaskJournalToCompatibilitySource\(source\.state\)/);
+  assert.match(body,/captureReadOnlyFullStorageInventory\(\)/);
+  assert.match(body,/db\.transaction\(\['habits','completions','meta'\], 'readonly'\)/);
+  assert.match(body,/paritySubset\(\{habits,completions\}\)/);
+  assert.match(body,/normalizeHabitForParity/);
+  assert.match(body,/normalizePilotCompletionForParity/);
+  assert.match(body,/mergeCompatibilityCompletions\(effective\.completions, completions\)/);
+  assert.match(body,/snapshot_top_level_fields_mismatch/);
+  assert.match(body,/mixed_completion_projection_mismatch/);
+  assert.match(body,/await readMeta\(db\)/);
+  assert.match(body,/previewRecoveryFingerprint\(actual\)/);
+  assert.match(body,/fullExportVerified: false/);
+  assert.match(body,/canPromote: false/);
+  assert.doesNotMatch(body,/\b(?:seedFromLegacy|buildCompatibilitySnapshot|journalTaskMutation|saveStateSnapshot)\s*\(/);
+  assert.doesNotMatch(body,/\.(?:put|add|delete|clear|setItem|removeItem)\s*\(/);
+  assert.match(runtime,/inspectPreviewMixedCompletionExport,\s*inspectPreviewWholeCompatibilityProjection,/);
+});
+
 test('Task parity checks identity, payload, source inventory and generation without trusting metadata alone',()=>{
   assert.match(source,/previewRecoveryFingerprint\(tasks\)/);
   assert.match(source,/evidence\.taskFingerprint !== taskFingerprint/);

@@ -1914,6 +1914,123 @@ try {
     return {badJournalNotDiscarded:true,noFalseExport:true,readOnlyDiagnostic:true};
   });
 
+  await run('whole V2 compatibility projection preserves Task journal, mixed completions and extra fields across reload',async context=>{
+    const page=await open(context);
+    const seeded=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      return {initial:await api.inspectPreviewWholeCompatibilityProjection(),
+        seed:await api.rehearsePreviewTaskCollectionSeed()};
+    });
+    assert.equal(seeded.initial.match,true,JSON.stringify(seeded.initial));
+    assert.equal(seeded.initial.fullExportVerified,false);
+    assert.equal(seeded.seed.verified,true);
+
+    await page.evaluate(()=>{
+      window.V2BrowserFixture.delta('h1','2026-10-21','full',41);
+    });
+    await settled(page,1);
+    const before=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2,core=window.TaskPointsCore;
+      core.journalTaskMutation({task:{id:'synthetic-task',title:'Journal-updated Task'}});
+      core.journalTaskMutation({completionDeleteId:'synthetic-task-completion'});
+      core.journalTaskCompletionBatch([
+        {id:'whole-work',source:'work',taskId:'synthetic-task',points:4,
+          completedAtISO:'2026-10-21T12:00:00.000Z'},
+        {id:'whole-metric',source:'metric',taskId:'synthetic-task',points:6,
+          completedAtISO:'2026-10-21T12:00:00.000Z'}
+      ]);
+      const originalV1=localStorage.getItem('taskpoints_v1');
+      const taskJournal=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const habitJournal=localStorage.getItem('taskpoints_pending_habit_deltas_v1');
+      const full=await api.buildCompatibilitySnapshot();
+      const audit=await api.inspectPreviewWholeCompatibilityProjection();
+      const raw=core.parseTaskPointsStorageJson(originalV1,{});
+      const pending=core.readPendingHabitDeltas();
+      if(pending?.length)core.applyPendingHabitDeltas(raw,pending);
+      const expected=core.applyPendingTaskMutations(raw,core.readPendingTaskMutations().record);
+      return {audit,full,expected,
+        originalSame:originalV1===localStorage.getItem('taskpoints_v1'),
+        taskJournalSame:taskJournal===localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        habitJournalSame:habitJournal===localStorage.getItem('taskpoints_pending_habit_deltas_v1'),
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(before.audit.match,true,JSON.stringify(before.audit));
+    assert.equal(before.audit.wholeProjectionVerified,true);
+    assert.equal(before.audit.fullExportVerified,false);
+    assert.equal(before.audit.canPromote,false);
+    assert.deepEqual(before.full.tasks,before.expected.tasks);
+    assert.deepEqual(before.full.completions,before.expected.completions);
+    assert.deepEqual(Object.keys(before.full).sort(),Object.keys(before.expected).sort());
+    assert.equal(before.full.tasks[0].title,'Journal-updated Task');
+    assert.equal(before.full.completions.some(c=>c.id==='synthetic-task-completion'),false);
+    assert.equal(before.full.completions.some(c=>c.id==='whole-work'),true);
+    assert.equal(before.full.completions.some(c=>c.id==='whole-metric'),true);
+    assert.equal(before.originalSame,true);
+    assert.equal(before.taskJournalSame,true);
+    assert.equal(before.habitJournalSame,true);
+    assert.equal(before.authority,'legacy_only');
+    // Re-open the same storage as a new page. Nothing here clears V1,
+    // changes V2 authority, or assumes the pending Task journal survives
+    // compaction forever.
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>window.V2BrowserFixture?.status()?.runtime?.installed);
+    const after=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const snapshot=await api.buildCompatibilitySnapshot();
+      const audit=await api.inspectPreviewWholeCompatibilityProjection();
+      return {audit,task:snapshot.tasks.find(t=>t.id==='synthetic-task'),
+        ids:snapshot.completions.map(c=>c.id),
+        fieldCount:Object.keys(snapshot).length,
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(after.audit.match,true,JSON.stringify(after.audit));
+    assert.equal(after.audit.normalizedFingerprint,before.audit.normalizedFingerprint);
+    assert.equal(after.task.title,'Journal-updated Task');
+    assert.deepEqual(after.ids,before.full.completions.map(c=>c.id));
+    assert.equal(after.fieldCount,before.audit.topLevelFieldCount);
+    assert.equal(after.authority,'legacy_only');
+    return {wholeProjectionAcrossReload:true,taskJournalReplay:true,
+      deletedCompletionNotResurrected:true,mixedOrderStable:true,
+      fingerprintStable:true,legacyAuthorityUnchanged:true};
+  });
+
+  await run('whole compatibility audit preserves V2 evidence when V1 source temporarily disappears',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const seeded=await api.rehearsePreviewTaskCollectionSeed();
+      const first=await api.inspectPreviewWholeCompatibilityProjection();
+      const db=await api.open();
+      const get=async()=>new Promise((resolve,reject)=>{
+        const q=db.transaction('tasks','readonly').objectStore('tasks').get('synthetic-task');
+        q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error);
+      });
+      const beforeTask=await get();
+      const raw=localStorage.getItem('taskpoints_v1');
+      localStorage.removeItem('taskpoints_v1');
+      const missing=await api.inspectPreviewWholeCompatibilityProjection();
+      const preserved=await get();
+      localStorage.setItem('taskpoints_v1',raw);
+      const recovered=await api.inspectPreviewWholeCompatibilityProjection();
+      const afterTask=await get();
+      return {seeded,first,missing,preserved,recovered,beforeTask,afterTask,
+        snapshotRestored:localStorage.getItem('taskpoints_v1')===raw,
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(result.seeded.verified,true);
+    assert.equal(result.first.match,true);
+    assert.equal(result.missing.match,false);
+    assert.equal(result.missing.reason,'legacy_unavailable');
+    assert.deepEqual(result.preserved,result.beforeTask);
+    assert.deepEqual(result.afterTask,result.beforeTask);
+    assert.equal(result.recovered.match,true,JSON.stringify(result.recovered));
+    assert.equal(result.recovered.normalizedFingerprint,result.first.normalizedFingerprint);
+    assert.equal(result.snapshotRestored,true);
+    assert.equal(result.authority,'legacy_only');
+    return {temporaryMissingV1FailsClosed:true,v2EvidencePreserved:true,
+      sourceRestorationMatches:true,noAutoHealingOrPromotion:true};
+  });
+
   await run('nonpilot Task record migration aborts atomically on Task put failure and retries safely',async context=>{
     const page=await open(context);
     const result=await page.evaluate(async()=>{
