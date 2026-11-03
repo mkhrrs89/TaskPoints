@@ -164,6 +164,10 @@ class FakeObjectStore {
     return this._request('getAll', (map) => Array.from(map.values()));
   }
 
+  count() {
+    return this._request('count', (map) => map.size);
+  }
+
   put(value) {
     return this._request('put', (map) => {
       if (!value || value.id == null) throw new Error(`fake_idb_missing_key:${this.name}`);
