@@ -371,8 +371,11 @@ test('preview indexed completion audit refuses V2 revision changes during read',
   const meta = db._stores.get('meta');
   const originalConsume = app.indexedDB._consumeFailure.bind(app.indexedDB);
   let injected = false;
+  let metaReads = 0;
   app.indexedDB._consumeFailure = (store, operation) => {
-    if (!injected && store === 'completions' && operation === 'indexGetAll') {
+    // Simulate a newer V2 write AFTER the atomic snapshot's metadata read,
+    // but BEFORE the independent post-read revision check.
+    if (store === 'meta' && operation === 'get' && ++metaReads === 2) {
       injected = true;
       const before = meta.get('runtime');
       meta.set('runtime', { ...before, revision: Number(before.revision) + 1 });
