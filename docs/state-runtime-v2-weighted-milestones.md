@@ -568,3 +568,39 @@ mandatory writer admission, cross-tab exclusion, background compaction
 handoff, nonpilot completion ownership, whole-app migration or final
 compatibility/export cutover. Those remaining criteria keep the
 12-point nonpilot migration gate **uncredited**. **67/100; canPromote:false.**
+
+## Historical Task-linked completion catch-up — November 3
+
+A preview-only historical backlog importer,
+`rehearsePreviewTaskCompletionHistoryCatchUp(sourceToken, actionId)`,
+now discovers **actual effective V1 Task/Work/metric completion rows**,
+including pending Task journal overlays, rather than requiring a caller to
+manually enumerate completion IDs. It selects up to 64 missing unique IDs
+per invocation and delegates the write to the existing atomic
+`rehearsePreviewTaskLinkedCompletionBatch` receipt-backed transaction.
+A success requires the batch's independent durable readback. It preserves
+the pilot Habit/vice completions and V1 authority.
+
+Before importing, the operation requires **complete Task collection parity**
+with V1, a current full-origin source token, an unchanged generation, and a
+full read-only V2 completion scan proving that **all already-present nonpilot
+rows** match the current V1 value, ID and negative position sequence. Extra,
+partially packed, colliding or different V2 evidence refuses the operation
+rather than silently overwriting it. More than one completion with the same
+V1 ID refuses (including duplicates across pilot scopes). Each batch reports
+the imported count, remaining supported backlog, and whether independent
+scoped ordering parity verifies the entire imported history. Unsupported
+nonpilot completion classes cannot be reported as fully migrated.
+
+The new executable contracts cover a complete historical import, chunked
+64+2 continuation without duplicate inserts, V2 corruption, duplicate
+V1 IDs, stale Task/source evidence, quota rollback and reload. Chromium/
+WebKit coverage imports actual V1 Task journal completion upserts and checks
+V1 unchanged plus source ordering after reload.
+
+**Limits:** This is a bounded historical importer, not a live V1 journal
+hook, a writer fence or a generalized update/delete of previously imported
+completion records. A later V1 edit that changes old completion ordering
+requires an explicit safe reconciliation strategy; the importer deliberately
+refuses stale evidence. Other nonpilot V1 collections and independent backup
+remain incomplete. **V2 67/100, canPromote:false.**
