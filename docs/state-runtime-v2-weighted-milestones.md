@@ -457,3 +457,30 @@ and old-read/new-audit races.
 These are read-only, preview-host-only checks. They do not prove whole-app
 Habit parity, forbid unfenced legacy-tab writes, provide independent backup,
 or authorize indexed production reads. **67/100; canPromote:false.**
+
+## Verified empty-reset export must contain no V2 pilot/WAL evidence — November 3
+
+An earlier compatibility export accepted an authorized, generation-rotated
+missing-V1 reset whenever V2 runtime metadata had `legacyMissing:true`.
+That marker alone did not prove the IndexedDB pilot and mutation stores were
+actually empty. A corrupt/partially cleaned store could therefore be hidden
+behind a deceptively valid `{}` compatibility export.
+
+The missing-V1 export now checks the runtime marker **and counts** the
+`habits`, `completions`, and `mutations` stores within the **same read-only
+IndexedDB transaction**, followed by a separate metadata revision check and
+unchanged full-origin V1 inventory/generation guard. Nonzero retained rows
+refuse the export without deleting, repairing or revealing them as valid
+empty data. Unreadable counts and concurrent revision changes also refuse.
+
+Node regression cases cover each retained store, denied count reads,
+revision races and a valid empty export that performs no expensive getAll.
+Chromium/WebKit browser testing simulates a legitimate reset, injects
+recoverable stranded V2 evidence, and verifies export refusal and evidence
+preservation after reload. **No production authority promotion.**
+
+The V2 Task preview store deliberately remains outside this three-store
+pilot/WAL emptiness check; this patch does not purport to prove entire-app
+reset completeness or independent backup. The nine writer families,
+off-device recovery, physical PWA tests, and final approval gates remain
+uncredited. **67/100; canPromote:false.**
