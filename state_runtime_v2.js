@@ -1069,7 +1069,10 @@
       if (source.missing) {
         // A temporarily missing V1 key is not proof of an authorized reset.
         // A same-generation V2 copy may be the only remaining durable evidence.
-        if (previousMeta?.resetGeneration === desiredGeneration && options.force !== true) {
+        // A "force" reseed is NOT an authorized reset. If V1 disappears
+        // without a generation rotation, preserve the existing V2 evidence
+        // even when a manual/diagnostic caller requests force:true.
+        if (previousMeta?.resetGeneration === desiredGeneration) {
           if (previousMeta.legacyMissing === true) {
             seeded = true;
             lastSeedHash = null;
