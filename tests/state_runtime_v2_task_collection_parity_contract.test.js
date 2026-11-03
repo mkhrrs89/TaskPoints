@@ -174,7 +174,7 @@ test('V2 compatibility overlays Task journal on Habit journal and checks immutab
 
 test('mixed completion export inspector is preview-only, read-only and non-promotable',()=>{
   const begin=runtime.indexOf('async function inspectPreviewMixedCompletionExport()');
-  const end=runtime.indexOf('async function inspectPreviewWholeCompatibilityProjection()',begin);
+  const end=runtime.indexOf('// PREVIEW-HOST-ONLY snapshot projection audit.',begin);
   assert.ok(begin>=0 && end>begin);
   const source=runtime.slice(begin,end);
   assert.match(source,/isWalTestPreviewHost\(\)/);
