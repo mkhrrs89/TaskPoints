@@ -436,3 +436,24 @@ cannot be excluded. Independent cross-tab writer admission, actual device
 validation, full backup and final authority approval remain required. The
 existing normal V2 `getCompletionsForHabit` safe fallback is unchanged.
 **67/100; canPromote:false.**
+
+## Index proof now requires authoritative Habit-completion parity — November 3
+
+A correct `by_habit_ids` index could previously pass its full-V2-scan
+check even if V2's completion values had independently diverged from the
+authoritative V1 state. The preview index auditor now requires the selected
+Habit's ordered, duplicate-preserving completion entries to also match
+**effective V1**, including pending Habit journal changes and the existing
+full-completion normalization rule. A V2-only extra, missing, reordered,
+or altered completion must refuse proof; it is never silently repaired.
+
+Concurrent preview audits use an in-memory audit epoch so an older
+asynchronous attempt cannot republish stale proof after a later audit.
+Likewise, a previously started indexed read only revokes its *own* evidence,
+never a newer proof established during that read. Tests cover internally
+self-consistent V2 corruption, unexpected V2-only rows, overlapping audits,
+and old-read/new-audit races.
+
+These are read-only, preview-host-only checks. They do not prove whole-app
+Habit parity, forbid unfenced legacy-tab writes, provide independent backup,
+or authorize indexed production reads. **67/100; canPromote:false.**
