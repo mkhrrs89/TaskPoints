@@ -215,3 +215,61 @@ test('V2 preview does not drop a burst of completions across several days', asyn
   assert.equal(app.indexedDB.dump(DB_NAME).mutations.length, days.length);
   assert.equal(runtimeMeta(app).revision, seedRevision + days.length);
 });
+
+test('targeted V2 Habit completion lookup skips full Habits scan and preserves packed duplicate-ID order', async () => {
+  const legacy = baseLegacyState();
+  legacy.habits.push({
+    ...structuredClone(legacy.habits[0]), id: 'h2', name: 'Walk'
+  });
+  legacy.completions = [
+    { id: 'shared-id', source: 'habit', habitId: 'h2', dayKey: '2026-09-06', points: 5 },
+    { id: 'h1-recent', source: 'habit', habitId: 'h1', dayKey: '2026-09-05', points: 10 },
+    { id: 'shared-id', source: 'habit', habitId: 'h1', dayKey: '2026-09-04', points: 7 },
+    { id: 'h2-old', source: 'habit', habitId: 'h2', dayKey: '2026-09-03', points: 5 }
+  ];
+  const app = installRuntime({
+    localStorage: new FakeStorage({
+      [DARK_MODE_KEY]: '1',
+      [LEGACY_KEY]: JSON.stringify(legacy)
+    })
+  });
+  await app.api.seedFromLegacy();
+  const before = app.indexedDB.dump(DB_NAME);
+  const originalConsume = app.indexedDB._consumeFailure.bind(app.indexedDB);
+  const operations = [];
+  app.indexedDB._consumeFailure = (store, operation) => {
+    operations.push([store, operation]);
+    return originalConsume(store, operation);
+  };
+
+  const h1 = await app.api.getCompletionsForHabit('h1');
+  const h2 = await app.api.getCompletionsForHabit('h2');
+  const missing = await app.api.getCompletionsForHabit('unknown');
+
+  assert.deepEqual(h1.map(row => row.dayKey), ['2026-09-05', '2026-09-04']);
+  assert.deepEqual(h2.map(row => row.dayKey), ['2026-09-06', '2026-09-03']);
+  assert.deepEqual(missing, []);
+  assert.equal(operations.some(([store, operation]) =>
+    store === 'habits' && operation === 'getAll'), false,
+    'single-Habit lookups must never deserialize the entire Habits store');
+  assert.equal(operations.filter(([store, operation]) =>
+    store === 'habits' && operation === 'get').length, 3);
+  assert.equal(operations.filter(([store, operation]) =>
+    store === 'completions' && operation === 'getAll').length, 3,
+    'unverified completion indexes must still use the complete safe fallback');
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), before,
+    'preview retrieval must not mutate persisted records or metadata');
+});
+
+test('V2 one-Habit lookup leaves unrelated Habit records unread when completions are empty', async () => {
+  const app = installRuntime();
+  await app.api.seedFromLegacy();
+  const originalConsume = app.indexedDB._consumeFailure.bind(app.indexedDB);
+  let habitStoreScans = 0;
+  app.indexedDB._consumeFailure = (store, operation) => {
+    if (store === 'habits' && operation === 'getAll') habitStoreScans += 1;
+    return originalConsume(store, operation);
+  };
+  assert.deepEqual(await app.api.getCompletionsForHabit('h1'), []);
+  assert.equal(habitStoreScans, 0);
+});
