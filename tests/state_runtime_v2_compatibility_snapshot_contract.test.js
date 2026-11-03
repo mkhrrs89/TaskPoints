@@ -485,3 +485,87 @@ test('V2 forced reseed cannot reinterpret same-generation V1 disappearance as re
   });
   assert.deepEqual(app.indexedDB.dump(DB_NAME), original);
 });
+
+test('V2 refuses empty seeding when another tab restores V1 during async meta read', async () => {
+  const original = {
+    habits: [baseHabit('h1', 'Preserve before race', 'default', 0)],
+    tasks: [{ id: 't1', title: 'Original Task' }],
+    completions: []
+  };
+  const restored = {
+    habits: [baseHabit('h2', 'Restored while DB opens', 'default', 0)],
+    tasks: [{ id: 't2', title: 'Newer Task' }],
+    completions: []
+  };
+  const app = install(original);
+  await app.api.seedFromLegacy();
+  const priorV2 = app.indexedDB.dump(DB_NAME);
+  app.localStorage.removeItem(LEGACY_KEY);
+  app.localStorage.setItem('taskpoints_state_v2_generation_v1', 'approved-reset-generation');
+  const originalConsume = app.indexedDB._consumeFailure.bind(app.indexedDB);
+  let restoredDuringRead = false;
+  app.indexedDB._consumeFailure = (store, operation) => {
+    if (!restoredDuringRead && store === 'meta' && operation === 'get') {
+      restoredDuringRead = true;
+      app.localStorage.setItem(LEGACY_KEY, JSON.stringify(restored));
+    }
+    return originalConsume(store, operation);
+  };
+
+  await assert.rejects(app.api.seedFromLegacy({ force: true }),
+    /state_runtime_v2_empty_seed_source_restored/);
+  assert.equal(restoredDuringRead, true, 'V1 must be restored after initial missing read');
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), priorV2,
+    'never erase V2 evidence after a concurrent restore');
+  assert.deepEqual(JSON.parse(app.localStorage.getItem(LEGACY_KEY)), restored);
+});
+
+test('V2 refuses empty seeding when reset generation rotates again during async read', async () => {
+  const legacy = {
+    habits: [baseHabit('h1', 'Retain across reset race', 'default', 0)],
+    tasks: [],
+    completions: []
+  };
+  const app = install(legacy);
+  await app.api.seedFromLegacy();
+  const priorV2 = app.indexedDB.dump(DB_NAME);
+  app.localStorage.removeItem(LEGACY_KEY);
+  app.localStorage.setItem('taskpoints_state_v2_generation_v1', 'first-new-generation');
+  const originalConsume = app.indexedDB._consumeFailure.bind(app.indexedDB);
+  let rotated = false;
+  app.indexedDB._consumeFailure = (store, operation) => {
+    if (!rotated && store === 'meta' && operation === 'get') {
+      rotated = true;
+      app.localStorage.setItem('taskpoints_state_v2_generation_v1', 'second-new-generation');
+    }
+    return originalConsume(store, operation);
+  };
+
+  await assert.rejects(app.api.seedFromLegacy({ force: true }),
+    /state_runtime_v2_empty_seed_context_changed/);
+  assert.equal(rotated, true);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), priorV2);
+});
+
+test('V2 refuses an empty seed when localStorage access is denied after initial absent read', async () => {
+  const legacy = {
+    habits: [baseHabit('h1', 'Keep in V2', 'default', 0)],
+    tasks: [],
+    completions: []
+  };
+  const app = install(legacy);
+  await app.api.seedFromLegacy();
+  const priorV2 = app.indexedDB.dump(DB_NAME);
+  app.localStorage.removeItem(LEGACY_KEY);
+  app.localStorage.setItem('taskpoints_state_v2_generation_v1', 'new-generation');
+  const originalGet = app.localStorage.getItem.bind(app.localStorage);
+  let calls = 0;
+  app.localStorage.getItem = key => {
+    if (key === LEGACY_KEY && ++calls >= 2) throw new Error('denied_after_capture');
+    return originalGet(key);
+  };
+  await assert.rejects(app.api.seedFromLegacy({ force: true }),
+    /state_runtime_v2_empty_seed_source_unreadable/);
+  assert.equal(calls >= 2, true);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), priorV2);
+});
