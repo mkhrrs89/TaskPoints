@@ -112,7 +112,7 @@ test('complete or half-complete manual dates are dormant and do not consume free
 });
 
 test('manual spending rejects future/current dates, vices, disabled multipliers and zero credits', () => {
-  const done = ['2026-10-12', '2026-10-13'];
+  const done = ['2026-10-12']; // no silver week yet, so no credits exist
   const h = makeHabit(done);
   const s = state(h);
   assert.equal(core.getHabitManualFreezeEligibility(h, s, '2026-11-02', '2026-11-02').reason, 'not_closed');
