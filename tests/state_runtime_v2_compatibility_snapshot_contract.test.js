@@ -679,3 +679,61 @@ test('V2 verified empty export counts stores without loading full record content
   assert.equal(operations.some(([,op])=>op==='getAll'), false,
     'verified empty exports should never deserialize all historical records');
 });
+
+test('V2 parity verifies an authorized empty reset against all pilot/WAL stores', async () => {
+  const app = await verifiedEmptyResetApp();
+  const result = await app.api.verifyParity();
+  assert.equal(result.checked, true);
+  assert.equal(result.match, true);
+  assert.equal(result.reason, 'verified_empty_reset');
+  assert.deepEqual(JSON.parse(JSON.stringify(result.counts)), {
+    habits: 0, completions: 0, mutations: 0
+  });
+  assert.equal(app.localStorage.getItem(LEGACY_KEY), null);
+});
+
+for (const store of ['habits', 'completions', 'mutations']) {
+  test(`V2 parity never declares empty reset success with retained ${store} rows`, async () => {
+    const app = await verifiedEmptyResetApp();
+    const rows = app.indexedDB._databases.get(DB_NAME)._stores.get(store);
+    rows.set('stranded', { id: 'stranded', value: {
+      id: 'stranded', habitId: 'h1', source: 'habit'
+    } });
+    const previous = app.indexedDB.dump(DB_NAME);
+    const result = await app.api.verifyParity();
+    assert.equal(result.checked, true);
+    assert.equal(result.match, false);
+    assert.equal(result.reason, 'empty_reset_evidence_retained');
+    assert.equal(result.counts[store], 1);
+    assert.deepEqual(app.indexedDB.dump(DB_NAME), previous);
+  });
+}
+
+test('V2 parity refuses empty source when pilot count request fails', async () => {
+  const app = await verifiedEmptyResetApp();
+  const before = app.indexedDB.dump(DB_NAME);
+  app.indexedDB.failNext({ store: 'mutations', operation: 'count',
+    error: new Error('denied-count') });
+  await assert.rejects(app.api.verifyParity(),
+    /state_runtime_v2_parity_empty_evidence_unreadable/);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), before);
+});
+
+test('V2 parity refuses a revision change during empty reset proof', async () => {
+  const app = await verifiedEmptyResetApp();
+  const meta = app.indexedDB._databases.get(DB_NAME)._stores.get('meta');
+  const originalConsume = app.indexedDB._consumeFailure.bind(app.indexedDB);
+  let metaReads = 0;
+  app.indexedDB._consumeFailure = (store, op) => {
+    if (store === 'meta' && op === 'get' && ++metaReads === 2) {
+      const before = meta.get('runtime');
+      meta.set('runtime', { ...before, revision: before.revision + 1 });
+    }
+    return originalConsume(store, op);
+  };
+  const result = await app.api.verifyParity();
+  assert.equal(metaReads, 2);
+  assert.equal(result.match, false);
+  assert.equal(result.checked, false);
+  assert.equal(result.reason, 'empty_reset_context_changed');
+});
