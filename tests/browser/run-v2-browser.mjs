@@ -11139,6 +11139,7 @@ try {
         tx.onabort = () => reject(tx.error);
         tx.onerror = () => reject(tx.error);
       });
+      const parity = await runtime.verifyParity();
       let error = null;
       try { await runtime.buildCompatibilitySnapshot(); }
       catch (e) { error = String(e.message || e); }
@@ -11148,12 +11149,14 @@ try {
         read.onsuccess=()=>resolve(read.result);
         read.onerror=()=>reject(read.error);
       });
-      return { clean, error, preserved, original,
+      return { clean, error, parity, preserved, original,
         authority: runtime.getStatus().readAuthority,
         legacyMissing: localStorage.getItem('taskpoints_v1') === null };
     });
     assert.deepEqual(evidence.clean, {});
     assert.equal(evidence.error, 'state_runtime_v2_compatibility_empty_evidence_retained');
+    assert.equal(evidence.parity.match,false);
+    assert.equal(evidence.parity.reason,'empty_reset_evidence_retained');
     assert.equal(evidence.preserved?.id, 'stranded-v2-habit');
     assert.equal(evidence.legacyMissing, true);
     assert.equal(evidence.authority, 'legacy_only');
@@ -11161,6 +11164,7 @@ try {
     const after = await page.evaluate(async () => {
       const runtime = window.TaskPointsStateRuntimeV2;
       await runtime.startCoordinatedDarkMirror();
+      const parity = await runtime.verifyParity();
       let error = null;
       try { await runtime.buildCompatibilitySnapshot(); }
       catch (e) { error = String(e.message || e); }
@@ -11171,9 +11175,11 @@ try {
         read.onsuccess=()=>resolve(read.result);
         read.onerror=()=>reject(read.error);
       });
-      return { error, preserved, authority:runtime.getStatus().readAuthority };
+      return { error, parity, preserved, authority:runtime.getStatus().readAuthority };
     });
     assert.equal(after.error,'state_runtime_v2_compatibility_empty_evidence_retained');
+    assert.equal(after.parity.match,false);
+    assert.equal(after.parity.reason,'empty_reset_evidence_retained');
     assert.equal(after.preserved?.id,'stranded-v2-habit');
     assert.equal(after.authority,'legacy_only');
     return {cleanResetPreserved:true,unexpectedV2DataRejected:true,
