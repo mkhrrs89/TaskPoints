@@ -3415,6 +3415,93 @@
     }
   }
 
+  // Preview-only evidence for a future fast per-Habit completion index read.
+  // An index's mere existence does not prove that historical completion
+  // packs were indexed. Compare a full scan and the indexed lookup inside
+  // ONE readonly transaction, including duplicate-ID packs and sequence.
+  // Never repair source rows, cache this as a production permit or promote.
+  async function inspectPreviewHabitCompletionIndexParity(habitIdInput) {
+    const refuse = (reason, detail = {}) => ({
+      checked: true, previewOnly: true, indexVerified: false,
+      canPromote: false, readAuthority: 'legacy_only',
+      mutationAuthority: 'legacy_only', productionWritersFenced: false,
+      reason, ...detail
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    if (typeof habitIdInput !== 'string' || !habitIdInput.trim()
+      || habitIdInput.length > 256) return refuse('habit_id_required');
+    const habitId = habitIdInput.trim();
+    const generation = currentGeneration({ create: false });
+    if (!generation) return refuse('generation_unavailable');
+    const modeEpoch = darkMirrorModeEpoch;
+    let inventory;
+    try {
+      inventory = captureReadOnlyFullStorageInventory();
+      if (parseLegacyStateWithPending().missing) return refuse('legacy_unavailable');
+      if (captureReadOnlyFullStorageInventory() !== inventory)
+        return refuse('legacy_changed_during_capture');
+    } catch (_) { return refuse('legacy_source_unreadable'); }
+    const sourceCurrent = () => isDarkEnabled()
+      && darkMirrorModeEpoch === modeEpoch
+      && currentGeneration({ create: false }) === generation
+      && captureReadOnlyFullStorageInventory() === inventory;
+    try {
+      if (!sourceCurrent()) return refuse('legacy_changed_before_read');
+    } catch (_) { return refuse('legacy_unreadable_before_read'); }
+
+    let db, allRows, indexRows, meta;
+    try {
+      db = await open();
+      if (!db) return refuse('v2_unavailable');
+      const tx = db.transaction(['completions', 'meta'], 'readonly');
+      const store = tx.objectStore('completions');
+      if (!store.indexNames.contains(COMPLETION_HABIT_INDEX))
+        return refuse('completion_index_missing');
+      [allRows, indexRows, meta] = await Promise.all([
+        requestPromise(store.getAll()),
+        requestPromise(store.index(COMPLETION_HABIT_INDEX).getAll(habitId)),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID))
+      ]);
+    } catch (_) { return refuse('index_read_unavailable'); }
+    try {
+      if (!sourceCurrent()) return refuse('legacy_changed_during_read');
+      if (!meta || meta.schemaVersion !== SCHEMA_VERSION
+        || meta.resetGeneration !== generation || meta.legacyMissing === true)
+        return refuse('pilot_meta_not_ready');
+      // The entire V2 completion store must have correct metadata, not
+      // just the indexed rows returned for this specific Habit.
+      const invalidRows = allRows.filter(row => !Array.isArray(row?.habitIds)
+        || stableJson(row.habitIds) !== stableJson(completionHabitIdsForRow(row)));
+      if (invalidRows.length)
+        return refuse('completion_index_metadata_incomplete', {
+          scannedRows: allRows.length, invalidRows: invalidRows.length
+        });
+      const relevant = rows => unpackCompletionRows(rows).filter(
+        completion => String(completion?.habitId || '') === habitId
+      );
+      const expected = relevant(allRows);
+      const actual = relevant(indexRows);
+      if (stableJson(actual) !== stableJson(expected))
+        return refuse('completion_index_result_mismatch', {
+          fullScanCompletions: expected.length, indexedCompletions: actual.length
+        });
+      const metaAfter = await readMeta(db);
+      if (!sourceCurrent()) return refuse('legacy_changed_after_read');
+      if (stableJson(metaAfter) !== stableJson(meta))
+        return refuse('v2_revision_changed_during_read');
+      return {
+        checked: true, previewOnly: true, indexVerified: true,
+        reason: 'completion_index_scoped_parity_verified',
+        habitId, generation, revision: Number(meta.revision || 0),
+        scannedRows: allRows.length, indexedRows: indexRows.length,
+        matchingCompletions: expected.length,
+        canPromote: false, productionWritersFenced: false,
+        readAuthority: 'legacy_only', mutationAuthority: 'legacy_only'
+      };
+    } catch (_) { return refuse('completion_index_verification_unreadable'); }
+  }
+
   // Diagnostic-only targeted projection for Stage C development. No live
   // application caller is routed here: the legacy snapshot remains read
   // authority. Never return a V2 candidate across an asynchronous epoch,
@@ -7522,6 +7609,7 @@
     verifyParity,
     inspectPilotReadiness,
     inspectPilotCompletionIndexCoverage,
+    inspectPreviewHabitCompletionIndexParity,
     inspectMutationHandoffPrerequisites,
     inspectAuthorityCutoverBarriers,
     inspectPreviewWriterPeers,
