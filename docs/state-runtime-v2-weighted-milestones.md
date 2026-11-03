@@ -363,3 +363,25 @@ cross-tab writer exclusion across localStorage and IndexedDB. An old
 nonparticipating tab could still write immediately after a check.
 Physical-device validation, complete writer admission, independent backup,
 and full collection migration remain uncredited. **67/100; canPromote:false.**
+
+## Targeted V2 Habit completion lookup — November 3
+
+The existing V2 diagnostic `getCompletionsForHabit(habitId)` formerly
+materialized the entire Habits object store and the completion rows just to
+return one Habit's history. It now retrieves the specific Habit via
+IndexedDB primary-key `get(habitId)`, while preserving the established
+complete completion-row scan and filtering by Habit ID. This removes the
+unnecessary whole-Habits read and clone cost from the preview lookup.
+
+Duplicate historical completion IDs may share a packed IndexedDB record,
+so the matching entries are still ordered by their persisted completion
+sequence, newest first. The index is intentionally **not** trusted merely
+because it exists: older rows may not have verified index coverage.
+Regression cases require no `habits.getAll()`, exact mixed-Habit ordering,
+a safe absent-Habit result and no persistent writes.
+
+**Scope:** This optimizes only the opt-in V2 read API, not the live Home
+page or production Habit scoring. A full completion scan remains until an
+independently verified index-backed read can safely replace it. This is
+incremental engineering within the existing readiness gates; **67/100**
+and **canPromote:false** remain unchanged.
