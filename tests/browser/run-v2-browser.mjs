@@ -493,6 +493,82 @@ try {
     return {metadataCreated:true,legacyGapsDiagnosed:true,oldReadersUnchanged:true};
   });
 
+  await run('preview completion index backfill is atomic and survives browser reload', async context => {
+    const page=await open(context);
+    await page.evaluate(() => {
+      window.V2BrowserFixture.delta('h1','2026-10-20','full',1);
+      window.V2BrowserFixture.delta('h2','2026-10-20','half',2);
+    });
+    await settled(page,2);
+    const checked=await page.evaluate(async () => {
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const db=await runtime.open();
+      const getAll=store=>new Promise((resolve,reject)=>{
+        const req=db.transaction(store,'readonly').objectStore(store).getAll();
+        req.onsuccess=()=>resolve(req.result);
+        req.onerror=()=>reject(req.error);
+      });
+      const original=await getAll('completions');
+      const originalLegacy=localStorage.getItem('taskpoints_v1');
+      // Simulate an older valid V2 pack created before the index metadata.
+      const oldRow={...original.find(row=>row.id==='habit:h1:2026-10-20')};
+      delete oldRow.habitIds;
+      const tx=db.transaction('completions','readwrite');
+      tx.objectStore('completions').put(oldRow);
+      await new Promise((resolve,reject)=>{
+        tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+      });
+      const gap=await runtime.inspectPilotCompletionIndexCoverage();
+      const backfill=await runtime.rehearsePreviewCompletionIndexBackfill();
+      const after=await getAll('completions');
+      const replay=await runtime.rehearsePreviewCompletionIndexBackfill();
+      const coverage=await runtime.inspectPilotCompletionIndexCoverage();
+      const parity=await runtime.verifyParity();
+      const audit=await runtime.inspectPreviewHabitCompletionIndexParity('h1');
+      const indexed=await runtime.readPreviewIndexedHabitCompletions('h1');
+      return {original,originalLegacy,backfill,replay,gap,after,coverage,parity,
+        audit,indexed,legacyAfter:localStorage.getItem('taskpoints_v1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(checked.gap.indexReady,false);
+    assert.equal(checked.gap.counts.missing,1);
+    assert.equal(checked.backfill.applied,true,JSON.stringify(checked.backfill));
+    assert.equal(checked.backfill.confirmedDurable,true);
+    assert.equal(checked.backfill.updatedRows,1);
+    assert.equal(checked.backfill.remainingRows,0);
+    assert.equal(checked.replay.alreadyCurrent,true);
+    assert.equal(checked.coverage.indexReady,true,JSON.stringify(checked.coverage));
+    assert.equal(checked.parity.match,true,JSON.stringify(checked.parity.differences));
+    assert.equal(checked.audit.indexVerified,true,JSON.stringify(checked.audit));
+    assert.equal(checked.indexed.eligible,true,JSON.stringify(checked.indexed));
+    assert.equal(checked.indexed.lookupMode,'audited_index');
+    assert.deepEqual(checked.indexed.completions.map(row=>row.id),
+      ['habit:h1:2026-10-20']);
+    assert.equal(checked.legacyAfter,checked.originalLegacy);
+    assert.equal(checked.authority,'legacy_only');
+    const originalEntries=checked.original.map(row=>({id:row.id,entries:row.entries}))
+      .sort((a,b)=>a.id.localeCompare(b.id));
+    const updatedEntries=checked.after.map(row=>({id:row.id,entries:row.entries}))
+      .sort((a,b)=>a.id.localeCompare(b.id));
+    assert.deepEqual(updatedEntries,originalEntries,
+      'metadata backfill must never rewrite historical completion values');
+    await page.reload({waitUntil:'load'});
+    await page.evaluate(()=>window.V2BrowserFixture.start());
+    const resumed=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      return {coverage:await runtime.inspectPilotCompletionIndexCoverage(),
+        parity:await runtime.verifyParity(),
+        authority:runtime.getStatus().readAuthority,
+        legacy:localStorage.getItem('taskpoints_v1')};
+    });
+    assert.equal(resumed.coverage.indexReady,true,JSON.stringify(resumed.coverage));
+    assert.equal(resumed.parity.match,true,JSON.stringify(resumed.parity.differences));
+    assert.equal(resumed.authority,'legacy_only');
+    assert.equal(resumed.legacy,checked.originalLegacy);
+    return {metadataRestored:true,reloadSurvived:true,indexedReadVerified:true,
+      legacyUnchanged:true};
+  });
+
   await run('pilot read readiness is preview-only, read-only, and refuses pending WAL', async context => {
     const page = await open(context);
     const before = await page.evaluate(async () => {
