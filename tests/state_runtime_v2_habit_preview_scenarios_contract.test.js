@@ -29,7 +29,7 @@ function baseLegacyState() {
   };
 }
 
-function installRuntime({ indexedDB = new FakeIndexedDB(), localStorage = null } = {}) {
+function installRuntime({ indexedDB = new FakeIndexedDB(), localStorage = null, previewHost = false } = {}) {
   const storage = localStorage || new FakeStorage({
     [DARK_MODE_KEY]: '1',
     [LEGACY_KEY]: JSON.stringify(baseLegacyState())
@@ -54,6 +54,7 @@ function installRuntime({ indexedDB = new FakeIndexedDB(), localStorage = null }
   const context = {
     indexedDB,
     localStorage: storage,
+    location: previewHost ? { hostname: 'localhost' } : undefined,
     structuredClone,
     JSON,
     Date,
@@ -272,4 +273,114 @@ test('V2 one-Habit lookup leaves unrelated Habit records unread when completions
   };
   assert.deepEqual(await app.api.getCompletionsForHabit('h1'), []);
   assert.equal(habitStoreScans, 0);
+});
+
+test('preview indexed completion audit verifies mixed Habit packs without changing storage', async () => {
+  const legacy = baseLegacyState();
+  legacy.habits.push({
+    ...structuredClone(legacy.habits[0]), id: 'h2', name: 'Walk'
+  });
+  legacy.completions = [
+    { id: 'same', source: 'habit', habitId: 'h1', dayKey: '2026-09-07', points: 10 },
+    { id: 'h2', source: 'habit', habitId: 'h2', dayKey: '2026-09-06', points: 5 },
+    { id: 'same', source: 'habit', habitId: 'h2', dayKey: '2026-09-04', points: 3 },
+    { id: 'old', source: 'habit', habitId: 'h1', dayKey: '2026-09-01', points: 10 }
+  ];
+  const app = installRuntime({
+    previewHost: true,
+    localStorage: new FakeStorage({
+      [DARK_MODE_KEY]: '1',
+      [LEGACY_KEY]: JSON.stringify(legacy)
+    })
+  });
+  await app.api.seedFromLegacy();
+  const before = app.indexedDB.dump(DB_NAME);
+  const originalConsume = app.indexedDB._consumeFailure.bind(app.indexedDB);
+  const operations = [];
+  app.indexedDB._consumeFailure = (store, operation) => {
+    operations.push([store, operation]);
+    return originalConsume(store, operation);
+  };
+  const h1 = await app.api.inspectPreviewHabitCompletionIndexParity('h1');
+  const h2 = await app.api.inspectPreviewHabitCompletionIndexParity('h2');
+  assert.equal(h1.indexVerified, true, h1.reason);
+  assert.equal(h2.indexVerified, true, h2.reason);
+  assert.equal(h1.matchingCompletions, 2);
+  assert.equal(h2.matchingCompletions, 2);
+  assert.equal(h1.canPromote, false);
+  assert.equal(h1.readAuthority, 'legacy_only');
+  assert.equal(operations.filter(([store, operation]) =>
+    store === 'completions' && operation === 'indexGetAll').length, 2);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), before,
+    'an index check must not modify V1, V2 rows or meta');
+});
+
+test('preview indexed completion audit refuses missing historical index metadata', async () => {
+  const legacy = baseLegacyState();
+  legacy.completions = [
+    { id: 'h1', source: 'habit', habitId: 'h1', dayKey: '2026-09-06', points: 10 }
+  ];
+  const app = installRuntime({
+    previewHost: true,
+    localStorage: new FakeStorage({
+      [DARK_MODE_KEY]: '1',
+      [LEGACY_KEY]: JSON.stringify(legacy)
+    })
+  });
+  await app.api.seedFromLegacy();
+  const rows = app.indexedDB._databases.get(DB_NAME)._stores.get('completions');
+  const key = [...rows.keys()][0];
+  const before = rows.get(key);
+  rows.set(key, { ...before, habitIds: undefined });
+  const damaged = app.indexedDB.dump(DB_NAME);
+  const result = await app.api.inspectPreviewHabitCompletionIndexParity('h1');
+  assert.equal(result.indexVerified, false);
+  assert.equal(result.reason, 'completion_index_metadata_incomplete');
+  assert.equal(result.canPromote, false);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), damaged,
+    'the audit must not silently repair historical completion metadata');
+});
+
+test('preview indexed completion audit detects incorrect metadata and missing indexed rows', async () => {
+  const legacy = baseLegacyState();
+  legacy.completions = [
+    { id: 'h1', source: 'habit', habitId: 'h1', dayKey: '2026-09-06', points: 10 }
+  ];
+  const app = installRuntime({
+    previewHost: true,
+    localStorage: new FakeStorage({
+      [DARK_MODE_KEY]: '1',
+      [LEGACY_KEY]: JSON.stringify(legacy)
+    })
+  });
+  await app.api.seedFromLegacy();
+  const rows = app.indexedDB._databases.get(DB_NAME)._stores.get('completions');
+  const key = [...rows.keys()][0];
+  const before = rows.get(key);
+  rows.set(key, { ...before, habitIds: ['h2'] });
+  const result = await app.api.inspectPreviewHabitCompletionIndexParity('h1');
+  assert.equal(result.indexVerified, false);
+  assert.equal(result.reason, 'completion_index_metadata_incomplete');
+  assert.equal(result.canPromote, false);
+});
+
+test('preview indexed completion audit refuses V2 revision changes during read', async () => {
+  const app = installRuntime({ previewHost: true });
+  await app.api.seedFromLegacy();
+  const db = app.indexedDB._databases.get(DB_NAME);
+  const meta = db._stores.get('meta');
+  const originalConsume = app.indexedDB._consumeFailure.bind(app.indexedDB);
+  let injected = false;
+  app.indexedDB._consumeFailure = (store, operation) => {
+    if (!injected && store === 'completions' && operation === 'indexGetAll') {
+      injected = true;
+      const before = meta.get('runtime');
+      meta.set('runtime', { ...before, revision: Number(before.revision) + 1 });
+    }
+    return originalConsume(store, operation);
+  };
+  const result = await app.api.inspectPreviewHabitCompletionIndexParity('h1');
+  assert.equal(injected, true);
+  assert.equal(result.indexVerified, false);
+  assert.equal(result.reason, 'v2_revision_changed_during_read');
 });
