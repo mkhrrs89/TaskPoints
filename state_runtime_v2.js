@@ -2956,8 +2956,19 @@
   // and refuse corrupt Task journal evidence instead of treating it as empty.
   function applyTaskJournalToCompatibilitySource(sourceState) {
     if (typeof core.readPendingTaskMutations !== 'function'
-      || typeof core.applyPendingTaskMutations !== 'function')
+      || typeof core.applyPendingTaskMutations !== 'function') {
+      // Older standalone Habit-only harnesses, and pages where the Task
+      // journal module was never installed, must retain the original export
+      // behavior ONLY when there is provably no pending Task journal.
+      // A present but unreadable journal is never equivalent to no changes.
+      let raw;
+      try { raw = global.localStorage.getItem('taskpoints_pending_task_mutations_v1'); }
+      catch (_) {
+        throw new Error('state_runtime_v2_compatibility_task_journal_unreadable');
+      }
+      if (raw === null) return clone(sourceState);
       throw new Error('state_runtime_v2_compatibility_task_journal_unavailable');
+    }
     const pending = core.readPendingTaskMutations();
     if (pending?.malformed || !pending?.record
       || !Array.isArray(pending.record.tasks)
