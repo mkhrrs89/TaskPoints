@@ -3549,6 +3549,10 @@
       || habitIdInput.length > 256) return refuse('habit_id_required');
     const habitId = habitIdInput.trim();
     const proof = previewHabitIndexProof;
+    const invalidateOwnProof = () => {
+      // Older in-flight lookups must not erase a newer audit's evidence.
+      if (previewHabitIndexProof === proof) previewHabitIndexProof = null;
+    };
     if (!proof || proof.habitId !== habitId)
       return refuse('fresh_index_audit_required');
     const sourceCurrent = () => isDarkEnabled()
@@ -3557,11 +3561,11 @@
       && captureReadOnlyFullStorageInventory() === proof.inventory;
     try {
       if (!sourceCurrent()) {
-        previewHabitIndexProof = null;
+        invalidateOwnProof();
         return refuse('index_audit_source_stale');
       }
     } catch (_) {
-      previewHabitIndexProof = null;
+      invalidateOwnProof();
       return refuse('index_audit_source_unreadable');
     }
     let db, rows, meta;
@@ -3571,7 +3575,7 @@
       const tx = db.transaction(['completions', 'meta'], 'readonly');
       const store = tx.objectStore('completions');
       if (!store.indexNames.contains(COMPLETION_HABIT_INDEX)) {
-        previewHabitIndexProof = null;
+        invalidateOwnProof();
         return refuse('completion_index_missing');
       }
       [rows, meta] = await Promise.all([
@@ -3579,37 +3583,37 @@
         requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID))
       ]);
     } catch (_) {
-      previewHabitIndexProof = null;
+      invalidateOwnProof();
       return refuse('indexed_read_unavailable');
     }
     try {
       if (!sourceCurrent()) {
-        previewHabitIndexProof = null;
+        invalidateOwnProof();
         return refuse('index_audit_source_stale');
       }
       if (!meta || meta.schemaVersion !== SCHEMA_VERSION
         || meta.resetGeneration !== proof.generation || meta.legacyMissing === true
         || stableJson(meta) !== proof.metaJson) {
-        previewHabitIndexProof = null;
+        invalidateOwnProof();
         return refuse('index_audit_revision_stale');
       }
       // Fail closed if any *returned* packed row has changed its index
       // metadata even if a broken writer forgot to bump the revision.
       if (rows.some(row => !Array.isArray(row?.habitIds)
         || stableJson(row.habitIds) !== stableJson(completionHabitIdsForRow(row)))) {
-        previewHabitIndexProof = null;
+        invalidateOwnProof();
         return refuse('indexed_rows_corrupt');
       }
       const completions = global.Array.from(unpackCompletionRows(rows)
         .filter(row => String(row?.habitId || '') === habitId));
       const after = await readMeta(db);
       if (stableJson(after) !== proof.metaJson) {
-        previewHabitIndexProof = null;
+        invalidateOwnProof();
         return refuse('index_audit_revision_stale');
       }
       if (!sourceCurrent() || previewHabitIndexProof !== proof) {
         // An older in-flight read must not revoke a *newer* successful audit.
-        if (previewHabitIndexProof === proof) previewHabitIndexProof = null;
+        invalidateOwnProof();
         return refuse('index_audit_source_stale');
       }
       return {
@@ -3622,7 +3626,7 @@
         readAuthority: 'legacy_only', mutationAuthority: 'legacy_only'
       };
     } catch (_) {
-      previewHabitIndexProof = null;
+      invalidateOwnProof();
       return refuse('indexed_read_verification_unreadable');
     }
   }
