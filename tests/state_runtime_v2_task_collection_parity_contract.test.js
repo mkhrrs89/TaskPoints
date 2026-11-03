@@ -158,6 +158,37 @@ test('read-only completion ordering inspector refuses partial, stale, extra and 
   assert.match(runtime,/rehearsePreviewTaskLinkedCompletionBatch,\s*inspectPreviewTaskCompletionOrderParity,/);
 });
 
+test('V2 compatibility overlays Task journal on Habit journal and checks immutable source across async reads',()=>{
+  const begin=runtime.indexOf('function applyTaskJournalToCompatibilitySource(');
+  const end=runtime.indexOf('// Home renderHabits recomputes exactly these fields',begin);
+  assert.ok(begin>=0 && end>begin);
+  const source=runtime.slice(begin,end);
+  assert.match(source,/core\.readPendingTaskMutations\(\)/);
+  assert.match(source,/core\.applyPendingTaskMutations\(clone\(sourceState\), pending\.record\)/);
+  assert.match(source,/pending\?\.malformed/);
+  assert.match(source,/captureReadOnlyFullStorageInventory\(\)/);
+  assert.match(source,/currentGeneration\(\{ create: false \}\)/);
+  assert.match(source,/mergeCompatibilityCompletions\(effective\.completions, collections\.completions\)/);
+  assert.doesNotMatch(source,/\b(?:journalTaskMutation|journalTaskCompletionBatch|saveStateSnapshot)\s*\(/);
+});
+
+test('mixed completion export inspector is preview-only, read-only and non-promotable',()=>{
+  const begin=runtime.indexOf('async function inspectPreviewMixedCompletionExport()');
+  const end=runtime.indexOf('// A narrower stepping stone toward REQUIRED writer admission',begin);
+  assert.ok(begin>=0 && end>begin);
+  const source=runtime.slice(begin,end);
+  assert.match(source,/isWalTestPreviewHost\(\)/);
+  assert.match(source,/applyTaskJournalToCompatibilitySource\(source\.state\)/);
+  assert.match(source,/db\.transaction\(\['habits','completions','meta'\], 'readonly'\)/);
+  assert.match(source,/mergeCompatibilityCompletions\(effective\.completions, completions\)/);
+  assert.match(source,/stableJson\(candidate\) === stableJson\(original\)/);
+  assert.match(source,/fullExportVerified: false/);
+  assert.match(source,/canPromote: false/);
+  assert.doesNotMatch(source,/\b(?:seedFromLegacy|buildCompatibilitySnapshot|journalTaskMutation|saveStateSnapshot)\s*\(/);
+  assert.doesNotMatch(source,/\.(?:put|add|delete|clear|setItem|removeItem)\s*\(/);
+  assert.match(runtime,/inspectPreviewTaskCompletionOrderParity,\s*inspectPreviewMixedCompletionExport,/);
+});
+
 test('Task parity checks identity, payload, source inventory and generation without trusting metadata alone',()=>{
   assert.match(source,/previewRecoveryFingerprint\(tasks\)/);
   assert.match(source,/evidence\.taskFingerprint !== taskFingerprint/);

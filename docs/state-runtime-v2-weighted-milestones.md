@@ -279,3 +279,30 @@ interleaved Habit/Task chronology, export/backup parity, production writer
 fencing or independent recovery. It never rewrites or auto-heals V2 or V1.
 Browser scenarios cover partial import, exact completion, corrupt sequence,
 unexpected extra row, and new V1 journal activity.
+
+
+## V2 compatibility snapshot: interleaved V1 Task and Habit journals — November 3
+
+The existing V2 `buildCompatibilitySnapshot()` formerly read the effective
+V1 **Habit** journal, then merged V2 pilot completions into the persisted V1
+completion array. It did **not** overlay the pending synchronous V1 **Task**
+journal before building that snapshot. A preview export could therefore omit
+recent Task/Work/metric completion upserts or deletions that had not yet
+undergone V1 compaction.
+
+The V2-only compatibility builder now clones the Habit-journal-aware V1
+source and applies the **production Task-journal replay function** to that
+copy before merging V2's Habit-only pilot rows. It refuses malformed Task
+journal evidence and rejects source inventory, generation or mode changes
+during the asynchronous V2 read. It does not alter V1 storage, the journal
+writer, the existing Habit/WAL mirror or any production export path.
+
+New `inspectPreviewMixedCompletionExport()` independently inspects the
+uncompacted effective V1 mixed completion order and the V2 Habit pilot
+candidate via **read-only** IDB transactions without seeding or repairing.
+It compares exact payloads and array ordering, flags pilot mismatches or
+stale source, and never infers promotion readiness. Browser tests cover
+interleaved Habit + Task changes and malformed journal refusal. Neither
+a successful scoped audit nor the compatibility snapshot establishes
+full multi-collection export parity, off-device backup or writer exclusion;
+`fullExportVerified` and `canPromote` remain false.

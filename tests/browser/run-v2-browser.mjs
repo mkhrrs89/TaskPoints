@@ -1834,6 +1834,80 @@ try {
       unexpectedRecordRefused:true,staleJournalRefused:true};
   });
 
+  await run('V2 compatibility export includes V1 Task journal and preserves interleaved Habit/Task chronology', async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2,core=window.TaskPointsCore;
+      const baseline=await api.buildCompatibilitySnapshot();
+      const baselineCheck=await api.inspectPreviewMixedCompletionExport();
+      window.V2BrowserFixture.delta('h1','2026-10-21','full',1);
+      await api.waitForHabitMirrorIdle();
+      const record={id:'export-journal-work',source:'work',taskId:'synthetic-task',
+        title:'Work Score',points:7.2,completedAtISO:'2026-10-21T12:00:00.000Z'};
+      core.journalTaskCompletionBatch([record]);
+      const rawV1=localStorage.getItem('taskpoints_v1');
+      const rawTaskJournal=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const rawHabitJournal=localStorage.getItem('taskpoints_pending_habit_deltas_v1');
+      const snapshot=await api.buildCompatibilitySnapshot();
+      const diagnostic=await api.inspectPreviewMixedCompletionExport();
+      const raw=core.parseTaskPointsStorageJson(rawV1,{});
+      const pendingHabits=core.readPendingHabitDeltas();
+      if(pendingHabits?.length)core.applyPendingHabitDeltas(raw,pendingHabits);
+      const effective=core.applyPendingTaskMutations(raw,core.readPendingTaskMutations().record);
+      return {baselineIds:baseline.completions.map(c=>c.id),baselineCheck,
+        snapshotIds:snapshot.completions.map(c=>c.id),
+        effectiveIds:effective.completions.map(c=>c.id),
+        snapshotWork:snapshot.completions.find(c=>c.id===record.id),
+        expectedWork:effective.completions.find(c=>c.id===record.id),
+        diagnostic,
+        originalSame:localStorage.getItem('taskpoints_v1')===rawV1,
+        taskJournalSame:localStorage.getItem('taskpoints_pending_task_mutations_v1')===rawTaskJournal,
+        habitJournalSame:localStorage.getItem('taskpoints_pending_habit_deltas_v1')===rawHabitJournal,
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(result.baselineCheck.match,true,JSON.stringify(result.baselineCheck));
+    assert.deepEqual(result.baselineIds,['synthetic-task-completion']);
+    assert.deepEqual(result.snapshotIds,result.effectiveIds);
+    assert.equal(result.snapshotWork.points,result.expectedWork.points);
+    assert.equal(result.snapshotIds.includes('export-journal-work'),true);
+    assert.equal(result.snapshotIds.includes('habit:h1:2026-10-21'),true);
+    assert.equal(result.diagnostic.match,true,JSON.stringify(result.diagnostic));
+    assert.equal(result.diagnostic.mixedCompletionOrderVerified,true);
+    assert.equal(result.diagnostic.fullExportVerified,false);
+    assert.equal(result.diagnostic.canPromote,false);
+    assert.equal(result.originalSame,true);
+    assert.equal(result.taskJournalSame,true);
+    assert.equal(result.habitJournalSame,true);
+    assert.equal(result.authority,'legacy_only');
+    return {TaskJournalKeptInExport:true,interleavedOrderingExact:true,
+      HabitJournalPreserved:true,readOnlyInspector:true,V1Unchanged:true};
+  });
+
+  await run('V2 compatibility snapshot fails closed on malformed Task journal without clearing evidence',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.buildCompatibilitySnapshot();
+      const prior=localStorage.getItem('taskpoints_v1');
+      const malformed='{corrupt-task-journal';
+      localStorage.setItem('taskpoints_pending_task_mutations_v1',malformed);
+      const diagnostic=await api.inspectPreviewMixedCompletionExport();
+      let error='';
+      try{await api.buildCompatibilitySnapshot()}catch(e){error=String(e.message)}
+      return {diagnostic,error,
+        journalUnchanged:localStorage.getItem('taskpoints_pending_task_mutations_v1')===malformed,
+        v1Unchanged:localStorage.getItem('taskpoints_v1')===prior,
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(result.diagnostic.match,false);
+    assert.equal(result.diagnostic.reason,'legacy_task_journal_malformed');
+    assert.match(result.error,/compatibility_task_journal_malformed/);
+    assert.equal(result.journalUnchanged,true);
+    assert.equal(result.v1Unchanged,true);
+    assert.equal(result.authority,'legacy_only');
+    return {badJournalNotDiscarded:true,noFalseExport:true,readOnlyDiagnostic:true};
+  });
+
   await run('nonpilot Task record migration aborts atomically on Task put failure and retries safely',async context=>{
     const page=await open(context);
     const result=await page.evaluate(async()=>{

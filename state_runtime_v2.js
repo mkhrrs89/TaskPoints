@@ -2950,16 +2950,49 @@
     return clone([...v2Only, ...merged]);
   }
 
+  // V1's synchronous Task journal may not yet be compacted into the V1
+  // snapshot. An export candidate built from the Habit-only overlay silently
+  // misses those Task/Work/metric changes. Overlay both journals in V1 order,
+  // and refuse corrupt Task journal evidence instead of treating it as empty.
+  function applyTaskJournalToCompatibilitySource(sourceState) {
+    if (typeof core.readPendingTaskMutations !== 'function'
+      || typeof core.applyPendingTaskMutations !== 'function')
+      throw new Error('state_runtime_v2_compatibility_task_journal_unavailable');
+    const pending = core.readPendingTaskMutations();
+    if (pending?.malformed || !pending?.record
+      || !Array.isArray(pending.record.tasks)
+      || !Array.isArray(pending.record.completionUpserts)
+      || !Array.isArray(pending.record.completionDeletes))
+      throw new Error('state_runtime_v2_compatibility_task_journal_malformed');
+    // The production journal's own replay function preserves its exact
+    // ordering, upsert and deletion rules. Work on an isolated clone only.
+    const overlaid = core.applyPendingTaskMutations(clone(sourceState), pending.record);
+    if (!overlaid || !Array.isArray(overlaid.tasks)
+      || !Array.isArray(overlaid.completions))
+      throw new Error('state_runtime_v2_compatibility_task_overlay_invalid');
+    return overlaid;
+  }
+
   async function buildCompatibilitySnapshot() {
     if (!isDarkEnabled()) throw new Error('state_runtime_v2_dark_disabled');
     await seedFromLegacy();
+    const sourceInventory = captureReadOnlyFullStorageInventory();
+    const expectedGeneration = currentGeneration({ create: false });
+    const modeEpoch = darkMirrorModeEpoch;
     const source = parseLegacyStateWithPending();
     if (source.missing) return {};
+    const effective = applyTaskJournalToCompatibilitySource(source.state);
+    if (captureReadOnlyFullStorageInventory() !== sourceInventory)
+      throw new Error('state_runtime_v2_compatibility_source_changed_during_capture');
     const collections = await readV2Collections();
+    if (!isDarkEnabled() || darkMirrorModeEpoch !== modeEpoch
+      || currentGeneration({ create: false }) !== expectedGeneration
+      || captureReadOnlyFullStorageInventory() !== sourceInventory)
+      throw new Error('state_runtime_v2_compatibility_source_changed_during_read');
     return {
-      ...source.state,
+      ...effective,
       habits: collections.habits,
-      completions: mergeCompatibilityCompletions(source.state.completions, collections.completions)
+      completions: mergeCompatibilityCompletions(effective.completions, collections.completions)
     };
   }
 
@@ -5808,6 +5841,103 @@
     } catch (_) { return refuse('task_completion_order_unreadable'); }
   }
 
+  // PREVIEW HOST ONLY: independently audit the mixed completion history
+  // that buildCompatibilitySnapshot would export. No call to seedFromLegacy
+  // or buildCompatibilitySnapshot: both may perform IDB writes on startup.
+  // This inspection opens only readonly transactions and never auto-heals.
+  async function inspectPreviewMixedCompletionExport() {
+    const refuse = (reason, detail = {}) => ({
+      checked: true, previewOnly: true, match: false,
+      mixedCompletionOrderVerified: false, fullExportVerified: false,
+      canPromote: false, productionWritersFenced: false,
+      readAuthority: 'legacy_only', mutationAuthority: 'legacy_only',
+      comparisonScope: 'effective_v1_interleaved_completion_history',
+      reason, ...detail
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    const modeEpoch = darkMirrorModeEpoch;
+    const generation = currentGeneration({ create: false });
+    if (!generation) return refuse('generation_unavailable');
+    let inventory, effective, v1PilotHash;
+    try {
+      inventory = captureReadOnlyFullStorageInventory();
+      const source = parseLegacyStateWithPending();
+      if (source.missing) return refuse('legacy_unavailable');
+      effective = applyTaskJournalToCompatibilitySource(source.state);
+      if (captureReadOnlyFullStorageInventory() !== inventory)
+        return refuse('legacy_changed_during_capture');
+      v1PilotHash = stableJson(paritySubset(effective));
+    } catch (error) {
+      const message = String(error?.message || error);
+      if (message.includes('compatibility_task_journal_malformed'))
+        return refuse('legacy_task_journal_malformed');
+      if (message.includes('compatibility_task_journal_unavailable'))
+        return refuse('legacy_task_journal_unavailable');
+      return refuse('legacy_mixed_completion_unreadable');
+    }
+    const sourceCurrent = () => isDarkEnabled()
+      && darkMirrorModeEpoch === modeEpoch
+      && currentGeneration({ create: false }) === generation
+      && captureReadOnlyFullStorageInventory() === inventory;
+    try {
+      if (!sourceCurrent()) return refuse('legacy_changed_before_inspection');
+    } catch (_) { return refuse('legacy_unreadable_before_inspection'); }
+    let habits, completions, meta;
+    try {
+      const db = await open();
+      if (!db) return refuse('dark_disabled');
+      const tx = db.transaction(['habits','completions','meta'], 'readonly');
+      const [habitRows, completionRows, metadata] = await Promise.all([
+        requestPromise(tx.objectStore('habits').getAll()),
+        requestPromise(tx.objectStore('completions').getAll()),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID))
+      ]);
+      habits = habitRows.slice()
+        .sort((a,b)=>Number(a.legacyIndex)-Number(b.legacyIndex))
+        .map(row=>clone(row.value));
+      completions = unpackCompletionRows(completionRows);
+      meta = metadata;
+    } catch (_) { return refuse('v2_mixed_completion_read_unavailable'); }
+    try {
+      if (!sourceCurrent()) return refuse('legacy_changed_during_inspection');
+      if (!meta || meta.schemaVersion !== SCHEMA_VERSION
+        || meta.resetGeneration !== generation || meta.legacyMissing === true)
+        return refuse('pilot_meta_not_ready');
+      // The compatibility function overlays pilot rows only; a V2-only
+      // Task/Work completion may exist for preview but cannot enter exports.
+      const v2PilotHash = stableJson(paritySubset({habits,completions}));
+      if (v1PilotHash !== v2PilotHash)
+        return refuse('pilot_parity_mismatch');
+      const candidate = mergeCompatibilityCompletions(effective.completions, completions);
+      const original = effective.completions;
+      const mixedMatch = stableJson(candidate) === stableJson(original);
+      if (!mixedMatch) {
+        const firstDifference = candidate.findIndex((row,index)=>
+          stableJson(row) !== stableJson(original[index]));
+        return refuse('mixed_completion_export_mismatch', {
+          expectedCount: original.length, actualCount: candidate.length,
+          firstDifferenceIndex: firstDifference < 0 ? Math.min(candidate.length,original.length)
+            : firstDifference
+        });
+      }
+      if (!sourceCurrent()) return refuse('legacy_changed_after_inspection');
+      return {
+        checked: true, previewOnly: true, match: true,
+        mixedCompletionOrderVerified: true, fullExportVerified: false,
+        comparisonScope: 'effective_v1_interleaved_completion_history',
+        completionCount: original.length,
+        habitCompletionCount: original.filter(isPilotCompletion).length,
+        legacyNonpilotCompletionCount: original.filter(row=>!isPilotCompletion(row)).length,
+        // Extra V2 nonpilot rows are NOT promoted into compatibility snapshots.
+        v2NonpilotPreviewRowCount: completions.filter(row=>!isPilotCompletion(row)).length,
+        reason: 'mixed_completion_export_order_verified',
+        canPromote: false, productionWritersFenced: false,
+        readAuthority: 'legacy_only', mutationAuthority: 'legacy_only'
+      };
+    } catch (_) { return refuse('mixed_completion_export_unreadable'); }
+  }
+
   // A narrower stepping stone toward REQUIRED writer admission, rather
   // than relying on the caller to invoke an optional freshness callback.
   // This API is explicit, PREVIEW-HOST-ONLY and NEVER installs on the live
@@ -7141,6 +7271,7 @@
     rehearsePreviewTaskLinkedCompletion,
     rehearsePreviewTaskLinkedCompletionBatch,
     inspectPreviewTaskCompletionOrderParity,
+    inspectPreviewMixedCompletionExport,
     rehearsePreviewDurableWriterFence,
     inspectPreservedParityMismatch,
     inspectLegacyRollbackSource,
