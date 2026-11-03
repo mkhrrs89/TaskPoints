@@ -11116,6 +11116,70 @@ try {
     return {writes:48,tabReopens:2,distinctSidecars:48,checkedInBothTabs:true};
   });
 
+  await run('empty reset export refuses stranded V2 evidence across browser reload', async context => {
+    const page = await open(context);
+    const evidence = await page.evaluate(async () => {
+      const runtime = window.TaskPointsStateRuntimeV2;
+      const original = localStorage.getItem('taskpoints_v1');
+      // A legitimate reset rotates the generation and removes V1, so a
+      // genuinely empty pilot must still yield the historic {} export.
+      localStorage.removeItem('taskpoints_v1');
+      localStorage.setItem('taskpoints_state_v2_generation_v1',
+        'browser-reset-empty-evidence-epoch');
+      const clean = await runtime.buildCompatibilitySnapshot();
+      const db = await runtime.open();
+      const tx = db.transaction('habits', 'readwrite');
+      const stranded = {
+        id: 'stranded-v2-habit', legacyIndex: 0,
+        value: { id: 'stranded-v2-habit', name: 'Recoverable V2 data' }
+      };
+      tx.objectStore('habits').put(stranded);
+      await new Promise((resolve,reject) => {
+        tx.oncomplete = resolve;
+        tx.onabort = () => reject(tx.error);
+        tx.onerror = () => reject(tx.error);
+      });
+      let error = null;
+      try { await runtime.buildCompatibilitySnapshot(); }
+      catch (e) { error = String(e.message || e); }
+      const read = db.transaction('habits', 'readonly')
+        .objectStore('habits').get(stranded.id);
+      const preserved = await new Promise((resolve,reject)=>{
+        read.onsuccess=()=>resolve(read.result);
+        read.onerror=()=>reject(read.error);
+      });
+      return { clean, error, preserved, original,
+        authority: runtime.getStatus().readAuthority,
+        legacyMissing: localStorage.getItem('taskpoints_v1') === null };
+    });
+    assert.deepEqual(evidence.clean, {});
+    assert.equal(evidence.error, 'state_runtime_v2_compatibility_empty_evidence_retained');
+    assert.equal(evidence.preserved?.id, 'stranded-v2-habit');
+    assert.equal(evidence.legacyMissing, true);
+    assert.equal(evidence.authority, 'legacy_only');
+    await page.reload({ waitUntil:'load' });
+    const after = await page.evaluate(async () => {
+      const runtime = window.TaskPointsStateRuntimeV2;
+      await runtime.startCoordinatedDarkMirror();
+      let error = null;
+      try { await runtime.buildCompatibilitySnapshot(); }
+      catch (e) { error = String(e.message || e); }
+      const db = await runtime.open();
+      const read = db.transaction('habits','readonly')
+        .objectStore('habits').get('stranded-v2-habit');
+      const preserved = await new Promise((resolve,reject)=>{
+        read.onsuccess=()=>resolve(read.result);
+        read.onerror=()=>reject(read.error);
+      });
+      return { error, preserved, authority:runtime.getStatus().readAuthority };
+    });
+    assert.equal(after.error,'state_runtime_v2_compatibility_empty_evidence_retained');
+    assert.equal(after.preserved?.id,'stranded-v2-habit');
+    assert.equal(after.authority,'legacy_only');
+    return {cleanResetPreserved:true,unexpectedV2DataRejected:true,
+      evidenceStillAvailableAfterReload:true};
+  });
+
   await run('missing V1 during five repeated two-tab reloads preserves V2 WAL evidence for recovery',async context=>{
     const first=await open(context);
     await first.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-20','full',9));
