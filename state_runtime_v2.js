@@ -7507,8 +7507,14 @@
       return row?.value ? clone(row.value) : null;
     },
     getCompletionsForHabit: async (habitId) => {
-      const collections = await readV2Collections();
-      return collections.completions.filter((completion) => String(completion?.habitId || '') === String(habitId));
+      const db = await open();
+      if (!db) return [];
+      // A one-Habit preview lookup need not deserialize every Habit. Keep
+      // the full completion scan fallback until the V2 completion index is
+      // independently verified; using a merely present index could silently
+      // omit older rows that predate its backfill.
+      const candidate = await readPilotHabitRowsFromDb(db, String(habitId), false);
+      return candidate.completions;
     },
     buildCompatibilitySnapshot,
     verifyParity,
