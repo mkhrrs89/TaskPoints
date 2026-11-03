@@ -5634,6 +5634,180 @@
     }
   }
 
+  // Read-only, preview-host-only diagnostic for Task/Work/metric completion
+  // chronology. A scoped match never establishes whole-app compatibility:
+  // unrelated completion classes, production writer admission and exports
+  // remain unverified. The full V2 store is scanned only in this inspector.
+  async function inspectPreviewTaskCompletionOrderParity() {
+    const refuse = (reason, details = {}) => ({
+      checked: true, previewOnly: true, match: false,
+      completionOrderingVerified: false, fullCompatibilityVerified: false,
+      canPromote: false, productionWritersFenced: false,
+      readAuthority: 'legacy_only', mutationAuthority: 'legacy_only',
+      comparisonScope: 'existing_v1_task_work_metric_completions_only',
+      reason, ...details
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    if (typeof core.readTaskPointsStoredState !== 'function'
+      || typeof core.readPendingTaskMutations !== 'function')
+      return refuse('legacy_task_reader_unavailable');
+    const generation = currentGeneration({ create: false });
+    if (!generation) return refuse('generation_unavailable');
+    const modeEpoch = darkMirrorModeEpoch;
+    let sourceInventory, tasks, expectedRows, taskFingerprint, excludedCount;
+    let unsupportedNonpilotCount;
+    try {
+      sourceInventory = captureReadOnlyFullStorageInventory();
+      const pending = core.readPendingTaskMutations();
+      if (pending?.malformed) return refuse('legacy_task_journal_malformed');
+      const state = core.readTaskPointsStoredState();
+      if (!state || !Array.isArray(state.tasks)
+        || !Array.isArray(state.completions))
+        return refuse('legacy_tasks_or_completions_missing');
+      tasks = clone(state.tasks);
+      const taskIds = new Set();
+      for (const task of tasks) {
+        if (!task || typeof task !== 'object' || Array.isArray(task)
+          || task.id == null || !String(task.id)
+          || taskIds.has(String(task.id)))
+          return refuse('legacy_task_ids_invalid');
+        taskIds.add(String(task.id));
+      }
+      const supported = completion =>
+        ['task', 'work', 'metric'].includes(String(completion?.source || ''))
+        && typeof completion?.taskId === 'string' && Boolean(completion.taskId);
+      const scoped = state.completions.map((value, index) => ({value, index}))
+        .filter(entry => supported(entry.value));
+      excludedCount = state.completions.length - scoped.length;
+      unsupportedNonpilotCount = state.completions.filter(
+        entry => !isPilotCompletion(entry) && !supported(entry)
+      ).length;
+      const seen = new Set();
+      expectedRows = [];
+      for (const entry of scoped) {
+        const item = entry.value;
+        if (typeof item.id !== 'string' || !item.id || seen.has(item.id))
+          return refuse('legacy_completion_id_ambiguous');
+        seen.add(item.id);
+        if (!taskIds.has(item.taskId)) return refuse('linked_legacy_task_missing');
+        if (isPilotCompletion(item)) return refuse('completion_scope_overlap');
+        expectedRows.push(withCompletionHabitIds({
+          id: item.id,
+          entries: [{value: clone(item), sequence: -(entry.index + 1)}]
+        }));
+      }
+      if (!expectedRows.length)
+        return refuse('task_completion_no_supported_records', {
+          scopedCompletionCount: 0, excludedCompletionCount: excludedCount,
+          unsupportedNonpilotCount
+        });
+      if (captureReadOnlyFullStorageInventory() !== sourceInventory)
+        return refuse('legacy_changed_during_capture');
+      taskFingerprint = await previewRecoveryFingerprint(tasks);
+    } catch (_) { return refuse('legacy_completion_order_capture_unreadable'); }
+
+    const sourceCurrent = () => isDarkEnabled()
+      && darkMirrorModeEpoch === modeEpoch
+      && currentGeneration({create:false}) === generation
+      && captureReadOnlyFullStorageInventory() === sourceInventory;
+    try {
+      if (!sourceCurrent()) return refuse('legacy_changed_before_inspection');
+    } catch (_) { return refuse('legacy_unreadable_before_inspection'); }
+    let taskRows, completionRows, evidence, meta;
+    try {
+      const db = await open();
+      if (!db) return refuse('dark_disabled');
+      const tx = db.transaction(['tasks','completions','meta'], 'readonly');
+      [taskRows, completionRows, evidence, meta] = await Promise.all([
+        requestPromise(tx.objectStore('tasks').getAll()),
+        requestPromise(tx.objectStore('completions').getAll()),
+        requestPromise(tx.objectStore('meta').get('task-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID))
+      ]);
+    } catch (_) { return refuse('task_completion_order_read_unavailable'); }
+    try {
+      if (!sourceCurrent()) return refuse('legacy_changed_during_inspection');
+      if (meta?.schemaVersion !== SCHEMA_VERSION
+        || meta.resetGeneration !== generation || meta.legacyMissing === true)
+        return refuse('pilot_meta_not_ready');
+      if (!evidence) return refuse('task_preview_missing');
+      if (evidence.schemaVersion !== 1 || evidence.resetGeneration !== generation)
+        return refuse('task_preview_generation_mismatch');
+      const inventorySignature = `${fnv1a(sourceInventory)}:${sourceInventory.length}`;
+      if (evidence.taskFingerprint !== taskFingerprint
+        || evidence.sourceInventory !== inventorySignature)
+        return refuse('task_preview_source_stale');
+      if (evidence.taskCount !== tasks.length || taskRows.length !== tasks.length)
+        return refuse('task_preview_record_mismatch');
+      const orderedTasks = taskRows.slice()
+        .sort((a,b)=>Number(a?.legacyIndex)-Number(b?.legacyIndex));
+      for (let index=0;index<tasks.length;index++) {
+        const row=orderedTasks[index],expected=tasks[index];
+        if (!row || row.id !== String(expected.id)
+          || row.legacyIndex !== index
+          || stableJson(row.value) !== stableJson(expected))
+          return refuse('task_preview_record_mismatch');
+      }
+      const expected = new Map(expectedRows.map(row=>[row.id,row]));
+      const actual = new Map();
+      for (const row of completionRows) {
+        if (!row || typeof row.id !== 'string')
+          return refuse('task_completion_row_malformed');
+        const entries = Array.isArray(row.entries) ? row.entries
+          : Object.prototype.hasOwnProperty.call(row,'value')
+            ? [{value:row.value,sequence:row.sequence}] : [];
+        if (!entries.length) return refuse('task_completion_row_malformed');
+        const scopedEntries = entries.filter(entry =>
+          ['task','work','metric'].includes(String(entry?.value?.source || ''))
+          && typeof entry?.value?.taskId === 'string'
+          && Boolean(entry.value.taskId));
+        if (!scopedEntries.length) continue;
+        // A packed row that mixes Habit and Task completions cannot be
+        // safely interpreted as a single logical record.
+        if (scopedEntries.length !== 1 || entries.length !== 1
+          || actual.has(row.id)) return refuse('task_completion_row_collision');
+        actual.set(row.id,row);
+      }
+      if (actual.size !== expected.size) {
+        const missing = [...expected.keys()].filter(id=>!actual.has(id)).length;
+        const extra = [...actual.keys()].filter(id=>!expected.has(id)).length;
+        return refuse(missing ? 'task_completion_preview_missing'
+          : 'task_completion_preview_extra', {
+          expectedCount: expected.size, actualCount: actual.size,
+          missingCount: missing, extraCount: extra
+        });
+      }
+      for (const [id, expectedRow] of expected) {
+        if (!actual.has(id)) return refuse('task_completion_preview_missing');
+        if (stableJson(actual.get(id)) !== stableJson(expectedRow))
+          return refuse('task_completion_preview_record_mismatch');
+      }
+      // Compare original V1 list order, NOT date stamps. V1 ordering may
+      // contain same-timestamp entries. Negative preview sequences encode
+      // the exact original array position for this isolated record class.
+      const expectedOrder = expectedRows.map(row=>row.id);
+      const actualOrder = [...actual.values()]
+        .sort((a,b)=>b.entries[0].sequence-a.entries[0].sequence)
+        .map(row=>row.id);
+      if (stableJson(expectedOrder) !== stableJson(actualOrder))
+        return refuse('task_completion_preview_order_mismatch');
+      if (!sourceCurrent()) return refuse('legacy_changed_after_inspection');
+      return {
+        checked: true, previewOnly: true, match: true,
+        completionOrderingVerified: true,
+        fullCompatibilityVerified: false,
+        comparisonScope: 'existing_v1_task_work_metric_completions_only',
+        scopedCompletionCount: expectedRows.length,
+        excludedCompletionCount: excludedCount,
+        unsupportedNonpilotCount,
+        reason: 'task_completion_scoped_order_verified',
+        canPromote: false, productionWritersFenced: false,
+        readAuthority: 'legacy_only', mutationAuthority: 'legacy_only'
+      };
+    } catch (_) { return refuse('task_completion_order_unreadable'); }
+  }
+
   // A narrower stepping stone toward REQUIRED writer admission, rather
   // than relying on the caller to invoke an optional freshness callback.
   // This API is explicit, PREVIEW-HOST-ONLY and NEVER installs on the live
@@ -6966,6 +7140,7 @@
     rehearsePreviewTaskLifecycleMutation,
     rehearsePreviewTaskLinkedCompletion,
     rehearsePreviewTaskLinkedCompletionBatch,
+    inspectPreviewTaskCompletionOrderParity,
     rehearsePreviewDurableWriterFence,
     inspectPreservedParityMismatch,
     inspectLegacyRollbackSource,

@@ -256,3 +256,26 @@ conflicting order, retry, failure and complete readback.
 V1 journal/save modification, production authority transfer, global writer
 fence, Task/Work/Sleep compatibility export, or full completion chronology
 is established. Existing Habit pilot parity remains scoped and unchanged.
+
+
+## Read-only Task completion ordering inspection — November 3
+
+`inspectPreviewTaskCompletionOrderParity()` independently compares the
+effective V1 ordered Task/Work/metric completion subset (including
+uncompacted journal overlays) to isolated V2 packed completion rows.
+It verifies original Task seed evidence, generation and full-origin
+source inventory, scans the V2 Task and completion stores read-only,
+checks exact Task payload/order, refuses incomplete or extra Task
+completion rows, detects payload/sequence corruption and verifies relative
+source-array order independently of timestamps. Historical ambiguous IDs
+and mixed Habit/Task packed records fail closed.
+
+The inspector reports `comparisonScope:
+'existing_v1_task_work_metric_completions_only'`, plus excluded and
+unsupported-nonpilot counts. Even a matching scoped comparison always
+reports `fullCompatibilityVerified: false`, `canPromote: false`
+and legacy-only read/write authority. It does NOT establish complete
+interleaved Habit/Task chronology, export/backup parity, production writer
+fencing or independent recovery. It never rewrites or auto-heals V2 or V1.
+Browser scenarios cover partial import, exact completion, corrupt sequence,
+unexpected extra row, and new V1 journal activity.

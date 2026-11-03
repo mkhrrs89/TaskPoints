@@ -1711,6 +1711,121 @@ try {
       retrySafe:true,V1Unchanged:true};
   });
 
+  await run('read-only V2 Task completion order inspector detects partial and full scoped history',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2,core=window.TaskPointsCore;
+      const prior=localStorage.getItem('taskpoints_v1');
+      const rows=[
+        {id:'order-metric-a',taskId:'synthetic-task',source:'metric',
+          title:'Sleep',points:5,completedAtISO:'2026-11-02T12:00:00.000Z'},
+        {id:'order-work-b',taskId:'synthetic-task',source:'work',
+          title:'Work',points:8,completedAtISO:'2026-11-02T12:00:00.000Z'}
+      ];
+      core.journalTaskCompletionBatch(rows);
+      const seeded=await api.rehearsePreviewTaskCollectionSeed();
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(key=>[key,localStorage.getItem(key)]));
+      const journalBefore=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const missing=await api.inspectPreviewTaskCompletionOrderParity();
+      const first=await api.rehearsePreviewTaskLinkedCompletion(rows[0].id,token,'ordered-first');
+      const partial=await api.inspectPreviewTaskCompletionOrderParity();
+      const second=await api.rehearsePreviewTaskLinkedCompletion(rows[1].id,token,'ordered-second');
+      const verified=await api.inspectPreviewTaskCompletionOrderParity();
+      const pilot=await api.verifyParity();
+      const again=await api.inspectPreviewTaskCompletionOrderParity();
+      return {seeded,missing,first,partial,second,verified,pilot,again,
+        unchanged:prior===localStorage.getItem('taskpoints_v1'),
+        journalSame:journalBefore===localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(result.seeded.verified,true,JSON.stringify(result.seeded));
+    assert.equal(result.missing.reason,'task_completion_preview_missing');
+    assert.equal(result.missing.missingCount,2);
+    assert.equal(result.first.confirmedDurable,true);
+    assert.equal(result.partial.reason,'task_completion_preview_missing');
+    assert.equal(result.partial.missingCount,1);
+    assert.equal(result.second.confirmedDurable,true);
+    assert.equal(result.verified.match,true,JSON.stringify(result.verified));
+    assert.equal(result.verified.completionOrderingVerified,true);
+    assert.equal(result.verified.scopedCompletionCount,2);
+    assert.equal(result.verified.fullCompatibilityVerified,false);
+    assert.equal(result.verified.canPromote,false);
+    assert.equal(result.again.match,true);
+    assert.equal(result.pilot.match,true,JSON.stringify(result.pilot));
+    assert.equal(result.unchanged,true);
+    assert.equal(result.journalSame,true);
+    assert.equal(result.authority,'legacy_only');
+    return {partialNotCertified:true,exactOrderVerified:true,
+      habitPilotUnaffected:true,readOnly:true,noProductionPromotion:true};
+  });
+
+  await run('read-only Task order inspector refuses corrupt sequences extra rows and stale V1',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2,core=window.TaskPointsCore;
+      const rows=[
+        {id:'order-corrupt-1',taskId:'synthetic-task',source:'work',points:2},
+        {id:'order-corrupt-2',taskId:'synthetic-task',source:'metric',points:3}
+      ];
+      core.journalTaskCompletionBatch(rows);
+      await api.rehearsePreviewTaskCollectionSeed();
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(key=>[key,localStorage.getItem(key)]));
+      await api.rehearsePreviewTaskLinkedCompletionBatch(
+        rows.map(x=>x.id),token,'order-corrupt-batch');
+      const pristine=await api.inspectPreviewTaskCompletionOrderParity();
+      const db=await api.open();
+      const get=async(id)=>new Promise((resolve,reject)=>{
+        const req=db.transaction('completions','readonly').objectStore('completions').get(id);
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      const first=await get(rows[0].id);
+      await new Promise((resolve,reject)=>{
+        const tx=db.transaction('completions','readwrite');
+        tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);
+        tx.objectStore('completions').put({...first,entries:[
+          {...first.entries[0],sequence:999999}
+        ]});
+      });
+      const tampered=await api.inspectPreviewTaskCompletionOrderParity();
+      const stillTampered=await get(rows[0].id);
+      await new Promise((resolve,reject)=>{
+        const tx=db.transaction('completions','readwrite');
+        tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);
+        tx.objectStore('completions').put(first);
+        tx.objectStore('completions').add({
+          id:'preview-extra-only',entries:[{value:{
+            id:'preview-extra-only',taskId:'synthetic-task',source:'task',points:1
+          },sequence:-999}],habitIds:[]
+        });
+      });
+      const extra=await api.inspectPreviewTaskCompletionOrderParity();
+      const beforeJournal=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      core.journalTaskCompletionBatch([
+        {id:'order-source-new',taskId:'synthetic-task',source:'work',points:4}
+      ]);
+      const stale=await api.inspectPreviewTaskCompletionOrderParity();
+      const extraRow=await get('preview-extra-only');
+      return {pristine,tampered,stillTampered,extra,stale,extraRow,
+        journalAdvanced:localStorage.getItem('taskpoints_pending_task_mutations_v1')!==beforeJournal,
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(result.pristine.match,true,JSON.stringify(result.pristine));
+    assert.equal(result.tampered.match,false);
+    assert.equal(result.tampered.reason,'task_completion_preview_record_mismatch');
+    assert.equal(result.stillTampered.entries[0].sequence,999999);
+    assert.equal(result.extra.match,false);
+    assert.equal(result.extra.reason,'task_completion_preview_extra');
+    assert.equal(result.stale.match,false);
+    assert.equal(result.stale.reason,'task_preview_source_stale');
+    assert.equal(result.extraRow.entries[0].value.points,1);
+    assert.equal(result.journalAdvanced,true);
+    assert.equal(result.authority,'legacy_only');
+    return {corruptSequenceRefused:true,noAutomaticHealing:true,
+      unexpectedRecordRefused:true,staleJournalRefused:true};
+  });
+
   await run('nonpilot Task record migration aborts atomically on Task put failure and retries safely',async context=>{
     const page=await open(context);
     const result=await page.evaluate(async()=>{

@@ -136,6 +136,28 @@ test('Task completion batches are journal-backed, bounded and atomically verifie
   assert.match(runtime,/rehearsePreviewTaskLinkedCompletion,\s*rehearsePreviewTaskLinkedCompletionBatch,/);
 });
 
+test('read-only completion ordering inspector refuses partial, stale, extra and reordered Task records',()=>{
+  const begin=runtime.indexOf('async function inspectPreviewTaskCompletionOrderParity()');
+  const end=runtime.indexOf('// A narrower stepping stone toward REQUIRED writer admission',begin);
+  assert.ok(begin>=0&&end>begin);
+  const snippet=runtime.slice(begin,end);
+  assert.match(snippet,/isWalTestPreviewHost\(\)/);
+  assert.match(snippet,/core\.readPendingTaskMutations\(\)/);
+  assert.match(snippet,/captureReadOnlyFullStorageInventory\(\)/);
+  assert.match(snippet,/db\.transaction\(\['tasks','completions','meta'\], 'readonly'\)/);
+  assert.match(snippet,/task_preview_source_stale/);
+  assert.match(snippet,/task_completion_preview_missing/);
+  assert.match(snippet,/task_completion_preview_extra/);
+  assert.match(snippet,/task_completion_preview_record_mismatch/);
+  assert.match(snippet,/task_completion_preview_order_mismatch/);
+  assert.match(snippet,/fullCompatibilityVerified: false/);
+  assert.match(snippet,/canPromote: false/);
+  assert.doesNotMatch(snippet,/\b(?:journalTaskMutation|journalTaskCompletionBatch|saveStateSnapshot)\s*\(/);
+  assert.doesNotMatch(snippet,/\b(?:taskStore|completionStore|metaStore|mutationStore)\.(?:put|add|delete|clear)\s*\(/);
+  assert.doesNotMatch(snippet,/localStorage\.(?:setItem|removeItem|clear)\s*\(/);
+  assert.match(runtime,/rehearsePreviewTaskLinkedCompletionBatch,\s*inspectPreviewTaskCompletionOrderParity,/);
+});
+
 test('Task parity checks identity, payload, source inventory and generation without trusting metadata alone',()=>{
   assert.match(source,/previewRecoveryFingerprint\(tasks\)/);
   assert.match(source,/evidence\.taskFingerprint !== taskFingerprint/);
