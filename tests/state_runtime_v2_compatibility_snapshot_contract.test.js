@@ -343,3 +343,50 @@ test('V2-compat snapshot refuses a V2 revision change during its asynchronous co
   assert.deepEqual(JSON.parse(app.localStorage.getItem(LEGACY_KEY)), legacy,
     'refusal must never replace or remove the authoritative V1 snapshot');
 });
+
+test('V2 compatibility export captures metadata and collections in a single readonly transaction', async () => {
+  const legacy = {
+    profile: { name: 'Atomic read fixture' },
+    habits: [baseHabit('h1', 'Read', 'default', 0)],
+    tasks: [{ id: 't1', title: 'Unrelated task' }],
+    completions: []
+  };
+  const app = install(legacy);
+  await app.api.seedFromLegacy();
+  const db = app.indexedDB._databases.get(DB_NAME);
+  const original = db.transaction.bind(db);
+  const observed = [];
+  db.transaction = (stores, mode = 'readonly') => {
+    observed.push({ stores: Array.isArray(stores) ? [...stores] : [stores], mode });
+    return original(stores, mode);
+  };
+
+  const snapshot = await app.api.buildCompatibilitySnapshot();
+  assert.deepEqual(snapshot.habits, legacy.habits);
+  assert.deepEqual(snapshot.tasks, legacy.tasks);
+  const together = observed.filter(({ stores, mode }) =>
+    mode === 'readonly' && ['habits', 'completions', 'meta'].every(store => stores.includes(store)));
+  assert.equal(together.length, 1, 'metadata and both collections must be read atomically');
+  assert.equal(observed.filter(({ stores }) => stores.length === 2
+    && stores.includes('habits') && stores.includes('completions')).length, 0,
+    'compatibility snapshot must not fetch its collections in a separate transaction');
+  assert.equal(observed.filter(({ stores }) => stores.length === 1 && stores[0] === 'meta').length, 1,
+    'one later meta read must still detect a post-snapshot V2 revision race');
+  assert.equal(observed.some(({ mode }) => mode !== 'readonly'), false,
+    'export construction must not write into the V2 database after prior seeding');
+});
+
+test('V2 compatibility export refuses missing metadata without touching authoritative V1', async () => {
+  const legacy = {
+    habits: [baseHabit('h1', 'Read', 'default', 0)],
+    tasks: [{ id: 't1', title: 'Keep me' }],
+    completions: []
+  };
+  const app = install(legacy);
+  await app.api.seedFromLegacy();
+  app.indexedDB._databases.get(DB_NAME)._stores.get('meta').delete('runtime');
+
+  await assert.rejects(app.api.buildCompatibilitySnapshot(),
+    /state_runtime_v2_compatibility_metadata_not_ready/);
+  assert.deepEqual(JSON.parse(app.localStorage.getItem(LEGACY_KEY)), legacy);
+});
