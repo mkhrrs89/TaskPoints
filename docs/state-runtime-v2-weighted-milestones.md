@@ -408,3 +408,31 @@ cross-tab writer admission, full export safety, or future index freshness.
 The ordinary `getCompletionsForHabit` continues to use its complete
 safe completion scan; a subsequent per-revision fast path still needs
 separately proven freshness and invalidation. **67/100 and canPromote:false.**
+
+## Proof-bound indexed Habit completion candidate — November 3
+
+After a successful preview-only full-store index audit, the new
+`readPreviewIndexedHabitCompletions(habitId)` can query only that Habit's
+completion index, with no subsequent whole-Habits or whole-completions
+IndexedDB scan. It preserves duplicate-ID packed entries and their canonical
+sequence ordering. A bounded **single-Habit, in-memory** audit proof binds
+the target ID, complete original localStorage origin inventory, dark-mode
+epoch, reset generation, and exact V2 runtime metadata. Repeating an audit
+invalidates the old proof before rescanning.
+
+Every targeted candidate verifies current V1 inventory, generation/epoch,
+indexed-row metadata, and V2 metadata both inside the initial read-only
+transaction and afterward. A wrong Habit, missing/invalid proof, changed V1
+source, changed revision, or read failure returns no completion rows.
+Regression tests assert no V2 `getAll` calls after auditing and no writes,
+plus proof invalidation under racing V1/V2 changes.
+
+**Limits:** this is an explicit local preview probe, **not** a live app read.
+It still compares full-origin localStorage inventory, which has O(origin size)
+cost; therefore the no-full-scan improvement applies specifically to V2
+IndexedDB access, not measured end-to-end Home latency. A noncooperating
+writer that corrupts unreturned index records without updating metadata
+cannot be excluded. Independent cross-tab writer admission, actual device
+validation, full backup and final authority approval remain required. The
+existing normal V2 `getCompletionsForHabit` safe fallback is unchanged.
+**67/100; canPromote:false.**
