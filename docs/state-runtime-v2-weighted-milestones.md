@@ -479,9 +479,9 @@ Chromium/WebKit browser testing simulates a legitimate reset, injects
 recoverable stranded V2 evidence, and verifies export refusal and evidence
 preservation after reload. **No production authority promotion.**
 
-The V2 Task preview store deliberately remains outside this three-store
-pilot/WAL emptiness check; this patch does not purport to prove entire-app
-reset completeness or independent backup. The nine writer families,
+The original three-store version was expanded in the subsequent update
+below to cover the V2 Task preview store too. This still does not prove
+entire-app reset completeness or independent backup. The nine writer families,
 off-device recovery, physical PWA tests, and final approval gates remain
 uncredited. **67/100; canPromote:false.**
 
@@ -504,7 +504,34 @@ successful authorized empty export, then injects a stranded V2 Habit record
 and verifies both false-empty export refusal and parity mismatch across
 a browser reload. Stranded data is preserved for investigation.
 
-This change is restricted to diagnostic/preview operations; it does not
-erase retained rows, alter production V1, or claim the separate V2 Task
-preview store is clean. Unfenced legacy writers and asynchronous races
+This change is restricted to diagnostic/preview operations and does
+not erase retained rows or alter production V1. The subsequent four-store
+expansion below also refuses retained V2 Task preview evidence. Unfenced legacy writers and asynchronous races
 after the last check remain cutover blockers. **67/100; canPromote:false.**
+
+## Broadened empty-reset inspection and browser-test correction — November 3
+
+The previous three-store empty-reset inspection omitted V2's isolated
+`tasks` rehearsal store. Although preview Tasks are **not authoritative**,
+they may contain recoverable evidence from an earlier epoch and should never
+be silently hidden behind a clean `{}` export. The same single read-only
+IndexedDB transaction now counts all **four** V2 data/ledger stores:
+`habits`, `completions`, `mutations`, and `tasks`, together with
+runtime metadata. Export and parity both refuse falsely empty evidence.
+The authorized-reset path does **not** delete Tasks to make the check pass.
+Node tests cover stranded rows in each store; an additional Chromium/WebKit
+case checks Tasks surviving a reload.
+
+The first version of the browser reset regression deliberately removed V1
+then manually wrote the generation key. That conflicted with the production
+reset-boundary hook, which independently rotates the epoch on V1 removal,
+so Chromium and WebKit correctly rejected the test with
+`state_runtime_v2_empty_seed_context_changed`. The test now bypasses the
+deferred removal hook *only within the synthetic isolated fixture* and
+rotates exactly once via the supported V2 generation API. Production reset
+handling was left intact. This is a browser-test fix, not a relaxation of
+generation safeguards.
+
+**Limits:** This covers IndexedDB metadata/count evidence, not all recovery
+sources, image databases, independent off-device backups or unfenced old
+tabs. No promotion is authorized. **67/100; canPromote:false.**
