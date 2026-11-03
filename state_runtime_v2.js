@@ -5224,6 +5224,224 @@
     } catch (_) { return refuse('task_preview_readback_failed'); }
   }
 
+  // PREVIEW ONLY: reconcile an already-seeded Task collection after a real
+  // V1 save/journal update. Unlike the initial Task seed, this changes ONLY
+  // affected records and atomically advances the source evidence + receipt.
+  // Never repair an unexplained V2 mismatch or overwrite preview-only edits.
+  // V1 retains all read, mutation, import/export and recovery authority.
+  async function rehearsePreviewTaskCollectionReconcile(sourceToken, actionId) {
+    const refuse = (reason, detail = {}) => ({
+      checked: true, previewOnly: true, committed: false,
+      confirmedDurable: false, collectionParityVerified: false,
+      canPromote: false, productionWritersFenced: false,
+      readAuthority: 'legacy_only', mutationAuthority: 'legacy_only',
+      reason, ...detail
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    if (typeof sourceToken !== 'string' || !sourceToken)
+      return refuse('full_origin_token_required');
+    if (typeof actionId !== 'string' || !actionId || actionId.length > 128)
+      return refuse('task_action_id_required');
+    if (typeof core.readTaskPointsStoredState !== 'function'
+      || typeof core.readPendingTaskMutations !== 'function')
+      return refuse('legacy_task_reader_unavailable');
+
+    const modeEpoch = darkMirrorModeEpoch;
+    const generation = currentGeneration({ create: false });
+    if (!generation) return refuse('generation_unavailable');
+    const sourceCurrent = () => isDarkEnabled()
+      && darkMirrorModeEpoch === modeEpoch
+      && currentGeneration({ create: false }) === generation
+      && captureReadOnlyFullStorageInventory() === sourceToken;
+
+    let desired, desiredFingerprint;
+    try {
+      if (!sourceCurrent()) return refuse('full_origin_changed');
+      const pending = core.readPendingTaskMutations();
+      if (pending?.malformed) return refuse('legacy_task_journal_malformed');
+      const state = core.readTaskPointsStoredState();
+      if (!state || !Array.isArray(state.tasks))
+        return refuse('legacy_tasks_missing');
+      desired = clone(state.tasks);
+      const ids = new Set();
+      for (const item of desired) {
+        if (!item || typeof item !== 'object' || Array.isArray(item)
+          || item.id == null || !String(item.id)
+          || ids.has(String(item.id))) return refuse('legacy_task_ids_invalid');
+        ids.add(String(item.id));
+      }
+      if (!sourceCurrent()) return refuse('legacy_changed_during_capture');
+      desiredFingerprint = await previewRecoveryFingerprint(desired);
+    } catch (_) { return refuse('legacy_task_capture_unreadable'); }
+    try { if (!sourceCurrent()) return refuse('legacy_changed_before_reconcile'); }
+    catch (_) { return refuse('legacy_unreadable_before_reconcile'); }
+
+    let db, priorRows, priorEvidence, runtimeMeta, lifecycleCursor;
+    try {
+      db = await open();
+      if (!db) return refuse('v2_unavailable');
+      const tx = db.transaction(['tasks','meta'], 'readonly');
+      [priorRows, priorEvidence, runtimeMeta, lifecycleCursor] = await Promise.all([
+        requestPromise(tx.objectStore('tasks').getAll()),
+        requestPromise(tx.objectStore('meta').get('task-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
+        requestPromise(tx.objectStore('meta').get('task-preview-lifecycle-state'))
+      ]);
+    } catch (_) { return refuse('task_preview_read_unavailable'); }
+    if (!runtimeMeta || runtimeMeta.schemaVersion !== SCHEMA_VERSION
+      || runtimeMeta.resetGeneration !== generation
+      || runtimeMeta.legacyMissing === true)
+      return refuse('pilot_meta_not_ready');
+    if (!priorEvidence || priorEvidence.schemaVersion !== 1
+      || priorEvidence.resetGeneration !== generation)
+      return refuse('task_preview_source_not_seeded');
+    // Existing preview-only creates/deletes have a distinct counter. Refuse
+    // to rebase them as V1 changes without independently proving ownership.
+    if (lifecycleCursor) return refuse('task_preview_lifecycle_evidence_preserved');
+
+    const priorOrdered = priorRows.slice().sort((a,b)=>a.legacyIndex-b.legacyIndex);
+    const oldIds = new Set();
+    for (let i = 0; i < priorOrdered.length; i += 1) {
+      const row = priorOrdered[i];
+      if (!row || row.id == null || !String(row.id)
+        || oldIds.has(String(row.id)) || row.legacyIndex !== i
+        || !row.value || String(row.value.id) !== String(row.id))
+        return refuse('task_preview_prior_rows_invalid');
+      oldIds.add(String(row.id));
+    }
+    let oldFingerprint;
+    try { oldFingerprint = await previewRecoveryFingerprint(priorOrdered.map(r=>r.value)); }
+    catch (_) { return refuse('task_preview_old_fingerprint_unavailable'); }
+    if (oldFingerprint !== priorEvidence.taskFingerprint
+      || priorOrdered.length !== priorEvidence.taskCount)
+      return refuse('task_preview_existing_evidence_preserved');
+    try { if (!sourceCurrent()) return refuse('legacy_changed_during_reconcile'); }
+    catch (_) { return refuse('legacy_unreadable_during_reconcile'); }
+
+    const sourceSignature = `${fnv1a(sourceToken)}:${sourceToken.length}`;
+    if (priorEvidence.taskFingerprint === desiredFingerprint
+      && priorEvidence.sourceInventory === sourceSignature) {
+      return {
+        checked:true, previewOnly:true, committed:false,
+        confirmedDurable:true, collectionParityVerified:true,
+        reason:'task_preview_already_current',
+        changedRows:0, taskCount:desired.length,
+        canPromote:false, productionWritersFenced:false,
+        readAuthority:'legacy_only', mutationAuthority:'legacy_only'
+      };
+    }
+    const target = desired.map((task,i)=>({
+      id:String(task.id),legacyIndex:i,value:task
+    }));
+    const oldMap = new Map(priorOrdered.map(row=>[String(row.id),row]));
+    const newMap = new Map(target.map(row=>[row.id,row]));
+    const removed = priorOrdered.filter(row=>!newMap.has(String(row.id)));
+    const changed = target.filter(row=>
+      stableJson(row)!==stableJson(oldMap.get(row.id)));
+    if (removed.length + changed.length > 64)
+      return refuse('task_reconcile_batch_too_large', {
+        changedRows:removed.length+changed.length, maxAtomicRows:64
+      });
+    const nextEvidence = {
+      id:'task-preview', schemaVersion:1, resetGeneration:generation,
+      taskFingerprint:desiredFingerprint, sourceInventory:sourceSignature,
+      taskCount:desired.length, capturedAtISO:nowIso()
+    };
+    const receipt = {
+      id:'task-preview-reconcile:'+actionId,
+      type:'task-preview-reconcile', resetGeneration:generation,
+      priorTaskFingerprint:priorEvidence.taskFingerprint,
+      nextTaskFingerprint:desiredFingerprint,
+      sourceInventory:sourceSignature,
+      removedIds:removed.map(row=>String(row.id)),
+      changedIds:changed.map(row=>row.id)
+    };
+    let failure = null, repeated = false;
+    const refuseAbort = (tx,reason) => {
+      failure=reason;
+      try { tx.abort(); } catch (_) {}
+    };
+    try {
+      if (!sourceCurrent()) return refuse('legacy_changed_before_reconcile');
+      const tx=db.transaction(['tasks','mutations','meta'],'readwrite');
+      const taskStore=tx.objectStore('tasks');
+      const mutationStore=tx.objectStore('mutations');
+      const metaStore=tx.objectStore('meta');
+      const reads=[
+        taskStore.getAll(),metaStore.get(RUNTIME_META_ID),
+        metaStore.get('task-preview'),
+        metaStore.get('task-preview-lifecycle-state'),
+        mutationStore.get(receipt.id)
+      ];
+      const values=new Array(reads.length);
+      let remaining=reads.length;
+      reads.forEach((request,index)=>{
+        request.onsuccess=()=>{
+          values[index]=request.result;
+          if (--remaining!==0) return;
+          try {
+            if (!sourceCurrent())
+              return refuseAbort(tx,'legacy_changed_under_transaction');
+            if (stableJson(values[0])!==stableJson(priorRows)
+              || stableJson(values[1])!==stableJson(runtimeMeta)
+              || stableJson(values[2])!==stableJson(priorEvidence)
+              || stableJson(values[3])!==stableJson(lifecycleCursor))
+              return refuseAbort(tx,'task_preview_concurrent_change');
+            if (values[4]) {
+              if (stableJson(values[4])!==stableJson(receipt))
+                return refuseAbort(tx,'task_reconcile_action_id_conflict');
+              repeated=true;
+              return;
+            }
+            for (const row of removed) taskStore.delete(String(row.id));
+            for (const row of changed) taskStore.put(row);
+            metaStore.put(nextEvidence);
+            mutationStore.add(receipt);
+          } catch (_) { refuseAbort(tx,'task_reconcile_atomic_write_failed'); }
+        };
+      });
+      await transactionPromise(tx);
+    } catch (_) { return refuse(failure || 'task_reconcile_atomic_write_failed'); }
+    try {
+      const tx=db.transaction(['tasks','mutations','meta'],'readonly');
+      const [rows,evidence,savedReceipt,postMeta]=await Promise.all([
+        requestPromise(tx.objectStore('tasks').getAll()),
+        requestPromise(tx.objectStore('meta').get('task-preview')),
+        requestPromise(tx.objectStore('mutations').get(receipt.id)),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID))
+      ]);
+      const ordered=rows.slice().sort((a,b)=>a.legacyIndex-b.legacyIndex);
+      if (stableJson(ordered)!==stableJson(target)
+        || stableJson(evidence)!==stableJson(nextEvidence)
+        || stableJson(savedReceipt)!==stableJson(receipt)
+        || stableJson(postMeta)!==stableJson(runtimeMeta))
+        return refuse('task_reconcile_readback_unverified',{
+          committed:!repeated,writeOutcomeUncertain:true
+        });
+      if (!sourceCurrent()) return refuse('legacy_changed_after_preview_commit',{
+        committed:!repeated,confirmedDurable:true,
+        writeOutcomeUncertain:true
+      });
+      return {
+        checked:true,previewOnly:true,committed:!repeated,
+        confirmedDurable:true,collectionParityVerified:true,
+        replayed:repeated,
+        reason:repeated ? 'task_preview_reconcile_replayed'
+          : 'task_preview_reconcile_verified',
+        changedRows:removed.length+changed.length,
+        addedRows:changed.filter(row=>!oldMap.has(row.id)).length,
+        deletedRows:removed.length, taskCount:desired.length,
+        canPromote:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+      };
+    } catch (_) {
+      return refuse('task_reconcile_readback_unavailable',{
+        committed:!repeated,writeOutcomeUncertain:true
+      });
+    }
+  }
+
   // Independent preview-only nonpilot Tasks parity inspector. It reads the
   // effective V1 Tasks (including pending Task journal overlays) and the
   // isolated V2 Task rows without writing, reseeding, repairing, or promoting.
@@ -7988,6 +8206,7 @@
     exercisePreviewSerializedSnapshotLease,
     rehearsePreviewAdmittedTaskCompletionBatch,
     rehearsePreviewTaskCollectionSeed,
+    rehearsePreviewTaskCollectionReconcile,
     inspectPreviewTaskCollectionParity,
     inspectPreviewTaskRecord,
     rehearsePreviewTaskRecordUpdate,
