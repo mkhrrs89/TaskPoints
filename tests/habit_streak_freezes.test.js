@@ -56,7 +56,8 @@ test('two missed days each spend a freeze and preserve the 21-day bonus at 21, n
   const afterTwoMisses = status(h, s, '2026-11-04');
   assert.equal(before.balance, 3);
   assert.equal(afterOneMiss.balance, 2);
-  assert.equal(afterTwoMisses.balance, 1);
+  assert.equal(afterTwoMisses.balance, 2);
+  assert.equal(afterTwoMisses.earned, 4, 'the two white freezes make Nov 2–8 a silver week');
   assert.equal(afterTwoMisses.spent, 2);
   assert.deepEqual(afterTwoMisses.protectedDays, ['2026-11-02', '2026-11-03']);
   assert.equal(afterTwoMisses.streak, 22, 'only completed days count toward streak length');
@@ -94,7 +95,7 @@ test('a first missed day after only one completion does not spend a freeze', () 
 });
 
 test('when the last freeze is spent, the next miss resets streak and bonus', () => {
-  const h = habit(['2026-10-26', '2026-10-27', '2026-10-31', '2026-11-01', '2026-11-04']);
+  const h = habit(['2026-10-26', '2026-10-27', '2026-10-31', '2026-11-01', '2026-11-04'], { daysPerCompleteWeek: 3 });
   const s = state(h);
   const out = status(h, s, '2026-11-04');
   assert.equal(out.earned, 1);
@@ -114,8 +115,8 @@ test('backfilling a missed day refunds its freeze; editing a half day also recom
   s.completions.push(entry('2026-11-02'));
   const updated = status(h, s, '2026-11-04');
   assert.equal(updated.spent, 1);
-  assert.equal(updated.earned, original.earned + 1);
-  assert.equal(updated.balance, original.balance + 2);
+  assert.equal(updated.earned, original.earned, 'the frozen week was already silver; backfill does not award it twice');
+  assert.equal(updated.balance, original.balance + 1, 'restoring a completion refunds the one freeze');
   assert.equal(updated.streak, original.streak + 1);
   // Source state is not given a mutable "freezesRemaining" counter.
   assert.equal(Object.hasOwn(h, 'freezesRemaining'), false);
@@ -207,11 +208,12 @@ test('a refunded or spent freeze changes the protected-day projection without ch
   const s = state(h);
   const before = status(h, s, '2026-11-04');
   assert.deepEqual(before.protectedDays, ['2026-11-02', '2026-11-03']);
-  assert.equal(before.balance, 1);
+  assert.equal(before.balance, 2);
   h.doneKeys.push('2026-11-02');
   s.completions.push(entry('2026-11-02'));
   const after = status(h, s, '2026-11-04');
   assert.deepEqual(after.protectedDays, ['2026-11-03']);
   assert.equal(after.balance, 3);
+  assert.equal(after.earned, before.earned, 'backfilling a frozen day cannot earn the same silver week twice');
   assert.ok(!after.protectedDays.includes('2026-11-02'));
 });
