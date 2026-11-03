@@ -2896,6 +2896,7 @@ header,
 .habitDay.off.streak-freeze-used{
   background: #ffffff !important;
   color: #000000 !important;
+  font-weight: 800 !important;
   border-color: #ffffff !important;
 }
 

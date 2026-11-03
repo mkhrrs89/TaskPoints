@@ -193,6 +193,7 @@ test('a spent freeze is displayed as a white bubble with black numbers only on i
   assert.ok(rule, 'freeze-protected missed days have a dedicated visual rule');
   assert.match(rule[1], /background:\s*#ffffff\s*!important/);
   assert.match(rule[1], /color:\s*#000000\s*!important/);
+  assert.match(rule[1], /font-weight:\s*800\s*!important/, 'frozen day number is bold');
   assert.match(home, /const protectedDayKeys = new Set\(options\.protectedDays \|\| \[\]\)/);
   assert.match(home, /const isFreezeProtected = status === 'off' && protectedDayKeys\.has\(d\.key\)/);
   assert.match(home, /const isPastIncomplete = !on && !isFreezeProtected/);
