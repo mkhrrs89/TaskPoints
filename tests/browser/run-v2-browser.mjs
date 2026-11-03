@@ -1258,6 +1258,67 @@ try {
       noProductionAuthorityChange:true};
   });
 
+  await run('Task completion history catch-up imports real V1 Task journal backlog and retains it after reload',async context=>{
+    const page=await open(context);
+    const details=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const core=window.TaskPointsCore;
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},(_,i)=>
+        localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const before=localStorage.getItem('taskpoints_v1');
+      const original=await runtime.rehearsePreviewTaskCollectionSeed();
+      core.journalTaskMutation({completionUpserts:[
+        {id:'task-journal-backlog-a',source:'task',taskId:'synthetic-task',
+          dayKey:'2026-10-18',points:4},
+        {id:'task-journal-backlog-b',source:'work',taskId:'synthetic-task',
+          dayKey:'2026-10-19',points:7}
+      ]});
+      const pending=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const stale=await runtime.inspectPreviewTaskCollectionParity();
+      const refreshed=await runtime.rehearsePreviewTaskCollectionReconcile(
+        token(),'task-history-journal-evidence');
+      const backfill=await runtime.rehearsePreviewTaskCompletionHistoryCatchUp(
+        token(),'task-history-batch-1');
+      const parity=await runtime.inspectPreviewTaskCompletionOrderParity();
+      const repeat=await runtime.rehearsePreviewTaskCompletionHistoryCatchUp(
+        token(),'task-history-batch-2');
+      const db=await runtime.open();
+      const tx=db.transaction('completions','readonly');
+      const rows=await new Promise((resolve,reject)=>{
+        const req=tx.objectStore('completions').getAll();
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      return {before,after:localStorage.getItem('taskpoints_v1'),
+        pending,afterPending:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        original,stale,refreshed,backfill,parity,repeat,rows,
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(details.original.verified,true);
+    assert.equal(details.stale.match,false);
+    assert.equal(details.refreshed.confirmedDurable,true,JSON.stringify(details.refreshed));
+    assert.equal(details.backfill.committed,true,JSON.stringify(details.backfill));
+    assert.equal(details.backfill.fullyMirrored,true,JSON.stringify(details.backfill));
+    assert.equal(details.backfill.importedRows,2);
+    assert.equal(details.parity.match,true,JSON.stringify(details.parity));
+    assert.equal(details.repeat.reason,'task_completion_history_current');
+    assert.equal(details.repeat.committed,false);
+    assert.equal(details.rows.filter(row=>row.id.startsWith('task-journal-backlog-')).length,2);
+    assert.equal(details.after,details.before);
+    assert.equal(details.afterPending,details.pending);
+    assert.equal(details.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.evaluate(()=>window.V2BrowserFixture.start());
+    const after=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      return {parity:await runtime.inspectPreviewTaskCompletionOrderParity(),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(after.parity.match,true,JSON.stringify(after.parity));
+    assert.equal(after.authority,'legacy_only');
+    return {historicV1RowsImported:2,immutableLegacySnapshot:true,
+      journalRemainsV1Authority:true,reloadVerified:true};
+  });
+
   await run('nonpilot Tasks parity inspector detects stale journal and remains read-only across reload',async context=>{
     const page=await open(context);
     const captured=await page.evaluate(async()=>{
