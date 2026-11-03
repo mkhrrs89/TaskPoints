@@ -390,3 +390,80 @@ test('V2 compatibility export refuses missing metadata without touching authorit
     /state_runtime_v2_compatibility_metadata_not_ready/);
   assert.deepEqual(JSON.parse(app.localStorage.getItem(LEGACY_KEY)), legacy);
 });
+
+test('V2 seed refuses transient V1 read denial without clearing durable V2 records', async () => {
+  const legacy = {
+    habits: [baseHabit('h1', 'Preserve existing Habit', 'default', 0)],
+    tasks: [{ id: 't1', title: 'Preserve existing Task' }],
+    completions: []
+  };
+  const app = install(legacy);
+  await app.api.seedFromLegacy();
+  const storedBefore = app.indexedDB.dump(DB_NAME);
+  const originalGet = app.localStorage.getItem.bind(app.localStorage);
+  app.localStorage.getItem = key => {
+    if (key === LEGACY_KEY) throw new Error('temporary_browser_storage_denial');
+    return originalGet(key);
+  };
+  await assert.rejects(app.api.seedFromLegacy({ force: true }),
+    /state_runtime_v2_legacy_snapshot_unreadable/);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), storedBefore,
+    'read denial must not trigger an empty-state seed or destroy mirrored data');
+  assert.equal(originalGet(LEGACY_KEY), JSON.stringify(legacy));
+});
+
+test('V2 compatibility export refuses V1 access denial after inventory, not an empty export', async () => {
+  const legacy = {
+    habits: [baseHabit('h1', 'Read', 'default', 0)],
+    tasks: [{ id: 't1', title: 'Preserve Task' }],
+    completions: []
+  };
+  const app = install(legacy);
+  await app.api.seedFromLegacy();
+  const storedBefore = app.indexedDB.dump(DB_NAME);
+  const originalGet = app.localStorage.getItem.bind(app.localStorage);
+  let legacyReads = 0;
+  app.localStorage.getItem = key => {
+    if (key === LEGACY_KEY && ++legacyReads === 2)
+      throw new Error('intermittent_denied_read');
+    return originalGet(key);
+  };
+  await assert.rejects(app.api.buildCompatibilitySnapshot(),
+    /state_runtime_v2_legacy_snapshot_unreadable/);
+  assert.equal(legacyReads, 2, 'failure occurs after full-origin inventory');
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), storedBefore);
+  assert.deepEqual(JSON.parse(originalGet(LEGACY_KEY)), legacy);
+});
+
+test('V2 compatibility export rejects same-generation V1 disappearance while V2 evidence survives', async () => {
+  const legacy = {
+    habits: [baseHabit('h1', 'Still mirrored', 'default', 0)],
+    tasks: [{ id: 't1', title: 'Not erased by temporary disappearance' }],
+    completions: []
+  };
+  const app = install(legacy);
+  await app.api.seedFromLegacy();
+  const before = app.indexedDB.dump(DB_NAME);
+  app.localStorage.removeItem(LEGACY_KEY);
+  await assert.rejects(app.api.buildCompatibilitySnapshot(),
+    /state_runtime_v2_compatibility_legacy_missing_unverified/);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), before,
+    'unverified missing legacy must retain all V2 recovery evidence');
+});
+
+test('V2 compatibility export keeps verified generation-rotated empty reset behavior', async () => {
+  const legacy = {
+    habits: [baseHabit('h1', 'Pre-reset', 'default', 0)],
+    tasks: [{ id: 't1', title: 'Pre-reset' }],
+    completions: []
+  };
+  const app = install(legacy);
+  await app.api.seedFromLegacy();
+  app.localStorage.removeItem(LEGACY_KEY);
+  app.localStorage.setItem('taskpoints_state_v2_generation_v1', 'new-explicit-reset-generation');
+  assert.deepEqual(await app.api.buildCompatibilitySnapshot(), {});
+  const stored = app.indexedDB.dump(DB_NAME);
+  assert.equal(stored.habits.length, 0);
+  assert.equal(stored.completions.length, 0);
+  assert.equal(stored.meta.find(row => row.id === 'runtime').legacyMissing, true);
+});
