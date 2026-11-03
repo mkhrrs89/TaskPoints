@@ -6542,6 +6542,7 @@
       return refuse('pilot_meta_not_ready');
 
     const existing = new Set();
+    let presentSupported = 0;
     try {
       for (const row of priorRows) {
         if (!row || typeof row.id !== 'string' || !row.id
@@ -6567,6 +6568,7 @@
           return refuse('v2_nonpilot_completion_evidence_preserved', {
             conflictingId:row.id
           });
+        presentSupported += 1;
       }
       if (!sourceCurrent()) return refuse('legacy_changed_during_scan');
     } catch (_) { return refuse('v2_completion_history_verification_unreadable'); }
@@ -6615,7 +6617,7 @@
       });
     // This count reflects the audited, original backlog; never claim complete
     // parity for a bounded partial batch without an independent full read.
-    const remainingRows=wanted.size-existing.size-selected.length;
+    const remainingRows=wanted.size-presentSupported-selected.length;
     let fullVerified=false;
     if (remainingRows===0 && unsupported===0) {
       const parity=await inspectPreviewTaskCompletionOrderParity();
