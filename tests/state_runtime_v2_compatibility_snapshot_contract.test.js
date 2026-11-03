@@ -467,3 +467,21 @@ test('V2 compatibility export keeps verified generation-rotated empty reset beha
   assert.equal(stored.completions.length, 0);
   assert.equal(stored.meta.find(row => row.id === 'runtime').legacyMissing, true);
 });
+
+test('V2 forced reseed cannot reinterpret same-generation V1 disappearance as reset', async () => {
+  const legacy = {
+    habits: [baseHabit('h1', 'Do not erase', 'default', 0)],
+    tasks: [{ id: 't1', title: 'Retain task' }],
+    completions: []
+  };
+  const app = install(legacy);
+  await app.api.seedFromLegacy();
+  const original = app.indexedDB.dump(DB_NAME);
+  app.localStorage.removeItem(LEGACY_KEY);
+  await assert.rejects(app.api.seedFromLegacy({ force: true }), error => {
+    assert.equal(error.code, 'STATE_V2_LEGACY_MISSING_PRESERVED');
+    assert.equal(error.evidence.destructiveReseedBlocked, true);
+    return true;
+  });
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), original);
+});
