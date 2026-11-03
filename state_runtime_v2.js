@@ -2968,6 +2968,22 @@
     };
   }
 
+  // A reset marked empty is not enough to prove the mirror contains no
+  // surviving Habit, completion or mutation evidence. Count stores and read
+  // runtime metadata in the same transaction without loading their records.
+  async function readV2EmptyResetEvidence(db) {
+    const tx = db.transaction(
+      ['habits', 'completions', 'mutations', 'meta'], 'readonly'
+    );
+    const [meta, habits, completions, mutations] = await Promise.all([
+      requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
+      requestPromise(tx.objectStore('habits').count()),
+      requestPromise(tx.objectStore('completions').count()),
+      requestPromise(tx.objectStore('mutations').count())
+    ]);
+    return { meta, habits, completions, mutations };
+  }
+
   function completionCompatibilityBase(completion) {
     if (completion?.id != null && String(completion.id) !== '') return `id:${String(completion.id)}`;
     return `pilot:${String(completion?.source || '')}:${String(completion?.habitId || '')}:${String(completion?.dayKey || '')}`;
@@ -3067,31 +3083,20 @@
         throw new Error('state_runtime_v2_compatibility_source_changed_during_capture');
       const emptyDb = await open();
       if (!emptyDb) throw new Error('state_runtime_v2_compatibility_db_unavailable');
-      // The reset marker alone is insufficient: an interrupted or corrupted
-      // cleanup could leave recoverable V2 evidence while claiming an empty
-      // source. Count all three pilot/WAL stores alongside runtime metadata
-      // in ONE consistent readonly transaction, without deserializing records.
-      let emptyMeta, remainingHabits, remainingCompletions, remainingMutations;
-      try {
-        const tx = emptyDb.transaction(
-          ['habits', 'completions', 'mutations', 'meta'], 'readonly'
-        );
-        [emptyMeta, remainingHabits, remainingCompletions, remainingMutations]
-          = await Promise.all([
-            requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
-            requestPromise(tx.objectStore('habits').count()),
-            requestPromise(tx.objectStore('completions').count()),
-            requestPromise(tx.objectStore('mutations').count())
-          ]);
-      } catch (_) {
+      // The marker alone cannot hide retained records or a WAL ledger.
+      // Shared count-based evidence is also used by verifyParity().
+      let evidence;
+      try { evidence = await readV2EmptyResetEvidence(emptyDb); }
+      catch (_) {
         throw new Error('state_runtime_v2_compatibility_empty_evidence_unreadable');
       }
+      const emptyMeta = evidence.meta;
       if (!emptyMeta || emptyMeta.schemaVersion !== SCHEMA_VERSION
         || emptyMeta.resetGeneration !== expectedGeneration
         || emptyMeta.legacyMissing !== true)
         throw new Error('state_runtime_v2_compatibility_legacy_missing_unverified');
-      if (remainingHabits !== 0 || remainingCompletions !== 0
-        || remainingMutations !== 0)
+      if (evidence.habits !== 0 || evidence.completions !== 0
+        || evidence.mutations !== 0)
         throw new Error('state_runtime_v2_compatibility_empty_evidence_retained');
       // A separate metadata read rejects a revision committed after the
       // consistent emptiness check. An old noncooperating tab can still write
@@ -3283,7 +3288,37 @@
     await seedFromLegacy();
     const source = parseLegacyStateWithPending();
     if (source.missing) {
-      lastParity = { checked: true, match: true, legacyMissing: true, checkedAtISO: nowIso() };
+      const expectedGeneration = currentGeneration({ create: false });
+      const modeEpoch = darkMirrorModeEpoch;
+      const inventory = captureReadOnlyFullStorageInventory();
+      const db = await open();
+      if (!db) throw new Error('state_runtime_v2_parity_empty_db_unavailable');
+      let evidence;
+      try { evidence = await readV2EmptyResetEvidence(db); }
+      catch (_) { throw new Error('state_runtime_v2_parity_empty_evidence_unreadable'); }
+      const afterMeta = await readMeta(db);
+      const sourceStable = isDarkEnabled() && modeEpoch === darkMirrorModeEpoch
+        && currentGeneration({ create: false }) === expectedGeneration
+        && captureReadOnlyFullStorageInventory() === inventory;
+      // A changing source/revision cannot be considered a completed parity
+      // check, even if both observed counts happened to be zero.
+      const consistent = sourceStable
+        && stableJson(afterMeta) === stableJson(evidence.meta);
+      const markerValid = evidence.meta?.schemaVersion === SCHEMA_VERSION
+        && evidence.meta?.resetGeneration === expectedGeneration
+        && evidence.meta?.legacyMissing === true;
+      const empty = evidence.habits === 0 && evidence.completions === 0
+        && evidence.mutations === 0;
+      lastParity = {
+        checked: consistent, match: Boolean(consistent && markerValid && empty),
+        legacyMissing: true,
+        reason: !consistent ? 'empty_reset_context_changed'
+          : !markerValid ? 'empty_reset_marker_unverified'
+            : !empty ? 'empty_reset_evidence_retained' : 'verified_empty_reset',
+        counts: { habits: evidence.habits,
+          completions: evidence.completions, mutations: evidence.mutations },
+        checkedAtISO: nowIso()
+      };
       return lastParity;
     }
     const collections = await readV2Collections();
