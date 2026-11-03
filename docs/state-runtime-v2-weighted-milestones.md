@@ -385,3 +385,26 @@ page or production Habit scoring. A full completion scan remains until an
 independently verified index-backed read can safely replace it. This is
 incremental engineering within the existing readiness gates; **67/100**
 and **canPromote:false** remain unchanged.
+
+## Scoped Habit completion index parity rehearsal — November 3
+
+The preview-host-only `inspectPreviewHabitCompletionIndexParity(habitId)`
+compares a fully unpacked V2 completion scan to the multi-entry
+`by_habit_ids` index result, reading both together with runtime metadata
+in **one read-only IndexedDB transaction**. It validates the index metadata
+of every stored completion pack, not only the packs the index happened to
+return. Historical duplicate completion IDs and mixed-Habit packs are
+preserved, with actual completion sequence order compared exactly.
+
+A newer V2 metadata revision, invalid reset generation, changed full-origin
+V1 source, missing index or inaccurate legacy index metadata must refuse
+the claim without making any repair or persistence write. Synthetic tests
+cover mixed-Habit packed rows, absent/inaccurate `habitIds` metadata and
+a revision racing the final metadata check.
+
+This is an **explicit O(all-completions) diagnostic**, not an optimized
+foreground read. Its result does not establish current whole-app parity,
+cross-tab writer admission, full export safety, or future index freshness.
+The ordinary `getCompletionsForHabit` continues to use its complete
+safe completion scan; a subsequent per-revision fast path still needs
+separately proven freshness and invalidation. **67/100 and canPromote:false.**
