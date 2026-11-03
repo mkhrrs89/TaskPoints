@@ -339,3 +339,27 @@ No live storage write path or authority flag is changed.
 The browser recovery probe injects a temporary V1 read denial, not a real
 localStorage.removeItem: removal is an intentional reset boundary which
 rotates the TaskPoints generation and must not be bypassed.
+
+## Empty-seed preservation under asynchronous V1/reset races — November 3
+
+The dark V2 seed now distinguishes an unreadable V1 snapshot from a truly
+missing key, and refuses to manufacture an empty source from a denied read.
+A same-generation missing V1 key preserves existing V2 evidence even when
+a diagnostic caller requests `force:true`. The preview compatibility
+snapshot likewise refuses to return an apparently valid empty export while
+a same-generation V2 mirror survives; a generation-rotated, verified empty
+seed retains its established behavior.
+
+A further race guard rechecks dark-mode epoch, reset generation and actual V1
+key absence **after** asynchronous IndexedDB opening and again inside the
+seed replacement transaction callback, before any Habits/completions/WAL
+clears. A competing V1 restore, second generation rotation, or V1 read denial
+must abort without erasing the older V2 mirror. Regression fixtures inject
+these changes both during metadata reads and inside the destructive
+transaction. Existing production V1 writers and image storage are untouched.
+
+**Scope limit:** These best-effort checks do not provide transactional
+cross-tab writer exclusion across localStorage and IndexedDB. An old
+nonparticipating tab could still write immediately after a check.
+Physical-device validation, complete writer admission, independent backup,
+and full collection migration remain uncredited. **67/100; canPromote:false.**
