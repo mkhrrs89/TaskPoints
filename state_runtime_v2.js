@@ -6455,6 +6455,185 @@
   // chronology. A scoped match never establishes whole-app compatibility:
   // unrelated completion classes, production writer admission and exports
   // remain unverified. The full V2 store is scanned only in this inspector.
+  // PREVIEW ONLY: discover a historical backlog of Task/Work/metric
+  // completions in effective V1 and ingest ONE bounded batch through the
+  // existing atomic receipt-backed importer. Never overwrite existing V2
+  // evidence, drop duplicate IDs, or mix unrelated completion classes.
+  // This is explicit developer rehearsal, not automatic production mirroring.
+  async function rehearsePreviewTaskCompletionHistoryCatchUp(sourceToken, actionId) {
+    const refuse = (reason, detail = {}) => ({
+      checked:true, previewOnly:true, committed:false,
+      confirmedDurable:false, collectionParityVerified:false,
+      canPromote:false, productionWritersFenced:false,
+      readAuthority:'legacy_only', mutationAuthority:'legacy_only',
+      reason, ...detail
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    if (typeof sourceToken !== 'string' || !sourceToken)
+      return refuse('full_origin_token_required');
+    if (typeof actionId !== 'string' || !actionId || actionId.length > 128)
+      return refuse('task_completion_action_id_required');
+    if (typeof core.readTaskPointsStoredState !== 'function'
+      || typeof core.readPendingTaskMutations !== 'function')
+      return refuse('legacy_task_reader_unavailable');
+
+    const generation = currentGeneration({create:false});
+    const modeEpoch = darkMirrorModeEpoch;
+    const sourceCurrent = () => isDarkEnabled()
+      && darkMirrorModeEpoch === modeEpoch
+      && currentGeneration({create:false}) === generation
+      && captureReadOnlyFullStorageInventory() === sourceToken;
+    if (!generation) return refuse('generation_unavailable');
+    let effective, wanted, unsupported = 0;
+    try {
+      if (!sourceCurrent()) return refuse('full_origin_changed');
+      const pending = core.readPendingTaskMutations();
+      if (pending?.malformed) return refuse('legacy_task_journal_malformed');
+      effective = core.readTaskPointsStoredState();
+      if (!effective || !Array.isArray(effective.completions))
+        return refuse('legacy_completions_missing');
+      const occurrences = new Map();
+      for (const item of effective.completions) {
+        if (typeof item?.id === 'string' && item.id)
+          occurrences.set(item.id, (occurrences.get(item.id) || 0) + 1);
+      }
+      const supported = row => ['task','work','metric'].includes(
+        String(row?.source || '')
+      ) && typeof row?.taskId === 'string' && Boolean(row.taskId);
+      wanted = new Map();
+      for (let i=0; i<effective.completions.length; i+=1) {
+        const row = effective.completions[i];
+        if (isPilotCompletion(row)) continue;
+        if (!supported(row)) { unsupported+=1; continue; }
+        if (typeof row.id !== 'string' || !row.id || row.id.length > 128
+          || occurrences.get(row.id) !== 1)
+          return refuse('legacy_completion_id_ambiguous');
+        if (wanted.has(row.id)) return refuse('legacy_completion_id_ambiguous');
+        wanted.set(row.id, withCompletionHabitIds({
+          id:row.id,
+          entries:[{value:clone(row),sequence:-(i+1)}]
+        }));
+      }
+      if (!sourceCurrent()) return refuse('legacy_changed_during_capture');
+    } catch (_) { return refuse('legacy_completion_history_unreadable'); }
+    // The already-seeded Task collection must be fully consistent, not just
+    // metadata-authenticated. Otherwise importing completions for stale or
+    // preview-edited Tasks could misattribute user work.
+    const taskParity = await inspectPreviewTaskCollectionParity();
+    if (!taskParity.match) return refuse('task_preview_parity_required', {
+      prerequisiteReason:taskParity.reason
+    });
+    try { if (!sourceCurrent()) return refuse('legacy_changed_before_scan'); }
+    catch (_) { return refuse('legacy_unreadable_before_scan'); }
+
+    let priorRows, meta;
+    try {
+      const db=await open();
+      if (!db) return refuse('v2_unavailable');
+      const tx=db.transaction(['completions','meta'],'readonly');
+      [priorRows,meta]=await Promise.all([
+        requestPromise(tx.objectStore('completions').getAll()),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID))
+      ]);
+    } catch (_) { return refuse('v2_completion_history_unreadable'); }
+    if (!meta || meta.schemaVersion !== SCHEMA_VERSION
+      || meta.resetGeneration !== generation || meta.legacyMissing === true)
+      return refuse('pilot_meta_not_ready');
+
+    const existing = new Set();
+    try {
+      for (const row of priorRows) {
+        if (!row || typeof row.id !== 'string' || !row.id
+          || existing.has(row.id)) return refuse('v2_completion_pack_invalid');
+        existing.add(row.id);
+        const entries = Array.isArray(row.entries)
+          ? row.entries
+          : Object.prototype.hasOwnProperty.call(row,'value')
+            ? [{value:row.value,sequence:row.sequence}] : [];
+        if (!entries.length) return refuse('v2_completion_pack_invalid');
+        const nonpilot = entries.filter(entry =>
+          !isPilotCompletion(entry?.value));
+        if (!nonpilot.length) {
+          if (wanted.has(row.id))
+            return refuse('v2_completion_id_collides_with_pilot');
+          continue;
+        }
+        const expected=wanted.get(row.id);
+        // An old preview row is NEVER trusted just because its ID exists.
+        // Require the entire packed payload and chronology to agree with V1.
+        if (!expected || nonpilot.length !== entries.length
+          || stableJson(row) !== stableJson(expected))
+          return refuse('v2_nonpilot_completion_evidence_preserved', {
+            conflictingId:row.id
+          });
+      }
+      if (!sourceCurrent()) return refuse('legacy_changed_during_scan');
+    } catch (_) { return refuse('v2_completion_history_verification_unreadable'); }
+
+    let bytes=2;
+    const selected=[];
+    for (const [id,row] of wanted) {
+      if (existing.has(id)) continue;
+      const size=JSON.stringify(row).length + 1;
+      if (size > 131072) return refuse('task_completion_payload_too_large');
+      if (selected.length && (selected.length>=64 || bytes+size>240000))
+        break;
+      if (bytes+size>240000)
+        return refuse('task_completion_payload_too_large');
+      selected.push(id); bytes+=size;
+    }
+    if (!selected.length) {
+      // A completion-free V1 state is legitimate, but unsupported classes
+      // are not counted as successfully migrated.
+      if (unsupported) return refuse('unsupported_nonpilot_completion_classes', {
+        unsupportedCount:unsupported, supportedCount:wanted.size
+      });
+      const parity = wanted.size
+        ? await inspectPreviewTaskCompletionOrderParity()
+        : {match:true,completionOrderingVerified:true};
+      if (!parity.match) return refuse('task_completion_history_parity_mismatch',{
+        prerequisiteReason:parity.reason
+      });
+      return {
+        checked:true, previewOnly:true, committed:false,
+        confirmedDurable:true, collectionParityVerified:true,
+        fullyMirrored:true, importedRows:0, remainingRows:0,
+        supportedRows:wanted.size, reason:'task_completion_history_current',
+        canPromote:false, productionWritersFenced:false,
+        readAuthority:'legacy_only', mutationAuthority:'legacy_only'
+      };
+    }
+    try { if (!sourceCurrent()) return refuse('legacy_changed_before_import'); }
+    catch (_) { return refuse('legacy_unreadable_before_import'); }
+    const result = await rehearsePreviewTaskLinkedCompletionBatch(
+      selected,sourceToken,actionId
+    );
+    if (!result.confirmedDurable)
+      return refuse(result.reason || 'task_completion_batch_unverified', {
+        batchResult:result, importedRows:0
+      });
+    // This count reflects the audited, original backlog; never claim complete
+    // parity for a bounded partial batch without an independent full read.
+    const remainingRows=wanted.size-existing.size-selected.length;
+    let fullVerified=false;
+    if (remainingRows===0 && unsupported===0) {
+      const parity=await inspectPreviewTaskCompletionOrderParity();
+      fullVerified=parity.match === true;
+    }
+    return {
+      checked:true,previewOnly:true, committed:result.committed===true,
+      confirmedDurable:true,collectionParityVerified:fullVerified,
+      fullyMirrored:fullVerified,importedRows:selected.length,
+      remainingRows:Math.max(0,remainingRows),
+      supportedRows:wanted.size,unsupportedCount:unsupported,
+      reason:fullVerified?'task_completion_history_verified'
+        :'task_completion_history_partial',
+      canPromote:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+    };
+  }
+
   async function inspectPreviewTaskCompletionOrderParity() {
     const refuse = (reason, details = {}) => ({
       checked: true, previewOnly: true, match: false,
@@ -8213,6 +8392,7 @@
     rehearsePreviewTaskLifecycleMutation,
     rehearsePreviewTaskLinkedCompletion,
     rehearsePreviewTaskLinkedCompletionBatch,
+    rehearsePreviewTaskCompletionHistoryCatchUp,
     inspectPreviewTaskCompletionOrderParity,
     inspectPreviewMixedCompletionExport,
     inspectPreviewWholeCompatibilityProjection,
