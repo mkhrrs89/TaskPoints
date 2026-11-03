@@ -569,3 +569,28 @@ test('V2 refuses an empty seed when localStorage access is denied after initial 
   assert.equal(calls >= 2, true);
   assert.deepEqual(app.indexedDB.dump(DB_NAME), priorV2);
 });
+
+test('V2 refuses an empty seed if V1 returns inside the destructive transaction', async () => {
+  const legacy = {
+    habits: [baseHabit('h1', 'Keep before transaction race', 'default', 0)],
+    tasks: [{ id: 't1', title: 'Durable before transaction' }],
+    completions: []
+  };
+  const app = install(legacy);
+  await app.api.seedFromLegacy();
+  const storedBefore = app.indexedDB.dump(DB_NAME);
+  app.localStorage.removeItem(LEGACY_KEY);
+  app.localStorage.setItem('taskpoints_state_v2_generation_v1', 'rotated-generation');
+  const originalConsume = app.indexedDB._consumeFailure.bind(app.indexedDB);
+  let metaGets = 0;
+  app.indexedDB._consumeFailure = (store, operation) => {
+    if (store === 'meta' && operation === 'get' && ++metaGets === 2)
+      app.localStorage.setItem(LEGACY_KEY, JSON.stringify(legacy));
+    return originalConsume(store, operation);
+  };
+  await assert.rejects(app.api.seedFromLegacy({ force: true }),
+    /state_runtime_v2_empty_seed_source_restored/);
+  assert.equal(metaGets >= 2, true, 'V1 restoration must occur at the in-transaction guard');
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), storedBefore,
+    'an aborted empty-seed transaction must leave the previous mirror unchanged');
+});
