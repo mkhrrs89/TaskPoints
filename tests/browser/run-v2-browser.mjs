@@ -11123,9 +11123,15 @@ try {
       const original = localStorage.getItem('taskpoints_v1');
       // A legitimate reset rotates the generation and removes V1, so a
       // genuinely empty pilot must still yield the historic {} export.
-      localStorage.removeItem('taskpoints_v1');
-      localStorage.setItem('taskpoints_state_v2_generation_v1',
-        'browser-reset-empty-evidence-epoch');
+      // Isolate the empty-export invariant from the V1 reset hook's
+      // deferred microtask. That hook independently rotates the generation
+      // and will race a hand-written generation key if called here.
+      // Rotate through the supported V2 generation module exactly once.
+      Storage.prototype.__taskPointsV2GenerationOriginalRemoveItem
+        .call(localStorage, 'taskpoints_v1');
+      const rotated = window.TaskPointsStateRuntimeV2Generation
+        .rotate('browser-reset-empty-evidence');
+      if (rotated.rotated !== true) throw Error('test_reset_rotation_failed');
       const clean = await runtime.buildCompatibilitySnapshot();
       const db = await runtime.open();
       const tx = db.transaction('habits', 'readwrite');
