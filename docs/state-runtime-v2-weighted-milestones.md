@@ -484,3 +484,27 @@ pilot/WAL emptiness check; this patch does not purport to prove entire-app
 reset completeness or independent backup. The nine writer families,
 off-device recovery, physical PWA tests, and final approval gates remain
 uncredited. **67/100; canPromote:false.**
+
+## Count-verified empty-reset parity and compatibility — November 3
+
+An intentional reset that removes the V1 snapshot and rotates its generation
+must not produce a false-positive empty compatibility export or successful
+V2 parity when any recoverable pilot state or mutation ledger survives.
+A shared **read-only, single-transaction** IndexedDB inspection now reads
+the runtime reset marker and counts rows in `habits`, `completions` and
+`mutations` without deserializing the stores. Compatibility export refuses
+`{}` on retained records, denied count reads, unexpected metadata or a
+revision change after the atomic inspection. The parity diagnostic now
+reports `match:false` with actual retained counts instead of blindly
+declaring an absent V1 snapshot a match.
+
+Node regressions cover all three stores, count failures, revision races and
+the genuinely empty reset case. Chromium/WebKit browser coverage checks a
+successful authorized empty export, then injects a stranded V2 Habit record
+and verifies both false-empty export refusal and parity mismatch across
+a browser reload. Stranded data is preserved for investigation.
+
+This change is restricted to diagnostic/preview operations; it does not
+erase retained rows, alter production V1, or claim the separate V2 Task
+preview store is clean. Unfenced legacy writers and asynchronous races
+after the last check remain cutover blockers. **67/100; canPromote:false.**
