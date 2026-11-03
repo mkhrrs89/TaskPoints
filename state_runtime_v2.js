@@ -2902,6 +2902,31 @@
     return { habits, completions };
   }
 
+  // Capture the compatibility revision and its Habit/completion records
+  // atomically in ONE readonly IndexedDB transaction. A writer cannot
+  // interleave a different V2 revision into this transaction. The caller
+  // still checks a fresh metadata read afterward to reject a newer commit
+  // made immediately after this consistent collection snapshot.
+  async function readV2CompatibilityCollections(db) {
+    const tx = db.transaction(['habits', 'completions', 'meta'], 'readonly');
+    const metaRequest = tx.objectStore('meta').get(RUNTIME_META_ID);
+    const habitsRequest = tx.objectStore('habits').getAll();
+    const completionsRequest = tx.objectStore('completions').getAll();
+    const [meta, habitRows, completionRows] = await Promise.all([
+      requestPromise(metaRequest),
+      requestPromise(habitsRequest),
+      requestPromise(completionsRequest)
+    ]);
+    return {
+      meta,
+      habits: (habitRows || [])
+        .slice()
+        .sort((a, b) => Number(a.legacyIndex || 0) - Number(b.legacyIndex || 0))
+        .map(row => clone(row.value)),
+      completions: unpackCompletionRows(completionRows)
+    };
+  }
+
   function completionCompatibilityBase(completion) {
     if (completion?.id != null && String(completion.id) !== '') return `id:${String(completion.id)}`;
     return `pilot:${String(completion?.source || '')}:${String(completion?.habitId || '')}:${String(completion?.dayKey || '')}`;
@@ -2995,19 +3020,17 @@
     const effective = applyTaskJournalToCompatibilitySource(source.state);
     if (captureReadOnlyFullStorageInventory() !== sourceInventory)
       throw new Error('state_runtime_v2_compatibility_source_changed_during_capture');
-    // A V2 mutation may land while the separate Habit/completion snapshot
-    // transaction is pending, even if the V1 journal and origin do not change.
-    // Reject a mixed-generation export candidate rather than combining
-    // different V2 revisions. These are read-only metadata checks; V1 remains
-    // authoritative and this does not enable the V2 export/cutover path.
+    // The metadata and collections must describe the SAME IndexedDB snapshot.
+    // An independent post-read metadata check still rejects a newer V2
+    // mutation committed while we were assembling this preview export.
     const db = await open();
     if (!db) throw new Error('state_runtime_v2_compatibility_db_unavailable');
-    const metaBefore = await readMeta(db);
+    const collections = await readV2CompatibilityCollections(db);
+    const metaBefore = collections.meta;
     if (!metaBefore || metaBefore.schemaVersion !== SCHEMA_VERSION
       || metaBefore.resetGeneration !== expectedGeneration
       || metaBefore.legacyMissing === true)
       throw new Error('state_runtime_v2_compatibility_metadata_not_ready');
-    const collections = await readV2Collections();
     const metaAfter = await readMeta(db);
     if (stableJson(metaAfter) !== stableJson(metaBefore))
       throw new Error('state_runtime_v2_compatibility_v2_revision_changed_during_read');
