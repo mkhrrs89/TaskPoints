@@ -147,3 +147,134 @@ test('reusing a consumed Task action ID on different data refuses admission',asy
   assert.equal(outcome.reason,'task_reconcile_action_id_conflict');
   assert.deepEqual(app.indexedDB.dump(DB),before);
 });
+
+function updateCompletionHistory(app, completions) {
+  const state=JSON.parse(app.localStorage.getItem(KEY));
+  state.completions=completions;
+  app.localStorage.setItem(KEY,JSON.stringify(state));
+}
+function completion(i,task='a') {
+  return {id:'work-completion-'+i,source:'task',taskId:task,
+    dayKey:'2026-11-'+String(i%28+1).padStart(2,'0'),points:i};
+}
+async function currentTasksWithHistory(app,completions) {
+  updateCompletionHistory(app,completions);
+  const taskUpdate=await app.api.rehearsePreviewTaskCollectionReconcile(
+    app.token(),'completion-history-evidence');
+  assert.equal(taskUpdate.confirmedDurable,true,taskUpdate.reason);
+}
+
+test('historical Task completions import without modifying V1 or Habit records',async()=>{
+  const app=await seeded();
+  const v2Before=app.indexedDB.dump(DB);
+  await currentTasksWithHistory(app,[completion(1),completion(2,'b')]);
+  const v1=app.localStorage.getItem(KEY);
+  const result=await app.api.rehearsePreviewTaskCompletionHistoryCatchUp(
+    app.token(),'history-import');
+  assert.equal(result.committed,true,result.reason);
+  assert.equal(result.confirmedDurable,true);
+  assert.equal(result.fullyMirrored,true);
+  assert.equal(result.collectionParityVerified,true);
+  assert.equal(result.importedRows,2);
+  assert.equal(result.remainingRows,0);
+  assert.equal(result.canPromote,false);
+  assert.deepEqual(app.indexedDB.dump(DB).habits,v2Before.habits);
+  assert.equal(app.localStorage.getItem(KEY),v1);
+  assert.equal((await app.api.inspectPreviewTaskCompletionOrderParity()).match,true);
+  const same=await app.api.rehearsePreviewTaskCompletionHistoryCatchUp(
+    app.token(),'history-import');
+  assert.equal(same.reason,'task_completion_history_current');
+  assert.equal(same.committed,false);
+  const restarted=install(app.indexedDB,app.localStorage);
+  await restarted.api.seedFromLegacy();
+  assert.equal((await restarted.api.inspectPreviewTaskCompletionOrderParity()).match,true);
+});
+
+test('Task history backfill stays bounded and resumes without duplicate insertions',async()=>{
+  const app=await seeded();
+  await currentTasksWithHistory(app,Array.from({length:66},(_,i)=>completion(i)));
+  const first=await app.api.rehearsePreviewTaskCompletionHistoryCatchUp(
+    app.token(),'history-1');
+  assert.equal(first.committed,true,first.reason);
+  assert.equal(first.importedRows,64);
+  assert.equal(first.remainingRows,2);
+  assert.equal(first.fullyMirrored,false);
+  const second=await app.api.rehearsePreviewTaskCompletionHistoryCatchUp(
+    app.token(),'history-2');
+  assert.equal(second.committed,true,second.reason);
+  assert.equal(second.importedRows,2);
+  assert.equal(second.remainingRows,0);
+  assert.equal(second.fullyMirrored,true,second.reason);
+  const after=app.indexedDB.dump(DB);
+  assert.equal(after.completions.length,66);
+  const third=await app.api.rehearsePreviewTaskCompletionHistoryCatchUp(
+    app.token(),'history-3');
+  assert.equal(third.reason,'task_completion_history_current');
+  assert.deepEqual(app.indexedDB.dump(DB),after);
+});
+
+test('backlog catch-up refuses a corrupted existing V2 completion',async()=>{
+  const app=await seeded();
+  await currentTasksWithHistory(app,[completion(1),completion(2)]);
+  assert.equal((await app.api.rehearsePreviewTaskCompletionHistoryCatchUp(
+    app.token(),'first')).fullyMirrored,true);
+  const rows=app.indexedDB._databases.get(DB)._stores.get('completions');
+  const row=rows.get('work-completion-1');
+  rows.set('work-completion-1',{...row,entries:[{
+    ...row.entries[0],value:{...row.entries[0].value,points:999}
+  }]});
+  updateCompletionHistory(app,[completion(1),completion(2),completion(3)]);
+  await app.api.rehearsePreviewTaskCollectionReconcile(app.token(),'source-change');
+  const before=app.indexedDB.dump(DB);
+  const result=await app.api.rehearsePreviewTaskCompletionHistoryCatchUp(
+    app.token(),'no-repair');
+  assert.equal(result.committed,false);
+  assert.equal(result.reason,'v2_nonpilot_completion_evidence_preserved');
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('history backfill refuses duplicate legacy completion IDs and preserves V2',async()=>{
+  const app=await seeded();
+  await currentTasksWithHistory(app,[completion(1),completion(1)]);
+  const before=app.indexedDB.dump(DB);
+  const result=await app.api.rehearsePreviewTaskCompletionHistoryCatchUp(
+    app.token(),'duplicates');
+  assert.equal(result.committed,false);
+  assert.equal(result.reason,'legacy_completion_id_ambiguous');
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('history backfill refuses incomplete Task preview prerequisite without writes',async()=>{
+  const app=await seeded();
+  updateCompletionHistory(app,[completion(5)]);
+  const before=app.indexedDB.dump(DB);
+  const result=await app.api.rehearsePreviewTaskCompletionHistoryCatchUp(
+    app.token(),'source-stale');
+  assert.equal(result.committed,false);
+  assert.equal(result.reason,'task_preview_parity_required');
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('history importer aborts the whole batch on quota failure',async()=>{
+  const app=await seeded();
+  await currentTasksWithHistory(app,[completion(1),completion(2)]);
+  const before=app.indexedDB.dump(DB);
+  app.indexedDB.failNext({store:'completions',operation:'add',
+    error:new Error('QuotaExceededError')});
+  const result=await app.api.rehearsePreviewTaskCompletionHistoryCatchUp(
+    app.token(),'quota');
+  assert.equal(result.committed,false);
+  assert.equal(result.confirmedDurable,false);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('historical catchup refuses old full-origin tokens after unrelated changes',async()=>{
+  const app=await seeded();
+  await currentTasksWithHistory(app,[completion(1)]);
+  const token=app.token(),before=app.indexedDB.dump(DB);
+  app.localStorage.setItem('tp_projects_v1','new-other-tab-value');
+  const result=await app.api.rehearsePreviewTaskCompletionHistoryCatchUp(
+    token,'stale');
+  assert.equal(result.reason,'full_origin_changed');
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
