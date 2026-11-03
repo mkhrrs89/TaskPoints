@@ -1731,24 +1731,32 @@ try {
       const first=await api.rehearsePreviewTaskLinkedCompletion(rows[0].id,token,'ordered-first');
       const partial=await api.inspectPreviewTaskCompletionOrderParity();
       const second=await api.rehearsePreviewTaskLinkedCompletion(rows[1].id,token,'ordered-second');
+      const beforeBaseline=await api.inspectPreviewTaskCompletionOrderParity();
+      // The fixture also contains an older V1 Task completion. A complete
+      // comparison must include it, not only the recent journal rows.
+      const baseline=await api.rehearsePreviewTaskLinkedCompletion(
+        'synthetic-task-completion',token,'ordered-baseline');
       const verified=await api.inspectPreviewTaskCompletionOrderParity();
       const pilot=await api.verifyParity();
       const again=await api.inspectPreviewTaskCompletionOrderParity();
-      return {seeded,missing,first,partial,second,verified,pilot,again,
+      return {seeded,missing,first,partial,second,beforeBaseline,baseline,verified,pilot,again,
         unchanged:prior===localStorage.getItem('taskpoints_v1'),
         journalSame:journalBefore===localStorage.getItem('taskpoints_pending_task_mutations_v1'),
         authority:api.getStatus().readAuthority};
     });
     assert.equal(result.seeded.verified,true,JSON.stringify(result.seeded));
     assert.equal(result.missing.reason,'task_completion_preview_missing');
-    assert.equal(result.missing.missingCount,2);
+    assert.equal(result.missing.missingCount,3);
     assert.equal(result.first.confirmedDurable,true);
     assert.equal(result.partial.reason,'task_completion_preview_missing');
-    assert.equal(result.partial.missingCount,1);
+    assert.equal(result.partial.missingCount,2);
     assert.equal(result.second.confirmedDurable,true);
+    assert.equal(result.beforeBaseline.reason,'task_completion_preview_missing');
+    assert.equal(result.beforeBaseline.missingCount,1);
+    assert.equal(result.baseline.confirmedDurable,true);
     assert.equal(result.verified.match,true,JSON.stringify(result.verified));
     assert.equal(result.verified.completionOrderingVerified,true);
-    assert.equal(result.verified.scopedCompletionCount,2);
+    assert.equal(result.verified.scopedCompletionCount,3);
     assert.equal(result.verified.fullCompatibilityVerified,false);
     assert.equal(result.verified.canPromote,false);
     assert.equal(result.again.match,true);
@@ -1773,7 +1781,7 @@ try {
       const token=JSON.stringify(Array.from({length:localStorage.length},
         (_,i)=>localStorage.key(i)).sort().map(key=>[key,localStorage.getItem(key)]));
       await api.rehearsePreviewTaskLinkedCompletionBatch(
-        rows.map(x=>x.id),token,'order-corrupt-batch');
+        [...rows.map(x=>x.id),'synthetic-task-completion'],token,'order-corrupt-batch');
       const pristine=await api.inspectPreviewTaskCompletionOrderParity();
       const db=await api.open();
       const get=async(id)=>new Promise((resolve,reject)=>{
