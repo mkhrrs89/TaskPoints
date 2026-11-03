@@ -155,7 +155,7 @@ test('read-only completion ordering inspector refuses partial, stale, extra and 
   assert.doesNotMatch(snippet,/\b(?:journalTaskMutation|journalTaskCompletionBatch|saveStateSnapshot)\s*\(/);
   assert.doesNotMatch(snippet,/\b(?:taskStore|completionStore|metaStore|mutationStore)\.(?:put|add|delete|clear)\s*\(/);
   assert.doesNotMatch(snippet,/localStorage\.(?:setItem|removeItem|clear)\s*\(/);
-  assert.match(runtime,/rehearsePreviewTaskLinkedCompletionBatch,\s*inspectPreviewTaskCompletionOrderParity,/);
+  assert.match(runtime,/rehearsePreviewTaskLinkedCompletionBatch,\s*rehearsePreviewTaskCompletionHistoryCatchUp,\s*inspectPreviewTaskCompletionOrderParity,/);
 });
 
 test('V2 compatibility overlays Task journal on Habit journal and checks immutable source across async reads',()=>{
