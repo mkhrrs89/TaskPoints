@@ -3420,6 +3420,7 @@
   // This evidence lives only in this preview tab and is invalidated when an
   // audit is attempted again or its generation/revision/source changes.
   let previewHabitIndexProof = null;
+  let previewHabitIndexAuditEpoch = 0;
 
   // Preview-only evidence for a future fast per-Habit completion index read.
   // An index's mere existence does not prove that historical completion
@@ -3428,6 +3429,9 @@
   // Never repair source rows, cache this as a production permit or promote.
   async function inspectPreviewHabitCompletionIndexParity(habitIdInput) {
     previewHabitIndexProof = null;
+    // Overlapping audits cannot let an older asynchronous attempt replace
+    // the newer audit's proof after its IndexedDB read finally resolves.
+    const auditEpoch = ++previewHabitIndexAuditEpoch;
     const refuse = (reason, detail = {}) => ({
       checked: true, previewOnly: true, indexVerified: false,
       canPromote: false, readAuthority: 'legacy_only',
@@ -3442,10 +3446,11 @@
     const generation = currentGeneration({ create: false });
     if (!generation) return refuse('generation_unavailable');
     const modeEpoch = darkMirrorModeEpoch;
-    let inventory;
+    let inventory, legacySource;
     try {
       inventory = captureReadOnlyFullStorageInventory();
-      if (parseLegacyStateWithPending().missing) return refuse('legacy_unavailable');
+      legacySource = parseLegacyStateWithPending();
+      if (legacySource.missing) return refuse('legacy_unavailable');
       if (captureReadOnlyFullStorageInventory() !== inventory)
         return refuse('legacy_changed_during_capture');
     } catch (_) { return refuse('legacy_source_unreadable'); }
@@ -3493,10 +3498,24 @@
         return refuse('completion_index_result_mismatch', {
           fullScanCompletions: expected.length, indexedCompletions: actual.length
         });
+      // A perfect index can faithfully return a corrupted or stale V2 mirror.
+      // Require the audited Habit history to agree with effective V1 authority
+      // (including pending Habit journal deltas) before issuing reusable proof.
+      const legacyCompletions = pilotCompletions(legacySource.state).filter(
+        completion => String(completion?.habitId ?? '') === habitId
+      );
+      const normalized = rows => stableJson(rows.map(normalizePilotCompletionForParity));
+      if (normalized(legacyCompletions) !== normalized(expected))
+        return refuse('legacy_pilot_completion_parity_mismatch', {
+          legacyCompletions: legacyCompletions.length,
+          v2Completions: expected.length
+        });
       const metaAfter = await readMeta(db);
       if (!sourceCurrent()) return refuse('legacy_changed_after_read');
       if (stableJson(metaAfter) !== stableJson(meta))
         return refuse('v2_revision_changed_during_read');
+      if (auditEpoch !== previewHabitIndexAuditEpoch)
+        return refuse('index_audit_superseded');
       previewHabitIndexProof = {
         habitId, generation, modeEpoch, inventory,
         metaJson: stableJson(meta)
@@ -3589,7 +3608,8 @@
         return refuse('index_audit_revision_stale');
       }
       if (!sourceCurrent() || previewHabitIndexProof !== proof) {
-        previewHabitIndexProof = null;
+        // An older in-flight read must not revoke a *newer* successful audit.
+        if (previewHabitIndexProof === proof) previewHabitIndexProof = null;
         return refuse('index_audit_source_stale');
       }
       return {
