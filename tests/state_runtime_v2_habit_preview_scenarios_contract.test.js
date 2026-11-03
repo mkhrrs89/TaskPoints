@@ -582,3 +582,22 @@ test('overlapping indexed completion audits cannot let an older audit supersede 
   assert.deepEqual(read.completions, []);
   assert.equal(read.canPromote, false);
 });
+
+test('a stale in-flight indexed read never clears a newer successful audit proof', async () => {
+  const app = installRuntime({ previewHost: true });
+  await app.api.seedFromLegacy();
+  assert.equal((await app.api.inspectPreviewHabitCompletionIndexParity('h1')).indexVerified, true);
+  // The read captures the old proof, then yields on IndexedDB. The new audit
+  // immediately revokes it and later publishes a newer, independently checked
+  // proof. The older read must refuse without erasing the newer proof.
+  const staleRead = app.api.readPreviewIndexedHabitCompletions('h1');
+  const newAudit = app.api.inspectPreviewHabitCompletionIndexParity('h1');
+  const [stale, fresh] = await Promise.all([staleRead, newAudit]);
+  assert.equal(stale.eligible, false);
+  assert.equal(stale.reason, 'index_audit_source_stale');
+  assert.equal(Object.hasOwn(stale, 'completions'), false);
+  assert.equal(fresh.indexVerified, true, fresh.reason);
+  const after = await app.api.readPreviewIndexedHabitCompletions('h1');
+  assert.equal(after.eligible, true, after.reason);
+  assert.equal(after.canPromote, false);
+});
