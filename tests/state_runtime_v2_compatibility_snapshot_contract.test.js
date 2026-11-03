@@ -461,7 +461,7 @@ test('V2 compatibility export keeps verified generation-rotated empty reset beha
   await app.api.seedFromLegacy();
   app.localStorage.removeItem(LEGACY_KEY);
   app.localStorage.setItem('taskpoints_state_v2_generation_v1', 'new-explicit-reset-generation');
-  assert.deepEqual(await app.api.buildCompatibilitySnapshot(), {});
+  assert.equal(JSON.stringify(await app.api.buildCompatibilitySnapshot()), '{}');
   const stored = app.indexedDB.dump(DB_NAME);
   assert.equal(stored.habits.length, 0);
   assert.equal(stored.completions.length, 0);
