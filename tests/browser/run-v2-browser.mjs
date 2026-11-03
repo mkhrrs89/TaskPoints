@@ -1836,12 +1836,19 @@ try {
 
   await run('V2 compatibility export includes V1 Task journal and preserves interleaved Habit/Task chronology', async context=>{
     const page=await open(context);
+    const baseline=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const snapshot=await api.buildCompatibilitySnapshot();
+      const check=await api.inspectPreviewMixedCompletionExport();
+      window.V2BrowserFixture.delta('h1','2026-10-21','full',1);
+      return {ids:snapshot.completions.map(c=>c.id),check};
+    });
+    // The V2 WAL confirmation may still clear an independent sidecar after
+    // the Habit mirror queue becomes idle. Wait for confirmation before
+    // snapshotting the full-origin localStorage inventory.
+    await settled(page,1);
     const result=await page.evaluate(async()=>{
       const api=window.TaskPointsStateRuntimeV2,core=window.TaskPointsCore;
-      const baseline=await api.buildCompatibilitySnapshot();
-      const baselineCheck=await api.inspectPreviewMixedCompletionExport();
-      window.V2BrowserFixture.delta('h1','2026-10-21','full',1);
-      await api.waitForHabitMirrorIdle();
       const record={id:'export-journal-work',source:'work',taskId:'synthetic-task',
         title:'Work Score',points:7.2,completedAtISO:'2026-10-21T12:00:00.000Z'};
       core.journalTaskCompletionBatch([record]);
@@ -1854,8 +1861,7 @@ try {
       const pendingHabits=core.readPendingHabitDeltas();
       if(pendingHabits?.length)core.applyPendingHabitDeltas(raw,pendingHabits);
       const effective=core.applyPendingTaskMutations(raw,core.readPendingTaskMutations().record);
-      return {baselineIds:baseline.completions.map(c=>c.id),baselineCheck,
-        snapshotIds:snapshot.completions.map(c=>c.id),
+      return {snapshotIds:snapshot.completions.map(c=>c.id),
         effectiveIds:effective.completions.map(c=>c.id),
         snapshotWork:snapshot.completions.find(c=>c.id===record.id),
         expectedWork:effective.completions.find(c=>c.id===record.id),
@@ -1865,8 +1871,8 @@ try {
         habitJournalSame:localStorage.getItem('taskpoints_pending_habit_deltas_v1')===rawHabitJournal,
         authority:api.getStatus().readAuthority};
     });
-    assert.equal(result.baselineCheck.match,true,JSON.stringify(result.baselineCheck));
-    assert.deepEqual(result.baselineIds,['synthetic-task-completion']);
+    assert.equal(baseline.check.match,true,JSON.stringify(baseline.check));
+    assert.deepEqual(baseline.ids,['synthetic-task-completion']);
     assert.deepEqual(result.snapshotIds,result.effectiveIds);
     assert.equal(result.snapshotWork.points,result.expectedWork.points);
     assert.equal(result.snapshotIds.includes('export-journal-work'),true);
