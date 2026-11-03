@@ -387,3 +387,125 @@ test('preview indexed completion audit refuses V2 revision changes during read',
   assert.equal(result.indexVerified, false);
   assert.equal(result.reason, 'v2_revision_changed_during_read');
 });
+
+test('audited V2 completion read uses only the index after its full-scan proof', async () => {
+  const legacy = baseLegacyState();
+  legacy.habits.push({ ...structuredClone(legacy.habits[0]), id: 'h2' });
+  legacy.completions = [
+    { id: 'shared', source: 'habit', habitId: 'h2', dayKey: '2026-09-08', points: 5 },
+    { id: 'recent', source: 'habit', habitId: 'h1', dayKey: '2026-09-07', points: 10 },
+    { id: 'shared', source: 'habit', habitId: 'h1', dayKey: '2026-09-05', points: 8 },
+    { id: 'older', source: 'habit', habitId: 'h1', dayKey: '2026-09-03', points: 10 }
+  ];
+  const app = installRuntime({
+    previewHost: true,
+    localStorage: new FakeStorage({
+      [DARK_MODE_KEY]: '1',
+      [LEGACY_KEY]: JSON.stringify(legacy)
+    })
+  });
+  await app.api.seedFromLegacy();
+  const before = app.indexedDB.dump(DB_NAME);
+  const audit = await app.api.inspectPreviewHabitCompletionIndexParity('h1');
+  assert.equal(audit.indexVerified, true, audit.reason);
+  const originalConsume = app.indexedDB._consumeFailure.bind(app.indexedDB);
+  const operations = [];
+  app.indexedDB._consumeFailure = (store, operation) => {
+    operations.push([store, operation]);
+    return originalConsume(store, operation);
+  };
+  const first = await app.api.readPreviewIndexedHabitCompletions('h1');
+  const second = await app.api.readPreviewIndexedHabitCompletions('h1');
+  assert.equal(first.eligible, true, first.reason);
+  assert.equal(second.eligible, true, second.reason);
+  assert.equal(first.lookupMode, 'audited_index');
+  assert.deepEqual(first.completions.map(c => c.dayKey),
+    ['2026-09-07', '2026-09-05', '2026-09-03']);
+  assert.deepEqual(second.completions.map(c => c.dayKey),
+    ['2026-09-07', '2026-09-05', '2026-09-03']);
+  assert.equal(first.canPromote, false);
+  assert.equal(first.readAuthority, 'legacy_only');
+  assert.equal(operations.filter(([store, op]) =>
+    store === 'completions' && op === 'indexGetAll').length, 2);
+  assert.equal(operations.some(([store, op]) =>
+    op === 'getAll' || store === 'habits'), false,
+    'a fresh indexed read must never scan full Habits or completion stores');
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), before);
+});
+
+test('fast V2 indexed read rejects absent and wrong-Habit audit evidence', async () => {
+  const app = installRuntime({ previewHost: true });
+  await app.api.seedFromLegacy();
+  const absent = await app.api.readPreviewIndexedHabitCompletions('h1');
+  assert.equal(absent.eligible, false);
+  assert.equal(absent.reason, 'fresh_index_audit_required');
+  assert.equal(Object.hasOwn(absent, 'completions'), false);
+  const audit = await app.api.inspectPreviewHabitCompletionIndexParity('h1');
+  assert.equal(audit.indexVerified, true);
+  const wrong = await app.api.readPreviewIndexedHabitCompletions('h2');
+  assert.equal(wrong.reason, 'fresh_index_audit_required');
+  assert.equal(Object.hasOwn(wrong, 'completions'), false);
+  assert.equal((await app.api.readPreviewIndexedHabitCompletions('h1')).eligible, true);
+});
+
+test('fast V2 indexed read rejects V1 changes and requires a new full audit', async () => {
+  const app = installRuntime({ previewHost: true });
+  await app.api.seedFromLegacy();
+  assert.equal((await app.api.inspectPreviewHabitCompletionIndexParity('h1')).indexVerified, true);
+  const raw = JSON.parse(app.localStorage.getItem(LEGACY_KEY));
+  raw.settings = { newSetting: 1 };
+  app.localStorage.setItem(LEGACY_KEY, JSON.stringify(raw));
+  const stale = await app.api.readPreviewIndexedHabitCompletions('h1');
+  assert.equal(stale.eligible, false);
+  assert.equal(stale.reason, 'index_audit_source_stale');
+  assert.equal(Object.hasOwn(stale, 'completions'), false);
+  assert.equal((await app.api.readPreviewIndexedHabitCompletions('h1')).reason,
+    'fresh_index_audit_required');
+});
+
+test('fast V2 indexed read rejects revision changes and preserves all records', async () => {
+  const app = installRuntime({ previewHost: true });
+  await app.api.seedFromLegacy();
+  assert.equal((await app.api.inspectPreviewHabitCompletionIndexParity('h1')).indexVerified, true);
+  const db = app.indexedDB._databases.get(DB_NAME);
+  const meta = db._stores.get('meta');
+  const previous = meta.get('runtime');
+  meta.set('runtime', { ...previous, revision: Number(previous.revision) + 1 });
+  const before = app.indexedDB.dump(DB_NAME);
+  const stale = await app.api.readPreviewIndexedHabitCompletions('h1');
+  assert.equal(stale.eligible, false);
+  assert.equal(stale.reason, 'index_audit_revision_stale');
+  assert.equal(Object.hasOwn(stale, 'completions'), false);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), before);
+});
+
+test('fast V2 indexed read rechecks metadata after the indexed result', async () => {
+  const legacy = baseLegacyState();
+  legacy.completions = [
+    { id: 'c1', source: 'habit', habitId: 'h1', dayKey: '2026-09-07', points: 10 }
+  ];
+  const app = installRuntime({
+    previewHost: true,
+    localStorage: new FakeStorage({
+      [DARK_MODE_KEY]: '1',
+      [LEGACY_KEY]: JSON.stringify(legacy)
+    })
+  });
+  await app.api.seedFromLegacy();
+  assert.equal((await app.api.inspectPreviewHabitCompletionIndexParity('h1')).indexVerified, true);
+  const meta = app.indexedDB._databases.get(DB_NAME)._stores.get('meta');
+  const originalConsume = app.indexedDB._consumeFailure.bind(app.indexedDB);
+  let metaGets = 0;
+  app.indexedDB._consumeFailure = (store, operation) => {
+    if (store === 'meta' && operation === 'get' && ++metaGets === 2) {
+      const before = meta.get('runtime');
+      meta.set('runtime', { ...before, revision: Number(before.revision) + 1 });
+    }
+    return originalConsume(store, operation);
+  };
+  const outcome = await app.api.readPreviewIndexedHabitCompletions('h1');
+  assert.equal(metaGets, 2);
+  assert.equal(outcome.eligible, false);
+  assert.equal(outcome.reason, 'index_audit_revision_stale');
+  assert.equal(Object.hasOwn(outcome, 'completions'), false);
+});
