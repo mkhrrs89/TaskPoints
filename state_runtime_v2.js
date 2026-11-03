@@ -4998,6 +4998,222 @@
     }
   }
 
+  // PREVIEW ONLY: atomic Task creation or deletion in V2's isolated store.
+  // V1 remains authoritative. A mutation receipt is committed alongside
+  // the record change, and a V2-only monotonic index prevents two preview
+  // creates from accidentally sharing the same legacy order position.
+  async function rehearsePreviewTaskLifecycleMutation(input, sourceToken, actionId) {
+    const refuse = (reason, detail = {}) => ({
+      checked: true, previewOnly: true, committed: false,
+      confirmedDurable: false, collectionParityVerified: false,
+      canPromote: false, productionWritersFenced: false,
+      readAuthority: 'legacy_only', mutationAuthority: 'legacy_only',
+      reason, ...detail
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    if (typeof sourceToken !== 'string' || !sourceToken)
+      return refuse('full_origin_token_required');
+    if (typeof actionId !== 'string' || !actionId || actionId.length > 128)
+      return refuse('task_action_id_required');
+    if (typeof core.readPendingTaskMutations !== 'function'
+      || typeof core.readTaskPointsStoredState !== 'function')
+      return refuse('legacy_task_reader_unavailable');
+
+    // Canonicalize all user-controlled bytes before any async operation.
+    let action, taskId, actionFingerprint;
+    try {
+      if (!input || typeof input !== 'object' || Array.isArray(input))
+        return refuse('task_lifecycle_payload_invalid');
+      const raw = JSON.stringify(input);
+      if (!raw || raw.length > 131072)
+        return refuse('task_lifecycle_payload_invalid');
+      action = JSON.parse(raw);
+      const props = Object.keys(action).sort().join(',');
+      if (action.operation === 'create') {
+        if (props !== 'operation,task' || !action.task
+          || typeof action.task !== 'object' || Array.isArray(action.task))
+          return refuse('task_lifecycle_payload_invalid');
+        taskId = action.task.id;
+      } else if (action.operation === 'delete') {
+        if (props !== 'operation,taskId')
+          return refuse('task_lifecycle_payload_invalid');
+        taskId = action.taskId;
+      } else return refuse('task_lifecycle_payload_invalid');
+      if (typeof taskId !== 'string' || !taskId || taskId.length > 128)
+        return refuse('task_lifecycle_payload_invalid');
+      if (stableJson(input) !== stableJson(action))
+        return refuse('task_lifecycle_payload_invalid');
+      actionFingerprint = await previewRecoveryFingerprint(action);
+    } catch (_) { return refuse('task_lifecycle_payload_invalid'); }
+
+    const generation = currentGeneration({ create: false });
+    if (!generation) return refuse('generation_unavailable');
+    const modeEpoch = darkMirrorModeEpoch;
+    let tasks, baseIndex, baseTask, sourceFingerprint;
+    try {
+      if (captureReadOnlyFullStorageInventory() !== sourceToken)
+        return refuse('full_origin_changed');
+      const pending = core.readPendingTaskMutations();
+      if (pending?.malformed) return refuse('legacy_task_journal_malformed');
+      const state = core.readTaskPointsStoredState();
+      if (!state || !Array.isArray(state.tasks))
+        return refuse('legacy_tasks_missing');
+      tasks = clone(state.tasks);
+      const ids = new Set();
+      for (const task of tasks) {
+        if (!task || typeof task !== 'object' || Array.isArray(task)
+          || task.id == null || !String(task.id) || ids.has(String(task.id)))
+          return refuse('legacy_task_ids_invalid');
+        ids.add(String(task.id));
+      }
+      baseIndex = tasks.findIndex(task => String(task.id) === taskId);
+      if (action.operation === 'create' && baseIndex >= 0)
+        return refuse('legacy_task_already_exists');
+      if (action.operation === 'delete' && baseIndex < 0)
+        return refuse('legacy_task_not_found');
+      baseTask = baseIndex < 0 ? null : tasks[baseIndex];
+      if (captureReadOnlyFullStorageInventory() !== sourceToken)
+        return refuse('legacy_changed_during_capture');
+      sourceFingerprint = await previewRecoveryFingerprint(tasks);
+    } catch (_) { return refuse('legacy_task_capture_unreadable'); }
+
+    const sourceCurrent = () => isDarkEnabled()
+      && darkMirrorModeEpoch === modeEpoch
+      && currentGeneration({ create: false }) === generation
+      && captureReadOnlyFullStorageInventory() === sourceToken;
+    try {
+      if (!sourceCurrent()) return refuse('legacy_changed_before_mutation');
+    } catch (_) { return refuse('legacy_unreadable_before_mutation'); }
+
+    const receiptId = 'task-preview-lifecycle:' + actionId;
+    const inventorySignature = `${fnv1a(sourceToken)}:${sourceToken.length}`;
+    const receipt = {
+      id: receiptId, type: 'task-preview-lifecycle',
+      operation: action.operation, taskId,
+      actionFingerprint, resetGeneration: generation,
+      sourceInventory: inventorySignature, sourceFingerprint
+    };
+    const lifecycleId = 'task-preview-lifecycle-state';
+    let db;
+    try {
+      db = await open();
+      if (!db) return refuse('dark_disabled');
+    } catch (_) { return refuse('task_preview_db_unavailable'); }
+
+    let failure = null, repeated = false, committedIndex = null;
+    try {
+      if (!sourceCurrent()) return refuse('legacy_changed_before_mutation');
+      const tx = db.transaction(['tasks', 'mutations', 'meta'], 'readwrite');
+      const taskStore = tx.objectStore('tasks');
+      const mutationStore = tx.objectStore('mutations');
+      const metaStore = tx.objectStore('meta');
+      const taskReq = taskStore.get(taskId);
+      const receiptReq = mutationStore.get(receiptId);
+      const evidenceReq = metaStore.get('task-preview');
+      const runtimeReq = metaStore.get(RUNTIME_META_ID);
+      const counterReq = metaStore.get(lifecycleId);
+      let row, previousReceipt, evidence, meta, counter, ready = 0;
+      const abort = reason => {
+        failure = reason;
+        try { tx.abort(); } catch (_) {}
+      };
+      const decide = () => {
+        if (++ready !== 5) return;
+        try {
+          if (!sourceCurrent()) return abort('legacy_changed_under_transaction');
+          if (meta?.schemaVersion !== SCHEMA_VERSION
+            || meta.resetGeneration !== generation || meta.legacyMissing === true)
+            return abort('pilot_meta_not_ready');
+          if (!evidence || evidence.schemaVersion !== 1
+            || evidence.resetGeneration !== generation
+            || evidence.taskFingerprint !== sourceFingerprint
+            || evidence.sourceInventory !== inventorySignature
+            || evidence.taskCount !== tasks.length)
+            return abort('task_preview_source_not_seeded');
+          if (counter && (counter.resetGeneration !== generation
+            || counter.sourceInventory !== inventorySignature
+            || counter.sourceFingerprint !== sourceFingerprint
+            || !Number.isSafeInteger(counter.nextIndex)
+            || counter.nextIndex < tasks.length))
+            return abort('task_preview_lifecycle_counter_invalid');
+          if (previousReceipt) {
+            if (stableJson(previousReceipt) !== stableJson(receipt))
+              return abort('task_action_id_conflict');
+            repeated = true;
+            return;
+          }
+          if (action.operation === 'create') {
+            if (row) return abort('task_preview_target_exists');
+            const index = counter ? counter.nextIndex : tasks.length;
+            if (!Number.isSafeInteger(index) || index >= Number.MAX_SAFE_INTEGER)
+              return abort('task_preview_lifecycle_counter_invalid');
+            committedIndex = index;
+            taskStore.add({id: taskId, legacyIndex: index, value: action.task});
+            metaStore.put({
+              id: lifecycleId, resetGeneration: generation,
+              sourceInventory: inventorySignature,
+              sourceFingerprint, nextIndex: index + 1
+            });
+          } else {
+            if (!row || row.id !== taskId || row.legacyIndex !== baseIndex
+              || stableJson(row.value) !== stableJson(baseTask))
+              return abort('task_preview_target_stale');
+            committedIndex = baseIndex;
+            taskStore.delete(taskId);
+          }
+          mutationStore.add(receipt);
+        } catch (_) { abort('task_lifecycle_atomic_write_failed'); }
+      };
+      taskReq.onsuccess = () => { row = taskReq.result; decide(); };
+      receiptReq.onsuccess = () => { previousReceipt = receiptReq.result; decide(); };
+      evidenceReq.onsuccess = () => { evidence = evidenceReq.result; decide(); };
+      runtimeReq.onsuccess = () => { meta = runtimeReq.result; decide(); };
+      counterReq.onsuccess = () => { counter = counterReq.result; decide(); };
+      await transactionPromise(tx);
+    } catch (_) {
+      return refuse(failure || 'task_lifecycle_atomic_write_failed');
+    }
+
+    // New transaction, not just a successful IDB request or oncomplete:
+    // confirm the final record state and exactly matching action receipt.
+    try {
+      const tx = db.transaction(['tasks', 'mutations'], 'readonly');
+      const [row, savedReceipt] = await Promise.all([
+        requestPromise(tx.objectStore('tasks').get(taskId)),
+        requestPromise(tx.objectStore('mutations').get(receiptId))
+      ]);
+      const matched = action.operation === 'create'
+        ? row && row.id === taskId
+          && Number.isSafeInteger(row.legacyIndex)
+          && row.legacyIndex >= tasks.length
+          && stableJson(row.value) === stableJson(action.task)
+        : !row;
+      if (!matched || stableJson(savedReceipt) !== stableJson(receipt))
+        return refuse('task_lifecycle_readback_unverified', {
+          committed: !repeated, writeOutcomeUncertain: true
+        });
+      if (!sourceCurrent())
+        return refuse('legacy_changed_after_preview_commit', {
+          committed: !repeated, confirmedDurable: true,
+          writeOutcomeUncertain: true
+        });
+      return {
+        checked: true, previewOnly: true, committed: !repeated,
+        confirmedDurable: true, replayed: repeated,
+        collectionParityVerified: false, taskId, operation: action.operation,
+        reason: repeated
+          ? 'task_lifecycle_replayed' : 'task_lifecycle_mutation_verified',
+        canPromote: false, productionWritersFenced: false,
+        mutationAuthority: 'legacy_only', readAuthority: 'legacy_only'
+      };
+    } catch (_) {
+      return refuse('task_lifecycle_readback_unavailable', {
+        committed: !repeated, writeOutcomeUncertain: true
+      });
+    }
+  }
+
   // A narrower stepping stone toward REQUIRED writer admission, rather
   // than relying on the caller to invoke an optional freshness callback.
   // This API is explicit, PREVIEW-HOST-ONLY and NEVER installs on the live
@@ -6327,6 +6543,7 @@
     inspectPreviewTaskCollectionParity,
     inspectPreviewTaskRecord,
     rehearsePreviewTaskRecordUpdate,
+    rehearsePreviewTaskLifecycleMutation,
     rehearsePreviewDurableWriterFence,
     inspectPreservedParityMismatch,
     inspectLegacyRollbackSource,

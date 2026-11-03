@@ -64,6 +64,29 @@ test('preview Task update requires single atomic row/receipt transaction and ref
   assert.match(runtime,/inspectPreviewTaskRecord,\s*rehearsePreviewTaskRecordUpdate,/);
 });
 
+test('Task lifecycle preview commits row, retry receipt and ordering counter in one IDB transaction',()=>{
+  const begin=runtime.indexOf('async function rehearsePreviewTaskLifecycleMutation(');
+  const end=runtime.indexOf('// A narrower stepping stone toward REQUIRED writer admission',begin);
+  assert.ok(begin>=0 && end>begin);
+  const snippet=runtime.slice(begin,end);
+  assert.match(snippet,/isWalTestPreviewHost\(\)/);
+  assert.match(snippet,/db\.transaction\(\['tasks', 'mutations', 'meta'\], 'readwrite'\)/);
+  assert.match(snippet,/taskStore\.add\(/);
+  assert.match(snippet,/taskStore\.delete\(taskId\)/);
+  assert.match(snippet,/metaStore\.put\(/);
+  assert.match(snippet,/mutationStore\.add\(receipt\)/);
+  assert.match(snippet,/transactionPromise\(tx\)/);
+  assert.match(snippet,/db\.transaction\(\['tasks', 'mutations'\], 'readonly'\)/);
+  assert.match(snippet,/task_preview_lifecycle_counter_invalid/);
+  assert.match(snippet,/task_action_id_conflict/);
+  assert.match(snippet,/legacy_changed_after_preview_commit/);
+  assert.match(snippet,/collectionParityVerified: false/);
+  assert.match(snippet,/canPromote: false/);
+  assert.doesNotMatch(snippet,/\b(?:journalTaskMutation|journalTaskCompletionBatch|saveStateSnapshot)\s*\(/);
+  assert.doesNotMatch(snippet,/localStorage\.(?:setItem|removeItem|clear)\s*\(/);
+  assert.match(runtime,/rehearsePreviewTaskRecordUpdate,\s*rehearsePreviewTaskLifecycleMutation,/);
+});
+
 test('Task parity checks identity, payload, source inventory and generation without trusting metadata alone',()=>{
   assert.match(source,/previewRecoveryFingerprint\(tasks\)/);
   assert.match(source,/evidence\.taskFingerprint !== taskFingerprint/);

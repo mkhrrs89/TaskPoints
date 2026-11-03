@@ -1353,6 +1353,126 @@ try {
       noV1Impact:true,authorityUnchanged:true};
   });
 
+  await run('preview Task lifecycle create/delete writes only isolated IDB with durable receipts',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const preSeed=await api.rehearsePreviewTaskLifecycleMutation(
+        {operation:'create',task:{id:'preview-a',title:'A'}},'unmatched','before-seed');
+      const seed=await api.rehearsePreviewTaskCollectionSeed();
+      const inventory=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(key=>[key,localStorage.getItem(key)]));
+      const token=inventory(), priorState=localStorage.getItem('taskpoints_v1');
+      const priorJournal=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const createA={operation:'create',task:{id:'preview-a',title:'A'}};
+      const createB={operation:'create',task:{id:'preview-b',title:'B'}};
+      const addedA=await api.rehearsePreviewTaskLifecycleMutation(createA,token,'create-a');
+      const againA=await api.rehearsePreviewTaskLifecycleMutation(createA,token,'create-a');
+      const collision=await api.rehearsePreviewTaskLifecycleMutation(
+        {operation:'create',task:{id:'preview-a',title:'Conflicting'}},token,'create-a');
+      const duplicated=await api.rehearsePreviewTaskLifecycleMutation(createA,token,'create-new-id');
+      const addedB=await api.rehearsePreviewTaskLifecycleMutation(createB,token,'create-b');
+      const deleteOriginal={operation:'delete',taskId:'synthetic-task'};
+      const deleted=await api.rehearsePreviewTaskLifecycleMutation(deleteOriginal,token,'delete-original');
+      const retriedDelete=await api.rehearsePreviewTaskLifecycleMutation(deleteOriginal,token,'delete-original');
+      const secondDelete=await api.rehearsePreviewTaskLifecycleMutation(deleteOriginal,token,'delete-second');
+      const parity=await api.inspectPreviewTaskCollectionParity();
+      const db=await api.open();
+      const load=async(store,id)=>new Promise((resolve,reject)=>{
+        const req=db.transaction(store,'readonly').objectStore(store).get(id);
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      return {preSeed,seed,addedA,againA,collision,duplicated,addedB,
+        deleted,retriedDelete,secondDelete,parity,
+        a:await load('tasks','preview-a'),b:await load('tasks','preview-b'),
+        original:await load('tasks','synthetic-task'),
+        receiptA:await load('mutations','task-preview-lifecycle:create-a'),
+        receiptDelete:await load('mutations','task-preview-lifecycle:delete-original'),
+        counter:await load('meta','task-preview-lifecycle-state'),
+        v1Same:priorState===localStorage.getItem('taskpoints_v1'),
+        journalSame:priorJournal===localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(result.preSeed.reason,'full_origin_changed');
+    assert.equal(result.seed.verified,true);
+    for(const item of [result.addedA,result.addedB,result.deleted]){
+      assert.equal(item.reason,'task_lifecycle_mutation_verified',JSON.stringify(item));
+      assert.equal(item.committed,true);assert.equal(item.confirmedDurable,true);
+      assert.equal(item.canPromote,false);
+    }
+    assert.equal(result.againA.reason,'task_lifecycle_replayed');
+    assert.equal(result.againA.committed,false);
+    assert.equal(result.retriedDelete.reason,'task_lifecycle_replayed');
+    assert.equal(result.retriedDelete.committed,false);
+    assert.equal(result.collision.reason,'task_action_id_conflict');
+    assert.equal(result.duplicated.reason,'task_preview_target_exists');
+    assert.equal(result.secondDelete.reason,'task_preview_target_stale');
+    assert.equal(result.a.value.title,'A');
+    assert.equal(result.b.value.title,'B');
+    assert.equal(result.a.legacyIndex,1);
+    assert.equal(result.b.legacyIndex,2);
+    assert.equal(result.original,undefined);
+    assert.equal(result.counter.nextIndex,3);
+    assert.equal(result.receiptA.operation,'create');
+    assert.equal(result.receiptDelete.operation,'delete');
+    assert.equal(result.parity.match,false);
+    assert.equal(result.v1Same,true);assert.equal(result.journalSame,true);
+    assert.equal(result.authority,'legacy_only');
+    return {atomicCreateAndDelete:true,monotonicOrder:true,
+      idempotentRetry:true,staleActionDenied:true,
+      sourceUnchanged:true,authorityUnchanged:true};
+  });
+
+  await run('preview Task lifecycle aborts both record and receipt after quota failure',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const seeded=await api.rehearsePreviewTaskCollectionSeed();
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(key=>[key,localStorage.getItem(key)]));
+      const before=localStorage.getItem('taskpoints_v1');
+      const action={operation:'create',task:{id:'preview-quota-task',title:'Quota retry'}};
+      const original=IDBObjectStore.prototype.add;
+      let calls=0,failed;
+      IDBObjectStore.prototype.add=function(value){
+        if(this.name==='mutations' && value?.type==='task-preview-lifecycle'){
+          calls++;throw new DOMException('synthetic receipt quota','QuotaExceededError');
+        }
+        return original.apply(this,arguments);
+      };
+      try { failed=await api.rehearsePreviewTaskLifecycleMutation(action,token,'quota'); }
+      finally {IDBObjectStore.prototype.add=original;}
+      const db=await api.open();
+      const load=async(store,id)=>new Promise((resolve,reject)=>{
+        const req=db.transaction(store,'readonly').objectStore(store).get(id);
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      const partialRow=await load('tasks','preview-quota-task');
+      const partialReceipt=await load('mutations','task-preview-lifecycle:quota');
+      const partialCounter=await load('meta','task-preview-lifecycle-state');
+      const recovered=await api.rehearsePreviewTaskLifecycleMutation(action,token,'quota');
+      return {seeded,failed,calls,partialRow,partialReceipt,partialCounter,
+        recovered,finalRow:await load('tasks','preview-quota-task'),
+        finalReceipt:await load('mutations','task-preview-lifecycle:quota'),
+        sameV1:before===localStorage.getItem('taskpoints_v1'),
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(result.seeded.verified,true);
+    assert.equal(result.calls,1);
+    assert.equal(result.failed.reason,'task_lifecycle_atomic_write_failed');
+    assert.equal(result.failed.committed,false);
+    assert.equal(result.partialRow,undefined);
+    assert.equal(result.partialReceipt,undefined);
+    assert.equal(result.partialCounter,undefined);
+    assert.equal(result.recovered.confirmedDurable,true);
+    assert.equal(result.finalRow.value.title,'Quota retry');
+    assert.equal(result.finalReceipt.operation,'create');
+    assert.equal(result.sameV1,true);
+    assert.equal(result.authority,'legacy_only');
+    return {createRollbackIncludesCounter:true,receiptAllOrNothing:true,
+      explicitRetrySafe:true,V1Unchanged:true};
+  });
+
   await run('nonpilot Task record migration aborts atomically on Task put failure and retries safely',async context=>{
     const page=await open(context);
     const result=await page.evaluate(async()=>{

@@ -181,3 +181,30 @@ save or general migration. It does not resync to V1, amend the original seed
 evidence, install any production writer hook, exclude old tabs or establish
 physical-device recovery. The complete nonpilot collection milestone
 remains uncredited; V1 is still the only authority.
+
+
+## Isolated Task create/delete lifecycle rehearsal — November 2
+
+The explicit preview-host-only `rehearsePreviewTaskLifecycleMutation()`
+now rehearses **Task creation and deletion** in the separate V2 Tasks
+object store. A validated and frozen action, exact full-origin source token,
+effective V1 Task journal, matching original seed fingerprint and current
+generation are required before any V2 write. A Task record change and a
+SHA-256-bound retry receipt commit in one IndexedDB readwrite transaction.
+Creates also advance a monotonic, generation-bound Task index counter in the
+**same transaction**, preserving unique relative insertion order without an
+extra whole-store read. Deleting a seeded V1 Task verifies its original
+V2 record first; missing, changed and conflicting targets are refused.
+
+Retrying identical action IDs is idempotent, with a new readonly transaction
+verifying exact receipt and current Task state. Quota failure injected during
+receipt insertion aborts Task, receipt and ordering counter together;
+subsequent explicit retry succeeds. Browser coverage includes two sequential
+creates, original Task deletion, conflicting and repeated actions, V1
+byte preservation, source parity refusal and quota interruption.
+
+This is intentionally divergent **V2-only preview storage**, not live Task
+creation or deletion. The original seed evidence stays immutable, and the
+read-only parity inspector must flag resulting differences. V1 primary
+writes, pending journals, UI, writer admission and rollback are untouched.
+The 12-point full nonpilot migration gate remains uncredited.
