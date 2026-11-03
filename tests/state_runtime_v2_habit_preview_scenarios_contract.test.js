@@ -601,3 +601,191 @@ test('a stale in-flight indexed read never clears a newer successful audit proof
   assert.equal(after.eligible, true, after.reason);
   assert.equal(after.canPromote, false);
 });
+
+function previewBackfillApp(count = 3) {
+  const legacy = baseLegacyState();
+  legacy.habits.push({ ...structuredClone(legacy.habits[0]), id: 'h2', name: 'Walk' });
+  legacy.completions = Array.from({ length: count }, (_, i) => ({
+    id: i === 0 || i === 1 ? 'packed-mixed' : `c-${i}`,
+    source: 'habit', habitId: i % 2 === 0 ? 'h1' : 'h2',
+    dayKey: `2026-09-${String((i % 28) + 1).padStart(2, '0')}`,
+    points: i + 1
+  }));
+  return {
+    legacy,
+    app: installRuntime({
+      previewHost: true,
+      localStorage: new FakeStorage({
+        [DARK_MODE_KEY]: '1',
+        [LEGACY_KEY]: JSON.stringify(legacy)
+      })
+    })
+  };
+}
+
+test('preview metadata backfill restores old completion index without changing entries or V1', async () => {
+  const { app, legacy } = previewBackfillApp();
+  await app.api.seedFromLegacy();
+  const db = app.indexedDB._databases.get(DB_NAME);
+  const rows = db._stores.get('completions');
+  for (const [id, value] of rows) {
+    const stale = structuredClone(value);
+    delete stale.habitIds;
+    rows.set(id, stale);
+  }
+  const original = app.indexedDB.dump(DB_NAME);
+  const beforeMeta = original.meta.find(r => r.id === 'runtime');
+  const beforeEntries = original.completions.map(r => [r.id, r.entries]);
+  const result = await app.api.rehearsePreviewCompletionIndexBackfill();
+  assert.equal(result.applied, true, result.reason);
+  assert.equal(result.confirmedDurable, true);
+  assert.equal(result.updatedRows, 2);
+  assert.equal(result.remainingRows, 0);
+  assert.equal(result.canPromote, false);
+  const updated = app.indexedDB.dump(DB_NAME);
+  assert.deepEqual(updated.completions.map(r => [r.id, r.entries]), beforeEntries);
+  assert.equal(updated.meta.find(r => r.id === 'runtime').revision,
+    beforeMeta.revision + 1);
+  assert.deepEqual(updated.habits, original.habits);
+  assert.deepEqual(updated.mutations, original.mutations);
+  assert.deepEqual(JSON.parse(app.localStorage.getItem(LEGACY_KEY)), legacy);
+  assert.equal((await app.api.inspectPreviewHabitCompletionIndexParity('h1')).indexVerified, true);
+  const beforeAgain = app.indexedDB.dump(DB_NAME);
+  const again = await app.api.rehearsePreviewCompletionIndexBackfill();
+  assert.equal(again.applied, false);
+  assert.equal(again.alreadyCurrent, true);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), beforeAgain,
+    'idempotent backfill must not write another revision');
+});
+
+test('preview completion metadata backfill is bounded to 64 packs per transaction', async () => {
+  const { app } = previewBackfillApp(66);
+  await app.api.seedFromLegacy();
+  const rows = app.indexedDB._databases.get(DB_NAME)._stores.get('completions');
+  for (const [id, value] of rows) {
+    const copy = structuredClone(value);
+    delete copy.habitIds;
+    rows.set(id, copy);
+  }
+  // 66 V1 completions contain 65 packed V2 rows because two share one ID.
+  const first = await app.api.rehearsePreviewCompletionIndexBackfill();
+  assert.equal(first.applied, true, first.reason);
+  assert.equal(first.updatedRows, 64);
+  assert.equal(first.remainingRows, 1);
+  const second = await app.api.rehearsePreviewCompletionIndexBackfill();
+  assert.equal(second.applied, true, second.reason);
+  assert.equal(second.updatedRows, 1);
+  assert.equal(second.remainingRows, 0);
+  const third = await app.api.rehearsePreviewCompletionIndexBackfill();
+  assert.equal(third.alreadyCurrent, true);
+});
+
+test('preview completion backfill preserves mistaken existing index metadata for investigation', async () => {
+  const { app } = previewBackfillApp();
+  await app.api.seedFromLegacy();
+  const rows = app.indexedDB._databases.get(DB_NAME)._stores.get('completions');
+  const key = [...rows.keys()][0];
+  rows.set(key, { ...rows.get(key), habitIds: ['wrong-habit'] });
+  const before = app.indexedDB.dump(DB_NAME);
+  const outcome = await app.api.rehearsePreviewCompletionIndexBackfill();
+  assert.equal(outcome.applied, false);
+  assert.equal(outcome.reason, 'existing_index_metadata_invalid');
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), before);
+});
+
+test('preview completion backfill refuses mismatched V1 history before any write', async () => {
+  const { app, legacy } = previewBackfillApp();
+  await app.api.seedFromLegacy();
+  const rows = app.indexedDB._databases.get(DB_NAME)._stores.get('completions');
+  for (const [id, value] of rows) {
+    const stale = structuredClone(value);
+    delete stale.habitIds;
+    rows.set(id, stale);
+  }
+  legacy.completions[0].points += 100;
+  app.localStorage.setItem(LEGACY_KEY, JSON.stringify(legacy));
+  const before = app.indexedDB.dump(DB_NAME);
+  const outcome = await app.api.rehearsePreviewCompletionIndexBackfill();
+  assert.equal(outcome.applied, false);
+  assert.equal(outcome.reason, 'legacy_pilot_parity_mismatch');
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), before);
+});
+
+test('quota/transaction failure aborts all preview completion metadata changes', async () => {
+  const { app, legacy } = previewBackfillApp();
+  await app.api.seedFromLegacy();
+  const rows = app.indexedDB._databases.get(DB_NAME)._stores.get('completions');
+  for (const [id, value] of rows) {
+    const copy = structuredClone(value);
+    delete copy.habitIds;
+    rows.set(id, copy);
+  }
+  const before = app.indexedDB.dump(DB_NAME);
+  app.indexedDB.failNext({
+    store: 'completions', operation: 'put',
+    error: new Error('QuotaExceededError')
+  });
+  const result = await app.api.rehearsePreviewCompletionIndexBackfill();
+  assert.equal(result.applied, false);
+  assert.equal(result.confirmedDurable, false);
+  assert.equal(result.reason, 'index_backfill_transaction_aborted');
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), before);
+  assert.deepEqual(JSON.parse(app.localStorage.getItem(LEGACY_KEY)), legacy);
+});
+
+test('preview metadata backfill blocks concurrent revision changes at readwrite admission', async () => {
+  const { app } = previewBackfillApp();
+  await app.api.seedFromLegacy();
+  const db = app.indexedDB._databases.get(DB_NAME);
+  const rows = db._stores.get('completions');
+  for (const [id, value] of rows) {
+    const copy = structuredClone(value);
+    delete copy.habitIds;
+    rows.set(id, copy);
+  }
+  const transaction = db.transaction.bind(db);
+  let changed = false;
+  db.transaction = (stores, mode) => {
+    if (!changed && mode === 'readwrite') {
+      changed = true;
+      const meta = db._stores.get('meta');
+      const existing = meta.get('runtime');
+      meta.set('runtime', { ...existing, revision: existing.revision + 1 });
+    }
+    return transaction(stores, mode);
+  };
+  const beforeRows = app.indexedDB.dump(DB_NAME).completions;
+  const outcome = await app.api.rehearsePreviewCompletionIndexBackfill();
+  assert.equal(changed, true);
+  assert.equal(outcome.applied, false);
+  assert.equal(outcome.reason, 'v2_revision_changed_before_write');
+  assert.deepEqual(app.indexedDB.dump(DB_NAME).completions, beforeRows);
+});
+
+test('preview completion backfill rejects V1 mutation during write admission', async () => {
+  const { app, legacy } = previewBackfillApp();
+  await app.api.seedFromLegacy();
+  const db = app.indexedDB._databases.get(DB_NAME);
+  const rows = db._stores.get('completions');
+  for (const [id, value] of rows) {
+    const copy = structuredClone(value);
+    delete copy.habitIds;
+    rows.set(id, copy);
+  }
+  const oldTransaction = db.transaction.bind(db);
+  let changed = false;
+  db.transaction = (stores, mode) => {
+    if (!changed && mode === 'readwrite') {
+      changed = true;
+      app.localStorage.setItem('tp_projects_v1', 'modified-by-other-tab');
+    }
+    return oldTransaction(stores, mode);
+  };
+  const before = app.indexedDB.dump(DB_NAME);
+  const result = await app.api.rehearsePreviewCompletionIndexBackfill();
+  assert.equal(changed, true);
+  assert.equal(result.applied, false);
+  assert.equal(result.reason, 'legacy_changed_before_write');
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), before);
+  assert.deepEqual(JSON.parse(app.localStorage.getItem(LEGACY_KEY)), legacy);
+});
