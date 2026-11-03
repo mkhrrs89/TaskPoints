@@ -845,9 +845,33 @@
     catch (error) { throw failure || error; }
   }
 
-  async function clearForMissingLegacy(db, previousMeta = null, resetGeneration = currentGeneration()) {
+  async function clearForMissingLegacy(db, previousMeta = null,
+    resetGeneration = currentGeneration(), expectedModeEpoch = darkMirrorModeEpoch) {
+    // A V1 key absent at the *start* of an asynchronous seed may reappear
+    // before the IndexedDB transaction begins (e.g. another tab restores a
+    // snapshot). A reset generation may also rotate while the DB opens.
+    // Neither case authorizes clearing the old V2 evidence.
+    const assertStillAuthorizedEmpty = () => {
+      if (!isDarkEnabled() || darkMirrorModeEpoch !== expectedModeEpoch
+        || currentGeneration({ create: false }) !== resetGeneration)
+        throw new Error('state_runtime_v2_empty_seed_context_changed');
+      let raw;
+      try {
+        if (typeof global.localStorage?.getItem !== 'function')
+          throw new Error('local_storage_unavailable');
+        raw = global.localStorage.getItem(core.STORAGE_KEY || 'taskpoints_v1');
+      } catch (_) {
+        throw new Error('state_runtime_v2_empty_seed_source_unreadable');
+      }
+      if (raw !== null)
+        throw new Error('state_runtime_v2_empty_seed_source_restored');
+    };
+    assertStillAuthorizedEmpty();
     const revision = Number(previousMeta?.revision || 0) + 1;
     await guardedSeedReplace(db, previousMeta, (tx) => {
+      // Repeat inside the synchronous transaction callback, immediately
+      // before any clear; this is not a global cross-tab writer fence.
+      assertStillAuthorizedEmpty();
       tx.objectStore('habits').clear();
       tx.objectStore('completions').clear();
       tx.objectStore('mutations').clear();
@@ -1057,6 +1081,7 @@
     // user to perform a new mutation. Seeding from a later snapshot would fold
     // that new mutation into the baseline before its incremental V2 mirror runs.
     const desiredGeneration = currentGeneration();
+    const desiredModeEpoch = darkMirrorModeEpoch;
     const source = parseLegacyStateWithPending();
     const capturedHash = source.missing ? null : subsetHash(source.state);
     const capturedCanonicalCompletionSignature = source.missing
@@ -1092,7 +1117,7 @@
           mark('stateV2.legacyMissingSeedBlocked', error.evidence);
           throw error;
         }
-        return clearForMissingLegacy(db, previousMeta, desiredGeneration);
+        return clearForMissingLegacy(db, previousMeta, desiredGeneration, desiredModeEpoch);
       }
 
       const hash = capturedHash;
