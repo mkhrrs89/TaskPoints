@@ -7514,7 +7514,9 @@
       // independently verified; using a merely present index could silently
       // omit older rows that predate its backfill.
       const candidate = await readPilotHabitRowsFromDb(db, String(habitId), false);
-      return candidate.completions;
+      // Match the original public API's native-array shape without cloning
+      // the already-cloned completion payloads a second time.
+      return global.Array.from(candidate.completions);
     },
     buildCompatibilitySnapshot,
     verifyParity,
