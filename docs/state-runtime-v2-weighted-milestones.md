@@ -332,6 +332,10 @@ recovery have not yet been proven.
 Browser coverage verifies a pending Task edit, completion deletion and
 Work/metric upserts alongside a Habit completion; full snapshot
 top-level keys, mixed ordering and stable fingerprint after reload.
-A missing V1 source must fail closed while preserving V2 Task seed
+A transient denied V1 read must fail closed while preserving V2 Task seed
 evidence, and source restoration must restore a matching projection.
 No live storage write path or authority flag is changed.
+
+The browser recovery probe injects a temporary V1 read denial, not a real
+localStorage.removeItem: removal is an intentional reset boundary which
+rotates the TaskPoints generation and must not be bypassed.

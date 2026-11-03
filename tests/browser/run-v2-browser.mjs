@@ -1994,7 +1994,7 @@ try {
       fingerprintStable:true,legacyAuthorityUnchanged:true};
   });
 
-  await run('whole compatibility audit preserves V2 evidence when V1 source temporarily disappears',async context=>{
+  await run('whole compatibility audit preserves V2 evidence when V1 read is temporarily denied',async context=>{
     const page=await open(context);
     const result=await page.evaluate(async()=>{
       const api=window.TaskPointsStateRuntimeV2;
@@ -2006,29 +2006,41 @@ try {
         q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error);
       });
       const beforeTask=await get();
-      const raw=localStorage.getItem('taskpoints_v1');
-      localStorage.removeItem('taskpoints_v1');
-      const missing=await api.inspectPreviewWholeCompatibilityProjection();
+      const original=Storage.prototype.getItem;
+      const raw=original.call(localStorage,'taskpoints_v1');
+      const generation=api.getStatus().currentGeneration;
+      let denied;
+      // A genuine removeItem is an explicit reset boundary in this app.
+      // Inject a transient V1 read denial instead, without mutating V1
+      // or accidentally invoking the intentionally destructive reset path.
+      Storage.prototype.getItem=function(key){
+        if(this===localStorage && key==='taskpoints_v1')
+          throw new DOMException('simulated denied source read','SecurityError');
+        return original.apply(this,arguments);
+      };
+      try { denied=await api.inspectPreviewWholeCompatibilityProjection(); }
+      finally { Storage.prototype.getItem=original; }
       const preserved=await get();
-      localStorage.setItem('taskpoints_v1',raw);
       const recovered=await api.inspectPreviewWholeCompatibilityProjection();
       const afterTask=await get();
-      return {seeded,first,missing,preserved,recovered,beforeTask,afterTask,
-        snapshotRestored:localStorage.getItem('taskpoints_v1')===raw,
+      return {seeded,first,denied,preserved,recovered,beforeTask,afterTask,
+        snapshotUnchanged:localStorage.getItem('taskpoints_v1')===raw,
+        generationUnchanged:api.getStatus().currentGeneration===generation,
         authority:api.getStatus().readAuthority};
     });
     assert.equal(result.seeded.verified,true);
     assert.equal(result.first.match,true);
-    assert.equal(result.missing.match,false);
-    assert.equal(result.missing.reason,'legacy_unavailable');
+    assert.equal(result.denied.match,false);
+    assert.equal(result.denied.reason,'legacy_snapshot_unreadable');
     assert.deepEqual(result.preserved,result.beforeTask);
     assert.deepEqual(result.afterTask,result.beforeTask);
     assert.equal(result.recovered.match,true,JSON.stringify(result.recovered));
     assert.equal(result.recovered.normalizedFingerprint,result.first.normalizedFingerprint);
-    assert.equal(result.snapshotRestored,true);
+    assert.equal(result.snapshotUnchanged,true);
+    assert.equal(result.generationUnchanged,true);
     assert.equal(result.authority,'legacy_only');
-    return {temporaryMissingV1FailsClosed:true,v2EvidencePreserved:true,
-      sourceRestorationMatches:true,noAutoHealingOrPromotion:true};
+    return {temporaryV1ReadDenialFailsClosed:true,v2EvidencePreserved:true,
+      fullReadRecoveryMatches:true,noAutoHealingOrPromotion:true};
   });
 
   await run('nonpilot Task record migration aborts atomically on Task put failure and retries safely',async context=>{
