@@ -77,6 +77,7 @@ jobs:
           tests/state_runtime_v2_pilot_compatibility_boundary_contract.test.js
           tests/state_runtime_v2_pilot_parity_scope_contract.test.js
           tests/state_runtime_v2_task_collection_parity_contract.test.js
+          tests/state_runtime_v2_task_reconcile_scenarios_contract.test.js
           tests/state_runtime_v2_revision_conflict_contract.test.js
           tests/state_runtime_v2_wal_contract.test.js
           tests/state_runtime_v2_wal_bridge_contract.test.js
