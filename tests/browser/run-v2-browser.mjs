@@ -1473,6 +1473,120 @@ try {
       explicitRetrySafe:true,V1Unchanged:true};
   });
 
+  await run('preview linked V1 Task completions copy atomically without disturbing Habit pilot parity',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2,core=window.TaskPointsCore;
+      const beforeSnapshot=localStorage.getItem('taskpoints_v1');
+      const work={id:'journal-task-work',taskId:'synthetic-task',
+        title:'Work Score',source:'work',workHours:8,points:8.4,
+        completedAtISO:'2026-11-02T12:00:00.000Z'};
+      const sleep={id:'journal-task-sleep',taskId:'synthetic-task',
+        title:'Sleep Score',source:'metric',sleepRested:7,points:9,
+        completedAtISO:'2026-11-02T12:01:00.000Z'};
+      core.journalTaskCompletionBatch([work,sleep]);
+      const seeded=await api.rehearsePreviewTaskCollectionSeed();
+      const inventory=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(key=>[key,localStorage.getItem(key)]));
+      const token=inventory(),beforeJournal=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const missing=await api.rehearsePreviewTaskLinkedCompletion('not-in-v1',token,'missing');
+      const first=await api.rehearsePreviewTaskLinkedCompletion(work.id,token,'work-1');
+      const repeat=await api.rehearsePreviewTaskLinkedCompletion(work.id,token,'work-1');
+      const conflict=await api.rehearsePreviewTaskLinkedCompletion(sleep.id,token,'work-1');
+      const secondAction=await api.rehearsePreviewTaskLinkedCompletion(work.id,token,'work-2');
+      const second=await api.rehearsePreviewTaskLinkedCompletion(sleep.id,token,'sleep-1');
+      const pilot=await api.verifyParity();
+      const db=await api.open();
+      const get=async(store,id)=>new Promise((resolve,reject)=>{
+        const req=db.transaction(store,'readonly').objectStore(store).get(id);
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      return {seeded,missing,first,repeat,conflict,secondAction,second,pilot,
+        work,sleep,workRow:await get('completions',work.id),
+        sleepRow:await get('completions',sleep.id),
+        receipt:await get('mutations','task-preview-completion:work-1'),
+        v1Same:beforeSnapshot===localStorage.getItem('taskpoints_v1'),
+        journalSame:beforeJournal===localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(result.seeded.verified,true,JSON.stringify(result.seeded));
+    assert.equal(result.missing.reason,'legacy_completion_not_found');
+    for(const item of [result.first,result.second]){
+      assert.equal(item.reason,'task_completion_preview_verified',JSON.stringify(item));
+      assert.equal(item.committed,true);
+      assert.equal(item.confirmedDurable,true);
+      assert.equal(item.canPromote,false);
+    }
+    assert.equal(result.repeat.reason,'task_completion_preview_replayed');
+    assert.equal(result.repeat.committed,false);
+    assert.equal(result.conflict.reason,'task_completion_action_id_conflict');
+    assert.equal(result.secondAction.reason,'task_preview_completion_id_exists');
+    assert.equal(result.workRow.entries[0].value.points,8.4);
+    assert.equal(result.sleepRow.entries[0].value.sleepRested,7);
+    assert.deepEqual(result.workRow.habitIds,[]);
+    assert.deepEqual(result.sleepRow.habitIds,[]);
+    assert.equal(result.receipt.type,'task-preview-completion');
+    assert.equal(result.pilot.match,true,JSON.stringify(result.pilot));
+    assert.equal(result.pilot.scopeExcludedCounts.actualCompletions,2);
+    assert.equal(result.v1Same,true);
+    assert.equal(result.journalSame,true);
+    assert.equal(result.authority,'legacy_only');
+    return {journalBackedCompletionCopied:true,TaskLinkChecked:true,
+      atomicReceipt:true,idempotentReplay:true,habitPilotPreserved:true,
+      originalV1Unchanged:true};
+  });
+
+  await run('preview Task completion receipt quota abort leaves V2 row absent and V1 untouched',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2,core=window.TaskPointsCore;
+      const completion={id:'quota-linked-completion',taskId:'synthetic-task',
+        title:'Test completion',source:'task',points:5,
+        completedAtISO:'2026-11-02T12:03:00.000Z'};
+      core.journalTaskCompletionBatch([completion]);
+      const seeded=await api.rehearsePreviewTaskCollectionSeed();
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(key=>[key,localStorage.getItem(key)]));
+      const priorJournal=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const original=IDBObjectStore.prototype.add;
+      let injections=0,failed;
+      IDBObjectStore.prototype.add=function(value){
+        if(this.name==='mutations' && value?.type==='task-preview-completion'){
+          injections++;throw new DOMException('injected receipt storage quota','QuotaExceededError');
+        }
+        return original.apply(this,arguments);
+      };
+      try { failed=await api.rehearsePreviewTaskLinkedCompletion(completion.id,token,'quota'); }
+      finally { IDBObjectStore.prototype.add=original; }
+      const db=await api.open();
+      const get=async(store,id)=>new Promise((resolve,reject)=>{
+        const req=db.transaction(store,'readonly').objectStore(store).get(id);
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      const rowBeforeRetry=await get('completions',completion.id);
+      const receiptBeforeRetry=await get('mutations','task-preview-completion:quota');
+      const retry=await api.rehearsePreviewTaskLinkedCompletion(completion.id,token,'quota');
+      return {seeded,injections,failed,rowBeforeRetry,receiptBeforeRetry,retry,
+        finalRow:await get('completions',completion.id),
+        finalReceipt:await get('mutations','task-preview-completion:quota'),
+        journalSame:priorJournal===localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(result.seeded.verified,true);
+    assert.equal(result.injections,1);
+    assert.equal(result.failed.reason,'task_completion_atomic_write_failed');
+    assert.equal(result.failed.committed,false);
+    assert.equal(result.rowBeforeRetry,undefined);
+    assert.equal(result.receiptBeforeRetry,undefined);
+    assert.equal(result.retry.confirmedDurable,true);
+    assert.equal(result.finalRow.entries[0].value.points,5);
+    assert.equal(result.finalReceipt.type,'task-preview-completion');
+    assert.equal(result.journalSame,true);
+    assert.equal(result.authority,'legacy_only');
+    return {transactionRollback:true,receiptAllOrNothing:true,
+      explicitRetrySafe:true,V1JournalUnchanged:true};
+  });
+
   await run('nonpilot Task record migration aborts atomically on Task put failure and retries safely',async context=>{
     const page=await open(context);
     const result=await page.evaluate(async()=>{

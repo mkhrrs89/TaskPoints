@@ -87,6 +87,31 @@ test('Task lifecycle preview commits row, retry receipt and ordering counter in 
   assert.match(runtime,/rehearsePreviewTaskRecordUpdate,\s*rehearsePreviewTaskLifecycleMutation,/);
 });
 
+test('linked Task completion preview requires unchanged V1 journal and atomic completion receipt',()=>{
+  const begin=runtime.indexOf('async function rehearsePreviewTaskLinkedCompletion(');
+  const end=runtime.indexOf('// A narrower stepping stone toward REQUIRED writer admission',begin);
+  assert.ok(begin>=0&&end>begin);
+  const snippet=runtime.slice(begin,end);
+  assert.match(snippet,/isWalTestPreviewHost\(\)/);
+  assert.match(snippet,/core\.readPendingTaskMutations\(\)/);
+  assert.match(snippet,/core\.readTaskPointsStoredState\(\)/);
+  assert.match(snippet,/captureReadOnlyFullStorageInventory\(\)/);
+  assert.match(snippet,/isPilotCompletion\(completion\)/);
+  assert.match(snippet,/db\.transaction\(\['tasks','completions','mutations','meta'\], 'readwrite'\)/);
+  assert.match(snippet,/completionStore\.add\(packed\)/);
+  assert.match(snippet,/mutationStore\.add\(receipt\)/);
+  assert.match(snippet,/transactionPromise\(tx\)/);
+  assert.match(snippet,/db\.transaction\(\['tasks','completions','mutations'\], 'readonly'\)/);
+  assert.match(snippet,/stableJson\(row\) !== stableJson\(packed\)/);
+  assert.match(snippet,/task_preview_linked_task_stale/);
+  assert.match(snippet,/task_preview_completion_id_exists/);
+  assert.match(snippet,/collectionParityVerified: false/);
+  assert.match(snippet,/canPromote: false/);
+  assert.doesNotMatch(snippet,/\b(?:journalTaskMutation|journalTaskCompletionBatch|saveStateSnapshot)\s*\(/);
+  assert.doesNotMatch(snippet,/localStorage\.(?:setItem|removeItem|clear)\s*\(/);
+  assert.match(runtime,/rehearsePreviewTaskLifecycleMutation,\s*rehearsePreviewTaskLinkedCompletion,/);
+});
+
 test('Task parity checks identity, payload, source inventory and generation without trusting metadata alone',()=>{
   assert.match(source,/previewRecoveryFingerprint\(tasks\)/);
   assert.match(source,/evidence\.taskFingerprint !== taskFingerprint/);

@@ -208,3 +208,26 @@ creation or deletion. The original seed evidence stays immutable, and the
 read-only parity inspector must flag resulting differences. V1 primary
 writes, pending journals, UI, writer admission and rollback are untouched.
 The 12-point full nonpilot migration gate remains uncredited.
+
+
+## Task-linked completion preview — November 2
+
+The explicit preview-only `rehearsePreviewTaskLinkedCompletion(id, token, actionId)`
+imports **one existing effective V1 Task/Work/metric completion** (including
+a pending V1 Task journal upsert) into the isolated V2 completion records
+store. It requires an unchanged effective V1 Task source, a uniquely
+identified completion and matching V2 seeded Task row, full-origin source
+inventory and current generation. The completion and a SHA-256-bound
+idempotency receipt commit in a **single IndexedDB transaction**, followed
+by an independent readback. It refuses preexisting completion ID collisions,
+stale Task edits, different reuse of an action ID, missing V1 completion,
+malformed journal and quota failures. The packed completion uses the
+existing V2 row format and a non-Habit index projection, preserving Habit
+pilot parity without claiming complete Tasks/Work/metric parity.
+
+The original V1 Task journal, V1 snapshot, live Work/Sleep scoring path and
+all production read/write authority remain untouched. A test-injected
+receipt write failure must abort both new completion and receipt, and an
+explicit retry is safe. Partial relative completion ordering is diagnostic,
+not full compatibility/export parity. Old-tab writer fencing, independent
+backup, real-device validation and authorization are still blocking gates.
