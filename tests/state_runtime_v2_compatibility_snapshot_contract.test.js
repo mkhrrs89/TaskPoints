@@ -653,7 +653,7 @@ test('V2 refuses empty reset export when revision advances after atomic count sn
   const originalConsume = app.indexedDB._consumeFailure.bind(app.indexedDB);
   let metaReads = 0;
   app.indexedDB._consumeFailure = (store, operation) => {
-    if (store === 'meta' && operation === 'get' && ++metaReads === 3) {
+    if (store === 'meta' && operation === 'get' && ++metaReads === 2) {
       const before = meta.get('runtime');
       meta.set('runtime', { ...before, revision: Number(before.revision) + 1 });
     }
@@ -661,7 +661,7 @@ test('V2 refuses empty reset export when revision advances after atomic count sn
   };
   await assert.rejects(app.api.buildCompatibilitySnapshot(),
     /state_runtime_v2_compatibility_v2_revision_changed_during_read/);
-  assert.equal(metaReads, 3);
+  assert.equal(metaReads, 2);
   assert.equal(app.indexedDB.dump(DB_NAME).meta.find(r=>r.id==='runtime').legacyMissing, true);
 });
 
