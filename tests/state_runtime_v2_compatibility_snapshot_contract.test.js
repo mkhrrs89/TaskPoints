@@ -594,3 +594,88 @@ test('V2 refuses an empty seed if V1 returns inside the destructive transaction'
   assert.deepEqual(app.indexedDB.dump(DB_NAME), storedBefore,
     'an aborted empty-seed transaction must leave the previous mirror unchanged');
 });
+
+async function verifiedEmptyResetApp() {
+  const app = install({
+    habits: [baseHabit('h1', 'Before reset', 'default', 0)],
+    completions: [{
+      id: 'prior-completion', source: 'habit', habitId: 'h1',
+      dayKey: '2026-09-03', points: 4
+    }],
+    tasks: [{ id: 'task-1', title: 'Before reset' }]
+  });
+  await app.api.seedFromLegacy();
+  app.localStorage.removeItem(LEGACY_KEY);
+  app.localStorage.setItem('taskpoints_state_v2_generation_v1',
+    'explicit-empty-reset-generation');
+  assert.equal(JSON.stringify(await app.api.buildCompatibilitySnapshot()), '{}');
+  return app;
+}
+
+for (const store of ['habits', 'completions', 'mutations']) {
+  test(`V2 verified empty reset export rejects retained ${store} evidence`, async () => {
+    const app = await verifiedEmptyResetApp();
+    const rows = app.indexedDB._databases.get(DB_NAME)._stores.get(store);
+    const evidence = store === 'habits'
+      ? { id: 'stranded-habit', legacyIndex: 0, value: baseHabit('stranded-habit', 'Survived reset', 'default', 0) }
+      : store === 'completions'
+        ? { id: 'stranded-completion', habitIds: ['h1'], entries: [{
+          value: { id: 'stranded-completion', source: 'habit',
+            habitId: 'h1', dayKey: '2026-09-03', points: 4 },
+          sequence: 1
+        }] }
+        : { id: 'stranded-mutation', kind: 'historical-write' };
+    rows.set(evidence.id, evidence);
+    const before = app.indexedDB.dump(DB_NAME);
+    await assert.rejects(app.api.buildCompatibilitySnapshot(),
+      /state_runtime_v2_compatibility_empty_evidence_retained/);
+    assert.deepEqual(app.indexedDB.dump(DB_NAME), before,
+      'unexpected V2 evidence must be preserved, not silently deleted');
+    assert.equal(app.localStorage.getItem(LEGACY_KEY), null);
+  });
+}
+
+test('V2 refuses empty reset export on a denied IndexedDB count read', async () => {
+  const app = await verifiedEmptyResetApp();
+  const before = app.indexedDB.dump(DB_NAME);
+  app.indexedDB.failNext({
+    store: 'completions', operation: 'count',
+    error: new Error('indexeddb_count_denied')
+  });
+  await assert.rejects(app.api.buildCompatibilitySnapshot(),
+    /state_runtime_v2_compatibility_empty_evidence_unreadable/);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), before);
+});
+
+test('V2 refuses empty reset export when revision advances after atomic count snapshot', async () => {
+  const app = await verifiedEmptyResetApp();
+  const meta = app.indexedDB._databases.get(DB_NAME)._stores.get('meta');
+  const originalConsume = app.indexedDB._consumeFailure.bind(app.indexedDB);
+  let metaReads = 0;
+  app.indexedDB._consumeFailure = (store, operation) => {
+    if (store === 'meta' && operation === 'get' && ++metaReads === 3) {
+      const before = meta.get('runtime');
+      meta.set('runtime', { ...before, revision: Number(before.revision) + 1 });
+    }
+    return originalConsume(store, operation);
+  };
+  await assert.rejects(app.api.buildCompatibilitySnapshot(),
+    /state_runtime_v2_compatibility_v2_revision_changed_during_read/);
+  assert.equal(metaReads, 3);
+  assert.equal(app.indexedDB.dump(DB_NAME).meta.find(r=>r.id==='runtime').legacyMissing, true);
+});
+
+test('V2 verified empty export counts stores without loading full record contents', async () => {
+  const app = await verifiedEmptyResetApp();
+  const originalConsume = app.indexedDB._consumeFailure.bind(app.indexedDB);
+  const operations = [];
+  app.indexedDB._consumeFailure = (store, operation) => {
+    operations.push([store, operation]);
+    return originalConsume(store, operation);
+  };
+  assert.equal(JSON.stringify(await app.api.buildCompatibilitySnapshot()), '{}');
+  assert.deepEqual(operations.filter(([,op])=>op==='count')
+    .map(([store])=>store).sort(), ['completions','habits','mutations']);
+  assert.equal(operations.some(([,op])=>op==='getAll'), false,
+    'verified empty exports should never deserialize all historical records');
+});
