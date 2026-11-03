@@ -3415,12 +3415,19 @@
     }
   }
 
+  // Keep at most ONE audited index proof: the full-origin snapshot can be
+  // several MiB, so never accumulate a per-Habit cache of source inventories.
+  // This evidence lives only in this preview tab and is invalidated when an
+  // audit is attempted again or its generation/revision/source changes.
+  let previewHabitIndexProof = null;
+
   // Preview-only evidence for a future fast per-Habit completion index read.
   // An index's mere existence does not prove that historical completion
   // packs were indexed. Compare a full scan and the indexed lookup inside
   // ONE readonly transaction, including duplicate-ID packs and sequence.
   // Never repair source rows, cache this as a production permit or promote.
   async function inspectPreviewHabitCompletionIndexParity(habitIdInput) {
+    previewHabitIndexProof = null;
     const refuse = (reason, detail = {}) => ({
       checked: true, previewOnly: true, indexVerified: false,
       canPromote: false, readAuthority: 'legacy_only',
@@ -3490,6 +3497,10 @@
       if (!sourceCurrent()) return refuse('legacy_changed_after_read');
       if (stableJson(metaAfter) !== stableJson(meta))
         return refuse('v2_revision_changed_during_read');
+      previewHabitIndexProof = {
+        habitId, generation, modeEpoch, inventory,
+        metaJson: stableJson(meta)
+      };
       return {
         checked: true, previewOnly: true, indexVerified: true,
         reason: 'completion_index_scoped_parity_verified',
@@ -3500,6 +3511,100 @@
         readAuthority: 'legacy_only', mutationAuthority: 'legacy_only'
       };
     } catch (_) { return refuse('completion_index_verification_unreadable'); }
+  }
+
+  // A successful full-store index audit may be reused for a narrowly
+  // targeted preview read, without another getAll scan. It is deliberately
+  // NOT used by getCompletionsForHabit or any live screen. An unexpected
+  // change in V1 source, V2 revision or generation invalidates the proof.
+  // Nonparticipating old tabs remain unfenced; do not authorize cutover.
+  async function readPreviewIndexedHabitCompletions(habitIdInput) {
+    const refuse = reason => ({
+      checked: true, previewOnly: true, eligible: false, reason,
+      canPromote: false, productionWritersFenced: false,
+      readAuthority: 'legacy_only', mutationAuthority: 'legacy_only'
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    if (typeof habitIdInput !== 'string' || !habitIdInput.trim()
+      || habitIdInput.length > 256) return refuse('habit_id_required');
+    const habitId = habitIdInput.trim();
+    const proof = previewHabitIndexProof;
+    if (!proof || proof.habitId !== habitId)
+      return refuse('fresh_index_audit_required');
+    const sourceCurrent = () => isDarkEnabled()
+      && darkMirrorModeEpoch === proof.modeEpoch
+      && currentGeneration({ create: false }) === proof.generation
+      && captureReadOnlyFullStorageInventory() === proof.inventory;
+    try {
+      if (!sourceCurrent()) {
+        previewHabitIndexProof = null;
+        return refuse('index_audit_source_stale');
+      }
+    } catch (_) {
+      previewHabitIndexProof = null;
+      return refuse('index_audit_source_unreadable');
+    }
+    let db, rows, meta;
+    try {
+      db = await open();
+      if (!db) return refuse('v2_unavailable');
+      const tx = db.transaction(['completions', 'meta'], 'readonly');
+      const store = tx.objectStore('completions');
+      if (!store.indexNames.contains(COMPLETION_HABIT_INDEX)) {
+        previewHabitIndexProof = null;
+        return refuse('completion_index_missing');
+      }
+      [rows, meta] = await Promise.all([
+        requestPromise(store.index(COMPLETION_HABIT_INDEX).getAll(habitId)),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID))
+      ]);
+    } catch (_) {
+      previewHabitIndexProof = null;
+      return refuse('indexed_read_unavailable');
+    }
+    try {
+      if (!sourceCurrent()) {
+        previewHabitIndexProof = null;
+        return refuse('index_audit_source_stale');
+      }
+      if (!meta || meta.schemaVersion !== SCHEMA_VERSION
+        || meta.resetGeneration !== proof.generation || meta.legacyMissing === true
+        || stableJson(meta) !== proof.metaJson) {
+        previewHabitIndexProof = null;
+        return refuse('index_audit_revision_stale');
+      }
+      // Fail closed if any *returned* packed row has changed its index
+      // metadata even if a broken writer forgot to bump the revision.
+      if (rows.some(row => !Array.isArray(row?.habitIds)
+        || stableJson(row.habitIds) !== stableJson(completionHabitIdsForRow(row)))) {
+        previewHabitIndexProof = null;
+        return refuse('indexed_rows_corrupt');
+      }
+      const completions = global.Array.from(unpackCompletionRows(rows)
+        .filter(row => String(row?.habitId || '') === habitId));
+      const after = await readMeta(db);
+      if (stableJson(after) !== proof.metaJson) {
+        previewHabitIndexProof = null;
+        return refuse('index_audit_revision_stale');
+      }
+      if (!sourceCurrent() || previewHabitIndexProof !== proof) {
+        previewHabitIndexProof = null;
+        return refuse('index_audit_source_stale');
+      }
+      return {
+        checked: true, previewOnly: true, eligible: true,
+        reason: 'audited_indexed_completion_candidate',
+        lookupMode: 'audited_index', habitId,
+        generation: proof.generation, revision: Number(meta.revision || 0),
+        completions,
+        canPromote: false, productionWritersFenced: false,
+        readAuthority: 'legacy_only', mutationAuthority: 'legacy_only'
+      };
+    } catch (_) {
+      previewHabitIndexProof = null;
+      return refuse('indexed_read_verification_unreadable');
+    }
   }
 
   // Diagnostic-only targeted projection for Stage C development. No live
@@ -7610,6 +7715,7 @@
     inspectPilotReadiness,
     inspectPilotCompletionIndexCoverage,
     inspectPreviewHabitCompletionIndexParity,
+    readPreviewIndexedHabitCompletions,
     inspectMutationHandoffPrerequisites,
     inspectAuthorityCutoverBarriers,
     inspectPreviewWriterPeers,
