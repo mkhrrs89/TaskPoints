@@ -7864,3 +7864,24 @@ body.tp-player-profile-open #cropModal:not(.hidden) { z-index: 1900 !important; 
   .tp-profile-columns { grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 12px; }
   .tp-profile-panel { padding: 14px; }
 }
+
+/* Habit-day long-press menu: retain ordinary tap and scrolling behavior. */
+.habitDay:not(.viceDay) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.habit-freeze-action-overlay {
+  position:fixed; inset:0; z-index:100100; display:flex;
+  align-items:center; justify-content:center;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+  background:rgba(0,0,0,.72);
+}
+.habit-freeze-action-panel {
+  width:min(100%,390px); padding:20px; border-radius:16px;
+  border:1px solid rgba(255,255,255,.2); background:#17272c; color:#fff;
+  box-shadow:0 18px 60px rgba(0,0,0,.55);
+}
+.habit-freeze-action-panel h3 { font-size:1.15rem; font-weight:750; margin:0 0 7px; }
+.habit-freeze-action-date { font-weight:600; margin:0 0 12px; }
+.habit-freeze-action-description { color:#d2dcdf; line-height:1.5; margin-bottom:14px; }
+.habit-freeze-action-balance { font-size:.85rem; color:#b1c6cd; margin-bottom:16px; }
+.habit-freeze-action-buttons { display:flex; gap:10px; flex-wrap:wrap; }
+.habit-freeze-action-buttons button { flex:1 1 auto; min-height:42px; }
+.habit-freeze-action-buttons button:disabled { cursor:not-allowed; opacity:.46; }

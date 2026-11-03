@@ -206,14 +206,14 @@ Nothing visible on the page is built here. === -->
   
   <!-- Your app scripts + CSS -->
 <link rel="preload" href="assets/tailwind.css" as="style">
-<link rel="preload" href="styles.css?v=20261102-freeze-white-bubbles-1" as="style">
+<link rel="preload" href="styles.css?v=20261102-manual-freeze-longpress-1" as="style">
 
 <link rel="stylesheet" href="assets/tailwind.css" media="print" onload="this.media='all'">
-<link rel="stylesheet" href="styles.css?v=20261102-freeze-white-bubbles-1" media="print" onload="this.media='all'">
+<link rel="stylesheet" href="styles.css?v=20261102-manual-freeze-longpress-1" media="print" onload="this.media='all'">
 
 <noscript>
   <link rel="stylesheet" href="assets/tailwind.css">
-  <link rel="stylesheet" href="styles.css?v=20261102-freeze-white-bubbles-1">
+  <link rel="stylesheet" href="styles.css?v=20261102-manual-freeze-longpress-1">
 </noscript>
   <style>
 
@@ -8787,6 +8787,120 @@ function scheduleHomeStreaksAtRiskRender() {
   });
 }
 
+
+let activeHabitFreezePopup = null;
+let activeHabitFreezePopupCleanup = null;
+
+function closeHabitFreezePopup() {
+  if (activeHabitFreezePopupCleanup) activeHabitFreezePopupCleanup();
+  activeHabitFreezePopupCleanup = null;
+  if (activeHabitFreezePopup) activeHabitFreezePopup.remove();
+  activeHabitFreezePopup = null;
+}
+
+function showHabitFreezePopup(habitId, dayKey) {
+  const habit = (state.habits || []).find(h => String(h?.id) === String(habitId));
+  if (!habit || habit.retired || (habit.category || 'habit') === 'vice') return;
+  const asOf = getCurrentTaskPointsDayKey();
+  const selected = Array.isArray(habit.manualStreakFreezeDays) && habit.manualStreakFreezeDays.includes(dayKey);
+  const status = TaskPointsCore?.getHabitFreezeStatus?.(habit, state, asOf);
+  const canApply = TaskPointsCore?.getHabitManualFreezeEligibility?.(habit, state, dayKey, asOf);
+  if (!status || !canApply) return;
+  if (activeHabitFreezePopup?.dataset.habitId === String(habitId)
+    && activeHabitFreezePopup?.dataset.dayKey === String(dayKey)) return;
+  closeHabitFreezePopup();
+
+  const messages = {
+    disabled: 'Only habits with streak multipliers enabled can spend freezes.',
+    not_closed: 'This day is not finished yet. You can freeze it after the 5 a.m. rollover.',
+    completed: 'Already completed, including half-completed days. No freeze is needed.',
+    already_auto: 'An automatic streak freeze is already protecting this date.',
+    no_credits: 'You have no available freezes to spend.',
+    would_change_other_freezes: 'This would alter another protected day or use more than one freeze.'
+  };
+  const overlay = document.createElement('div');
+  overlay.className = 'habit-freeze-action-overlay';
+  overlay.dataset.habitId = String(habitId);
+  overlay.dataset.dayKey = dayKey;
+  overlay.innerHTML = '<div class="habit-freeze-action-panel" role="dialog" aria-modal="true" aria-labelledby="habitFreezeActionTitle" aria-describedby="habitFreezeActionDescription">' +
+    '<h3 id="habitFreezeActionTitle">Streak freeze</h3>' +
+    '<p class="habit-freeze-action-date"></p>' +
+    '<p id="habitFreezeActionDescription" class="habit-freeze-action-description"></p>' +
+    '<p class="habit-freeze-action-balance"></p>' +
+    '<div class="habit-freeze-action-buttons">' +
+    '<button type="button" class="btn btn-teal" data-habit-freeze-action="apply"></button>' +
+    '<button type="button" class="btn btn-ghost" data-habit-freeze-action="cancel">Cancel</button>' +
+    '</div></div>';
+  overlay.querySelector('.habit-freeze-action-date').textContent =
+    (habit.name || 'Habit') + ' · ' + niceDate(fromKey(dayKey));
+  overlay.querySelector('.habit-freeze-action-balance').textContent =
+    status.balance + ' available streak freeze' + (status.balance === 1 ? '' : 's');
+  overlay.querySelector('.habit-freeze-action-description').textContent = selected
+    ? 'Remove this manual override. If the day was missed, its streak protection is removed and the freeze is refunded.'
+    : canApply.ok
+      ? 'Spend one streak freeze on this missed day? It protects a streak without adding a completion, streak day, or points—even before automatic freezes began.'
+      : (messages[canApply.reason] || 'A manual freeze cannot be applied to this day.');
+  const apply = overlay.querySelector('[data-habit-freeze-action="apply"]');
+  apply.textContent = selected ? 'Remove manual freeze' : 'Apply 1 streak freeze';
+  apply.disabled = !selected && !canApply.ok;
+
+  const keyHandler = event => {
+    if (event.key === 'Escape') { event.preventDefault(); closeHabitFreezePopup(); }
+  };
+  document.addEventListener('keydown', keyHandler);
+  activeHabitFreezePopupCleanup = () => document.removeEventListener('keydown', keyHandler);
+  overlay.addEventListener('click', event => {
+    if (event.target === overlay || event.target.closest('[data-habit-freeze-action="cancel"]')) closeHabitFreezePopup();
+  });
+  apply.addEventListener('click', () => {
+    const liveHabit = (state.habits || []).find(h => String(h?.id) === String(habitId));
+    if (!liveHabit) { closeHabitFreezePopup(); return; }
+    const oldDays = Array.isArray(liveHabit.manualStreakFreezeDays) ? liveHabit.manualStreakFreezeDays.slice() : [];
+    if (oldDays.includes(dayKey) !== selected) { closeHabitFreezePopup(); return; }
+    if (!selected && !TaskPointsCore.getHabitManualFreezeEligibility(
+      liveHabit, state, dayKey, getCurrentTaskPointsDayKey()).ok) {
+      closeHabitFreezePopup();
+      alert('That freeze is no longer available. Nothing changed.');
+      return;
+    }
+    const hadField = Object.prototype.hasOwnProperty.call(liveHabit, 'manualStreakFreezeDays');
+    liveHabit.manualStreakFreezeDays = Array.from(new Set(selected
+      ? oldDays.filter(key => key !== dayKey) : [...oldDays, dayKey])).sort();
+    const success = save(selected ? 'habit-manual-freeze-remove' : 'habit-manual-freeze-apply', {
+      immediateWrite: true, userInitiated: true, interactive: true,
+      deferCompression: true, replaceCompletions: true
+    });
+    let verified = false;
+    if (success) {
+      try {
+        const decoded = TaskPointsCore.parseTaskPointsStorageJson(localStorage.getItem(STORAGE_KEY), {});
+        const storedHabit = (decoded?.habits || []).find(h => String(h?.id) === String(habitId));
+        verified = Boolean(storedHabit && Array.isArray(storedHabit.manualStreakFreezeDays)
+          && storedHabit.manualStreakFreezeDays.includes(dayKey) === !selected);
+      } catch (error) { console.warn('Manual freeze readback failed', error); }
+    }
+    if (!verified) {
+      const current = (state.habits || []).find(h => String(h?.id) === String(habitId));
+      if (current) {
+        if (hadField) current.manualStreakFreezeDays = oldDays;
+        else delete current.manualStreakFreezeDays;
+      }
+      closeHabitFreezePopup();
+      renderHabits();
+      alert('The manual freeze could not be safely saved. Nothing was applied.');
+      return;
+    }
+    closeHabitFreezePopup();
+    renderHabits();
+    renderHomeStreakBonusSidecar();
+    scheduleHomeStreaksAtRiskRender();
+    scheduleHabitTodayScoreReconciliation();
+  });
+  document.body.appendChild(overlay);
+  activeHabitFreezePopup = overlay;
+  apply.focus({ preventScroll: true });
+}
+
 let habitTapHandlerBound = false;
 let viceTapHandlerBound = false;
 // A restack must never replace a bubble while its pointer gesture is live.
@@ -8988,16 +9102,28 @@ wrap.querySelectorAll('[data-act="habit-group-down"]').forEach(btn => {
 if (!habitTapHandlerBound) {
   habitTapHandlerBound = true;
 
-  let tap = null; // { pointerId, habitId, dayKey, category, startX, startY, moved }
+  let tap = null;
+  const clearLongPressTimer = gesture => {
+    if (gesture?.longPressTimerId != null) clearTimeout(gesture.longPressTimerId);
+    if (gesture) gesture.longPressTimerId = null;
+  };
 
   wrap.addEventListener('pointerdown', (e) => {
     const bubble = e.target.closest('.habitDay[data-habit][data-day]');
-    if (!bubble || !wrap.contains(bubble)) return;
+    if (!bubble || !wrap.contains(bubble) || (e.pointerType === 'mouse' && e.button !== 0)) return;
 
     tap = {
       pointerId: e.pointerId, habitId: bubble.dataset.habit, dayKey: bubble.dataset.day,
-      category: 'habit', startX: e.clientX, startY: e.clientY, moved: false
+      category: 'habit', startX: e.clientX, startY: e.clientY, moved: false,
+      longPressed: false, longPressTimerId: null
     };
+    const gesture = tap;
+    gesture.longPressTimerId = setTimeout(() => {
+      if (tap !== gesture || gesture.moved) return;
+      gesture.longPressed = true;
+      gesture.longPressTimerId = null;
+      showHabitFreezePopup(gesture.habitId, gesture.dayKey);
+    }, 550);
     activeHabitPointerGesture = tap;
   }, { passive: true });
 
@@ -9007,13 +9133,21 @@ if (!habitTapHandlerBound) {
     const dx = Math.abs(e.clientX - tap.startX);
     const dy = Math.abs(e.clientY - tap.startY);
 
-    if (dx > 12 || dy > 12) tap.moved = true; // scroll threshold
+    if (dx > 12 || dy > 12) {
+      tap.moved = true;
+      clearLongPressTimer(tap);
+    }
   }, { passive: true });
 
   wrap.addEventListener('pointerup', (e) => {
     if (!tap || e.pointerId !== tap.pointerId) return;
     const gesture = tap;
+    clearLongPressTimer(gesture);
     tap = null; activeHabitPointerGesture = null;
+    if (gesture.longPressed) {
+      scheduleDeferredHabitRestack();
+      return; // a long press never also toggles completion
+    }
     // Compare stable identity, not a DOM node that a delayed render may replace.
     const ended = e.target.closest('.habitDay[data-habit][data-day]');
     if (gesture.moved || !ended || ended.dataset.habit !== gesture.habitId || ended.dataset.day !== gesture.dayKey) {
@@ -9026,6 +9160,7 @@ if (!habitTapHandlerBound) {
 
   const clearHabitGestureFromDocument = (e) => {
     if (!tap || e.pointerId !== tap.pointerId) return;
+    clearLongPressTimer(tap);
     tap = null; activeHabitPointerGesture = null;
     scheduleDeferredHabitRestack();
   };
@@ -9033,6 +9168,16 @@ if (!habitTapHandlerBound) {
   // A release outside the list does not bubble through wrap; clean it up without toggling.
   document.addEventListener('pointerup', clearHabitGestureFromDocument, { passive: true });
   document.addEventListener('pointercancel', clearHabitGestureFromDocument, { passive: true });
+  wrap.addEventListener('contextmenu', e => {
+    const bubble = e.target.closest('.habitDay[data-habit][data-day]');
+    if (!bubble || !wrap.contains(bubble)) return;
+    e.preventDefault();
+    if (tap && tap.habitId === bubble.dataset.habit && tap.dayKey === bubble.dataset.day) {
+      clearLongPressTimer(tap);
+      tap.longPressed = true;
+    }
+    showHabitFreezePopup(bubble.dataset.habit, bubble.dataset.day);
+  });
 }
 }
 
