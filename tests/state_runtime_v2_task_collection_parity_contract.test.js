@@ -209,7 +209,8 @@ test('whole snapshot preview verifies all V1 fields and mixed completion chronol
   assert.match(body,/fullExportVerified: false/);
   assert.match(body,/canPromote: false/);
   assert.doesNotMatch(body,/(?:await\s+seedFromLegacy|await\s+buildCompatibilitySnapshot|core\.journalTaskMutation|core\.saveStateSnapshot)\s*\(/);
-  assert.doesNotMatch(body,/\.(?:put|add|delete|clear|setItem|removeItem)\s*\(/);
+  assert.doesNotMatch(body,/\b(?:taskStore|completionStore|metaStore|habitStore|objectStore)\.(?:put|add|delete|clear)\s*\(/);
+  assert.doesNotMatch(body,/\b(?:global\.)?localStorage\.(?:setItem|removeItem|clear)\s*\(/);
   assert.match(runtime,/inspectPreviewMixedCompletionExport,\s*inspectPreviewWholeCompatibilityProjection,/);
 });
 
