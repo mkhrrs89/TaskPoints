@@ -619,7 +619,20 @@
 
   function parseLegacyStateWithPending() {
     const storageKey = core.STORAGE_KEY || 'taskpoints_v1';
-    const raw = safeGet(storageKey);
+    // The V1 snapshot is authoritative until a separately authorized
+    // cutover. A denied localStorage read is NOT evidence of an empty app or
+    // an approved reset: silently converting it to null could clear or
+    // misrepresent durable V2 data during seeding/export.
+    let raw;
+    try {
+      if (typeof global.localStorage?.getItem !== 'function')
+        throw new Error('local_storage_unavailable');
+      raw = global.localStorage.getItem(storageKey);
+    } catch (_) {
+      throw new Error('state_runtime_v2_legacy_snapshot_unreadable');
+    }
+    if (raw !== null && typeof raw !== 'string')
+      throw new Error('state_runtime_v2_legacy_snapshot_invalid');
     if (raw === null) return { missing: true, raw: null, state: null };
 
     let state;
@@ -3016,7 +3029,27 @@
     const expectedGeneration = currentGeneration({ create: false });
     const modeEpoch = darkMirrorModeEpoch;
     const source = parseLegacyStateWithPending();
-    if (source.missing) return {};
+    if (source.missing) {
+      // Keep the historical empty-state result ONLY for a verified
+      // same-generation V2 reset/empty marker. A temporary key disappearance
+      // with retained V2 rows must never produce a deceptively valid {} export.
+      if (!isDarkEnabled() || darkMirrorModeEpoch !== modeEpoch
+        || currentGeneration({ create: false }) !== expectedGeneration
+        || captureReadOnlyFullStorageInventory() !== sourceInventory)
+        throw new Error('state_runtime_v2_compatibility_source_changed_during_capture');
+      const emptyDb = await open();
+      if (!emptyDb) throw new Error('state_runtime_v2_compatibility_db_unavailable');
+      const emptyMeta = await readMeta(emptyDb);
+      if (!emptyMeta || emptyMeta.schemaVersion !== SCHEMA_VERSION
+        || emptyMeta.resetGeneration !== expectedGeneration
+        || emptyMeta.legacyMissing !== true)
+        throw new Error('state_runtime_v2_compatibility_legacy_missing_unverified');
+      if (!isDarkEnabled() || darkMirrorModeEpoch !== modeEpoch
+        || currentGeneration({ create: false }) !== expectedGeneration
+        || captureReadOnlyFullStorageInventory() !== sourceInventory)
+        throw new Error('state_runtime_v2_compatibility_source_changed_during_read');
+      return {};
+    }
     const effective = applyTaskJournalToCompatibilitySource(source.state);
     if (captureReadOnlyFullStorageInventory() !== sourceInventory)
       throw new Error('state_runtime_v2_compatibility_source_changed_during_capture');
