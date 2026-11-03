@@ -2995,7 +2995,22 @@
     const effective = applyTaskJournalToCompatibilitySource(source.state);
     if (captureReadOnlyFullStorageInventory() !== sourceInventory)
       throw new Error('state_runtime_v2_compatibility_source_changed_during_capture');
+    // A V2 mutation may land while the separate Habit/completion snapshot
+    // transaction is pending, even if the V1 journal and origin do not change.
+    // Reject a mixed-generation export candidate rather than combining
+    // different V2 revisions. These are read-only metadata checks; V1 remains
+    // authoritative and this does not enable the V2 export/cutover path.
+    const db = await open();
+    if (!db) throw new Error('state_runtime_v2_compatibility_db_unavailable');
+    const metaBefore = await readMeta(db);
+    if (!metaBefore || metaBefore.schemaVersion !== SCHEMA_VERSION
+      || metaBefore.resetGeneration !== expectedGeneration
+      || metaBefore.legacyMissing === true)
+      throw new Error('state_runtime_v2_compatibility_metadata_not_ready');
     const collections = await readV2Collections();
+    const metaAfter = await readMeta(db);
+    if (stableJson(metaAfter) !== stableJson(metaBefore))
+      throw new Error('state_runtime_v2_compatibility_v2_revision_changed_during_read');
     if (!isDarkEnabled() || darkMirrorModeEpoch !== modeEpoch
       || currentGeneration({ create: false }) !== expectedGeneration
       || captureReadOnlyFullStorageInventory() !== sourceInventory)
