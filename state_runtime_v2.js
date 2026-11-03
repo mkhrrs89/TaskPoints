@@ -2969,19 +2969,21 @@
   }
 
   // A reset marked empty is not enough to prove the mirror contains no
-  // surviving Habit, completion or mutation evidence. Count stores and read
-  // runtime metadata in the same transaction without loading their records.
+  // surviving pilot, mutation or preview-Task evidence. Include the isolated
+  // Tasks rehearsal store without treating its contents as authoritative.
+  // Count all stores with runtime metadata in ONE readonly transaction.
   async function readV2EmptyResetEvidence(db) {
     const tx = db.transaction(
-      ['habits', 'completions', 'mutations', 'meta'], 'readonly'
+      ['habits', 'completions', 'mutations', 'tasks', 'meta'], 'readonly'
     );
-    const [meta, habits, completions, mutations] = await Promise.all([
+    const [meta, habits, completions, mutations, tasks] = await Promise.all([
       requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
       requestPromise(tx.objectStore('habits').count()),
       requestPromise(tx.objectStore('completions').count()),
-      requestPromise(tx.objectStore('mutations').count())
+      requestPromise(tx.objectStore('mutations').count()),
+      requestPromise(tx.objectStore('tasks').count())
     ]);
-    return { meta, habits, completions, mutations };
+    return { meta, habits, completions, mutations, tasks };
   }
 
   function completionCompatibilityBase(completion) {
@@ -3096,7 +3098,7 @@
         || emptyMeta.legacyMissing !== true)
         throw new Error('state_runtime_v2_compatibility_legacy_missing_unverified');
       if (evidence.habits !== 0 || evidence.completions !== 0
-        || evidence.mutations !== 0)
+        || evidence.mutations !== 0 || evidence.tasks !== 0)
         throw new Error('state_runtime_v2_compatibility_empty_evidence_retained');
       // A separate metadata read rejects a revision committed after the
       // consistent emptiness check. An old noncooperating tab can still write
@@ -3308,7 +3310,7 @@
         && evidence.meta?.resetGeneration === expectedGeneration
         && evidence.meta?.legacyMissing === true;
       const empty = evidence.habits === 0 && evidence.completions === 0
-        && evidence.mutations === 0;
+        && evidence.mutations === 0 && evidence.tasks === 0;
       lastParity = {
         checked: consistent, match: Boolean(consistent && markerValid && empty),
         legacyMissing: true,
@@ -3316,7 +3318,8 @@
           : !markerValid ? 'empty_reset_marker_unverified'
             : !empty ? 'empty_reset_evidence_retained' : 'verified_empty_reset',
         counts: { habits: evidence.habits,
-          completions: evidence.completions, mutations: evidence.mutations },
+          completions: evidence.completions, mutations: evidence.mutations,
+          tasks: evidence.tasks },
         checkedAtISO: nowIso()
       };
       return lastParity;
