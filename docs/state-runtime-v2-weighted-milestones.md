@@ -535,3 +535,36 @@ generation safeguards.
 **Limits:** This covers IndexedDB metadata/count evidence, not all recovery
 sources, image databases, independent off-device backups or unfenced old
 tabs. No promotion is authorized. **67/100; canPromote:false.**
+
+## Incremental authoritative-V1 Task collection reconciliation — November 3
+
+The next nonpilot migration step is a **real V1-source-backed, opt-in Task
+collection catch-up** (rather than another static parity check).
+`rehearsePreviewTaskCollectionReconcile(sourceToken, actionId)` compares an
+already-seeded V2 Task collection against current **effective V1 Tasks**,
+including pending Task journal changes, and updates only the changed records
+(create/edit/delete/reorder) inside **one readwrite transaction** covering
+`tasks`, `meta` and `mutations`. The old baseline, new SHA-256 Task
+fingerprint, exact full-origin source inventory, generation and action receipt
+must agree. A new readonly transaction checks the resulting entire Task
+collection and the action receipt before returning success.
+
+The operation refuses unexplained V2-only Task modifications, a preserved
+preview lifecycle ordering counter, changed V1 source, duplicate Task IDs,
+conflicting action IDs, concurrent IndexedDB changes and an oversized
+logical batch (more than 64 changed or deleted Task records). Quota or
+transaction failures leave all records and receipts unchanged. A repeated
+already-current source is read-only; V1 snapshot/journal, production scoring,
+exports, Habits and old recovery paths remain untouched. Node tests cover
+CRUD, order, source isolation, idempotence, restart, conflict and quota;
+Chromium/WebKit rehearsals exercise **real** Task journal create/edit changes
+and stale V2 evidence.
+
+This closes an important **Task collection delta catch-up gap**: the earlier
+Task seed could only populate a fresh store and would refuse a changed
+source instead of incrementally mirroring it. It is nevertheless **an
+explicit developer preview operation**, not automatic Task journal mirroring,
+mandatory writer admission, cross-tab exclusion, background compaction
+handoff, nonpilot completion ownership, whole-app migration or final
+compatibility/export cutover. Those remaining criteria keep the
+12-point nonpilot migration gate **uncredited**. **67/100; canPromote:false.**
