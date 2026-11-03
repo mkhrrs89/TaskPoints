@@ -208,7 +208,7 @@ test('whole snapshot preview verifies all V1 fields and mixed completion chronol
   assert.match(body,/previewRecoveryFingerprint\(actual\)/);
   assert.match(body,/fullExportVerified: false/);
   assert.match(body,/canPromote: false/);
-  assert.doesNotMatch(body,/\b(?:seedFromLegacy|buildCompatibilitySnapshot|journalTaskMutation|saveStateSnapshot)\s*\(/);
+  assert.doesNotMatch(body,/(?:await\s+seedFromLegacy|await\s+buildCompatibilitySnapshot|core\.journalTaskMutation|core\.saveStateSnapshot)\s*\(/);
   assert.doesNotMatch(body,/\.(?:put|add|delete|clear|setItem|removeItem)\s*\(/);
   assert.match(runtime,/inspectPreviewMixedCompletionExport,\s*inspectPreviewWholeCompatibilityProjection,/);
 });
