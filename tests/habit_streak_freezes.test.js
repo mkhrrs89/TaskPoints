@@ -185,7 +185,7 @@ test('Home indexes completion rows once for all habit freeze status calculations
 test('Streaks completed table follows canonical freeze-aware streak length', () => {
   assert.match(streaksPage, /currentStreak = core\.getHabitFreezeStatus\(projectedHabit, state, todayKey\)\.streak/);
   assert.match(streaksPage, /if \(currentStreak > 0\) current\.push\(makeRow\(habit, currentStreak, todayKey, state\)\)/);
-  assert.match(streaksPage, /src="scoring_core\.js\?v=20261102-habit-freezes-1"/);
+  assert.match(streaksPage, /src="scoring_core\.js\?v=20261102-freeze-silver-credit-2"/);
 });
 
 test('a spent freeze is displayed as a white bubble with black numbers only on its protected day', () => {

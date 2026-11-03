@@ -77,7 +77,9 @@ test('half completions remain half a silver day alongside frozen white days', ()
     { manualStreakFreezeDays: ['2026-10-27'] });
   const s = state(h, [entry('2026-10-12'), entry('2026-10-13'),
     entry('2026-10-26', 0.5), entry('2026-10-28', 0.5)]);
-  const mid = status(h, s, '2026-10-28');
+  const midHabit = { ...h, doneKeys: h.doneKeys.filter(key => key !== '2026-10-28') };
+  const midState = state(midHabit, s.completions.filter(c => c.dayKey !== '2026-10-28'));
+  const mid = status(midHabit, midState, '2026-10-28');
   assert.equal(mid.earned, 1, 'half day plus freeze = only 1.5, no silver');
   const end = status(h, s, '2026-10-29');
   assert.equal(end.earned, 2, '0.5 + 1 frozen + 0.5 = silver');
