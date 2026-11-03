@@ -306,3 +306,40 @@ test('backdated completion retains its canonical date through legacy replay and 
   context.applyPendingHabitDeltas(fallback, [oldDelta]);
   assert.equal(fallback.completions[0].completedAtISO, delta.updatedAtISO);
 });
+
+test('V2-compat snapshot refuses a V2 revision change during its asynchronous collection read', async () => {
+  const legacy = {
+    profile: { name: 'Snapshot guard fixture' },
+    habits: [baseHabit('h1', 'Read', 'default', 0)],
+    tasks: [{ id: 't1', title: 'Preserve task' }],
+    completions: []
+  };
+  const app = install(legacy);
+  await app.api.seedFromLegacy();
+  const db = app.indexedDB._databases.get(DB_NAME);
+  assert.ok(db, 'seeded V2 database exists');
+  assert.ok(db._stores.get('meta').has('runtime'), 'revision metadata exists');
+
+  // Simulate a second V2 writer committing a newer revision after the first
+  // metadata read but before the separate Habit/completion read completes.
+  // No V1 key or journal changes, so a V1-only guard would falsely pass.
+  const originalFailure = app.indexedDB._consumeFailure.bind(app.indexedDB);
+  let injected = false;
+  app.indexedDB._consumeFailure = (store, operation) => {
+    if (!injected && store === 'habits' && operation === 'getAll') {
+      injected = true;
+      const metaStore = db._stores.get('meta');
+      const prior = metaStore.get('runtime');
+      metaStore.set('runtime', { ...prior, revision: Number(prior.revision || 0) + 1 });
+    }
+    return originalFailure(store, operation);
+  };
+
+  await assert.rejects(
+    app.api.buildCompatibilitySnapshot(),
+    /state_runtime_v2_compatibility_v2_revision_changed_during_read/
+  );
+  assert.equal(injected, true, 'racing V2 metadata mutation was exercised');
+  assert.deepEqual(JSON.parse(app.localStorage.getItem(LEGACY_KEY)), legacy,
+    'refusal must never replace or remove the authoritative V1 snapshot');
+});
