@@ -509,3 +509,76 @@ test('fast V2 indexed read rechecks metadata after the indexed result', async ()
   assert.equal(outcome.reason, 'index_audit_revision_stale');
   assert.equal(Object.hasOwn(outcome, 'completions'), false);
 });
+
+test('index proof refuses a V2 completion with unchanged index but wrong authoritative V1 value', async () => {
+  const legacy = baseLegacyState();
+  legacy.completions = [
+    { id: 'c1', source: 'habit', habitId: 'h1', dayKey: '2026-09-07', points: 10 }
+  ];
+  const app = installRuntime({
+    previewHost: true,
+    localStorage: new FakeStorage({
+      [DARK_MODE_KEY]: '1',
+      [LEGACY_KEY]: JSON.stringify(legacy)
+    })
+  });
+  await app.api.seedFromLegacy();
+  const rows = app.indexedDB._databases.get(DB_NAME)._stores.get('completions');
+  const key = [...rows.keys()][0];
+  const row = rows.get(key);
+  rows.set(key, {
+    ...row,
+    entries: row.entries.map(entry => ({
+      ...entry, value: { ...entry.value, points: 99 }
+    }))
+  });
+  const damagedV2 = app.indexedDB.dump(DB_NAME);
+  const audit = await app.api.inspectPreviewHabitCompletionIndexParity('h1');
+  assert.equal(audit.indexVerified, false);
+  assert.equal(audit.reason, 'legacy_pilot_completion_parity_mismatch');
+  assert.equal(audit.legacyCompletions, 1);
+  assert.equal(audit.v2Completions, 1);
+  const blocked = await app.api.readPreviewIndexedHabitCompletions('h1');
+  assert.equal(blocked.eligible, false);
+  assert.equal(blocked.reason, 'fresh_index_audit_required');
+  assert.equal(Object.hasOwn(blocked, 'completions'), false);
+  assert.deepEqual(app.indexedDB.dump(DB_NAME), damagedV2,
+    'preview parity checks never repair or destroy the mismatched V2 evidence');
+  assert.deepEqual(JSON.parse(app.localStorage.getItem(LEGACY_KEY)), legacy);
+});
+
+test('indexed completion proof rejects V2 extra records despite internally matching index', async () => {
+  const app = installRuntime({ previewHost: true });
+  await app.api.seedFromLegacy();
+  const completions = app.indexedDB._databases.get(DB_NAME)._stores.get('completions');
+  completions.set('unexpected', {
+    id: 'unexpected',
+    habitIds: ['h1'],
+    entries: [{
+      sequence: 1,
+      value: { id: 'unexpected', source: 'habit', habitId: 'h1',
+        dayKey: '2026-09-03', points: 10 }
+    }]
+  });
+  const audit = await app.api.inspectPreviewHabitCompletionIndexParity('h1');
+  assert.equal(audit.indexVerified, false);
+  assert.equal(audit.reason, 'legacy_pilot_completion_parity_mismatch');
+  assert.equal(audit.legacyCompletions, 0);
+  assert.equal(audit.v2Completions, 1);
+  assert.equal((await app.api.readPreviewIndexedHabitCompletions('h1')).eligible, false);
+});
+
+test('overlapping indexed completion audits cannot let an older audit supersede fresh proof', async () => {
+  const app = installRuntime({ previewHost: true });
+  await app.api.seedFromLegacy();
+  const firstPromise = app.api.inspectPreviewHabitCompletionIndexParity('h1');
+  const secondPromise = app.api.inspectPreviewHabitCompletionIndexParity('h1');
+  const [first, second] = await Promise.all([firstPromise, secondPromise]);
+  assert.equal(first.indexVerified, false);
+  assert.equal(first.reason, 'index_audit_superseded');
+  assert.equal(second.indexVerified, true, second.reason);
+  const read = await app.api.readPreviewIndexedHabitCompletions('h1');
+  assert.equal(read.eligible, true, read.reason);
+  assert.deepEqual(read.completions, []);
+  assert.equal(read.canPromote, false);
+});
