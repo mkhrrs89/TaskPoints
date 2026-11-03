@@ -8345,52 +8345,49 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
       .filter(key => /^\d{4}-\d{2}-\d{2}$/.test(String(key))
         && key <= lastClosed && !isComplete(key)));
 
-    // First compute all silver-week credits, including credits earned TODAY.
-    // Reserve credits for manually selected days before charging automatic misses.
-    // Manual spending is allowed retroactively, even before credits existed.
+    // Count ordinary completions first to reserve existing credits for manual
+    // overrides. This preserves previously protected automatic misses.
+    // A frozen day may then earn silver, but can never create the first credit
+    // needed to freeze *itself*. Newly earned credits fund future auto misses.
     const thresholdRaw = Number(habit.daysPerCompleteWeek);
     const threshold = Number.isFinite(thresholdRaw) && thresholdRaw > 0 && thresholdRaw <= 7
       ? Math.round(thresholdRaw) : 0;
-    const weeklyTotals = new Map();
-    const earnedWeekKeys = new Set();
-    const earnedOnDay = new Set();
+    const weekFor = key => addDaysToDateKey(key, -((fromKey(key).getDay() + 6) % 7));
+    const completedWeekTotals = new Map();
+    const completedEarnedWeeks = new Set();
     for (let key = HABIT_FREEZE_EARN_START; key <= asOfDayKey; key = addDaysToDateKey(key, 1)) {
       if (!threshold || !isComplete(key)) continue;
-      const weekKey = addDaysToDateKey(key, -((fromKey(key).getDay() + 6) % 7));
-      const total = (weeklyTotals.get(weekKey) || 0) + (fractions.get(key) ?? 1);
-      weeklyTotals.set(weekKey, total);
-      if (total >= threshold && !earnedWeekKeys.has(weekKey)) {
-        earnedWeekKeys.add(weekKey);
-        earnedOnDay.add(key);
-      }
+      const weekKey = weekFor(key);
+      const sum = (completedWeekTotals.get(weekKey) || 0) + (fractions.get(key) ?? 1);
+      completedWeekTotals.set(weekKey, sum);
+      if (sum >= threshold) completedEarnedWeeks.add(weekKey);
     }
-    const earned = earnedWeekKeys.size;
-    const autoBudget = Math.max(0, earned - manualDays.size);
+    let autoBudget = Math.max(0, completedEarnedWeeks.size - manualDays.size);
 
-    // If a user selects an earlier date, scan back to that date. For the
-    // preceding uninterrupted history, reuse the existing streak baseline.
-    // Existing automatic-only behavior retains its original Oct 12 anchor.
+    // An older manually protected day can connect an existing prelaunch
+    // streak, but protected days never increase the streak's completed count.
     const firstManualDay = manualDays.size ? [...manualDays].sort()[0] : null;
     const scanStart = firstManualDay && firstManualDay < HABIT_FREEZE_EARN_START
       ? firstManualDay : HABIT_FREEZE_EARN_START;
     const beforeStart = addDaysToDateKey(scanStart, -1);
     let streak = getHabitStreakDayForKey(habit, beforeStart);
     let eligible = streak >= 2;
-    let availableAuto = 0, autoSpent = 0;
+    let availableAuto = 0, autoSpent = 0, earned = 0;
     const protectedDays = [];
     const manualProtectedDays = [];
+    const weeklyTotals = new Map(), earnedWeekKeys = new Set();
 
     for (let key = scanStart; key <= asOfDayKey; key = addDaysToDateKey(key, 1)) {
-      if (earnedOnDay.has(key)) availableAuto += 1;
-      if (isComplete(key)) {
+      const complete = isComplete(key);
+      let protectedMiss = false;
+      if (complete) {
         streak += 1;
         if (streak >= 2) eligible = true;
       } else if (key <= lastClosed) {
         if (manualDays.has(key)) {
-          // Explicit manual overrides are not constrained by the automatic
-          // feature launch date or multiplier activation date.
           manualProtectedDays.push(key);
           protectedDays.push(key);
+          protectedMiss = true;
         } else {
           const freezeCanSpend = key >= HABIT_FREEZE_SPEND_START
             && (!habit.streakMultiplierStartDateKey
@@ -8400,10 +8397,30 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
             availableAuto -= 1;
             autoSpent += 1;
             protectedDays.push(key);
+            protectedMiss = true;
           } else {
             streak = 0;
             eligible = false;
           }
+        }
+      }
+
+      // Silver thresholds count a frozen missed day as one day, while half
+      // completions remain half. No points/completion rows are synthesized.
+      // A week still earns one credit at most, regardless of how many
+      // completed or freeze-protected days it contains.
+      if (threshold && key >= HABIT_FREEZE_EARN_START && (complete || protectedMiss)) {
+        const weekKey = weekFor(key);
+        const sum = (weeklyTotals.get(weekKey) || 0)
+          + (complete ? (fractions.get(key) ?? 1) : 1);
+        weeklyTotals.set(weekKey, sum);
+        if (sum >= threshold && !earnedWeekKeys.has(weekKey)) {
+          earnedWeekKeys.add(weekKey);
+          earned += 1;
+          availableAuto += 1;
+          // This week could not earn from completions alone, so its silver
+          // credit is genuinely new, usable for later automatic misses.
+          if (!completedEarnedWeeks.has(weekKey)) autoBudget += 1;
         }
       }
     }
@@ -8438,8 +8455,14 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
       manualStreakFreezeDays: [...(habit.manualStreakFreezeDays || []), day]
     };
     const next = getHabitFreezeStatus(previewHabit, state, asOf);
-    if (!next.manualProtectedDays.includes(day) || next.spent !== current.spent + 1
-      || next.balance !== current.balance - 1
+    // A manual freeze can also make a week silver, earning one new credit.
+    // That credit may fund a later automatic freeze in the same projection.
+    // Existing protected days may never be displaced to pay for the override.
+    const earnedDelta = next.earned - current.earned;
+    const spentDelta = next.spent - current.spent;
+    if (!next.manualProtectedDays.includes(day) || spentDelta < 1
+      || earnedDelta < 0 || spentDelta > earnedDelta + 1
+      || next.balance !== current.balance + earnedDelta - spentDelta
       || current.protectedDays.some(key => !next.protectedDays.includes(key))) {
       return { ok: false, reason: 'would_change_other_freezes', status: current };
     }
