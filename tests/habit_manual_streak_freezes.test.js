@@ -152,3 +152,11 @@ test('Home long press never also toggles a completion and the popup verifies sav
   assert.match(css, /\.habit-freeze-action-overlay/);
   assert.match(css, /\.habitDay\.off\.streak-freeze-used/);
 });
+
+test('older weeks can be reached without removing the existing Week / This toggle', () => {
+  assert.match(home, /id="habitOlderWeekBtn"/);
+  assert.match(home, /async function goHabitViceWeekOlder\(\)/);
+  assert.match(home, /habitViceWeekOffsetDays -= 7/);
+  assert.match(home, /habitViceWeekOffsetDays < 0 \? 'This ▶︎' : '◀︎ Week'/);
+  assert.match(home, /habitViceWeekOffsetDays = goingToLast \? -7 : 0/);
+});

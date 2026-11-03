@@ -189,15 +189,15 @@ test('Streaks completed table follows canonical freeze-aware streak length', () 
 
 test('a spent freeze is displayed as a white bubble with black numbers only on its protected day', () => {
   const styles = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
-  const rule = styles.match(/\\.habitDay\\.off\\.streak-freeze-used\\s*\\{([^}]+)\\}/);
+  const rule = styles.match(/\.habitDay\.off\.streak-freeze-used\s*\{([^}]+)\}/);
   assert.ok(rule, 'freeze-protected missed days have a dedicated visual rule');
-  assert.match(rule[1], /background:\\s*#ffffff\\s*!important/);
-  assert.match(rule[1], /color:\\s*#000000\\s*!important/);
-  assert.match(home, /const protectedDayKeys = new Set\\(options\\.protectedDays \\|\\| \\[\\]\\)/);
-  assert.match(home, /const isFreezeProtected = status === 'off' && protectedDayKeys\\.has\\(d\\.key\\)/);
+  assert.match(rule[1], /background:\s*#ffffff\s*!important/);
+  assert.match(rule[1], /color:\s*#000000\s*!important/);
+  assert.match(home, /const protectedDayKeys = new Set\(options\.protectedDays \|\| \[\]\)/);
+  assert.match(home, /const isFreezeProtected = status === 'off' && protectedDayKeys\.has\(d\.key\)/);
   assert.match(home, /const isPastIncomplete = !on && !isFreezeProtected/);
-  assert.match(home, /isFreezeProtected \\? ' streak-freeze-used' : ''/);
-  assert.match(home, /protectedDays: freezeStatuses\\.get\\(String\\(h\\.id\\)\\)\\?\\.protectedDays \\|\\| \\[\\]/);
+  assert.match(home, /isFreezeProtected \? ' streak-freeze-used' : ''/);
+  assert.match(home, /protectedDays: freezeStatuses\.get\(String\(h\.id\)\)\?\.protectedDays \|\| \[\]/);
   assert.match(home, /'past-failed', 'streak-freeze-used'/, 'live taps clear stale freeze visuals');
 });
 

@@ -1657,6 +1657,7 @@ Nothing visible on the page is built here. === -->
   <button id="weekBackBtnHabits" class="btn btn-secondary btn-compact" type="button">
     ◀︎ Week
   </button>
+  <button id="habitOlderWeekBtn" class="btn btn-secondary btn-compact hidden" type="button" title="View an earlier habit week">◀︎ Older</button>
 </div>
 </div>
 
@@ -8098,9 +8099,12 @@ function renderViceWeekLabels(){
 function updateWeekToggleButtons() {
   const habitsBtn = document.getElementById('weekBackBtnHabits');
   const vicesBtn  = document.getElementById('weekBackBtnVices');
-  const label = isViewingLastWeek() ? 'This ▶︎' : '◀︎ Week';
+  const label = habitViceWeekOffsetDays < 0 ? 'This ▶︎' : '◀︎ Week';
   if (habitsBtn) habitsBtn.textContent = label;
-  if (vicesBtn)  vicesBtn.textContent  = label;
+  if (vicesBtn) vicesBtn.textContent = label;
+  // Older weeks are optional; the original Week button still returns to Today.
+  const olderBtn = document.getElementById('habitOlderWeekBtn');
+  if (olderBtn) olderBtn.classList.toggle('hidden', habitViceWeekOffsetDays === 0);
 }
 
 async function swapWeekViewAnimated(direction) {
@@ -8151,6 +8155,15 @@ async function swapWeekViewAnimated(direction) {
     w.style.transform = '';
     w.style.opacity = '';
   });
+}
+
+async function goHabitViceWeekOlder() {
+  if (weekSwapInFlight || habitViceWeekOffsetDays >= 0) return;
+  weekSwapInFlight = true;
+  habitViceWeekOffsetDays -= 7;
+  updateWeekToggleButtons();
+  try { await swapWeekViewAnimated('back'); }
+  finally { weekSwapInFlight = false; }
 }
 
 async function toggleHabitViceWeek() {
@@ -14586,6 +14599,8 @@ try {
   const b2 = document.getElementById('weekBackBtnVices');
   if (b1) b1.onclick = toggleHabitViceWeek;
   if (b2) b2.onclick = toggleHabitViceWeek;
+  const olderHabitWeekBtn = document.getElementById('habitOlderWeekBtn');
+  if (olderHabitWeekBtn) olderHabitWeekBtn.onclick = goHabitViceWeekOlder;
   $('addFlexBtn')?.addEventListener('click', openFlexModal);
   $('flexDayToggleBtn')?.addEventListener('click', toggleFlexDayView);
   $('saveSleepScoreBtn')?.addEventListener('click', saveSleepScore);
