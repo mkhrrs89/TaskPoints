@@ -231,3 +231,28 @@ receipt write failure must abort both new completion and receipt, and an
 explicit retry is safe. Partial relative completion ordering is diagnostic,
 not full compatibility/export parity. Old-tab writer fencing, independent
 backup, real-device validation and authorization are still blocking gates.
+
+
+## Atomic multi-completion preview batches — November 2
+
+The explicit `rehearsePreviewTaskLinkedCompletionBatch(ids, token, actionId)`
+extends the single completion rehearsal to bounded batches of up to 64
+distinct **existing effective V1 Task/Work/metric completions**, including
+rows awaiting V1 Task-journal compaction. Every linked Task must match its
+original V2 seed value and index. The source inventory, V1 Task collection,
+nonpilot completion classes, reset generation and all original seed evidence
+are checked before the entire batch is admitted.
+
+All packed completion rows and a SHA-256-bound batch receipt commit in
+**one IndexedDB transaction**. A different action with an already-present
+completion ID refuses rather than overwriting; an identical action-ID retry
+is read-only and must verify every row and receipt in a fresh transaction.
+A synthetic quota error at receipt insertion, after completion adds have
+been enqueued, aborts all completions and the receipt as one transaction.
+Browser tests cover two V1 journal-backed scores, malformed/duplicate IDs,
+conflicting order, retry, failure and complete readback.
+
+**Scope:** Only preview-host V2 records change. No live point calculation,
+V1 journal/save modification, production authority transfer, global writer
+fence, Task/Work/Sleep compatibility export, or full completion chronology
+is established. Existing Habit pilot parity remains scoped and unchanged.

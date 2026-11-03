@@ -112,6 +112,30 @@ test('linked Task completion preview requires unchanged V1 journal and atomic co
   assert.match(runtime,/rehearsePreviewTaskLifecycleMutation,\s*rehearsePreviewTaskLinkedCompletion,/);
 });
 
+test('Task completion batches are journal-backed, bounded and atomically verified',()=>{
+  const start=runtime.indexOf('async function rehearsePreviewTaskLinkedCompletionBatch(');
+  const end=runtime.indexOf('// A narrower stepping stone toward REQUIRED writer admission',start);
+  assert.ok(start>=0&&end>start);
+  const source=runtime.slice(start,end);
+  assert.match(source,/idsInput\.length > 64/);
+  assert.match(source,/new Set\(idsInput\)\.size !== idsInput\.length/);
+  assert.match(source,/core\.readPendingTaskMutations\(\)/);
+  assert.match(source,/core\.readTaskPointsStoredState\(\)/);
+  assert.match(source,/isPilotCompletion\(completion\)/);
+  assert.match(source,/db\.transaction\(\['tasks','completions','mutations','meta'\],'readwrite'\)/);
+  assert.match(source,/for \(const row of packedRows\) completionStore\.add\(row\)/);
+  assert.match(source,/mutationStore\.add\(receipt\)/);
+  assert.match(source,/await transactionPromise\(tx\)/);
+  assert.match(source,/db\.transaction\(\['tasks','completions','mutations'\],'readonly'\)/);
+  assert.match(source,/completionRows\.every/);
+  assert.match(source,/task_completion_action_id_conflict/);
+  assert.match(source,/collectionParityVerified:false/);
+  assert.match(source,/canPromote:false/);
+  assert.doesNotMatch(source,/localStorage\.(?:setItem|removeItem|clear)\s*\(/);
+  assert.doesNotMatch(source,/\b(?:journalTaskMutation|journalTaskCompletionBatch|saveStateSnapshot)\s*\(/);
+  assert.match(runtime,/rehearsePreviewTaskLinkedCompletion,\s*rehearsePreviewTaskLinkedCompletionBatch,/);
+});
+
 test('Task parity checks identity, payload, source inventory and generation without trusting metadata alone',()=>{
   assert.match(source,/previewRecoveryFingerprint\(tasks\)/);
   assert.match(source,/evidence\.taskFingerprint !== taskFingerprint/);

@@ -1587,6 +1587,130 @@ try {
       explicitRetrySafe:true,V1JournalUnchanged:true};
   });
 
+  await run('preview Work and metric completion batch is all-or-nothing, journal-backed, and replay-safe',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2,core=window.TaskPointsCore;
+      const rows=[
+        {id:'batch-work-score',taskId:'synthetic-task',title:'Work Score',
+          source:'work',points:11,completedAtISO:'2026-11-02T12:00:00.000Z'},
+        {id:'batch-sleep-score',taskId:'synthetic-task',title:'Sleep Score',
+          source:'metric',points:6,completedAtISO:'2026-11-02T12:02:00.000Z'}
+      ];
+      core.journalTaskCompletionBatch(rows);
+      const seed=await api.rehearsePreviewTaskCollectionSeed();
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(key=>[key,localStorage.getItem(key)]));
+      const beforeSnapshot=localStorage.getItem('taskpoints_v1');
+      const beforeJournal=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const invalid=await api.rehearsePreviewTaskLinkedCompletionBatch(
+        [rows[0].id,rows[0].id],token,'bad-ids');
+      const missing=await api.rehearsePreviewTaskLinkedCompletionBatch(
+        [rows[0].id,'missing-batch-id'],token,'missing');
+      const first=await api.rehearsePreviewTaskLinkedCompletionBatch(
+        rows.map(x=>x.id),token,'work-sleep-one');
+      const retry=await api.rehearsePreviewTaskLinkedCompletionBatch(
+        rows.map(x=>x.id),token,'work-sleep-one');
+      const altered=await api.rehearsePreviewTaskLinkedCompletionBatch(
+        [rows[1].id,rows[0].id],token,'work-sleep-one');
+      const doubleWrite=await api.rehearsePreviewTaskLinkedCompletionBatch(
+        rows.map(x=>x.id),token,'another-action');
+      const parity=await api.verifyParity();
+      const db=await api.open();
+      const read=async(store,id)=>new Promise((resolve,reject)=>{
+        const q=db.transaction(store,'readonly').objectStore(store).get(id);
+        q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error);
+      });
+      return {seed,invalid,missing,first,retry,altered,doubleWrite,parity,
+        rows:await Promise.all(rows.map(x=>read('completions',x.id))),
+        receipt:await read('mutations','task-preview-completion-batch:work-sleep-one'),
+        snapshotSame:localStorage.getItem('taskpoints_v1')===beforeSnapshot,
+        journalSame:localStorage.getItem('taskpoints_pending_task_mutations_v1')===beforeJournal,
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(result.seed.verified,true);
+    assert.equal(result.invalid.reason,'task_completion_batch_ids_invalid');
+    assert.equal(result.missing.reason,'legacy_completion_not_found');
+    assert.equal(result.first.reason,'task_completion_batch_verified',JSON.stringify(result.first));
+    assert.equal(result.first.confirmedDurable,true);
+    assert.equal(result.first.committed,true);
+    assert.equal(result.first.completionCount,2);
+    assert.equal(result.first.canPromote,false);
+    assert.equal(result.retry.reason,'task_completion_batch_replayed');
+    assert.equal(result.retry.committed,false);
+    assert.equal(result.altered.reason,'task_completion_action_id_conflict');
+    assert.equal(result.doubleWrite.reason,'task_preview_completion_id_exists');
+    assert.equal(result.rows[0].entries[0].value.points,11);
+    assert.equal(result.rows[1].entries[0].value.points,6);
+    assert.deepEqual(result.rows.map(x=>x.habitIds),[[],[]]);
+    assert.equal(result.receipt.type,'task-preview-completion-batch');
+    assert.deepEqual(result.receipt.ids,['batch-work-score','batch-sleep-score']);
+    assert.equal(result.parity.match,true,JSON.stringify(result.parity));
+    assert.equal(result.parity.scopeExcludedCounts.actualCompletions,2);
+    assert.equal(result.snapshotSame,true);assert.equal(result.journalSame,true);
+    assert.equal(result.authority,'legacy_only');
+    return {atomicWorkMetricBatch:true,exactReadback:true,
+      idempotentReplay:true,conflictRefused:true,pilotParityUnaffected:true,
+      V1Unchanged:true};
+  });
+
+  await run('Task completion batch rolls back every row when late receipt write fails',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2,core=window.TaskPointsCore;
+      const rows=[
+        {id:'batch-quota-1',taskId:'synthetic-task',title:'Work One',
+          source:'work',points:2,completedAtISO:'2026-11-02T12:03:00.000Z'},
+        {id:'batch-quota-2',taskId:'synthetic-task',title:'Work Two',
+          source:'work',points:3,completedAtISO:'2026-11-02T12:04:00.000Z'}
+      ];
+      core.journalTaskCompletionBatch(rows);
+      const seeded=await api.rehearsePreviewTaskCollectionSeed();
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(key=>[key,localStorage.getItem(key)]));
+      const priorSnapshot=localStorage.getItem('taskpoints_v1');
+      const priorJournal=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const original=IDBObjectStore.prototype.add;
+      let injected=0,failed;
+      IDBObjectStore.prototype.add=function(value){
+        if(this.name==='mutations' && value?.type==='task-preview-completion-batch'){
+          injected++;throw new DOMException('synthetic late receipt quota','QuotaExceededError');
+        }
+        return original.apply(this,arguments);
+      };
+      try {
+        failed=await api.rehearsePreviewTaskLinkedCompletionBatch(
+          rows.map(x=>x.id),token,'batch-quota');
+      } finally {IDBObjectStore.prototype.add=original; }
+      const db=await api.open();
+      const read=async(store,id)=>new Promise((resolve,reject)=>{
+        const q=db.transaction(store,'readonly').objectStore(store).get(id);
+        q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error);
+      });
+      const partial=await Promise.all(rows.map(x=>read('completions',x.id)));
+      const missingReceipt=await read('mutations','task-preview-completion-batch:batch-quota');
+      const recovered=await api.rehearsePreviewTaskLinkedCompletionBatch(
+        rows.map(x=>x.id),token,'batch-quota');
+      const final=await Promise.all(rows.map(x=>read('completions',x.id)));
+      return {seeded,injected,failed,partial,missingReceipt,recovered,final,
+        V1Same:priorSnapshot===localStorage.getItem('taskpoints_v1'),
+        journalSame:priorJournal===localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(result.seeded.verified,true);
+    assert.equal(result.injected,1);
+    assert.equal(result.failed.reason,'task_completion_batch_atomic_write_failed');
+    assert.equal(result.failed.committed,false);
+    assert.deepEqual(result.partial,[undefined,undefined]);
+    assert.equal(result.missingReceipt,undefined);
+    assert.equal(result.recovered.confirmedDurable,true);
+    assert.deepEqual(result.final.map(x=>x.entries[0].value.points),[2,3]);
+    assert.equal(result.V1Same,true);assert.equal(result.journalSame,true);
+    assert.equal(result.authority,'legacy_only');
+    return {allRowsRolledBackTogether:true,noPartialReceipt:true,
+      retrySafe:true,V1Unchanged:true};
+  });
+
   await run('nonpilot Task record migration aborts atomically on Task put failure and retries safely',async context=>{
     const page=await open(context);
     const result=await page.evaluate(async()=>{

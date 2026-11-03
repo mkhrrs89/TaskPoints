@@ -5414,6 +5414,226 @@
     }
   }
 
+  // PREVIEW ONLY: one logical Task/Work/metric action may have multiple
+  // authoritative V1 completion rows. Mirror those rows into isolated V2
+  // in ONE transaction, never one per ID. No production writes or authority.
+  async function rehearsePreviewTaskLinkedCompletionBatch(idsInput, sourceToken, actionId) {
+    const refuse = (reason, details = {}) => ({
+      checked: true, previewOnly: true, committed: false,
+      confirmedDurable: false, collectionParityVerified: false,
+      pilotParityVerified: false, canPromote: false,
+      productionWritersFenced: false, readAuthority: 'legacy_only',
+      mutationAuthority: 'legacy_only', reason, ...details
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    if (typeof sourceToken !== 'string' || !sourceToken)
+      return refuse('full_origin_token_required');
+    if (typeof actionId !== 'string' || !actionId || actionId.length > 128)
+      return refuse('task_completion_action_id_required');
+    if (typeof core.readTaskPointsStoredState !== 'function'
+      || typeof core.readPendingTaskMutations !== 'function')
+      return refuse('legacy_task_reader_unavailable');
+    if (!Array.isArray(idsInput) || !idsInput.length || idsInput.length > 64
+      || idsInput.some(id => typeof id !== 'string' || !id || id.length > 128)
+      || new Set(idsInput).size !== idsInput.length)
+      return refuse('task_completion_batch_ids_invalid');
+    // Freeze caller order and IDs before the first asynchronous boundary.
+    const ids = idsInput.slice();
+    const generation = currentGeneration({ create: false });
+    if (!generation) return refuse('generation_unavailable');
+    const expectedModeEpoch = darkMirrorModeEpoch;
+    let tasks, packedRows, referencedTasks, taskSourceFingerprint, batchFingerprint;
+    try {
+      if (captureReadOnlyFullStorageInventory() !== sourceToken)
+        return refuse('full_origin_changed');
+      const pending = core.readPendingTaskMutations();
+      if (pending?.malformed) return refuse('legacy_task_journal_malformed');
+      const state = core.readTaskPointsStoredState();
+      if (!state || !Array.isArray(state.tasks)
+        || !Array.isArray(state.completions))
+        return refuse('legacy_tasks_or_completions_missing');
+      tasks = clone(state.tasks);
+      const tasksById = new Map();
+      tasks.forEach((task,index) => {
+        if (!task || typeof task !== 'object' || Array.isArray(task)
+          || task.id == null || !String(task.id)
+          || tasksById.has(String(task.id)))
+          throw new Error('legacy_task_ids_invalid');
+        tasksById.set(String(task.id), {value:task,index});
+      });
+      const wanted = new Set(ids);
+      const found = new Map();
+      state.completions.forEach((value,index) => {
+        if (!wanted.has(value?.id)) return;
+        const id = value.id;
+        if (found.has(id)) throw new Error('legacy_completion_id_ambiguous');
+        found.set(id,{value:clone(value),index});
+      });
+      packedRows = [];
+      referencedTasks = new Map();
+      for (const id of ids) {
+        const selected = found.get(id);
+        if (!selected) return refuse('legacy_completion_not_found');
+        const completion = selected.value;
+        if (!completion || typeof completion !== 'object'
+          || Array.isArray(completion) || isPilotCompletion(completion)
+          || !['task','work','metric'].includes(String(completion.source))
+          || typeof completion.taskId !== 'string' || !completion.taskId)
+          return refuse('nonpilot_task_completion_required');
+        const linked = tasksById.get(completion.taskId);
+        if (!linked) return refuse('linked_legacy_task_missing');
+        const completionJson = JSON.stringify(completion);
+        if (!completionJson || completionJson.length > 131072)
+          return refuse('task_completion_payload_invalid');
+        referencedTasks.set(completion.taskId, linked);
+        packedRows.push(withCompletionHabitIds({
+          id, entries:[{value:completion,sequence:-(selected.index+1)}]
+        }));
+      }
+      if (JSON.stringify(packedRows).length > 262144)
+        return refuse('task_completion_batch_too_large');
+      if (captureReadOnlyFullStorageInventory() !== sourceToken)
+        return refuse('legacy_changed_during_capture');
+      taskSourceFingerprint = await previewRecoveryFingerprint(tasks);
+      batchFingerprint = await previewRecoveryFingerprint(packedRows);
+    } catch (error) {
+      if (error?.message === 'legacy_task_ids_invalid'
+        || error?.message === 'legacy_completion_id_ambiguous')
+        return refuse(error.message);
+      return refuse('legacy_completion_batch_capture_unreadable');
+    }
+    const sourceCurrent = () => isDarkEnabled()
+      && darkMirrorModeEpoch === expectedModeEpoch
+      && currentGeneration({create:false}) === generation
+      && captureReadOnlyFullStorageInventory() === sourceToken;
+    try {
+      if (!sourceCurrent()) return refuse('legacy_changed_before_batch');
+    } catch (_) { return refuse('legacy_unreadable_before_batch'); }
+
+    const signature = `${fnv1a(sourceToken)}:${sourceToken.length}`;
+    const receiptId = 'task-preview-completion-batch:' + actionId;
+    const receipt = {
+      id:receiptId, type:'task-preview-completion-batch',
+      ids, batchFingerprint, taskSourceFingerprint,
+      sourceInventory:signature, resetGeneration:generation
+    };
+    let db;
+    try {
+      db = await open();
+      if (!db) return refuse('dark_disabled');
+    } catch (_) { return refuse('task_preview_db_unavailable'); }
+
+    let failure = null, repeated = false;
+    try {
+      if (!sourceCurrent()) return refuse('legacy_changed_before_batch');
+      const tx = db.transaction(['tasks','completions','mutations','meta'],'readwrite');
+      const taskStore = tx.objectStore('tasks');
+      const completionStore = tx.objectStore('completions');
+      const mutationStore = tx.objectStore('mutations');
+      const metaStore = tx.objectStore('meta');
+      const taskIds = Array.from(referencedTasks.keys());
+      const taskRequests = taskIds.map(id=>taskStore.get(id));
+      const completionRequests = ids.map(id=>completionStore.get(id));
+      const receiptRequest = mutationStore.get(receiptId);
+      const evidenceRequest = metaStore.get('task-preview');
+      const runtimeRequest = metaStore.get(RUNTIME_META_ID);
+      const requests = [...taskRequests, ...completionRequests,
+        receiptRequest, evidenceRequest, runtimeRequest];
+      let outstanding = requests.length;
+      const abort = reason => {
+        failure = reason;
+        try { tx.abort(); } catch (_) {}
+      };
+      const decide = () => {
+        if (--outstanding !== 0) return;
+        try {
+          if (!sourceCurrent()) return abort('legacy_changed_under_transaction');
+          const meta = runtimeRequest.result;
+          const evidence = evidenceRequest.result;
+          if (meta?.schemaVersion !== SCHEMA_VERSION
+            || meta.resetGeneration !== generation || meta.legacyMissing === true)
+            return abort('pilot_meta_not_ready');
+          if (!evidence || evidence.schemaVersion !== 1
+            || evidence.resetGeneration !== generation
+            || evidence.taskFingerprint !== taskSourceFingerprint
+            || evidence.sourceInventory !== signature
+            || evidence.taskCount !== tasks.length)
+            return abort('task_preview_source_not_seeded');
+          for (let index=0;index<taskIds.length;index++) {
+            const expected = referencedTasks.get(taskIds[index]);
+            const row = taskRequests[index].result;
+            if (!row || row.id !== taskIds[index]
+              || row.legacyIndex !== expected.index
+              || stableJson(row.value) !== stableJson(expected.value))
+              return abort('task_preview_linked_task_stale');
+          }
+          const previous = receiptRequest.result;
+          if (previous) {
+            if (stableJson(previous) !== stableJson(receipt))
+              return abort('task_completion_action_id_conflict');
+            repeated = true;
+            return;
+          }
+          if (completionRequests.some(request => request.result))
+            return abort('task_preview_completion_id_exists');
+          for (const row of packedRows) completionStore.add(row);
+          mutationStore.add(receipt);
+        } catch (_) { abort('task_completion_batch_atomic_write_failed'); }
+      };
+      for (const req of requests) req.onsuccess = decide;
+      await transactionPromise(tx);
+    } catch (_) {
+      return refuse(failure || 'task_completion_batch_atomic_write_failed');
+    }
+
+    // Verify all rows AND the exact receipt in a fresh transaction.
+    // A half-visible batch must never be acknowledged as durable.
+    try {
+      const tx = db.transaction(['tasks','completions','mutations'],'readonly');
+      const taskIds = Array.from(referencedTasks.keys());
+      const values = await Promise.all([
+        ...taskIds.map(id=>requestPromise(tx.objectStore('tasks').get(id))),
+        ...ids.map(id=>requestPromise(tx.objectStore('completions').get(id))),
+        requestPromise(tx.objectStore('mutations').get(receiptId))
+      ]);
+      const savedReceipt = values.pop();
+      const taskRows = values.slice(0,taskIds.length);
+      const completionRows = values.slice(taskIds.length);
+      const matchedTasks = taskRows.every((row,index)=>{
+        const expected = referencedTasks.get(taskIds[index]);
+        return row && row.id === taskIds[index]
+          && row.legacyIndex === expected.index
+          && stableJson(row.value) === stableJson(expected.value);
+      });
+      if (!matchedTasks
+        || !completionRows.every((row,index)=>
+          stableJson(row) === stableJson(packedRows[index]))
+        || stableJson(savedReceipt) !== stableJson(receipt))
+        return refuse('task_completion_batch_readback_unverified',{
+          committed:!repeated,writeOutcomeUncertain:true
+        });
+      if (!sourceCurrent())
+        return refuse('legacy_changed_after_preview_commit',{
+          committed:!repeated,confirmedDurable:true,writeOutcomeUncertain:true
+        });
+      return {
+        checked:true,previewOnly:true,committed:!repeated,
+        confirmedDurable:true,replayed:repeated,
+        completionCount:ids.length,collectionParityVerified:false,
+        pilotParityVerified:false,
+        reason:repeated ? 'task_completion_batch_replayed'
+          : 'task_completion_batch_verified',
+        canPromote:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+      };
+    } catch (_) {
+      return refuse('task_completion_batch_readback_unavailable',{
+        committed:!repeated,writeOutcomeUncertain:true
+      });
+    }
+  }
+
   // A narrower stepping stone toward REQUIRED writer admission, rather
   // than relying on the caller to invoke an optional freshness callback.
   // This API is explicit, PREVIEW-HOST-ONLY and NEVER installs on the live
@@ -6745,6 +6965,7 @@
     rehearsePreviewTaskRecordUpdate,
     rehearsePreviewTaskLifecycleMutation,
     rehearsePreviewTaskLinkedCompletion,
+    rehearsePreviewTaskLinkedCompletionBatch,
     rehearsePreviewDurableWriterFence,
     inspectPreservedParityMismatch,
     inspectLegacyRollbackSource,
