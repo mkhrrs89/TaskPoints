@@ -11192,6 +11192,71 @@ try {
       evidenceStillAvailableAfterReload:true};
   });
 
+  await run('empty V1 reset does not disguise stranded preview Task rows',async context=>{
+    const page=await open(context);
+    const initial=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const original=localStorage.getItem('taskpoints_v1');
+      Storage.prototype.__taskPointsV2GenerationOriginalRemoveItem
+        .call(localStorage,'taskpoints_v1');
+      const epoch=window.TaskPointsStateRuntimeV2Generation
+        .rotate('browser-task-preview-empty-reset');
+      if(!epoch.rotated)throw Error('reset_epoch_failed');
+      const empty=await runtime.buildCompatibilitySnapshot();
+      const db=await runtime.open();
+      const tx=db.transaction('tasks','readwrite');
+      tx.objectStore('tasks').put({
+        id:'retained-preview-task',
+        value:{id:'retained-preview-task',title:'Recoverable preview only'}
+      });
+      await new Promise((resolve,reject)=>{
+        tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);
+        tx.onerror=()=>reject(tx.error);
+      });
+      const parity=await runtime.verifyParity();
+      let error=null;
+      try{await runtime.buildCompatibilitySnapshot()}
+      catch(e){error=String(e.message||e)}
+      return {empty,parity,error,original,
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.deepEqual(initial.empty,{});
+    assert.equal(initial.parity.checked,true);
+    assert.equal(initial.parity.match,false);
+    assert.equal(initial.parity.reason,'empty_reset_evidence_retained');
+    assert.equal(initial.parity.counts.tasks,1);
+    assert.equal(initial.error,'state_runtime_v2_compatibility_empty_evidence_retained');
+    assert.equal(initial.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    const after=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      await runtime.startCoordinatedDarkMirror();
+      const parity=await runtime.verifyParity();
+      const db=await runtime.open();
+      const req=db.transaction('tasks','readonly')
+        .objectStore('tasks').get('retained-preview-task');
+      const task=await new Promise((resolve,reject)=>{
+        req.onsuccess=()=>resolve(req.result);
+        req.onerror=()=>reject(req.error);
+      });
+      let error=null;
+      try{await runtime.buildCompatibilitySnapshot()}
+      catch(e){error=String(e.message||e)}
+      return {parity,task,error,
+        v1Missing:localStorage.getItem('taskpoints_v1')===null,
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(after.parity.match,false);
+    assert.equal(after.parity.reason,'empty_reset_evidence_retained');
+    assert.equal(after.parity.counts.tasks,1);
+    assert.equal(after.error,'state_runtime_v2_compatibility_empty_evidence_retained');
+    assert.equal(after.task.id,'retained-preview-task');
+    assert.equal(after.v1Missing,true);
+    assert.equal(after.authority,'legacy_only');
+    return {taskEvidencePreserved:true,falseEmptyExportBlocked:true,
+      reloadRetained:true,legacyAuthorityUnchanged:true};
+  });
+
   await run('missing V1 during five repeated two-tab reloads preserves V2 WAL evidence for recovery',async context=>{
     const first=await open(context);
     await first.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-20','full',9));
