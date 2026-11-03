@@ -1144,6 +1144,120 @@ try {
       noProductionAuthorityChange:true};
   });
 
+  await run('Task preview incrementally reconciles real journal-backed changes without full reseed',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const core=window.TaskPointsCore;
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(key=>[key,localStorage.getItem(key)]));
+      const canonical=localStorage.getItem('taskpoints_v1');
+      const seeded=await runtime.rehearsePreviewTaskCollectionSeed();
+      core.journalTaskMutation({task:{
+        id:'journal-added-v2-reconcile',title:'Created in V1 journal',points:7
+      }});
+      const journalAfterAdd=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const stale=await runtime.inspectPreviewTaskCollectionParity();
+      const first=await runtime.rehearsePreviewTaskCollectionReconcile(token(),'journal-add');
+      const parity=await runtime.inspectPreviewTaskCollectionParity();
+      const second=await runtime.rehearsePreviewTaskCollectionReconcile(token(),'journal-add');
+      core.journalTaskMutation({task:{
+        id:'synthetic-task',title:'Updated via V1 journal',points:9
+      }});
+      const journalAfterEdit=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const edited=await runtime.rehearsePreviewTaskCollectionReconcile(token(),'journal-edit');
+      const after=await runtime.inspectPreviewTaskCollectionParity();
+      const db=await runtime.open();
+      const tx=db.transaction(['tasks','mutations'],'readonly');
+      const getAll=store=>new Promise((resolve,reject)=>{
+        const req=tx.objectStore(store).getAll();
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      const [rows,receipts]=await Promise.all([getAll('tasks'),getAll('mutations')]);
+      return {seeded,stale,first,parity,second,edited,after,rows,receipts,
+        canonical,canonAfter:localStorage.getItem('taskpoints_v1'),
+        journalAfterAdd,journalAfterEdit,
+        currentJournal:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(result.seeded.verified,true,JSON.stringify(result.seeded));
+    assert.equal(result.stale.match,false);
+    assert.equal(result.stale.reason,'task_preview_source_stale');
+    assert.equal(result.first.committed,true,JSON.stringify(result.first));
+    assert.equal(result.first.changedRows,1);
+    assert.equal(result.first.addedRows,1);
+    assert.equal(result.parity.match,true,JSON.stringify(result.parity));
+    assert.equal(result.second.reason,'task_preview_already_current');
+    assert.equal(result.second.committed,false);
+    assert.equal(result.edited.committed,true,JSON.stringify(result.edited));
+    assert.equal(result.edited.changedRows,1);
+    assert.equal(result.edited.addedRows,0);
+    assert.equal(result.after.match,true,JSON.stringify(result.after));
+    assert.equal(result.rows.length,2);
+    assert.equal(result.rows.find(row=>row.id==='synthetic-task').value.title,
+      'Updated via V1 journal');
+    assert.equal(result.rows.find(row=>row.id==='journal-added-v2-reconcile').value.title,
+      'Created in V1 journal');
+    assert.ok(result.receipts.some(row=>row.id==='task-preview-reconcile:journal-add'));
+    assert.ok(result.receipts.some(row=>row.id==='task-preview-reconcile:journal-edit'));
+    assert.equal(result.canonAfter,result.canonical);
+    assert.equal(result.currentJournal,result.journalAfterEdit);
+    assert.notEqual(result.journalAfterAdd,result.journalAfterEdit);
+    assert.equal(result.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.evaluate(()=>window.V2BrowserFixture.start());
+    const reloaded=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      return {parity:await runtime.inspectPreviewTaskCollectionParity(),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(reloaded.parity.match,true,JSON.stringify(reloaded.parity));
+    assert.equal(reloaded.authority,'legacy_only');
+    return {atomicTaskDeltas:2,realJournalOverlayPreserved:true,
+      fullReseedAvoided:true,reloadParity:true,noProductionAuthorityChange:true};
+  });
+
+  await run('Task reconciliation refuses V2-only edits and preserves diverged evidence',async context=>{
+    const page=await open(context);
+    const outcome=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const core=window.TaskPointsCore;
+      await runtime.rehearsePreviewTaskCollectionSeed();
+      const db=await runtime.open();
+      const tx=db.transaction('tasks','readwrite');
+      const store=tx.objectStore('tasks');
+      const existing=await new Promise((resolve,reject)=>{
+        const req=store.get('synthetic-task');
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      store.put({...existing,value:{...existing.value,title:'V2-only unverified edit'}});
+      await new Promise((resolve,reject)=>{
+        tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);
+        tx.onabort=()=>reject(tx.error);
+      });
+      core.journalTaskMutation({task:{
+        id:'synthetic-task',title:'Updated V1',points:7
+      }});
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(key=>[key,localStorage.getItem(key)]));
+      const v1=localStorage.getItem('taskpoints_v1');
+      const result=await runtime.rehearsePreviewTaskCollectionReconcile(token,'no-overwrite');
+      const row=await new Promise((resolve,reject)=>{
+        const req=db.transaction('tasks','readonly').objectStore('tasks').get('synthetic-task');
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      return {result,row,v1,after:localStorage.getItem('taskpoints_v1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(outcome.result.committed,false);
+    assert.equal(outcome.result.reason,'task_preview_existing_evidence_preserved');
+    assert.equal(outcome.row.value.title,'V2-only unverified edit');
+    assert.equal(outcome.after,outcome.v1);
+    assert.equal(outcome.authority,'legacy_only');
+    return {unverifiedV2EvidencePreserved:true,noRepair:true,
+      noProductionAuthorityChange:true};
+  });
+
   await run('nonpilot Tasks parity inspector detects stale journal and remains read-only across reload',async context=>{
     const page=await open(context);
     const captured=await page.evaluate(async()=>{
