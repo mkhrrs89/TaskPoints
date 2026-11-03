@@ -1298,7 +1298,9 @@ try {
     assert.equal(details.refreshed.confirmedDurable,true,JSON.stringify(details.refreshed));
     assert.equal(details.backfill.committed,true,JSON.stringify(details.backfill));
     assert.equal(details.backfill.fullyMirrored,true,JSON.stringify(details.backfill));
-    assert.equal(details.backfill.importedRows,2);
+    // The standard browser fixture already contains one V1 Task-linked
+    // completion, plus the two journal rows added in this scenario.
+    assert.equal(details.backfill.importedRows,3);
     assert.equal(details.parity.match,true,JSON.stringify(details.parity));
     assert.equal(details.repeat.reason,'task_completion_history_current');
     assert.equal(details.repeat.committed,false);
@@ -1315,7 +1317,7 @@ try {
     });
     assert.equal(after.parity.match,true,JSON.stringify(after.parity));
     assert.equal(after.authority,'legacy_only');
-    return {historicV1RowsImported:2,immutableLegacySnapshot:true,
+    return {historicV1RowsImported:3,immutableLegacySnapshot:true,
       journalRemainsV1Authority:true,reloadVerified:true};
   });
 
