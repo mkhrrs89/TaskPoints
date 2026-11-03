@@ -3067,11 +3067,37 @@
         throw new Error('state_runtime_v2_compatibility_source_changed_during_capture');
       const emptyDb = await open();
       if (!emptyDb) throw new Error('state_runtime_v2_compatibility_db_unavailable');
-      const emptyMeta = await readMeta(emptyDb);
+      // The reset marker alone is insufficient: an interrupted or corrupted
+      // cleanup could leave recoverable V2 evidence while claiming an empty
+      // source. Count all three pilot/WAL stores alongside runtime metadata
+      // in ONE consistent readonly transaction, without deserializing records.
+      let emptyMeta, remainingHabits, remainingCompletions, remainingMutations;
+      try {
+        const tx = emptyDb.transaction(
+          ['habits', 'completions', 'mutations', 'meta'], 'readonly'
+        );
+        [emptyMeta, remainingHabits, remainingCompletions, remainingMutations]
+          = await Promise.all([
+            requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
+            requestPromise(tx.objectStore('habits').count()),
+            requestPromise(tx.objectStore('completions').count()),
+            requestPromise(tx.objectStore('mutations').count())
+          ]);
+      } catch (_) {
+        throw new Error('state_runtime_v2_compatibility_empty_evidence_unreadable');
+      }
       if (!emptyMeta || emptyMeta.schemaVersion !== SCHEMA_VERSION
         || emptyMeta.resetGeneration !== expectedGeneration
         || emptyMeta.legacyMissing !== true)
         throw new Error('state_runtime_v2_compatibility_legacy_missing_unverified');
+      if (remainingHabits !== 0 || remainingCompletions !== 0
+        || remainingMutations !== 0)
+        throw new Error('state_runtime_v2_compatibility_empty_evidence_retained');
+      // A separate metadata read rejects a revision committed after the
+      // consistent emptiness check. An old noncooperating tab can still write
+      // after our final check: this is not a production writer fence.
+      if (stableJson(await readMeta(emptyDb)) !== stableJson(emptyMeta))
+        throw new Error('state_runtime_v2_compatibility_v2_revision_changed_during_read');
       if (!isDarkEnabled() || darkMirrorModeEpoch !== modeEpoch
         || currentGeneration({ create: false }) !== expectedGeneration
         || captureReadOnlyFullStorageInventory() !== sourceInventory)
