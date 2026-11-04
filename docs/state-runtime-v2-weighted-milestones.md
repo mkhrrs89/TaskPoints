@@ -650,3 +650,46 @@ This is a cooperative race-detection improvement for an explicit preview,
 immediately after an inspection. Production V1 remains authoritative,
 `canPromote:false`; no credit toward the incomplete writer-admission
 gate is claimed. **V2 readiness remains 67/100.**
+
+
+## Receipt-proven historical Task-completion reconciliation — November 4
+
+The earlier Task/Work/metric preview history importer could insert missing
+records but deliberately refused to overwrite old imported data after V1
+edited, reordered or deleted a completion. The separate explicit
+`rehearsePreviewTaskCompletionHistoryReconcile(sourceToken, actionId)`
+now rehearses a bounded, all-or-nothing reconciliation of these changes.
+
+**Admission prerequisites:** complete current effective-V1 Task parity,
+a current full-origin token and reset generation, valid unique V1 IDs, no
+unsupported completion types, and immutable provenance for *every* existing
+V2 Task/Work/metric completion. On first reconciliation, every existing
+nonpilot row must be covered by intact, nonoverlapping, SHA-256 verified
+batch-import receipts. A later reconciliation instead requires its previous
+atomic history seal and matching receipt. This deliberately rejects preview
+only edits, incomplete historical backfills, single-record imports without
+sufficient ordering provenance, mixed pilot/nonpilot packs, unknown records,
+and any corrupted/extra completion instead of erasing or repairing them.
+
+Up to 64 changed/added/deleted history rows (and at most 240 KB of affected
+logical data) are reconciled in **one** IndexedDB readwrite transaction across
+`tasks`, `completions`, `mutations`, and `meta`. It compares the complete
+pre-transaction V2 snapshots and source token again *inside* the transaction,
+preserves all Habit/vice and unrelated rows, writes a durable action receipt
+plus entire nonpilot completion fingerprint seal, then performs an independent
+full readback and current V1 scoped ordering parity check before success.
+Deletion of the last supported completion is checked against an empty V2
+nonpilot scope rather than an inspector requiring at least one record.
+
+New Node scenarios cover edit/delete/reorder/insert, repeated no-op,
+second reconciliation and reload, V2 tampering, stale V1 source, quota
+rollback, action ID conflicts, altered seal and empty history. Existing
+imports/exports and all V1 durability paths are unchanged.
+
+**Limitations:** a cooperative preview recheck cannot exclude an older tab
+that writes after the last check. The sealing receipt is a consistency proof,
+not an independent off-device backup or a production admission fence. An
+incomplete/ambiguous origin fails closed; the function does not automatically
+run for ordinary Task edits, perform a live authority switch, or extend
+compatibility to unsupported completion classes. No cutover gate is fully
+satisfied by this step: **67/100; canPromote:false**.
