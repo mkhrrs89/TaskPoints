@@ -956,3 +956,47 @@ restricted, `todayMigrated:false`, `canPromote:false` and
 `readAuthority:'legacy_only'`. Uncooperative old tabs, remaining
 nonpilot writers, external backup/restore and physical iOS gates
 are still blockers. The weighted total remains **67/100**.
+
+
+## Read-only dual-source Notes audit — November 4
+
+Notes are **not** a single array or a single authoritative field. The
+`notes.html` editor persists the live text in two separate V1 locations:
+the `notes` field in `taskpoints_v1` and the independent
+`taskpoints_notes_v1` cache. Separate dirty
+(`taskpoints_notes_dirty_v1`) and authoritative
+(`taskpoints_notes_authoritative_v1`) flags select the cache on
+partial saves. A deliberately emptied or shortened dirty cache is
+**more recent** than a longer main snapshot, so taking the longest
+string or always trusting the snapshot would resurrect deleted text.
+
+An explicit, preview-host-only `inspectPreviewNotesSource()` now
+**reads both Notes locations and both markers without modifying
+either**. It uses the existing `TaskPointsCore.parseTaskPointsStorageJson`
+parser to handle compressed/packed main snapshots, refuses malformed
+snapshot contents, non-string Notes fields, missing marked caches,
+unrecognized marker values, unreadable storage, and excessive size.
+The initial Notes capture verifies full-origin inventory and reset
+generation before and after a SHA-256 digest, catching simultaneous
+writes in older tabs. The preview reimplements the editor's exact
+read-time precedence: an active dirty/authoritative cache wins even
+if empty, while unmarked older installations retain their legacy
+nonblank/length-based fallback.
+
+The report contains **no Notes text**: only cache/snapshot presence,
+dirty and authority state, copy agreement, lengths, source choice and
+a SHA-256 fingerprint. All Notes inspection is explicitly
+`notesMigrated:false`, `canPromote:false`, with V1 retaining reads
+and writes. New Node and Chromium/WebKit tests exercise both-copy
+parity, intentionally shortened caches, unmarked conflicts,
+malformed state, missing caches, authority flag changes,
+compressed parser delegation, source modification during hashing,
+and the absence of any source rewriting.
+
+**Next Notes phase:** independently record a complete Notes *source
+bundle* (both copies, marker status and appropriate main snapshot
+provenance) in an isolated V2 store with immutable receipts. Then
+implement bounded reconciliation and full origin/restore compatibility.
+Until those are proven, a Notes-source inspector is **not** a
+Notes migration or a production writer fence. The weighted
+readiness remains **67/100**.
