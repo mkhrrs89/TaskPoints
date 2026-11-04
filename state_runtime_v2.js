@@ -5431,7 +5431,8 @@
         });
       const receipt=receipts.find(x=>x?.id===evidence.receiptId);
       if (!receipt || receipt.id!==evidence.receiptId
-        || receipt.type!=='today-preview-seed'
+        || !['today-preview-seed','today-preview-reconcile']
+          .includes(receipt.type)
         || receipt.resetGeneration!==generation
         || receipt.sourceInventory!==evidence.sourceInventory
         || receipt.sourceFingerprint!==evidence.sourceFingerprint
@@ -5441,6 +5442,40 @@
         || (evidence.recordsFingerprint!==undefined
           && evidence.recordsFingerprint!==receipt.recordsFingerprint))
         return refuse('today_preview_receipt_invalid');
+      if (receipt.type==='today-preview-reconcile') {
+        const parent=receipts.find(row=>row?.id===receipt.priorReceiptId);
+        if (!parent || parent.id===receipt.id
+          || !['today-preview-seed','today-preview-reconcile']
+            .includes(parent.type)
+          || parent.resetGeneration!==generation
+          || receipt.priorFingerprint!==parent.sourceFingerprint
+          || receipt.priorRecordsFingerprint!==parent.recordsFingerprint
+          || receipt.priorCount!==parent.recordCount
+          || receipt.priorDayCount!==parent.dayCount)
+          return refuse('today_preview_receipt_chain_invalid');
+      }
+      // Authenticate the entire stored snapshot, not only the source
+      // metadata. A synthetic V2-only edit must never be misreported as
+      // a successful V1 parity check.
+      if (evidence.recordsFingerprint!==undefined) {
+        const actualRowsFingerprint=await previewRecoveryFingerprint(normalized(rows));
+        if (actualRowsFingerprint!==evidence.recordsFingerprint)
+          return refuse('today_preview_rows_fingerprint_invalid');
+      }
+      // An asynchronous digest leaves a window for a second preview tab
+      // to commit. Freshly verify the V2 rows, receipt and meta after it.
+      const freshTx=db.transaction(['todayDays','mutations','meta'],'readonly');
+      const [freshRows,freshEvidence,freshMeta,freshReceipt]=await Promise.all([
+        requestPromise(freshTx.objectStore('todayDays').getAll()),
+        requestPromise(freshTx.objectStore('meta').get('today-preview')),
+        requestPromise(freshTx.objectStore('meta').get(RUNTIME_META_ID)),
+        requestPromise(freshTx.objectStore('mutations').get(evidence.receiptId))
+      ]);
+      if (stableJson(normalized(freshRows))!==stableJson(normalized(rows))
+        || stableJson(freshEvidence)!==stableJson(evidence)
+        || stableJson(freshMeta)!==stableJson(meta)
+        || stableJson(freshReceipt)!==stableJson(receipt))
+        return refuse('today_preview_changed_during_parity');
       if (!current()) return refuse('legacy_today_changed_after_parity');
       return {
         checked:true,previewOnly:true,match:true,todayMigrated:false,
