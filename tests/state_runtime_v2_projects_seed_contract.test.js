@@ -70,7 +70,7 @@ test('V4 schema seeds Projects as separate ordered records with receipt and no V
   assert.equal(outcome.projectsMigrated,false);
   assert.equal(outcome.canPromote,false);
   const database=await app.api.open();
-  assert.equal(database.version,4);
+  assert.equal(database.version,5);
   assert.equal(database.objectStoreNames.contains('projects'),true);
   const after=app.indexedDB.dump(DB);
   assert.deepEqual(after.habits,before.habits);
@@ -233,11 +233,14 @@ test('upgrading an existing V3 mirror retains prior pilot rows and adds Projects
   db.version=3;
   db._stores.delete('projects');
   db._indexes.delete('projects');
+  db._stores.delete('todayDays');
+  db._indexes.delete('todayDays');
   const restart=await boot(undefined,{
     indexedDB:app.indexedDB,localStorage:app.localStorage
   });
-  assert.equal((await restart.api.open()).version,4);
+  assert.equal((await restart.api.open()).version,5);
   assert.equal(restart.indexedDB.dump(DB).projects.length,0);
+  assert.equal(restart.indexedDB.dump(DB).todayDays.length,0);
   assert.deepEqual(restart.indexedDB.dump(DB).habits,previous.habits);
   assert.deepEqual(restart.indexedDB.dump(DB).completions,previous.completions);
   const seeded=await restart.api.rehearsePreviewProjectsCollectionSeed(
