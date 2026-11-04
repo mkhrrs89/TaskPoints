@@ -1084,6 +1084,88 @@ try {
       freshJournalWritePreserved:true,unfencedLegacyWritesStillPossible:true};
   });
 
+  await run('Today V5 preview retains sparse day maps, survives reload and rejects stale V1',async context=>{
+    const page=await open(context);
+    const initial=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const payload={
+        version:1,
+        tasksByDay:{'2026-11-04':['task-1']},
+        notesByDay:{'2026-11-04':[{id:'note-1',text:'retained browser note',done:false}]},
+        selectedHabitIdsByDay:{'2026-11-05':['habit-1']},
+        orderByDay:{'2026-11-04':['task:task-1','note:note-1']},
+        futureMetadata:{preserve:'all'}
+      };
+      const raw=JSON.stringify(payload);
+      localStorage.setItem('taskpoints_today_view_v1',raw);
+      const inventory=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const v1=localStorage.getItem('taskpoints_v1');
+      const first=await api.rehearsePreviewTodayCollectionSeed(inventory(),'browser-today');
+      const repeat=await api.rehearsePreviewTodayCollectionSeed(inventory(),'repeat');
+      const parity=await api.inspectPreviewTodayCollectionParity();
+      const db=await api.open();
+      const read=req=>new Promise((resolve,reject)=>{
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      const tx=db.transaction(['todayDays','mutations','meta'],'readonly');
+      const [rows,receipt,evidence]=await Promise.all([
+        read(tx.objectStore('todayDays').getAll()),
+        read(tx.objectStore('mutations').get('today-preview-seed:browser-today')),
+        read(tx.objectStore('meta').get('today-preview'))
+      ]);
+      return {first,repeat,parity,version:db.version,rows,receipt,evidence,
+        unchanged:localStorage.getItem('taskpoints_today_view_v1')===raw
+          && localStorage.getItem('taskpoints_v1')===v1,
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(initial.first.committed,true,JSON.stringify(initial.first));
+    assert.equal(initial.first.collectionParityVerified,true);
+    assert.equal(initial.repeat.committed,false);
+    assert.equal(initial.parity.match,true,JSON.stringify(initial.parity));
+    assert.equal(initial.version,5);
+    assert.equal(initial.rows.length,3);
+    assert.deepEqual(initial.rows.find(r=>r.id==='root').presentMaps,
+      ['tasksByDay','notesByDay','selectedHabitIdsByDay','orderByDay']);
+    assert.equal(initial.rows.find(r=>r.id==='day:2026-11-04')
+      .value.notesByDay[0].text,'retained browser note');
+    assert.equal(initial.receipt.type,'today-preview-seed');
+    assert.equal(initial.evidence.receiptId,initial.receipt.id);
+    assert.equal(initial.unchanged,true);
+    assert.equal(initial.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    const after=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const parity=await api.inspectPreviewTodayCollectionParity();
+      const payload=JSON.parse(localStorage.getItem('taskpoints_today_view_v1'));
+      payload.notesByDay['2026-11-04'][0].done=true;
+      localStorage.setItem('taskpoints_today_view_v1',JSON.stringify(payload));
+      const stale=await api.inspectPreviewTodayCollectionParity();
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const reseed=await api.rehearsePreviewTodayCollectionSeed(token,'unsafe-reseed');
+      const db=await api.open();
+      const row=await new Promise((resolve,reject)=>{
+        const req=db.transaction('todayDays','readonly')
+          .objectStore('todayDays').get('day:2026-11-04');
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      return {parity,stale,reseed,previousDone:row.value.notesByDay[0].done,
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(after.parity.match,true,JSON.stringify(after.parity));
+    assert.equal(after.stale.match,false);
+    assert.equal(after.stale.reason,'today_preview_source_stale');
+    assert.equal(after.reseed.reason,'today_preview_existing_evidence_preserved');
+    assert.equal(after.reseed.committed,false);
+    assert.equal(after.previousDone,false);
+    assert.equal(after.authority,'legacy_only');
+    return {dayRows:2,reloadVerified:true,staleTodaySourceBlocked:true,
+      noSilentNotesLoss:true,legacyAuthorityPreserved:true};
+  });
+
   await run('Projects preview seeds atomic V2 records and receipts while V1 stays primary',async context=>{
     const page=await open(context);
     const result=await page.evaluate(async()=>{
