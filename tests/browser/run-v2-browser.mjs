@@ -1084,6 +1084,54 @@ try {
       freshJournalWritePreserved:true,unfencedLegacyWritesStillPossible:true};
   });
 
+  await run('Notes dual-source preview respects dirty authoritative cache without writes',async context=>{
+    const page=await open(context);
+    const details=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const original=localStorage.getItem('taskpoints_v1');
+      const snapshot=window.TaskPointsCore.readTaskPointsStoredState();
+      // One main-snapshot Note and one intentionally shortened dirty cache
+      // must remain distinct; a read-only V2 inspector never syncs them.
+      const changed=JSON.parse(original);
+      changed.notes='older longer snapshot notes';
+      localStorage.setItem('taskpoints_v1',JSON.stringify(changed));
+      localStorage.setItem('taskpoints_notes_v1','short');
+      localStorage.setItem('taskpoints_notes_dirty_v1','1');
+      localStorage.setItem('taskpoints_notes_authoritative_v1','1');
+      const beforeKeys=[
+        'taskpoints_v1','taskpoints_notes_v1','taskpoints_notes_dirty_v1',
+        'taskpoints_notes_authoritative_v1'
+      ];
+      const before=beforeKeys.map(key=>localStorage.getItem(key));
+      const first=await api.inspectPreviewNotesSource();
+      const after=beforeKeys.map(key=>localStorage.getItem(key));
+      localStorage.setItem('taskpoints_notes_v1','another dirty cache update');
+      const later=await api.inspectPreviewNotesSource();
+      return {first,later,unchanged:JSON.stringify(before)===JSON.stringify(after),
+        notesStillShort:before[1]==='short',
+        v1StillDifferent:before[0].includes('older longer snapshot notes'),
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(details.first.sourceVerified,true,JSON.stringify(details.first));
+    assert.equal(details.first.copiesAgree,false);
+    assert.equal(details.first.cacheDirty,true);
+    assert.equal(details.first.cacheAuthoritative,true);
+    assert.equal(details.first.selectedSource,'marked_cache');
+    assert.equal(details.first.selectedLength,5);
+    assert.equal(details.first.notesMigrated,false);
+    assert.equal(details.first.canPromote,false);
+    assert.equal(details.later.sourceVerified,true,JSON.stringify(details.later));
+    assert.notEqual(details.first.sourceFingerprint,details.later.sourceFingerprint);
+    assert.equal(details.unchanged,true);
+    assert.equal(details.notesStillShort,true);
+    assert.equal(details.v1StillDifferent,true);
+    assert.equal(details.authority,'legacy_only');
+    return {dirtyCacheWins:true,shortNotePreserved:true,
+      V1NotSynchronized:true,staleFingerprintChanges:true,
+      legacyAuthorityPreserved:true};
+  });
+
   await run('Today V5 preview retains sparse day maps, survives reload and rejects stale V1',async context=>{
     const page=await open(context);
     const initial=await page.evaluate(async()=>{
