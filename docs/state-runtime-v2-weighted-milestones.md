@@ -693,3 +693,35 @@ incomplete/ambiguous origin fails closed; the function does not automatically
 run for ordinary Task edits, perform a live authority switch, or extend
 compatibility to unsupported completion classes. No cutover gate is fully
 satisfied by this step: **67/100; canPromote:false**.
+
+
+## Independent Projects source preflight — November 4
+
+Projects is a **separate V1 authority** stored by the standalone Projects
+mini-app under `tp_projects_v1`, not only in `taskpoints_v1`. The normal
+Projects page uses a forgiving `loadProjects()` fallback (malformed JSON
+can display as an empty list). Such fallback is unacceptable as migration
+evidence: it risks silently replacing unresolved data with `[]`.
+
+V2 now exposes a **read-only, preview-host-only**
+`inspectPreviewProjectsSource()` preflight. It requires dark mode, a current
+reset generation, an exact full-origin storage inventory, and an unchanged
+source across asynchronous SHA-256 capture. It validates the original ordered
+Project array, unique nonempty Project IDs, and noncolliding valid subtask
+IDs when subtasks exist, while retaining **all** source fields (including
+notes, progress, timestamps and future extension fields) in the fingerprint.
+It returns only counts, an integrity fingerprint and nonpromotable status,
+not sensitive note content. A truly absent key and a present `[]` are
+both valid *empty sources* but are distinguished by `hasSourceKey`.
+
+Malformed JSON, non-array payloads, duplicated IDs, unreadable storage, or
+writes to Projects **or any other origin key** during hashing refuse a
+successful verification. The tests verify no IndexedDB or V1 writes, quota
+and authority flags unchanged, race refusal and production-host restriction.
+
+**Boundary:** this is a verified V1-source inventory, *not* a migrated
+Projects record store, independent off-device backup, mandatory Project
+writer fence, or permission to switch read authority. It does not modify
+`projects.html`, its forgiving existing load behavior, or any TaskPoints
+UI. This preparatory work earns no entire 12-point migration-gate credit.
+**67/100; canPromote:false.**
