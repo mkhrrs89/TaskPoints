@@ -6809,7 +6809,7 @@
         return refuse('v2_nonpilot_completion_evidence_preserved',{conflictingId:row.id});
       oldById.set(row.id,row);
     }
-    if (!oldById.size && desired.length)
+    if (!oldById.size && desired.length && !seal)
       return refuse('task_completion_history_backfill_required');
 
     const ordered=rows=>rows.slice().sort((a,b)=>a.id.localeCompare(b.id));
