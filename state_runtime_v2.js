@@ -5431,8 +5431,8 @@
         });
       const receipt=receipts.find(x=>x?.id===evidence.receiptId);
       if (!receipt || receipt.id!==evidence.receiptId
-        || !['today-preview-seed','today-preview-reconcile']
-          .includes(receipt.type)
+        || !['today-preview-seed','today-preview-reconcile',
+          'today-preview-seal'].includes(receipt.type)
         || receipt.resetGeneration!==generation
         || receipt.sourceInventory!==evidence.sourceInventory
         || receipt.sourceFingerprint!==evidence.sourceFingerprint
@@ -5442,11 +5442,12 @@
         || (evidence.recordsFingerprint!==undefined
           && evidence.recordsFingerprint!==receipt.recordsFingerprint))
         return refuse('today_preview_receipt_invalid');
-      if (receipt.type==='today-preview-reconcile') {
+      if (receipt.type==='today-preview-reconcile'
+        || receipt.type==='today-preview-seal') {
         const parent=receipts.find(row=>row?.id===receipt.priorReceiptId);
         if (!parent || parent.id===receipt.id
-          || !['today-preview-seed','today-preview-reconcile']
-            .includes(parent.type)
+          || !['today-preview-seed','today-preview-reconcile',
+            'today-preview-seal'].includes(parent.type)
           || parent.resetGeneration!==generation
           || receipt.priorFingerprint!==parent.sourceFingerprint
           || receipt.priorRecordsFingerprint!==parent.recordsFingerprint
@@ -5570,8 +5571,8 @@
       return refuse('today_preview_row_seal_required');
     const priorReceipt=receipts.find(row=>row?.id===oldEvidence.receiptId);
     if (!priorReceipt
-      || !['today-preview-seed','today-preview-reconcile']
-        .includes(priorReceipt.type)
+      || !['today-preview-seed','today-preview-reconcile',
+        'today-preview-seal'].includes(priorReceipt.type)
       || priorReceipt.resetGeneration!==generation
       || priorReceipt.sourceInventory!==oldEvidence.sourceInventory
       || priorReceipt.sourceFingerprint!==oldEvidence.sourceFingerprint
@@ -5580,11 +5581,12 @@
       || priorReceipt.recordCount!==oldEvidence.recordCount
       || priorReceipt.recordsFingerprint!==oldEvidence.recordsFingerprint)
       return refuse('today_preview_existing_receipt_invalid');
-    if (priorReceipt.type==='today-preview-reconcile') {
+    if (priorReceipt.type==='today-preview-reconcile'
+      || priorReceipt.type==='today-preview-seal') {
       const parent=receipts.find(row=>row?.id===priorReceipt.priorReceiptId);
       if (!parent || parent.id===priorReceipt.id
-        || !['today-preview-seed','today-preview-reconcile']
-          .includes(parent.type)
+        || !['today-preview-seed','today-preview-reconcile',
+          'today-preview-seal'].includes(parent.type)
         || parent.resetGeneration!==generation
         || parent.sourceFingerprint!==priorReceipt.priorFingerprint
         || parent.recordsFingerprint!==priorReceipt.priorRecordsFingerprint
