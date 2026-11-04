@@ -626,3 +626,27 @@ writer, scoring behavior, legacy fallback, or authority setting is altered.
 This is a race-detection hardening of a **cooperative preview**, not mandatory
 old-tab exclusion, a linearizable cross-store transaction, or permission to
 activate V2. The weighted cutover estimate remains **67/100**.
+
+
+## Fresh live V2 Task no-op parity guard — November 4
+
+The preview Task collection reconcile's `task_preview_already_current`
+shortcut previously checked that its earlier read of V2 Tasks matched recorded
+metadata, then hashed those rows asynchronously before returning
+`collectionParityVerified:true`. Another preview tab could mutate a V2 Task
+during that await without changing the V1 full-origin token. The shortcut could
+therefore confirm parity for **stale V2 evidence**.
+
+The read-only shortcut now invokes the independent complete V1-versus-V2 Task
+parity inspector immediately before claiming durable no-op success, then
+rechecks its **original** full-origin source/generation/mode token after the
+inspector returns. A mismatch refuses success, preserves the altered V2 row
+for investigation, and writes no Task, metadata or receipt. A Node regression
+injects a competing V2-only Task edit at the second SHA digest (after the
+initial V2 read) to reproduce the former false-positive result.
+
+This is a cooperative race-detection improvement for an explicit preview,
+**not** cross-tab writer exclusion or a proof that V2 data cannot change
+immediately after an inspection. Production V1 remains authoritative,
+`canPromote:false`; no credit toward the incomplete writer-admission
+gate is claimed. **V2 readiness remains 67/100.**
