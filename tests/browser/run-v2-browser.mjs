@@ -418,6 +418,7 @@ try {
         .objectStore('completions').index('by_habit_ids').getAll('h2'));
       return {version:db.version,indexPresent:store.indexNames.contains('by_habit_ids'),
         taskStoreReady:db.objectStoreNames.contains('tasks'),
+        projectsStoreReady:db.objectStoreNames.contains('projects'),
         entries:all[0].entries,habitIds:all[0].habitIds,
         h1:h1.map(r=>r.id),h2:h2.map(r=>r.id),
         authority:runtime.getStatus().readAuthority,
@@ -425,6 +426,7 @@ try {
     });
     assert.equal(changed.version,4);
     assert.equal(changed.taskStoreReady,true);
+    assert.equal(changed.projectsStoreReady,true);
     assert.equal(changed.indexPresent,true);
     assert.deepEqual(changed.habitIds,['h1','h2']);
     assert.deepEqual(changed.h1,['shared-old']);
