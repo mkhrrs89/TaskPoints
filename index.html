@@ -206,14 +206,14 @@ Nothing visible on the page is built here. === -->
   
   <!-- Your app scripts + CSS -->
 <link rel="preload" href="assets/tailwind.css" as="style">
-<link rel="preload" href="styles.css?v=20261104-task-swipe-reschedule-1" as="style">
+<link rel="preload" href="styles.css?v=20261104-task-swipe-feedback-2" as="style">
 
 <link rel="stylesheet" href="assets/tailwind.css" media="print" onload="this.media='all'">
-<link rel="stylesheet" href="styles.css?v=20261104-task-swipe-reschedule-1" media="print" onload="this.media='all'">
+<link rel="stylesheet" href="styles.css?v=20261104-task-swipe-feedback-2" media="print" onload="this.media='all'">
 
 <noscript>
   <link rel="stylesheet" href="assets/tailwind.css">
-  <link rel="stylesheet" href="styles.css?v=20261104-task-swipe-reschedule-1">
+  <link rel="stylesheet" href="styles.css?v=20261104-task-swipe-feedback-2">
 </noscript>
   <style>
 
@@ -11486,6 +11486,10 @@ function getTaskCardLayoutStateInput() {
 let taskRescheduleTaskId = null;
 let taskRescheduleDisplayMonth = null;
 let taskRescheduleReturnFocus = null;
+let taskReschedulePending = false;
+let taskRescheduleRevision = 0;
+let taskRescheduleFeedbackTimer = null;
+const TASK_RESCHEDULE_CONFIRMATION_MS = 360;
 
 function isTaskRescheduleDateKey(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -11517,6 +11521,7 @@ function getTaskRescheduleCalendar() {
         <span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span>
       </div>
       <div id="taskRescheduleDayGrid" class="task-reschedule-day-grid" role="group" aria-label="Choose the new due date"></div>
+      <div id="taskRescheduleFeedback" class="task-reschedule-feedback" role="status" aria-live="polite">Tap a day to reschedule</div>
       <div class="task-reschedule-shortcuts">
         <button type="button" data-task-reschedule-action="today">Today</button>
         <button type="button" data-task-reschedule-action="tomorrow">Tomorrow</button>
@@ -11525,6 +11530,7 @@ function getTaskRescheduleCalendar() {
   document.body.appendChild(overlay);
 
   overlay.addEventListener('click', event => {
+    if (taskReschedulePending) return;
     if (event.target === overlay) {
       closeTaskRescheduleCalendar();
       return;
@@ -11597,6 +11603,7 @@ function renderTaskRescheduleCalendar() {
 }
 
 function openTaskRescheduleCalendar(id) {
+  if (taskReschedulePending) return false;
   const task = state.tasks.find(item => item?.id === id);
   if (!task || task.completedAtISO || task.hidden || isTaskTrashed(task)
     || getTaskStatus(task) === 'wontdo') return false;
@@ -11606,6 +11613,8 @@ function openTaskRescheduleCalendar(id) {
   taskRescheduleDisplayMonth = new Date(dueDate.getFullYear(), dueDate.getMonth(), 1);
   taskRescheduleReturnFocus = document.activeElement;
   const overlay = getTaskRescheduleCalendar();
+  overlay.dataset.stage = 'idle';
+  overlay.querySelector('#taskRescheduleFeedback').textContent = 'Tap a day to reschedule';
   overlay.querySelector('#taskRescheduleTaskName').textContent = task.title || 'Untitled task';
   renderTaskRescheduleCalendar();
   overlay.hidden = false;
@@ -11616,12 +11625,20 @@ function openTaskRescheduleCalendar(id) {
   return true;
 }
 
-function closeTaskRescheduleCalendar() {
+function closeTaskRescheduleCalendar(force = false) {
+  if (taskReschedulePending && !force) return;
+  taskRescheduleRevision += 1; // Invalidate any uncommitted animation-frame callback.
+  taskReschedulePending = false;
+  if (taskRescheduleFeedbackTimer !== null) {
+    clearTimeout(taskRescheduleFeedbackTimer);
+    taskRescheduleFeedbackTimer = null;
+  }
   const overlay = $('taskRescheduleCalendar');
   if (overlay) {
     overlay.hidden = true;
     overlay.classList.add('hidden');
     overlay.setAttribute('aria-hidden', 'true');
+    overlay.dataset.stage = 'idle';
   }
   taskRescheduleTaskId = null;
   taskRescheduleDisplayMonth = null;
@@ -11629,41 +11646,115 @@ function closeTaskRescheduleCalendar() {
   taskRescheduleReturnFocus = null;
 }
 
+function setTaskRescheduleFeedback(newDateKey, stage) {
+  const overlay = $('taskRescheduleCalendar');
+  if (!overlay) return;
+  const date = fromKey(newDateKey);
+  if (stage === 'saving'
+    && taskRescheduleDisplayMonth
+    && (date.getFullYear() !== taskRescheduleDisplayMonth.getFullYear()
+      || date.getMonth() !== taskRescheduleDisplayMonth.getMonth())) {
+    taskRescheduleDisplayMonth = new Date(date.getFullYear(), date.getMonth(), 1);
+    renderTaskRescheduleCalendar();
+  }
+  overlay.dataset.stage = stage;
+  const feedback = overlay.querySelector('#taskRescheduleFeedback');
+  if (feedback) {
+    feedback.textContent = stage === 'saving'
+      ? 'Saving new date…'
+      : stage === 'saved'
+        ? '✓ Rescheduled!'
+        : stage === 'unchanged'
+          ? '✓ Date already selected'
+          : 'Could not save. Tap a date to try again.';
+  }
+  const chosen = overlay.querySelector('[data-task-reschedule-date="' + newDateKey + '"]');
+  if (!chosen) return;
+  overlay.querySelectorAll('.task-reschedule-day.is-picking').forEach(button => {
+    if (button !== chosen) button.classList.remove('is-picking', 'is-saved');
+  });
+  chosen.classList.add('is-picking');
+  chosen.classList.toggle('is-saved', stage === 'saved' || stage === 'unchanged');
+  chosen.setAttribute('aria-pressed', 'true');
+}
+
+function queueTaskRescheduleAfterPaint(callback) {
+  // Two frames let WebKit actually paint the selected-day pulse before any
+  // synchronous storage work. No extra persistence or snapshot writes occur.
+  if (typeof window.requestAnimationFrame === 'function') {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(callback));
+  } else {
+    setTimeout(callback, 0);
+  }
+}
+
 function applyTaskRescheduleDate(newDateKey) {
-  if (!isTaskRescheduleDateKey(newDateKey) || !taskRescheduleTaskId) return false;
+  if (taskReschedulePending || !isTaskRescheduleDateKey(newDateKey) || !taskRescheduleTaskId) return false;
   const task = state.tasks.find(item => item?.id === taskRescheduleTaskId);
   if (!task || task.completedAtISO || task.hidden || isTaskTrashed(task)
     || getTaskStatus(task) === 'wontdo') {
     closeTaskRescheduleCalendar();
     return false;
   }
+
+  const taskId = taskRescheduleTaskId;
+  const revision = ++taskRescheduleRevision;
+  taskReschedulePending = true;
+  setTaskRescheduleFeedback(newDateKey, task.dueDateISO === newDateKey ? 'unchanged' : 'saving');
+
   if (task.dueDateISO === newDateKey) {
-    closeTaskRescheduleCalendar();
+    // A tap on the already-selected date still gets an acknowledgement.
+    taskRescheduleFeedbackTimer = setTimeout(() => {
+      if (revision !== taskRescheduleRevision || taskRescheduleTaskId !== taskId) return;
+      taskReschedulePending = false;
+      closeTaskRescheduleCalendar();
+    }, TASK_RESCHEDULE_CONFIRMATION_MS);
     return true;
   }
-  if (!assertTaskActionMutationWritable()) return false;
 
-  const previous = {
-    dueDateISO: task.dueDateISO,
-    originalDueDateISO: task.originalDueDateISO,
-    postponedDays: task.postponedDays,
-    updatedAtISO: task.updatedAtISO
-  };
-  task.dueDateISO = newDateKey;
-  trackDueDatePush(task, previous.dueDateISO, newDateKey);
-  task.updatedAtISO = new Date().toISOString();
-  try {
-    persistTaskActionMutation(task, 'swipe-right-reschedule');
-  } catch (error) {
-    Object.assign(task, previous);
-    console.warn('Failed to save the rescheduled task.', error);
-    alert('Could not save the new date. Please try again.');
-    return false;
-  }
-  closeTaskRescheduleCalendar();
-  renderTasks(state);
-  window.updateCriticalTasksIsland?.();
-  return true;
+  queueTaskRescheduleAfterPaint(() => {
+    if (revision !== taskRescheduleRevision || taskRescheduleTaskId !== taskId) return;
+    const liveTask = state.tasks.find(item => item?.id === taskId);
+    if (!liveTask || liveTask.completedAtISO || liveTask.hidden || isTaskTrashed(liveTask)
+      || getTaskStatus(liveTask) === 'wontdo') {
+      closeTaskRescheduleCalendar(true);
+      return;
+    }
+    if (!assertTaskActionMutationWritable()) {
+      taskReschedulePending = false;
+      setTaskRescheduleFeedback(newDateKey, 'error');
+      return;
+    }
+
+    const previous = {
+      dueDateISO: liveTask.dueDateISO,
+      originalDueDateISO: liveTask.originalDueDateISO,
+      postponedDays: liveTask.postponedDays,
+      updatedAtISO: liveTask.updatedAtISO
+    };
+    liveTask.dueDateISO = newDateKey;
+    trackDueDatePush(liveTask, previous.dueDateISO, newDateKey);
+    liveTask.updatedAtISO = new Date().toISOString();
+    try {
+      persistTaskActionMutation(liveTask, 'swipe-right-reschedule');
+    } catch (error) {
+      Object.assign(liveTask, previous);
+      taskReschedulePending = false;
+      setTaskRescheduleFeedback(newDateKey, 'error');
+      console.warn('Failed to save the rescheduled task.', error);
+      alert('Could not save the new date. Please try again.');
+      return;
+    }
+    // "Rescheduled!" only appears after the existing guarded journal succeeds.
+    setTaskRescheduleFeedback(newDateKey, 'saved');
+    renderTasks(state);
+    window.updateCriticalTasksIsland?.();
+    taskRescheduleFeedbackTimer = setTimeout(() => {
+      if (revision !== taskRescheduleRevision || taskRescheduleTaskId !== taskId) return;
+      taskReschedulePending = false;
+      closeTaskRescheduleCalendar();
+    }, TASK_RESCHEDULE_CONFIRMATION_MS);
+  });
 }
 
 // Mobile-only left-swipe gesture. This opens the SAME confirmation and Trash

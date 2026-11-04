@@ -8033,3 +8033,58 @@ body.tp-player-profile-open #cropModal:not(.hidden) { z-index: 1900 !important; 
   .task-reschedule-dialog { width: 100%; border-radius: 18px 18px 12px 12px; }
   .task-reschedule-day { min-height: 44px; }
 }
+
+
+/* Immediate tactile feedback for the mobile one-tap reschedule calendar. */
+.task-reschedule-day.is-picking {
+  position: relative;
+  z-index: 1;
+  background: #0f766e;
+  border-color: #99f6e4;
+  color: #fff;
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, .19);
+  animation: task-reschedule-tap 280ms cubic-bezier(.2, 1.15, .3, 1) both;
+}
+.task-reschedule-day.is-picking::after {
+  content: "✓";
+  position: absolute;
+  top: 1px;
+  right: 4px;
+  font-size: .62rem;
+  font-weight: 900;
+  opacity: .9;
+}
+.task-reschedule-day.is-saved {
+  background: #15803d;
+  border-color: #86efac;
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, .18);
+}
+.task-reschedule-feedback {
+  min-height: 24px;
+  margin-top: 11px;
+  text-align: center;
+  color: #a9c5c6;
+  font-size: .8rem;
+  font-weight: 650;
+  transition: color 160ms ease, transform 160ms ease;
+}
+.task-reschedule-backdrop[data-stage="saving"] .task-reschedule-feedback {
+  color: #99f6e4;
+}
+.task-reschedule-backdrop[data-stage="saved"] .task-reschedule-feedback,
+.task-reschedule-backdrop[data-stage="unchanged"] .task-reschedule-feedback {
+  color: #86efac;
+  transform: scale(1.035);
+}
+.task-reschedule-backdrop[data-stage="error"] .task-reschedule-feedback {
+  color: #fda4af;
+}
+@keyframes task-reschedule-tap {
+  0% { transform: scale(.92); }
+  60% { transform: scale(1.13); }
+  100% { transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-reschedule-day.is-picking { animation: none; }
+  .task-reschedule-feedback { transition: none; }
+}
