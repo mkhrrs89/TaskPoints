@@ -5178,7 +5178,13 @@
     const fields=['tasksByDay','notesByDay','selectedHabitIdsByDay','orderByDay'];
     const root={};
     for (const [key,value] of Object.entries(payload)) {
-      if (!fields.includes(key)) root[key]=clone(value);
+      if (!fields.includes(key)) {
+        // JSON permits an own "__proto__" key. Defining the property
+        // explicitly preserves it without mutating the object prototype.
+        Object.defineProperty(root,key,{
+          value:clone(value),enumerable:true,writable:true,configurable:true
+        });
+      }
     }
     const days=new Set();
     for (const key of fields) {
