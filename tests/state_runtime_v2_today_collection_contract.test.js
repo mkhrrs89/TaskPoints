@@ -758,3 +758,19 @@ test('Today legacy sealing quota failure leaves the original receipt and rows in
   assert.equal(denied.committed,false);
   assert.deepEqual(app.indexedDB.dump(DB),before);
 });
+
+
+test('Today preview retains own __proto__ extension key without prototype pollution',async()=>{
+  const raw='{"version":1,"notesByDay":{},"__proto__":{"legacy":"not lost"}}';
+  const app=await boot(raw);
+  const before=app.localStorage.getItem(TODAY);
+  const seeded=await app.api.rehearsePreviewTodayCollectionSeed(
+    app.token(),'own-extension');
+  assert.equal(seeded.collectionParityVerified,true,JSON.stringify(seeded));
+  const root=app.indexedDB.dump(DB).todayDays.find(r=>r.id==='root').value;
+  assert.equal(Object.hasOwn(root,'__proto__'),true);
+  assert.deepEqual(root.__proto__,{legacy:'not lost'});
+  assert.equal(Object.getPrototypeOf(root).legacy,undefined);
+  assert.equal(app.localStorage.getItem(TODAY),before);
+  assert.equal((await app.api.inspectPreviewTodayCollectionParity()).match,true);
+});
