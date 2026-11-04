@@ -1132,6 +1132,66 @@ try {
       legacyAuthorityPreserved:true};
   });
 
+
+  await run('Notes preview reconciliation survives uncooperative tab and reload',async context=>{
+    const writer=await open(context);
+    const begin=await writer.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const main=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      main.notes='older longer notes';
+      localStorage.setItem('taskpoints_v1',JSON.stringify(main));
+      localStorage.setItem('taskpoints_notes_v1','first draft');
+      localStorage.setItem('taskpoints_notes_dirty_v1','1');
+      localStorage.setItem('taskpoints_notes_authoritative_v1','1');
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const source=token();
+      const seed=await api.rehearsePreviewNotesBundleSeed(source,'browser-seed');
+      const parity=await api.inspectPreviewNotesBundleParity();
+      return {seed,parity,unchanged:source===token()};
+    });
+    assert.equal(begin.seed.collectionParityVerified,true,JSON.stringify(begin.seed));
+    assert.equal(begin.parity.match,true);
+    assert.equal(begin.unchanged,true);
+    const older=await open(context);
+    await older.evaluate(()=>localStorage.setItem('taskpoints_notes_v1',''));
+    await requireCrossTabStorageValue(writer,'taskpoints_notes_v1','');
+    const after=await writer.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const stale=await api.inspectPreviewNotesBundleParity();
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const before=token();
+      const updated=await api.rehearsePreviewNotesBundleReconcile(before,'cross-tab-edit');
+      const parity=await api.inspectPreviewNotesBundleParity();
+      const noop=await api.rehearsePreviewNotesBundleReconcile(token(),'no-change');
+      return {stale,updated,parity,noop,unchanged:before===token(),
+        cache:localStorage.getItem('taskpoints_notes_v1'),
+        state:window.TaskPointsCore.parseTaskPointsStorageJson(
+          localStorage.getItem('taskpoints_v1')).notes,
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(after.stale.match,false,JSON.stringify(after.stale));
+    assert.equal(after.updated.collectionParityVerified,true,JSON.stringify(after.updated));
+    assert.equal(after.updated.receiptCount,2);
+    assert.equal(after.parity.match,true,JSON.stringify(after.parity));
+    assert.equal(after.noop.reason,'notes_preview_reconcile_no_change');
+    assert.equal(after.unchanged,true);
+    assert.equal(after.cache,'');
+    assert.equal(after.state,'older longer notes');
+    assert.equal(after.authority,'legacy_only');
+    await writer.reload({waitUntil:'load'});
+    const fresh=await writer.evaluate(async()=>({
+      report:await window.TaskPointsStateRuntimeV2.inspectPreviewNotesBundleParity(),
+      cache:localStorage.getItem('taskpoints_notes_v1')
+    }));
+    assert.equal(fresh.report.match,true,JSON.stringify(fresh.report));
+    assert.equal(fresh.cache,'');
+    return {reconciled:true,uncooperativeWriterDetected:true,
+      intentionalClearPreserved:true,reloadVerified:true,cutoverStillBlocked:true};
+  });
+
   await run('Today V5 preview retains sparse day maps, survives reload and rejects stale V1',async context=>{
     const page=await open(context);
     const initial=await page.evaluate(async()=>{

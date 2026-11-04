@@ -1031,3 +1031,38 @@ remains authoritative and weighted readiness stays **67/100**.
 
 Next: bounded incremental Notes reconciliation with receipt chaining, parity
 across recovery/import, browser coverage and separate actual-device tests.
+
+
+## Notes incremental source-bundle reconciliation — November 4 (V2 only)
+
+Added explicit preview-host-only reconciliation method:
+rehearsePreviewNotesBundleReconcile(fullOriginToken, actionId).
+inspectPreviewNotesBundleParity() now recognizes SHA-256-linked receipt lineage,
+instead of assuming that the original seed is forever the only receipt.
+V1 keeps all Notes read/write authority. No live Notes UI calls rehearsal.
+
+- Each reconciliation records the new source bundle, updates
+  generation-bound metadata and appends an immutable receipt in ONE
+  IndexedDB transaction. Prior receipts are not overwritten or deleted.
+- The chain pins predecessor bundle fingerprints and SHA-256 receipt
+  fingerprints, rejects orphaned/forked/cyclic/corrupted lineage, and
+  preserves questionable evidence instead of silently replacing it.
+- Full-origin V1 inventory and reset generation are checked before/after
+  asynchronous hashing, under the write transaction and after readback.
+  Uncooperative older tabs remain outside admission, blocking live cutover.
+- Missing seed, malformed Notes flags, stale capture tokens, action-ID reuse,
+  concurrent preview writes, intentional empty dirty caches, receipt tampering,
+  quota/transaction failures and cross-generation requests all fail closed.
+  Byte-identical sources become read-only verified no-ops.
+- Limited to 128 total receipts including the seed, preventing unbounded
+  provenance growth. A future verified checkpoint would be required beyond
+  that threshold; no history is silently pruned.
+- Nine new Node regression cases plus a Chromium/WebKit cross-tab browser
+  scenario exercise note shortening to empty, legacy source preservation,
+  durability, no-ops, reloads and interruption.
+
+Remaining: import/restore integration, off-device backup parity, production
+Notes writer admission, stale old-tab exclusion and physical Safari/iOS
+standalone interruption evidence. This does NOT complete the nonpilot
+migration gate, does not authorize production cutover and does not change the
+V1 authority. Weighted readiness remains **67/100**.

@@ -5326,35 +5326,95 @@
     return {bundle,evidence,receipts};
   }
 
-  async function verifyNotesPreviewRows(db, captured) {
-    const rows = await readNotesPreviewRows(db);
-    if (!rows.bundle && !rows.evidence && !rows.receipts.length)
-      return {verified:false,reason:'notes_preview_seed_required'};
+
+  // Validate the entire immutable receipt lineage without assuming that V1
+  // still matches. A changed V1 source must remain reconcilable, while a
+  // damaged V2 predecessor must NEVER be accepted as a starting point.
+  async function validateNotesPreviewLineage(rows, generation) {
+    const refuse = reason => ({verified:false,reason});
     const {bundle,evidence,receipts} = rows;
-    if (!bundle || !evidence || receipts.length !== 1
+    if (!bundle && !evidence && !receipts?.length)
+      return refuse('notes_preview_seed_required');
+    const sha = value => typeof value === 'string'
+      && /^sha256:[a-f0-9]{64}:\d+$/.test(value);
+    if (!bundle || !evidence || !Array.isArray(receipts)
+      || receipts.length < 1 || receipts.length > 128
       || bundle.id !== NOTES_BUNDLE_ID || bundle.schemaVersion !== 1
-      || stableJson(bundle) !== stableJson(captured.bundle)
+      || bundle.resetGeneration !== generation
       || evidence.id !== NOTES_BUNDLE_ID || evidence.schemaVersion !== 1
-      || evidence.resetGeneration !== bundle.resetGeneration
-      || evidence.bundleFingerprint !== captured.bundleFingerprint
+      || evidence.resetGeneration !== generation
+      || !sha(bundle.originFingerprint) || !sha(bundle.sourceFingerprint)
+      || !sha(evidence.bundleFingerprint)
       || evidence.originFingerprint !== bundle.originFingerprint
       || evidence.sourceFingerprint !== bundle.sourceFingerprint
-      || evidence.receiptId !== receipts[0]?.id
-      || receipts[0]?.type !== 'notes-preview-seed'
-      || receipts[0]?.resetGeneration !== bundle.resetGeneration
-      || receipts[0]?.bundleFingerprint !== captured.bundleFingerprint
-      || receipts[0]?.originFingerprint !== bundle.originFingerprint
-      || receipts[0]?.sourceFingerprint !== bundle.sourceFingerprint)
+      || typeof evidence.receiptId !== 'string')
+      return refuse('notes_preview_existing_evidence_preserved');
+    const byId = new Map();
+    for (const receipt of receipts) {
+      if (!receipt || typeof receipt.id !== 'string'
+        || !receipt.id || byId.has(receipt.id)
+        || receipt.resetGeneration !== generation
+        || !sha(receipt.bundleFingerprint)
+        || !sha(receipt.originFingerprint)
+        || !sha(receipt.sourceFingerprint)
+        || !['notes-preview-seed','notes-preview-reconcile'].includes(receipt.type)
+        || !receipt.id.startsWith(receipt.type + ':'))
+        return refuse('notes_preview_receipt_chain_invalid');
+      byId.set(receipt.id,receipt);
+    }
+    const head = byId.get(evidence.receiptId);
+    if (!head || head.bundleFingerprint !== evidence.bundleFingerprint
+      || head.originFingerprint !== evidence.originFingerprint
+      || head.sourceFingerprint !== evidence.sourceFingerprint)
+      return refuse('notes_preview_receipt_chain_invalid');
+    const visited = new Set();
+    let cursor = head;
+    while (cursor) {
+      if (visited.has(cursor.id)) return refuse('notes_preview_receipt_chain_invalid');
+      visited.add(cursor.id);
+      if (cursor.type === 'notes-preview-seed') {
+        if ('priorReceiptId' in cursor || 'priorBundleFingerprint' in cursor
+          || 'priorReceiptFingerprint' in cursor)
+          return refuse('notes_preview_receipt_chain_invalid');
+        cursor = null;
+      } else {
+        if (typeof cursor.priorReceiptId !== 'string'
+          || !sha(cursor.priorBundleFingerprint)
+          || !sha(cursor.priorReceiptFingerprint))
+          return refuse('notes_preview_receipt_chain_invalid');
+        const parent = byId.get(cursor.priorReceiptId);
+        if (!parent || parent.bundleFingerprint !== cursor.priorBundleFingerprint)
+          return refuse('notes_preview_receipt_chain_invalid');
+        const parentHash = await previewRecoveryFingerprint(parent);
+        if (parentHash !== cursor.priorReceiptFingerprint)
+          return refuse('notes_preview_receipt_chain_invalid');
+        cursor = parent;
+      }
+    }
+    if (visited.size !== receipts.length)
+      return refuse('notes_preview_receipt_chain_invalid');
+    const bundleHash = await previewRecoveryFingerprint(bundle);
+    if (bundleHash !== evidence.bundleFingerprint)
+      return refuse('notes_preview_bundle_digest_mismatch');
+    return {verified:true,reason:'notes_preview_lineage_verified',
+      headReceipt:head,receiptCount:receipts.length};
+  }
+
+  async function verifyNotesPreviewRows(db, captured) {
+    const rows = await readNotesPreviewRows(db);
+    const lineage = await validateNotesPreviewLineage(
+      rows,captured.bundle.resetGeneration);
+    if (!lineage.verified) return lineage;
+    if (stableJson(rows.bundle) !== stableJson(captured.bundle)
+      || lineage.headReceipt.bundleFingerprint !== captured.bundleFingerprint)
       return {verified:false,reason:'notes_preview_existing_evidence_preserved'};
-    const digest = await previewRecoveryFingerprint(bundle);
-    if (digest !== captured.bundleFingerprint)
-      return {verified:false,reason:'notes_preview_bundle_digest_mismatch'};
     if (!captured.current())
       return {verified:false,reason:'legacy_notes_changed_during_readback'};
     const again = await readNotesPreviewRows(db);
     if (stableJson(rows) !== stableJson(again) || !captured.current())
       return {verified:false,reason:'notes_preview_changed_during_digest'};
-    return {verified:true,reason:'notes_preview_bundle_verified'};
+    return {verified:true,reason:'notes_preview_bundle_verified',
+      receiptCount:lineage.receiptCount};
   }
 
   async function rehearsePreviewNotesBundleSeed(sourceToken, actionId) {
@@ -5443,6 +5503,124 @@
       committed,writeOutcomeUncertain:committed
     }); }
     finally { try { db?.close(); } catch (_) {} }
+  }
+
+
+  // Advance a previously sealed Notes bundle to a later V1 state. One
+  // logical reconciliation replaces the preview bundle, advances metadata
+  // and appends a linked immutable receipt in one IndexedDB transaction.
+  // Neither V1 Notes location nor its authority flags are ever written.
+  async function rehearsePreviewNotesBundleReconcile(sourceToken, actionId) {
+    const refuse = (reason,detail={}) => ({
+      checked:true,previewOnly:true,committed:false,confirmedDurable:false,
+      collectionParityVerified:false,notesMigrated:false,canPromote:false,
+      productionWritersFenced:false,readAuthority:'legacy_only',
+      mutationAuthority:'legacy_only',reason,...detail
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    if (typeof sourceToken !== 'string' || !sourceToken)
+      return refuse('full_origin_token_required');
+    if (typeof actionId !== 'string' || !actionId || actionId.length > 128)
+      return refuse('notes_preview_action_id_required');
+    const generation = currentGeneration({create:false});
+    if (!generation) return refuse('generation_unavailable');
+    const epoch = darkMirrorModeEpoch;
+    let captured,db,committed = false;
+    try {
+      captured = await capturePreviewNotesBundle(sourceToken,generation,epoch);
+      if (captured.reason) return refuse(captured.reason,{
+        prerequisiteReason:captured.prerequisiteReason
+      });
+      db = await openNotesPreviewDb(generation,epoch);
+      const initial = await readNotesPreviewRows(db);
+      const proof = await validateNotesPreviewLineage(initial,generation);
+      if (!proof.verified) return refuse(proof.reason);
+      // Validation includes an async digest. Re-read all old rows and the
+      // real V1 full-origin source before allowing a transition.
+      if (!captured.current()
+        || stableJson(await readNotesPreviewRows(db)) !== stableJson(initial))
+        return refuse('notes_preview_changed_during_reconcile_preflight');
+      if (stableJson(initial.bundle) === stableJson(captured.bundle)) {
+        const same = await verifyNotesPreviewRows(db,captured);
+        if (!same.verified) return refuse(same.reason);
+        return {
+          checked:true,previewOnly:true,committed:false,confirmedDurable:true,
+          collectionParityVerified:true,notesMigrated:false,
+          reason:'notes_preview_reconcile_no_change',
+          receiptCount:same.receiptCount,
+          canPromote:false,productionWritersFenced:false,
+          readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+        };
+      }
+      if (initial.receipts.length >= 128)
+        return refuse('notes_preview_receipt_limit');
+      const receiptId = 'notes-preview-reconcile:' + actionId;
+      if (initial.receipts.some(x=>x?.id===receiptId))
+        return refuse('notes_preview_action_id_reused');
+      const parent = proof.headReceipt;
+      const parentFingerprint = await previewRecoveryFingerprint(parent);
+      if (!captured.current()) return refuse('legacy_notes_changed_before_reconcile');
+      const receipt = {
+        id:receiptId,type:'notes-preview-reconcile',
+        resetGeneration:generation,priorReceiptId:parent.id,
+        priorBundleFingerprint:parent.bundleFingerprint,
+        priorReceiptFingerprint:parentFingerprint,
+        bundleFingerprint:captured.bundleFingerprint,
+        originFingerprint:captured.bundle.originFingerprint,
+        sourceFingerprint:captured.bundle.sourceFingerprint
+      };
+      const evidence = {
+        id:NOTES_BUNDLE_ID,schemaVersion:1,resetGeneration:generation,
+        receiptId,bundleFingerprint:captured.bundleFingerprint,
+        originFingerprint:captured.bundle.originFingerprint,
+        sourceFingerprint:captured.bundle.sourceFingerprint
+      };
+      let failure='notes_preview_reconcile_atomic_write_failed';
+      const tx=db.transaction(['bundles','receipts','meta'],'readwrite');
+      const bundles=tx.objectStore('bundles');
+      const receipts=tx.objectStore('receipts');
+      const meta=tx.objectStore('meta');
+      const reads=[bundles.get(NOTES_BUNDLE_ID),
+        meta.get(NOTES_BUNDLE_ID),receipts.getAll(),receipts.get(receiptId)];
+      const rows = [];
+      let remaining=reads.length;
+      const abort=reason=>{failure=reason;try{tx.abort();}catch(_){}};
+      reads.forEach((request,index)=>{request.onsuccess=()=>{
+        rows[index]=request.result;
+        if (--remaining!==0) return;
+        try {
+          if (!captured.current())
+            return abort('legacy_notes_changed_under_reconcile');
+          if (stableJson(rows[0])!==stableJson(initial.bundle)
+            || stableJson(rows[1])!==stableJson(initial.evidence)
+            || stableJson(rows[2])!==stableJson(initial.receipts)
+            || rows[3])
+            return abort('notes_preview_concurrent_change');
+          bundles.put(captured.bundle);
+          receipts.add(receipt);
+          meta.put(evidence);
+        } catch (_) {abort('notes_preview_reconcile_atomic_write_failed');}
+      };});
+      try {await transactionPromise(tx);}
+      catch (_) {return refuse(failure);}
+      committed=true;
+      const verified=await verifyNotesPreviewRows(db,captured);
+      if (!verified.verified) return refuse(verified.reason,{
+        committed:true,writeOutcomeUncertain:true
+      });
+      return {
+        checked:true,previewOnly:true,committed:true,confirmedDurable:true,
+        collectionParityVerified:true,notesMigrated:false,
+        receiptCount:verified.receiptCount,
+        reason:'notes_preview_reconcile_verified',
+        canPromote:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+      };
+    } catch (_) {return refuse('notes_preview_reconcile_unavailable',{
+      committed,writeOutcomeUncertain:committed
+    });}
+    finally {try{db?.close();}catch(_){}}
   }
 
   async function inspectPreviewNotesBundleParity() {
@@ -10636,6 +10814,7 @@
     rehearsePreviewAdmittedTaskCompletionBatch,
     inspectPreviewNotesSource,
     rehearsePreviewNotesBundleSeed,
+    rehearsePreviewNotesBundleReconcile,
     inspectPreviewNotesBundleParity,
     inspectPreviewTodaySource,
     rehearsePreviewTodayCollectionSeed,
