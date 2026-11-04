@@ -5322,6 +5322,19 @@
     const sourceSignature = `${fnv1a(sourceToken)}:${sourceToken.length}`;
     if (priorEvidence.taskFingerprint === desiredFingerprint
       && priorEvidence.sourceInventory === sourceSignature) {
+      // The initial read and its SHA calculation are asynchronous. A second
+      // preview tab may change V2 records while V1's source token stays
+      // unchanged. Revalidate the complete live Task collection before
+      // claiming that the no-op case is durably identical to V1.
+      let parity;
+      try { parity = await inspectPreviewTaskCollectionParity(); }
+      catch (_) { return refuse('task_preview_noop_parity_unreadable'); }
+      if (!parity.match) return refuse('task_preview_noop_parity_mismatch', {
+        prerequisiteReason:parity.reason
+      });
+      try {
+        if (!sourceCurrent()) return refuse('legacy_changed_after_noop_parity');
+      } catch (_) { return refuse('legacy_unreadable_after_noop_parity'); }
       return {
         checked:true, previewOnly:true, committed:false,
         confirmedDurable:true, collectionParityVerified:true,
