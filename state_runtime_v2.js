@@ -5086,6 +5086,117 @@
   // whole Task objects into an isolated V2 records store in one transaction.
   // Neither an interrupted/partial import nor a later stale tab can silently
   // overwrite an existing same-generation Task preview. No auto-repair.
+  // PREVIEW-ONLY Notes source preflight. Notes content is stored in TWO
+  // independently written V1 locations plus a dirty and authority marker.
+  // Never reinterpret a partially synced cache as an empty Notes document.
+  // This inspector reads but NEVER synchronizes, normalizes or writes V1.
+  async function inspectPreviewNotesSource() {
+    const refuse=(reason,detail={})=>({
+      checked:true,previewOnly:true,sourceVerified:false,
+      notesMigrated:false,canPromote:false,
+      productionWritersFenced:false,readAuthority:'legacy_only',
+      mutationAuthority:'legacy_only',reason,...detail
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    const generation=currentGeneration({create:false});
+    if (!generation) return refuse('generation_unavailable');
+    if (typeof core.parseTaskPointsStorageJson!=='function')
+      return refuse('legacy_notes_state_parser_missing');
+    const epoch=darkMirrorModeEpoch;
+    const sourceCurrent=inventory=>isDarkEnabled()
+      && epoch===darkMirrorModeEpoch
+      && currentGeneration({create:false})===generation
+      && captureReadOnlyFullStorageInventory()===inventory;
+    const keys=[
+      core.STORAGE_KEY||'taskpoints_v1',
+      'taskpoints_notes_v1',
+      'taskpoints_notes_dirty_v1',
+      'taskpoints_notes_authoritative_v1'
+    ];
+    let inventory,original,statePresent,cachePresent;
+    let stateNotes='',cacheNotes='',dirtyRaw,authorityRaw;
+    let effectiveNotes='',effectiveSource='';
+    try {
+      inventory=captureReadOnlyFullStorageInventory();
+      const raw=keys.map(key=>global.localStorage.getItem(key));
+      [original,cacheNotes,dirtyRaw,authorityRaw]=raw;
+      statePresent=original!==null;
+      cachePresent=cacheNotes!==null;
+      if (statePresent) {
+        const decoded=core.parseTaskPointsStorageJson(original);
+        if (!decoded || typeof decoded!=='object' || Array.isArray(decoded))
+          return refuse('legacy_notes_snapshot_invalid');
+        if (decoded.notes!==undefined && typeof decoded.notes!=='string')
+          return refuse('legacy_notes_snapshot_field_invalid');
+        stateNotes=decoded.notes||'';
+      }
+      if (cachePresent && typeof cacheNotes!=='string')
+        return refuse('legacy_notes_cache_unreadable');
+      if (!cachePresent) cacheNotes='';
+      if ((dirtyRaw!==null && dirtyRaw!=='0' && dirtyRaw!=='1')
+        || (authorityRaw!==null && authorityRaw!=='0'
+          && authorityRaw!=='1'))
+        return refuse('legacy_notes_marker_invalid');
+      const dirty=dirtyRaw==='1';
+      const authoritative=authorityRaw==='1';
+      if (!cachePresent && (dirty || authoritative))
+        return refuse('legacy_notes_authoritative_cache_missing');
+      if (stateNotes.length>1048576 || cacheNotes.length>1048576)
+        return refuse('legacy_notes_preview_size_limit');
+      // Match notes.html getBestNotesTextFromStorage() without invoking
+      // its synchronizing write side effects. Short/empty cache wins when
+      // either marker is active; unmarked bootstrap retains legacy choice.
+      if (cachePresent && (dirty||authoritative)) {
+        effectiveNotes=cacheNotes;
+        effectiveSource='marked_cache';
+      } else if (cacheNotes.trim() && !stateNotes.trim()) {
+        effectiveNotes=cacheNotes;
+        effectiveSource='unmarked_cache_only';
+      } else if (stateNotes.trim() && !cacheNotes.trim()) {
+        effectiveNotes=stateNotes;
+        effectiveSource='unmarked_snapshot_only';
+      } else if (cacheNotes===stateNotes) {
+        effectiveNotes=cacheNotes;
+        effectiveSource='unmarked_equal';
+      } else if (cacheNotes.length>=stateNotes.length) {
+        effectiveNotes=cacheNotes;
+        effectiveSource='unmarked_cache_longer';
+      } else {
+        effectiveNotes=stateNotes;
+        effectiveSource='unmarked_snapshot_longer';
+      }
+      if (!sourceCurrent(inventory)
+        || keys.some((key,index)=>global.localStorage.getItem(key)!==raw[index]))
+        return refuse('legacy_notes_changed_during_capture');
+    } catch (_) { return refuse('legacy_notes_snapshot_or_cache_unreadable'); }
+
+    let fingerprint;
+    try {
+      fingerprint=await previewRecoveryFingerprint({
+        statePresent,cachePresent,stateNotes,cacheNotes,
+        dirtyRaw,authorityRaw,effectiveNotes,effectiveSource
+      });
+    } catch (_) { return refuse('legacy_notes_digest_unavailable'); }
+    try {
+      if (!sourceCurrent(inventory))
+        return refuse('legacy_notes_changed_after_digest');
+    } catch (_) { return refuse('legacy_notes_snapshot_or_cache_unreadable'); }
+    return {
+      checked:true,previewOnly:true,sourceVerified:true,
+      notesMigrated:false,hasSnapshot:statePresent,hasCache:cachePresent,
+      cacheDirty:dirtyRaw==='1',cacheAuthoritative:authorityRaw==='1',
+      copiesAgree:stateNotes===cacheNotes,
+      selectedSource:effectiveSource,
+      stateLength:stateNotes.length,cacheLength:cacheNotes.length,
+      selectedLength:effectiveNotes.length,sourceFingerprint:fingerprint,
+      comparisonScope:'v1_notes_snapshot_cache_and_authority_markers',
+      reason:'legacy_notes_source_verified',
+      canPromote:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+    };
+  }
+
   // Today is a separate, independently writable V1 authority. Its four
   // per-day maps do not live in the main TaskPoints snapshot. This preview
   // capture never invokes Today page's forgiving fallback, which can erase
@@ -10243,6 +10354,7 @@
     exercisePreviewCooperativeWriterLease,
     exercisePreviewSerializedSnapshotLease,
     rehearsePreviewAdmittedTaskCompletionBatch,
+    inspectPreviewNotesSource,
     inspectPreviewTodaySource,
     rehearsePreviewTodayCollectionSeed,
     inspectPreviewTodayCollectionParity,
