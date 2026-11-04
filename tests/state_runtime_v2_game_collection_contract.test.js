@@ -238,7 +238,7 @@ test('Game source race under transaction refuses after old-tab localStorage edit
 
 test('Game player or receipt tampering refuses reconciliation preserving evidence',async()=>{
   for(const mutate of [
-    db=>{db._stores.get('players').get(0).value.name='poison';},
+    db=>{Array.from(db._stores.get('players').values())[0].value.name='poison';},
     db=>{db._stores.get('meta').get('game-source').bundleFingerprint='sha256:bad:0';},
     db=>{db._stores.get('receipts').get('game-preview-seed:initial').bundleFingerprint='bad';}
   ]){
