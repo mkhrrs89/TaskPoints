@@ -8761,7 +8761,6 @@
     rehearsePreviewTaskLinkedCompletion,
     rehearsePreviewTaskLinkedCompletionBatch,
     rehearsePreviewTaskCompletionHistoryCatchUp,
-    rehearsePreviewTaskCompletionHistoryReconcile,
     inspectPreviewTaskCompletionOrderParity,
     inspectPreviewMixedCompletionExport,
     inspectPreviewWholeCompatibilityProjection,
@@ -8775,6 +8774,7 @@
     readPilotHabitCandidate,
     setPilotReadProbeEnabled,
     probePilotHabitRead,
+    rehearsePreviewTaskCompletionHistoryReconcile,
     getStatus
   };
 
