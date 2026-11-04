@@ -5079,6 +5079,81 @@
   // whole Task objects into an isolated V2 records store in one transaction.
   // Neither an interrupted/partial import nor a later stale tab can silently
   // overwrite an existing same-generation Task preview. No auto-repair.
+  // PREVIEW-ONLY source inventory for the independent Projects mini-app.
+  // Projects live in tp_projects_v1, NOT the main TaskPoints snapshot. This
+  // validator deliberately does not normalize, seed, rewrite, or migrate.
+  // Invalid or changing source bytes must not become an empty collection.
+  async function inspectPreviewProjectsSource() {
+    const refuse = (reason, detail={}) => ({
+      checked:true, previewOnly:true, sourceVerified:false,
+      projectsMigrated:false, canPromote:false,
+      productionWritersFenced:false, readAuthority:'legacy_only',
+      mutationAuthority:'legacy_only', reason, ...detail
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    const generation=currentGeneration({create:false});
+    if (!generation) return refuse('generation_unavailable');
+    const modeEpoch=darkMirrorModeEpoch;
+    const key='tp_projects_v1';
+    let inventory, raw, projects, subtaskCount=0, fingerprint;
+    try {
+      inventory=captureReadOnlyFullStorageInventory();
+      raw=global.localStorage.getItem(key);
+      if (raw===null) projects=[];
+      else if (typeof raw==='string') {
+        try { projects=JSON.parse(raw); }
+        catch (_) { return refuse('legacy_projects_malformed_json'); }
+        if (!Array.isArray(projects))
+          return refuse('legacy_projects_array_required');
+      } else return refuse('legacy_projects_source_unreadable');
+      const seenProjects=new Set();
+      for (const project of projects) {
+        if (!project || typeof project!=='object' || Array.isArray(project)
+          || typeof project.id!=='string' || !project.id
+          || project.id.length>128 || seenProjects.has(project.id))
+          return refuse('legacy_project_ids_invalid');
+        seenProjects.add(project.id);
+        if (project.subtasks!=null) {
+          if (!Array.isArray(project.subtasks))
+            return refuse('legacy_project_subtasks_invalid');
+          const seenSubtasks=new Set();
+          for (const subtask of project.subtasks) {
+            if (!subtask || typeof subtask!=='object'
+              || Array.isArray(subtask) || typeof subtask.id!=='string'
+              || !subtask.id || subtask.id.length>128
+              || seenSubtasks.has(subtask.id))
+              return refuse('legacy_project_subtasks_invalid');
+            seenSubtasks.add(subtask.id);
+            subtaskCount+=1;
+          }
+        }
+      }
+      if (captureReadOnlyFullStorageInventory()!==inventory
+        || global.localStorage.getItem(key)!==raw)
+        return refuse('legacy_projects_changed_during_capture');
+      // Hash the exact ordered Project objects, including every unknown
+      // field, note, progress value and subtask; never silently prune data.
+      fingerprint=await previewRecoveryFingerprint(projects);
+    } catch (_) { return refuse('legacy_projects_source_unreadable'); }
+    try {
+      if (!isDarkEnabled() || modeEpoch!==darkMirrorModeEpoch
+        || currentGeneration({create:false})!==generation
+        || captureReadOnlyFullStorageInventory()!==inventory
+        || global.localStorage.getItem(key)!==raw)
+        return refuse('legacy_projects_changed_after_fingerprint');
+    } catch (_) { return refuse('legacy_projects_source_unreadable'); }
+    return {
+      checked:true,previewOnly:true,sourceVerified:true,
+      projectsMigrated:false,hasSourceKey:raw!==null,
+      projectCount:projects.length,subtaskCount,sourceFingerprint:fingerprint,
+      comparisonScope:'independent_v1_projects_source_only',
+      reason:'legacy_projects_source_verified',
+      canPromote:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+    };
+  }
+
   async function rehearsePreviewTaskCollectionSeed() {
     const refuse = (reason, detail = {}) => ({
       checked: true, previewOnly: true, verified: false, stored: false,
@@ -8760,6 +8835,7 @@
     exercisePreviewCooperativeWriterLease,
     exercisePreviewSerializedSnapshotLease,
     rehearsePreviewAdmittedTaskCompletionBatch,
+    inspectPreviewProjectsSource,
     rehearsePreviewTaskCollectionSeed,
     rehearsePreviewTaskCollectionReconcile,
     inspectPreviewTaskCollectionParity,
