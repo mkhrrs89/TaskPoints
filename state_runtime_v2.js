@@ -6257,6 +6257,167 @@
     }
   }
 
+
+  // Read-only, independently hashed verification of Game/Season image
+  // REFERENCES against the actual legacy \`taskpoints\` IndexedDB image store.
+  // Never open an absent DB (which would create it), never write/delete blobs,
+  // and never equate an intact local image with an off-device backup.
+  async function inspectPreviewGameImageCoverage() {
+    const refuse=(reason,details={})=>({
+      checked:true,previewOnly:true,sourceVerified:false,
+      gameImageReferencesVerified:false,allReferencedImagesPresent:false,
+      imageBytesVerified:false,externalImageBackupVerified:false,
+      canPromote:false,gameMigrated:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...details
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    const generation=currentGeneration({create:false});
+    if(!generation)return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    let db,imageDb;
+    try {
+      const token=captureReadOnlyFullStorageInventory();
+      const source=await capturePreviewGameSource(token,generation,epoch);
+      if(source.reason)return refuse(source.reason,{
+        prerequisiteReason:source.prerequisiteReason
+      });
+      db=await openGamePreviewDb(generation,epoch);
+      const parity=await proveGamePreviewParity(db,source);
+      if(!parity.verified)return refuse('game_preview_parity_required',{
+        prerequisiteReason:parity.reason
+      });
+      // Walk every Game/Season value, not just currently visible player
+      // portraits. Older season archives and future added imageId keys
+      // must survive an eventual import/export.
+      const references=new Set();
+      let invalid=false,visited=0;
+      const inspect=(value,key='')=>{
+        visited++;
+        if(visited>75000){invalid=true;return;}
+        if(/imageId$/i.test(key)) {
+          if(value===null||value===undefined||value==='')return;
+          if(typeof value!=='string'||value!==value.trim()
+            ||value.length>256){invalid=true;return;}
+          references.add(value);
+        }
+        if(Array.isArray(value)) {
+          for(const v of value)inspect(v);
+        }else if(value&&typeof value==='object'){
+          for(const [k,v] of Object.entries(value))inspect(v,k);
+        }
+      };
+      for(const row of source.rows)inspect(row.value);
+      inspect(source.bundle.fields);
+      if(invalid)return refuse('game_image_reference_invalid');
+      if(references.size>256)return refuse('game_image_reference_limit');
+      if(!source.current())return refuse('legacy_game_changed_during_image_audit');
+      const ids=[...references].sort();
+      if(!ids.length){
+        return {
+          checked:true,previewOnly:true,sourceVerified:true,
+          gameImageReferencesVerified:true,allReferencedImagesPresent:true,
+          imageBytesVerified:true,referencedImageCount:0,
+          verifiedImageBytes:0,imageDatabaseChecked:false,
+          reason:'game_preview_no_image_references',
+          externalImageBackupVerified:false,canPromote:false,
+          gameMigrated:false,productionWritersFenced:false,
+          readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+        };
+      }
+      // Without IDB database enumeration, even an open('taskpoints')
+      // would create a missing V1 image database: fail closed instead.
+      if(typeof global.indexedDB?.databases!=='function')
+        return refuse('game_image_database_enumeration_unavailable',{
+          referencedImageCount:ids.length
+        });
+      const listed=await global.indexedDB.databases();
+      if(!Array.isArray(listed)||!listed.some(d=>d?.name==='taskpoints'))
+        return refuse('game_image_database_missing',{
+          referencedImageCount:ids.length
+        });
+      if(!source.current())return refuse('legacy_game_changed_during_image_audit');
+      imageDb=await new Promise((resolve,reject)=>{
+        const req=global.indexedDB.open('taskpoints');
+        req.onupgradeneeded=()=>{
+          try{req.transaction?.abort();}catch(_){}
+          reject(Error('game_image_database_created_during_audit'));
+        };
+        req.onsuccess=()=>resolve(req.result);
+        req.onerror=()=>reject(req.error||Error('game_image_db_unreadable'));
+        req.onblocked=()=>reject(Error('game_image_db_blocked'));
+      });
+      if(!imageDb.objectStoreNames?.contains('images'))
+        return refuse('game_image_store_missing');
+      const read=async()=>{
+        const tx=imageDb.transaction('images','readonly');
+        const store=tx.objectStore('images');
+        // Issue all requests inside the same readonly transaction before
+        // awaiting any completion (no async gap that closes the transaction).
+        return Promise.all(ids.map(id=>requestPromise(store.get(id))));
+      };
+      const hash=async blobs=>{
+        if(blobs.some(blob=>blob===null||blob===undefined))
+          return {reason:'game_image_references_missing',
+            missingImageCount:blobs.filter(b=>b==null).length};
+        let total=0;
+        for(const blob of blobs){
+          if(!blob||typeof blob.arrayBuffer!=='function'
+            ||!Number.isSafeInteger(blob.size)||blob.size<0)
+            return {reason:'game_image_blob_invalid'};
+          total+=blob.size;
+          if(total>67108864)return {reason:'game_image_digest_budget_exceeded'};
+        }
+        const assets=[];
+        for(let i=0;i<blobs.length;i++){
+          const buffer=await blobs[i].arrayBuffer();
+          if(buffer.byteLength!==blobs[i].size)
+            return {reason:'game_image_blob_changed_during_read'};
+          const digest=await global.crypto.subtle.digest('SHA-256',buffer);
+          const hex=Array.from(new Uint8Array(digest),
+            n=>n.toString(16).padStart(2,'0')).join('');
+          assets.push([ids[i],blobs[i].size,blobs[i].type||'',hex]);
+        }
+        return {assets,total};
+      };
+      const first=await hash(await read());
+      if(first.reason)return refuse(first.reason,{
+        referencedImageCount:ids.length,
+        ...(first.missingImageCount!==undefined
+          ?{missingImageCount:first.missingImageCount}:{})
+      });
+      if(!source.current())return refuse('legacy_game_changed_during_image_digest');
+      const second=await hash(await read());
+      if(second.reason||stableJson(first)!==stableJson(second))
+        return refuse('game_image_bytes_changed_during_audit');
+      if(!source.current())
+        return refuse('legacy_game_changed_after_image_digest');
+      // The *Game preview itself* might have changed while reading blobs.
+      const final=await proveGamePreviewParity(db,source);
+      if(!final.verified)return refuse('game_preview_changed_during_image_audit',{
+        prerequisiteReason:final.reason
+      });
+      const imageFingerprint=await previewRecoveryFingerprint(first.assets);
+      if(!source.current())
+        return refuse('legacy_game_changed_after_image_fingerprint');
+      return {
+        checked:true,previewOnly:true,sourceVerified:true,
+        gameImageReferencesVerified:true,allReferencedImagesPresent:true,
+        imageBytesVerified:true,referencedImageCount:ids.length,
+        verifiedImageBytes:first.total,imageDatabaseChecked:true,
+        imageFingerprint,reason:'game_preview_image_coverage_verified',
+        externalImageBackupVerified:false,canPromote:false,
+        gameMigrated:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+      };
+    }catch(_){return refuse('game_image_coverage_unavailable');}
+    finally{
+      try{db?.close();}catch(_){}
+      try{imageDb?.close();}catch(_){}
+    }
+  }
+
   async function rehearsePreviewGameCollectionAction(sourceToken,actionId,reconcile) {
     const refuse=(reason,extra={})=>({
       checked:true,previewOnly:true,committed:false,confirmedDurable:false,
@@ -11604,6 +11765,7 @@
     inspectPreviewGameCollectionParity,
     inspectPreviewGameCompatibilityProjection,
     inspectPreviewGameCheckpointCoverage,
+    inspectPreviewGameImageCoverage,
     inspectPreviewTodaySource,
     rehearsePreviewTodayCollectionSeed,
     inspectPreviewTodayCollectionParity,

@@ -1432,6 +1432,67 @@ try {
       reloadVerified:true,stillPreviewOnly:true};
   });
 
+
+  await run('Game image provenance checks actual IndexedDB photo bytes and old-tab deletion',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const state=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      state.players=[{id:'p1',name:'Photo Player',
+        imageId:'v2-preview-game-photo-test'}];
+      state.youImageId='';
+      localStorage.setItem('taskpoints_v1',JSON.stringify(state));
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const imageId='v2-preview-game-photo-test';
+      // The legacy image helper stores this in its OWN V1 image DB.
+      // Test origin is disposable, and the V2 coverage inspector stays read-only.
+      await TaskPointsCore.saveImageBlob(imageId,
+        new Blob(['image-test-original'],{type:'image/png'}));
+      const seed=await api.rehearsePreviewGameCollectionSeed(token(),'photo-proof');
+      const source=token();
+      const covered=await api.inspectPreviewGameImageCoverage();
+      return {seed,covered,originUnchanged:source===token(),
+        supportsEnumeration:typeof indexedDB.databases==='function'};
+    });
+    assert.equal(result.seed.collectionParityVerified,true,JSON.stringify(result.seed));
+    if(result.supportsEnumeration){
+      assert.equal(result.covered.reason,
+        'game_preview_image_coverage_verified',JSON.stringify(result.covered));
+      assert.equal(result.covered.referencedImageCount,1);
+      assert.equal(result.covered.imageBytesVerified,true);
+      assert.equal(result.covered.externalImageBackupVerified,false);
+    }else{
+      assert.equal(result.covered.reason,
+        'game_image_database_enumeration_unavailable',JSON.stringify(result.covered));
+      assert.equal(result.covered.canPromote,false);
+    }
+    assert.equal(result.originUnchanged,true);
+    const legacy=await open(context);
+    await legacy.evaluate(()=>TaskPointsCore.deleteImageBlob(
+      'v2-preview-game-photo-test'));
+    const after=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const report=await api.inspectPreviewGameImageCoverage();
+      return {report,
+        idStillReferenced:JSON.parse(localStorage.getItem('taskpoints_v1'))
+          .players.some(p=>p.imageId==='v2-preview-game-photo-test'),
+        authority:api.getStatus().readAuthority};
+    });
+    if(result.supportsEnumeration){
+      assert.equal(after.report.reason,'game_image_references_missing',JSON.stringify(after.report));
+      assert.equal(after.report.missingImageCount,1);
+    }else assert.equal(after.report.reason,'game_image_database_enumeration_unavailable');
+    assert.equal(after.report.canPromote,false);
+    assert.equal(after.idStillReferenced,true);
+    assert.equal(after.authority,'legacy_only');
+    return {realLegacyBlobObserved:result.supportsEnumeration,
+      missingBlobDetected:result.supportsEnumeration,
+      unsupportedEnumerationFailsClosed:!result.supportsEnumeration,
+      legacyReferencePreserved:true};
+  });
+
   await run('Today V5 preview retains sparse day maps, survives reload and rejects stale V1',async context=>{
     const page=await open(context);
     const initial=await page.evaluate(async()=>{

@@ -1241,3 +1241,46 @@ authoritative. Full exports, images, production old-tab exclusion, off-device
 backup and real reversible cutover are still unproven. This does not
 satisfy the complete nonpilot or recovery milestones, and the weighted
 score remains **67/100**.
+
+
+## Game/player image-reference integrity preflight — November 4 (V2 only)
+
+Game/Players has an independently authoritative taskpoints IndexedDB
+database with an images object store. Game records contain imageId
+references (including youImageId), but an intact V1 snapshot, localStorage
+recovery checkpoint, or Game V2 preview does not prove the referenced binary
+photos are still present. A JSON-only backup may similarly retain an image
+ID without including the photo itself; the separately available Settings
+"Backup + Images" ZIP is not interchangeable with JSON export.
+
+The explicit preview-only inspectPreviewGameImageCoverage() now:
+- Requires current complete Game source/preview parity before examining
+  any image; traverses nested player, Game and season object fields ending
+  in imageId, retaining future/unknown reference fields.
+- Refuses invalid/malformed raw references, >256 distinct image IDs or
+  ambiguous legacy source changes instead of normalizing/dropping them.
+- Requires indexedDB.databases() to confirm the live legacy taskpoints
+  image DB already exists **before opening it**. An unsupported listing,
+  absent DB or absent images store is a failure, never permission to
+  create an empty DB. Zero references are handled without touching it.
+- Fetches referenced blobs in readonly transactions and checks exact
+  byte-size, MIME metadata and SHA-256 content hashes on two separate
+  reads. Rejects missing referenced blobs, access failures, byte changes
+  between reads and an oversized >64 MiB hashing budget.
+- Re-checks full-origin V1 generation/inventory and sealed Game preview
+  parity after the digest; its response contains only counts, fingerprint
+  and verdicts, never image IDs, bytes or personal player details.
+- Explicitly keeps externalImageBackupVerified:false,
+  canPromote:false, gameMigrated:false and readAuthority:'legacy_only'.
+
+The regression suite includes a real old-tab deletion scenario against the
+legacy image store in Chromium/WebKit, plus Node source/parity checks,
+no-reference behavior, missing DB/store/row, mismatched raw IDs, SHA byte
+races, large reference sets, denied image reads, and preview-only guards.
+It does not install new production image writers or change the core image
+storage API, import/export, snapshots, existing photos, or cleanup behavior.
+
+This audit closes one *observation* gap but does not authenticate an
+independent off-device backup, guarantee atomicity between the Game
+snapshot and separate photo database, or fence uncooperative legacy tabs.
+No weighted migration milestone is yet completed: **67/100**.

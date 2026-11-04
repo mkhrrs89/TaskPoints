@@ -579,3 +579,213 @@ test('Empty roster upgrades from historical source and preserves presence semant
   assert.equal(Object.prototype.hasOwnProperty.call(
     JSON.parse(app.localStorage.getItem(V1)),'players'),false);
 });
+
+
+async function installSyntheticLegacyImageDatabase(app,records) {
+  app.indexedDB.databases=async()=>app.indexedDB.databaseNames()
+    .map(name=>({name,version:1}));
+  await new Promise((resolve,reject)=>{
+    const req=app.indexedDB.open('taskpoints',1);
+    req.onupgradeneeded=()=>{
+      req.result.createObjectStore('images');
+    };
+    req.onsuccess=()=>resolve();
+    req.onerror=()=>reject(req.error);
+  });
+  const imageStore=app.indexedDB._databases.get('taskpoints')._stores.get('images');
+  for(const [id,content] of Object.entries(records))
+    imageStore.set(id,content instanceof Blob?content:
+      new Blob([content],{type:'image/png'}));
+  return imageStore;
+}
+
+test('Game image coverage requires explicit preview parity before touching legacy images',async()=>{
+  const app=await boot();
+  const before=app.token();
+  const result=await app.api.inspectPreviewGameImageCoverage();
+  assert.equal(result.sourceVerified,false,JSON.stringify(result));
+  assert.equal(result.reason,'game_preview_parity_required');
+  assert.equal(result.canPromote,false);
+  assert.equal(app.token(),before);
+  assert.equal(app.indexedDB.dump('taskpoints'),null);
+});
+
+test('Game image coverage refuses absent image DB without creating it',async()=>{
+  const app=await boot();
+  await seed(app);
+  app.indexedDB.databases=async()=>app.indexedDB.databaseNames()
+    .map(name=>({name,version:1}));
+  const before=app.indexedDB.databaseNames();
+  const report=await app.api.inspectPreviewGameImageCoverage();
+  assert.equal(report.reason,'game_image_database_missing',JSON.stringify(report));
+  assert.equal(report.referencedImageCount,1);
+  assert.deepEqual(app.indexedDB.databaseNames(),before);
+  assert.equal(report.allReferencedImagesPresent,false);
+  assert.equal(report.imageBytesVerified,false);
+});
+
+test('Game image coverage fails closed without database enumeration, never calls open on legacy images',async()=>{
+  const app=await boot();await seed(app);
+  const calls=app.indexedDB.openCalls.length;
+  const report=await app.api.inspectPreviewGameImageCoverage();
+  assert.equal(report.reason,'game_image_database_enumeration_unavailable',JSON.stringify(report));
+  assert.equal(app.indexedDB.openCalls.filter(x=>x.name==='taskpoints').length,0);
+  assert.ok(app.indexedDB.openCalls.length>=calls);
+});
+
+test('Game no-image-reference source verifies absence without creating the legacy database',async()=>{
+  const state=legacy();
+  state.youImageId='';
+  const app=await boot({state});
+  await seed(app);
+  const result=await app.api.inspectPreviewGameImageCoverage();
+  assert.equal(result.reason,'game_preview_no_image_references',JSON.stringify(result));
+  assert.equal(result.referencedImageCount,0);
+  assert.equal(result.imageBytesVerified,true);
+  assert.equal(result.imageDatabaseChecked,false);
+  assert.equal(result.externalImageBackupVerified,false);
+  assert.equal(app.indexedDB.databaseNames().includes('taskpoints'),false);
+});
+
+test('Game image audit hashes every referenced Game, season and player blob without copying or writing',async()=>{
+  const state=legacy();
+  state.players[0].imageId='npc-one';
+  state.players[1].futureImageId='old-npc';
+  state.seasonHistory[0].championImageId='season-photo';
+  const app=await boot({state});
+  const store=await installSyntheticLegacyImageDatabase(app,{
+    'image-1':'user-photo','npc-one':'npc-photo',
+    'old-npc':'older-photo','season-photo':'champ-photo',
+    'unreferenced-photo':'leave-this-alone'
+  });
+  const before=app.token();
+  const imagesBefore=Array.from(store,([key,value])=>[key,value.size,value.type]);
+  await seed(app);
+  const result=await app.api.inspectPreviewGameImageCoverage();
+  assert.equal(result.reason,'game_preview_image_coverage_verified',JSON.stringify(result));
+  assert.equal(result.referencedImageCount,4);
+  assert.equal(result.allReferencedImagesPresent,true);
+  assert.equal(result.imageBytesVerified,true);
+  assert.equal(result.gameImageReferencesVerified,true);
+  assert.equal(result.imageDatabaseChecked,true);
+  assert.equal(result.externalImageBackupVerified,false);
+  assert.equal(result.canPromote,false);
+  assert.match(result.imageFingerprint,/^sha256:[a-f0-9]{64}:\d+$/);
+  assert.equal(JSON.stringify(result).includes('npc-one'),false);
+  assert.equal(JSON.stringify(result).includes('user-photo'),false);
+  assert.equal(app.token(),before);
+  assert.deepEqual(Array.from(store,([key,value])=>[key,value.size,value.type]),imagesBefore);
+});
+
+test('Game missing referenced image fails closed without erasing surviving photo bytes',async()=>{
+  const state=legacy();
+  state.players[0].imageId='missing-player-photo';
+  const app=await boot({state});
+  const store=await installSyntheticLegacyImageDatabase(app,{
+    'image-1':'existing-photo'
+  });
+  await seed(app);
+  const result=await app.api.inspectPreviewGameImageCoverage();
+  assert.equal(result.reason,'game_image_references_missing',JSON.stringify(result));
+  assert.equal(result.missingImageCount,1);
+  assert.equal(result.referencedImageCount,2);
+  assert.equal(result.allReferencedImagesPresent,false);
+  assert.equal(store.get('image-1').size,new Blob(['existing-photo']).size);
+  assert.equal(store.has('missing-player-photo'),false);
+});
+
+test('Game explicit invalid image reference refuses to normalize or drop it',async()=>{
+  const state=legacy();
+  state.players[1].imageId='  spaced-id ';
+  const app=await boot({state});
+  await seed(app);
+  const value=app.localStorage.getItem(V1);
+  const result=await app.api.inspectPreviewGameImageCoverage();
+  assert.equal(result.reason,'game_image_reference_invalid',JSON.stringify(result));
+  assert.equal(result.canPromote,false);
+  assert.equal(app.localStorage.getItem(V1),value);
+});
+
+test('Game image audit detects same-length bytes changed during asynchronous hashing',async()=>{
+  let app,armed=false;
+  const crypto={randomUUID(){return 'blob-race';},subtle:{
+    digest:async(...args)=>{
+      const hash=await webcrypto.subtle.digest(...args);
+      if(armed && Buffer.from(args[1]).toString()==='photo-old'){
+        armed=false;
+        app.indexedDB._databases.get('taskpoints')
+          ._stores.get('images').set('image-1',new Blob(['photo-new'],
+            {type:'image/png'}));
+      }
+      return hash;
+    }
+  }};
+  app=await boot({crypto});
+  const store=await installSyntheticLegacyImageDatabase(app,{'image-1':'photo-old'});
+  await seed(app);
+  armed=true;
+  const oldApp=app.token();
+  const result=await app.api.inspectPreviewGameImageCoverage();
+  assert.equal(result.reason,'game_image_bytes_changed_during_audit',JSON.stringify(result));
+  assert.equal(result.canPromote,false);
+  assert.equal(app.token(),oldApp);
+  assert.equal(armed,false);
+  assert.equal(await store.get('image-1').text(),'photo-new');
+});
+
+test('Game images are invalidated by old-tab Game edit until preview reconciliation',async()=>{
+  const app=await boot();
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  const good=await app.api.inspectPreviewGameImageCoverage();
+  assert.equal(good.gameImageReferencesVerified,true,JSON.stringify(good));
+  const parsed=JSON.parse(app.localStorage.getItem(V1));
+  parsed.players[0].imageId='new-photo-id';
+  app.localStorage.setItem(V1,JSON.stringify(parsed));
+  const stale=await app.api.inspectPreviewGameImageCoverage();
+  assert.equal(stale.reason,'game_preview_parity_required',JSON.stringify(stale));
+  assert.equal((await reconcile(app,'new-image-reference')).collectionParityVerified,true);
+  const missing=await app.api.inspectPreviewGameImageCoverage();
+  assert.equal(missing.reason,'game_image_references_missing');
+  assert.equal(missing.missingImageCount,1);
+});
+
+test('Game image audit fails closed on denied image requests, quota and invalid legacy store schema',async()=>{
+  const app=await boot();
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  const db=app.indexedDB._databases.get('taskpoints');
+  app.indexedDB.failNext({store:'images',operation:'get',
+    error:new Error('SecurityError')});
+  const denied=await app.api.inspectPreviewGameImageCoverage();
+  assert.equal(denied.gameImageReferencesVerified,false,JSON.stringify(denied));
+  assert.equal(denied.canPromote,false);
+  const recovered=await app.api.inspectPreviewGameImageCoverage();
+  assert.equal(recovered.gameImageReferencesVerified,true,JSON.stringify(recovered));
+  db._stores.delete('images');
+  const noStore=await app.api.inspectPreviewGameImageCoverage();
+  assert.equal(noStore.reason,'game_image_store_missing',JSON.stringify(noStore));
+});
+
+test('Game image audit refuses more than 256 distinct references before opening any image DB',async()=>{
+  const state=legacy();
+  for(let i=0;i<257;i++)
+    state.players[0]['future'+i+'ImageId']='photo-'+i;
+  const app=await boot({state});
+  await seed(app);
+  const result=await app.api.inspectPreviewGameImageCoverage();
+  assert.equal(result.reason,'game_image_reference_limit',JSON.stringify(result));
+  assert.equal(result.canPromote,false);
+  assert.equal(app.indexedDB.openCalls.filter(x=>x.name==='taskpoints').length,0);
+});
+
+test('Game image coverage never runs on production hosts or with dark mode off',async()=>{
+  const app=await boot();await seed(app);
+  app.ctx.location.hostname='taskpoints.pages.dev';
+  assert.equal((await app.api.inspectPreviewGameImageCoverage()).reason,
+    'preview_host_required');
+  app.ctx.location.hostname='localhost';
+  app.localStorage.removeItem(DARK);
+  assert.equal((await app.api.inspectPreviewGameImageCoverage()).reason,
+    'dark_disabled');
+});
