@@ -170,7 +170,7 @@ test('navigation-state change during an IndexedDB mutation cannot redirect the w
 
   assert.equal(result.committed, true);
   assert.deepEqual(indexedDB.databaseNames(), [DB_NAME]);
-  assert.deepEqual(indexedDB.storeNames(DB_NAME), ['completions', 'habits', 'meta', 'mutations', 'tasks']);
+  assert.deepEqual(indexedDB.storeNames(DB_NAME), ['completions', 'habits', 'meta', 'mutations', 'projects', 'tasks']);
   const snapshot = indexedDB.dump(DB_NAME);
   assert.equal(snapshot.habits[0].value.doneKeys.includes('2026-09-05'), true);
   assert.equal(snapshot.completions[0].value.dayKey, '2026-09-05');
