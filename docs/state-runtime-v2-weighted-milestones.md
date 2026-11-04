@@ -894,3 +894,65 @@ physical iOS proof, or complete V2 migration of Notes/Game/other
 authoritative collections. V1 remains read/write authority;
 `todayMigrated:false`, `canPromote:false` and the weighted
 readiness estimate stays **67/100** until an entire gate passes.
+
+
+## Receipt-verified Today incremental reconciliation — November 4
+
+V5's independent Today day-map preview now supports explicitly invoked
+`rehearsePreviewTodayCollectionReconcile(fullOriginToken, actionId)`.
+The operation mirrors current V1 edits to dated task IDs, selected habits,
+notes, order, and root extensions with **record-level additions, changes and
+deletions** in the V2-only `todayDays` object store. It does not write V1
+or change the behavior of the live Today page.
+
+A source read must pass the original fail-closed Today preflight, remain
+unchanged across a cryptographic digest, and be tied to the caller's exact
+full-origin token and reset generation. **Before deleting or replacing any
+old row**, the operation checks the last V2 snapshot's full SHA-256
+`recordsFingerprint`, receipt, source inventory, row count, and immediate
+parent receipt chain. A V2-only edit, stale generation, missing receipt,
+invalid root, malformed day row, unexpected action ID replay, unreadable
+storage, or V1 write race is refused rather than automatically repaired.
+The `root` row preserves which of the four V1 maps are actually present,
+and arbitrary unknown fields (including an own JSON `__proto__` key) are
+retained without changing the object prototype.
+
+Each reconcile is bounded at **64 changed/add/remove rows** and 256 KiB
+of affected row payload, with the same 4,096-day/1 MiB overall source
+bounds as the Today preview seed. Changed/deleted day rows, immutable
+`today-preview-reconcile:<actionId>` receipt and successor metadata
+are committed in a **single readwrite IndexedDB transaction** that
+rechecks the prior rows, metadata, predecessor receipt, and V1 source.
+Source-only inventory changes write metadata/receipt without re-saving
+unchanged day rows. A true no-op independently re-proves live parity
+rather than relying on an older hash.
+
+Post-commit verification reads all updated rows, evidence, and receipt
+in a single readonly transaction. The independent parity inspector now
+recognizes seed, seal, and reconcile receipts, checks their immediate
+predecessor integrity and SHA-256 rows, and **re-reads V2 state after
+awaiting any digest**, catching intervening preview writes. A later V1
+write cannot turn a stale result into an authorized cutover.
+
+For V5 preview seeds created before the row-SHA format, the explicit
+`rehearsePreviewTodayRowSeal(fullOriginToken,actionId)` can add a
+new immutable `today-preview-seal:<actionId>` receipt and metadata SHA
+**without changing historical day rows**. It requires *current* whole
+V1-to-V2 parity and refuses any already-divergent source. The original
+seed receipt remains intact. Older unsealed previews remain inspectable,
+but cannot be reconciled until they pass this one-time upgrade.
+
+Added focused tests cover additions, edits, deletions, reordering,
+root-only changes, absent/present source transitions, multiple receipts,
+reloads, unchanged no-ops, metadata-only updates, >64 changes, stale
+sources, action ID reuse, injected add/put/delete or receipt quota
+failures, competing writers, previous-row corruption, receipt-chain
+tampering, digest races, legacy seal upgrade/refusal, and prototype
+key preservation. The Chromium/WebKit suite now also mirrors a real
+V1 Today note edit and verifies the change again after browser reload.
+
+**No production promotion:** All new paths are explicit, preview-host
+restricted, `todayMigrated:false`, `canPromote:false` and
+`readAuthority:'legacy_only'`. Uncooperative old tabs, remaining
+nonpilot writers, external backup/restore and physical iOS gates
+are still blockers. The weighted total remains **67/100**.
