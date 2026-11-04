@@ -1152,8 +1152,11 @@ try {
           .objectStore('todayDays').get('day:2026-11-04');
         req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
       });
+      const reconciled=await api.rehearsePreviewTodayCollectionReconcile(
+        token,'browser-today-reconcile');
+      const repaired=await api.inspectPreviewTodayCollectionParity();
       return {parity,stale,reseed,previousDone:row.value.notesByDay[0].done,
-        authority:api.getStatus().readAuthority};
+        reconciled,repaired,authority:api.getStatus().readAuthority};
     });
     assert.equal(after.parity.match,true,JSON.stringify(after.parity));
     assert.equal(after.stale.match,false);
@@ -1161,8 +1164,30 @@ try {
     assert.equal(after.reseed.reason,'today_preview_existing_evidence_preserved');
     assert.equal(after.reseed.committed,false);
     assert.equal(after.previousDone,false);
+    assert.equal(after.reconciled.committed,true,JSON.stringify(after.reconciled));
+    assert.equal(after.reconciled.changedRows,1);
+    assert.equal(after.reconciled.collectionParityVerified,true);
+    assert.equal(after.repaired.match,true,JSON.stringify(after.repaired));
     assert.equal(after.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    const final=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const parity=await api.inspectPreviewTodayCollectionParity();
+      const db=await api.open();
+      const read=req=>new Promise((resolve,reject)=>{
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      const row=await read(db.transaction('todayDays','readonly')
+        .objectStore('todayDays').get('day:2026-11-04'));
+      return {parity,done:row?.value?.notesByDay?.[0]?.done,
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(final.parity.match,true,JSON.stringify(final.parity));
+    assert.equal(final.done,true);
+    assert.equal(final.authority,'legacy_only');
     return {dayRows:2,reloadVerified:true,staleTodaySourceBlocked:true,
+      atomicReconciliation:true,reconciledReloadVerified:true,
       noSilentNotesLoss:true,legacyAuthorityPreserved:true};
   });
 
