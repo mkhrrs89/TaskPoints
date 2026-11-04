@@ -672,3 +672,89 @@ test('Earlier Today V5 seeds without row SHA remain inspectable but cannot rewri
     JSON.stringify(denied));
   assert.deepEqual(app.indexedDB.dump(DB),before);
 });
+
+
+test('Pre-row-SHA V5 Today seed can be sealed without changing any day then reconciled',async()=>{
+  const app=await seeded();
+  const db=app.indexedDB._databases.get(DB);
+  const meta=db._stores.get('meta');
+  const mutations=db._stores.get('mutations');
+  const oldMeta=meta.get('today-preview');
+  const oldReceipt=mutations.get('today-preview-seed:first');
+  const unsealedMeta={...oldMeta},unsealedReceipt={...oldReceipt};
+  delete unsealedMeta.recordsFingerprint;
+  delete unsealedReceipt.recordsFingerprint;
+  meta.set('today-preview',unsealedMeta);
+  mutations.set('today-preview-seed:first',unsealedReceipt);
+  const oldRows=app.indexedDB.dump(DB).todayDays;
+  assert.equal((await app.api.inspectPreviewTodayCollectionParity()).match,true);
+  const sealed=await app.api.rehearsePreviewTodayRowSeal(
+    app.token(),'one-time-upgrade');
+  assert.equal(sealed.reason,'today_preview_row_sealed',JSON.stringify(sealed));
+  assert.equal(sealed.committed,true);
+  assert.equal(sealed.collectionParityVerified,true);
+  assert.deepEqual(app.indexedDB.dump(DB).todayDays,oldRows);
+  assert.deepEqual(db._stores.get('mutations').get('today-preview-seed:first'),
+    unsealedReceipt);
+  const newEvidence=db._stores.get('meta').get('today-preview');
+  assert.match(newEvidence.recordsFingerprint,/^sha256:[a-f0-9]{64}:\d+$/);
+  const sealReceipt=mutations.get('today-preview-seal:one-time-upgrade');
+  assert.equal(sealReceipt.priorReceiptId,'today-preview-seed:first');
+  assert.equal(sealReceipt.type,'today-preview-seal');
+  const retry=await app.api.rehearsePreviewTodayRowSeal(
+    app.token(),'second-seal-should-noop');
+  assert.equal(retry.committed,false,JSON.stringify(retry));
+  assert.equal(retry.reason,'today_preview_row_seal_already_verified');
+  const changed=sample();
+  changed.notesByDay['2026-11-04'][0].done=true;
+  app.localStorage.setItem(TODAY,JSON.stringify(changed));
+  const reconciled=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'after-seal');
+  assert.equal(reconciled.committed,true,JSON.stringify(reconciled));
+  assert.equal(reconciled.collectionParityVerified,true);
+  assert.equal((await app.api.inspectPreviewTodayCollectionParity()).match,true);
+  assert.equal(app.indexedDB.dump(DB).todayDays
+    .find(row=>row.id==='day:2026-11-04').value.notesByDay[0].done,true);
+});
+
+test('Today legacy seed cannot be sealed after V1 changes, preserving every old row',async()=>{
+  const app=await seeded();
+  const db=app.indexedDB._databases.get(DB);
+  const oldMeta={...db._stores.get('meta').get('today-preview')};
+  const oldReceipt={...db._stores.get('mutations').get('today-preview-seed:first')};
+  delete oldMeta.recordsFingerprint;
+  delete oldReceipt.recordsFingerprint;
+  db._stores.get('meta').set('today-preview',oldMeta);
+  db._stores.get('mutations').set('today-preview-seed:first',oldReceipt);
+  const before=app.indexedDB.dump(DB);
+  app.localStorage.setItem(TODAY,JSON.stringify({
+    ...sample(),notesByDay:{'2026-11-04':[]}
+  }));
+  const denied=await app.api.rehearsePreviewTodayRowSeal(
+    app.token(),'too-late');
+  assert.equal(denied.reason,'today_preview_seal_parity_required',
+    JSON.stringify(denied));
+  assert.equal(denied.prerequisiteReason,'today_preview_source_stale');
+  assert.equal(denied.committed,false);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('Today legacy sealing quota failure leaves the original receipt and rows intact',async()=>{
+  const app=await seeded();
+  const db=app.indexedDB._databases.get(DB);
+  const oldMeta={...db._stores.get('meta').get('today-preview')};
+  const oldReceipt={...db._stores.get('mutations').get('today-preview-seed:first')};
+  delete oldMeta.recordsFingerprint;
+  delete oldReceipt.recordsFingerprint;
+  db._stores.get('meta').set('today-preview',oldMeta);
+  db._stores.get('mutations').set('today-preview-seed:first',oldReceipt);
+  const before=app.indexedDB.dump(DB);
+  app.indexedDB.failNext({store:'mutations',operation:'add',
+    error:new Error('QuotaExceededError')});
+  const denied=await app.api.rehearsePreviewTodayRowSeal(
+    app.token(),'quota-seal');
+  assert.equal(denied.reason,'today_preview_seal_atomic_write_failed',
+    JSON.stringify(denied));
+  assert.equal(denied.committed,false);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
