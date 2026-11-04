@@ -11557,17 +11557,23 @@ function installMobileTaskSwipeDelete(list) {
     if (!current || event.pointerId !== current.pointerId) return;
     current.dx = event.clientX - current.startX;
     current.dy = event.clientY - current.startY;
-    const shouldDelete = current.axis === 'horizontal'
+    const wasHorizontalSwipe = current.axis === 'horizontal'
+      && current.dx < -16 && Math.abs(current.dy) <= Math.abs(current.dx) * 0.6;
+    const shouldDelete = wasHorizontalSwipe
       && isTaskSwipeDeleteGesture(current.dx, current.dy)
       && current.card.isConnected;
     const id = current.id;
     cancel();
+    if (wasHorizontalSwipe) {
+      // Even an incomplete swipe must not synthesize a task-expansion click.
+      suppressClickTaskId = id;
+      suppressClickUntil = Date.now() + 750;
+    }
     if (!shouldDelete) return;
-    // Suppress the synthesized click that can follow touch-pointer release.
-    // Without this, a declined confirmation could still expand the card.
-    suppressClickTaskId = id;
-    suppressClickUntil = Date.now() + 750;
     deleteTask(id); // Always shows "Move this task to Trash?" first.
+    // Native confirm can stay open for seconds; keep the following click
+    // suppressed AFTER the confirmation returns, including on Cancel.
+    suppressClickUntil = Date.now() + 750;
   }, { passive: true });
 
   document.addEventListener('pointercancel', event => {
