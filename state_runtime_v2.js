@@ -6720,17 +6720,23 @@
           return refuse('legacy_task_ids_invalid');
         taskIds.add(String(task.id));
       }
-      const completionIds=new Set();
+      // V1 legitimately packs duplicate or ID-less Habit/vice rows. Only
+      // nonpilot Task IDs must be unique; still prevent any scope collision.
+      const scopedIds=new Set(),pilotIds=new Set();
       desired=[];
       for (let index=0;index<state.completions.length;index+=1) {
         const row=state.completions[index];
         if (!row || typeof row!=='object' || Array.isArray(row))
           return refuse('legacy_completion_history_invalid');
+        if (isPilotCompletion(row)) {
+          if (row.id!=null && String(row.id))
+            pilotIds.add(String(row.id));
+          continue;
+        }
         if (typeof row.id!=='string' || !row.id || row.id.length>128
-          || completionIds.has(row.id))
+          || scopedIds.has(row.id))
           return refuse('legacy_completion_id_ambiguous');
-        completionIds.add(row.id);
-        if (isPilotCompletion(row)) continue;
+        scopedIds.add(row.id);
         if (!['task','work','metric'].includes(String(row.source||''))
           || typeof row.taskId!=='string' || !row.taskId)
           return refuse('unsupported_nonpilot_completion_classes');
@@ -6742,6 +6748,8 @@
           return refuse('task_completion_payload_too_large');
         desired.push(packed);
       }
+      if (desired.some(row=>pilotIds.has(row.id)))
+        return refuse('legacy_completion_scope_collision');
       if (!sourceCurrent()) return refuse('legacy_changed_during_capture');
       taskFingerprint=await previewRecoveryFingerprint(tasks);
     } catch (_) { return refuse('legacy_completion_history_unreadable'); }
