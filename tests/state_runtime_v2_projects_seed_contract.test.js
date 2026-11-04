@@ -22,7 +22,7 @@ async function boot(raw=JSON.stringify(projects()),options={}) {
   const indexedDB=options.indexedDB||new FakeIndexedDB();
   const localStorage=options.localStorage||new FakeStorage({
     [DARK]:'1',[KEY]:JSON.stringify(initial()),
-    ...(raw===undefined?{}:{[PROJECTS]:raw})
+    ...(raw===null || raw===undefined ? {} : {[PROJECTS]:raw})
   });
   let id=0;
   const core={
@@ -211,7 +211,7 @@ test('full-origin stale source token rejects preview Projects seed before writin
 });
 
 test('empty and absent V1 Projects sources seed distinct evidence without erasure',async()=>{
-  const missing=await boot(undefined);
+  const missing=await boot(null);
   const a=await missing.api.rehearsePreviewProjectsCollectionSeed(
     missing.token(),'missing');
   assert.equal(a.committed,true,JSON.stringify(a));
