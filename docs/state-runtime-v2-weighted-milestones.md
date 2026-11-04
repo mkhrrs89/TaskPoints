@@ -1117,3 +1117,31 @@ WebKit browser fixture that exercises old/new checkpoint evidence.
 This is another prerequisite for reversible migration, not completion of the
 off-device backup or recovery gate. V1 remains authoritative, and the V2
 weighted score remains **67/100**.
+
+
+## Game-page independent preference source preflight (V2 preview)
+
+The V2 runtime now exposes an opt-in, read-only
+inspectPreviewGamePreferencesSource() method. The Game/Players page currently
+writes three separate localStorage keys independently of taskpoints_v1:
+taskpoints_gallery_columns, taskpoints_player_sort_mode and
+taskpoints_group_active_players. A partial V2 Game migration that copied only
+the players array could silently lose mobile gallery layout and user-selected
+sorting/grouping.
+
+The preview inspector retains the exact raw values in its SHA-256 source
+fingerprint and checks a stable full-origin inventory and reset generation
+before and after hashing. Its report contains only key-presence booleans,
+validated effective options and hashes; no raw storage content. It mirrors
+the current Game page's supported portrait/landscape column and sort-mode
+options but *refuses* malformed explicit values instead of treating the UI's
+forgiving fallback as a trustworthy storage migration.
+
+Tests pin all three existing Game keys/options, defaults, valid settings,
+malformed JSON, invalid sort/group flags, changed keys, unrelated-origin
+races, denied reads, dark-disabled and production-host refusals. Nothing
+writes the Game page, localStorage, any V2 store, or the canonical snapshot.
+This is only a source inventory prerequisite, not Game/player storage
+migration or mandatory writer fencing. The Game/editor legacy writer family
+is still unfenced, canPromote stays false, and weighted readiness remains
+**67/100**.

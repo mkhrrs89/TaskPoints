@@ -1234,6 +1234,55 @@ try {
       newerReconcileVerified:true,localBackupNotPromotion:true};
   });
 
+
+  await run('Game preference source detects unfenced old-tab changes without overwriting settings',async context=>{
+    const page=await open(context);
+    const first=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      return api.inspectPreviewGamePreferencesSource();
+    });
+    assert.equal(first.sourceVerified,true,JSON.stringify(first));
+    assert.equal(first.effectiveSortMode,'name-asc');
+    assert.equal(first.gamePreferencesMigrated,false);
+    assert.equal(first.canPromote,false);
+    const oldTab=await open(context);
+    await oldTab.evaluate(()=>{
+      // Actual independent V1 key values used by Game's mobile gallery
+      // and player controls, deliberately bypassing V2 admission.
+      localStorage.setItem('taskpoints_gallery_columns',
+        JSON.stringify({portrait:3,landscape:4}));
+      localStorage.setItem('taskpoints_player_sort_mode','pid-asc');
+      localStorage.setItem('taskpoints_group_active_players','true');
+    });
+    await requireCrossTabStorageValue(page,'taskpoints_player_sort_mode','pid-asc');
+    const changed=await page.evaluate(async()=>{
+      const before=localStorage.getItem('taskpoints_v1');
+      const audit=await window.TaskPointsStateRuntimeV2.inspectPreviewGamePreferencesSource();
+      return {audit,mainUnchanged:localStorage.getItem('taskpoints_v1')===before};
+    });
+    assert.equal(changed.audit.sourceVerified,true,JSON.stringify(changed.audit));
+    assert.equal(changed.audit.effectiveGalleryColumns.portrait,3);
+    assert.equal(changed.audit.effectiveGalleryColumns.landscape,4);
+    assert.equal(changed.audit.effectiveSortMode,'pid-asc');
+    assert.equal(changed.audit.effectiveGroupActive,true);
+    assert.notEqual(first.sourceFingerprint,changed.audit.sourceFingerprint);
+    assert.equal(changed.mainUnchanged,true);
+    await oldTab.evaluate(()=>
+      localStorage.setItem('taskpoints_player_sort_mode','unsupported-older-preference'));
+    await requireCrossTabStorageValue(page,'taskpoints_player_sort_mode',
+      'unsupported-older-preference');
+    const malformed=await page.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.inspectPreviewGamePreferencesSource());
+    assert.equal(malformed.sourceVerified,false,JSON.stringify(malformed));
+    assert.equal(malformed.reason,'game_preferences_sort_invalid');
+    assert.equal(malformed.canPromote,false);
+    assert.equal(await page.evaluate(()=>
+      localStorage.getItem('taskpoints_player_sort_mode')),'unsupported-older-preference');
+    return {crossTabSettingsObserved:true,defaultsPreserved:true,
+      badLegacyValueNotNormalized:true,noV1Writes:true,stillPreviewOnly:true};
+  });
+
   await run('Today V5 preview retains sparse day maps, survives reload and rejects stale V1',async context=>{
     const page=await open(context);
     const initial=await page.evaluate(async()=>{

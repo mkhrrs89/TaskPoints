@@ -5748,6 +5748,95 @@
     }
   }
 
+
+  // PREVIEW-ONLY, NONMUTATING Game preferences inventory. The Players page
+  // keeps three independent raw localStorage keys outside the V1 snapshot.
+  // Never substitute its forgiving UI defaults for missing/corrupt source
+  // evidence during a future authority transfer.
+  async function inspectPreviewGamePreferencesSource() {
+    const refuse=(reason,detail={})=>({
+      checked:true,previewOnly:true,sourceVerified:false,
+      gamePreferencesMigrated:false,canPromote:false,
+      productionWritersFenced:false,readAuthority:'legacy_only',
+      mutationAuthority:'legacy_only',reason,...detail
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    const generation=currentGeneration({create:false});
+    if(!generation)return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    const keys=[
+      'taskpoints_gallery_columns',
+      'taskpoints_player_sort_mode',
+      'taskpoints_group_active_players'
+    ];
+    let inventory,raw;
+    try{
+      inventory=captureReadOnlyFullStorageInventory();
+      raw=keys.map(key=>global.localStorage.getItem(key));
+    }catch(_){return refuse('game_preferences_source_unreadable');}
+    const [columnsRaw,sortRaw,groupRaw]=raw;
+    let portrait=2,landscape=3,sort='name-asc',groupActive=false;
+    if(columnsRaw!==null && columnsRaw!==''){
+      let parsed;
+      try{parsed=JSON.parse(columnsRaw);}
+      catch(_){return refuse('game_preferences_gallery_json_invalid');}
+      // The production reader may fall back to defaults here. V2 must not
+      // turn an unrecognized explicitly stored value into canonical data.
+      if(!parsed || typeof parsed!=='object' || Array.isArray(parsed)
+        || !Object.prototype.hasOwnProperty.call(parsed,'portrait')
+        || !Object.prototype.hasOwnProperty.call(parsed,'landscape')
+        || ![2,3].includes(parsed.portrait)
+        || ![3,4].includes(parsed.landscape))
+        return refuse('game_preferences_gallery_value_invalid');
+      portrait=parsed.portrait;
+      landscape=parsed.landscape;
+    }
+    if(sortRaw!==null && sortRaw!==''){
+      const modes=['name-asc','name-desc','pid-asc','pid-desc',
+        'avg-desc','overall-desc','ranking-asc','baseline-desc',
+        'created-desc','created-asc'];
+      if(!modes.includes(sortRaw))
+        return refuse('game_preferences_sort_invalid');
+      sort=sortRaw;
+    }
+    if(groupRaw!==null){
+      if(groupRaw!=='true'&&groupRaw!=='false')
+        return refuse('game_preferences_group_invalid');
+      groupActive=groupRaw==='true';
+    }
+    const current=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      && epoch===darkMirrorModeEpoch
+      && currentGeneration({create:false})===generation
+      && captureReadOnlyFullStorageInventory()===inventory
+      && keys.every((key,index)=>
+        global.localStorage.getItem(key)===raw[index]);
+    try{if(!current())return refuse('game_preferences_changed_during_capture');}
+    catch(_){return refuse('game_preferences_source_unreadable');}
+    let fingerprint;
+    try{
+      fingerprint=await previewRecoveryFingerprint({
+        keys,raw,portrait,landscape,sort,groupActive
+      });
+    }catch(_){return refuse('game_preferences_digest_unavailable');}
+    try{if(!current())return refuse('game_preferences_changed_after_digest');}
+    catch(_){return refuse('game_preferences_source_unreadable');}
+    return {
+      checked:true,previewOnly:true,sourceVerified:true,
+      sourceFingerprint:fingerprint,
+      galleryColumnsPresent:columnsRaw!==null,
+      playerSortPresent:sortRaw!==null,
+      groupActivePresent:groupRaw!==null,
+      effectiveGalleryColumns:{portrait,landscape},
+      effectiveSortMode:sort,effectiveGroupActive:groupActive,
+      comparisonScope:'v1_game_preferences_and_full_origin',
+      reason:'game_preferences_source_verified',
+      gamePreferencesMigrated:false,canPromote:false,
+      productionWritersFenced:false,readAuthority:'legacy_only',
+      mutationAuthority:'legacy_only'
+    };
+  }
+
   // Today is a separate, independently writable V1 authority. Its four
   // per-day maps do not live in the main TaskPoints snapshot. This preview
   // capture never invokes Today page's forgiving fallback, which can erase
@@ -10910,6 +10999,7 @@
     rehearsePreviewNotesBundleReconcile,
     inspectPreviewNotesBundleParity,
     inspectPreviewNotesCheckpointCoverage,
+    inspectPreviewGamePreferencesSource,
     inspectPreviewTodaySource,
     rehearsePreviewTodayCollectionSeed,
     inspectPreviewTodayCollectionParity,
