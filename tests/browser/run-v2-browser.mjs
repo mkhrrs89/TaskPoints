@@ -1362,6 +1362,76 @@ try {
       liveGameAuthorityStillV1:true};
   });
 
+
+  await run('Game preview export projection and recovery checkpoint reject stale old-tab state',async context=>{
+    const page=await open(context);
+    const first=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const v1=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      v1.players=[{id:'P1',name:'Old Name',future:{flag:true}}];
+      v1.seasonHistory=[{id:'S4',champion:'P1',unknown:'retained'}];
+      v1.currentSeason={id:'S5',custom:{wins:4}};
+      localStorage.setItem('taskpoints_v1',JSON.stringify(v1));
+      localStorage.setItem('taskpoints_player_sort_mode','pid-asc');
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const checkpoint=await api.createPreviewRecoveryCheckpoint({scope:'full_origin'});
+      const seed=await api.rehearsePreviewGameCollectionSeed(token(),'game-export-seed');
+      const projection=await api.inspectPreviewGameCompatibilityProjection();
+      const coverage=await api.inspectPreviewGameCheckpointCoverage(checkpoint.checkpointId);
+      return {checkpoint,seed,projection,coverage};
+    });
+    assert.equal(first.checkpoint.saved,true,JSON.stringify(first.checkpoint));
+    assert.equal(first.seed.collectionParityVerified,true,JSON.stringify(first.seed));
+    assert.equal(first.projection.gameProjectionVerified,true,JSON.stringify(first.projection));
+    assert.equal(first.projection.fullExportVerified,false);
+    assert.equal(first.coverage.reason,'checkpoint_game_coverage_verified',JSON.stringify(first.coverage));
+    assert.equal(first.coverage.canApply,false);
+    const oldTab=await open(context);
+    await oldTab.evaluate(()=>{
+      const v1=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      v1.players[0].name='Edited in old tab';
+      v1.currentSeason.custom.wins=5;
+      localStorage.setItem('taskpoints_v1',JSON.stringify(v1));
+    });
+    await page.waitForFunction(()=>JSON.parse(
+      localStorage.getItem('taskpoints_v1')).players?.[0]?.name==='Edited in old tab');
+    const later=await page.evaluate(async checkpointId=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const stale=await api.inspectPreviewGameCompatibilityProjection();
+      const before=await api.inspectPreviewGameCheckpointCoverage(checkpointId);
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const update=await api.rehearsePreviewGameCollectionReconcile(token(),'imported-edit');
+      const fresh=await api.inspectPreviewGameCompatibilityProjection();
+      const after=await api.inspectPreviewGameCheckpointCoverage(checkpointId);
+      const nextCheckpoint=await api.createPreviewRecoveryCheckpoint({scope:'full_origin'});
+      const newCoverage=await api.inspectPreviewGameCheckpointCoverage(
+        nextCheckpoint.checkpointId);
+      return {stale,before,update,fresh,after,newCoverage,
+        sourceUnchanged:localStorage.getItem('taskpoints_player_sort_mode')==='pid-asc',
+        authority:api.getStatus().readAuthority};
+    },first.checkpoint.checkpointId);
+    assert.equal(later.stale.match,false,JSON.stringify(later.stale));
+    assert.equal(later.before.checkpointMatchesCurrentV1,false);
+    assert.equal(later.update.collectionParityVerified,true,JSON.stringify(later.update));
+    assert.equal(later.fresh.match,true,JSON.stringify(later.fresh));
+    assert.equal(later.after.checkpointMatchesPreviewOrigin,false);
+    assert.equal(later.newCoverage.reason,'checkpoint_game_coverage_verified',JSON.stringify(later.newCoverage));
+    assert.equal(later.newCoverage.coversImages,false);
+    assert.equal(later.newCoverage.canApply,false);
+    assert.equal(later.sourceUnchanged,true);
+    assert.equal(later.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    const reloaded=await page.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.inspectPreviewGameCompatibilityProjection());
+    assert.equal(reloaded.match,true,JSON.stringify(reloaded));
+    return {oldTabChangeDetected:true,GameProjectionReconciled:true,
+      staleCheckpointRefused:true,newCheckpointVerified:true,
+      reloadVerified:true,stillPreviewOnly:true};
+  });
+
   await run('Today V5 preview retains sparse day maps, survives reload and rejects stale V1',async context=>{
     const page=await open(context);
     const initial=await page.evaluate(async()=>{

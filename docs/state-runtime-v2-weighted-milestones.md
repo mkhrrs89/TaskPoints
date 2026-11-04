@@ -1194,3 +1194,50 @@ independent V2 Game reads, transfer authority, fence legacy writers or
 reduce current production storage size. The canonical V1 save/import/export
 and recovery implementation remains completely unchanged. The nonpilot
 migration gate remains incomplete; weighted V2 readiness stays **67/100**.
+
+
+## Game preview compatibility, checkpoint/restore coverage and legacy evidence sealing
+
+The Game/Players preview now distinguishes between an **absent** players
+property and an explicitly **empty** players array; future exports must not
+turn one into the other. New Game bundles seal the presence bit. Existing
+preview bundles made before the change remain verifiable by their original
+source/receipt hashes and keep their old receipts intact. The explicit
+reconcile operation upgrades that legacy evidence by appending a linked
+immutable receipt and sealing the presence bit, without deleting any
+historical provenance or changing V1.
+
+The read-only inspectPreviewGameCompatibilityProjection() reconstructs a
+candidate from the original, parsed V1 snapshot plus the verified Game
+preview player rows and all relevant Game/season fields, checks raw
+independent Game preferences and full-origin freshness, then proves that
+**every** top-level source field (including unrelated Tasks/Notes/settings
+and unknown keys), absence/presence and ordering matches. It fingerprints
+the result, re-reads V2 evidence after the asynchronous digest and never
+writes, exports or restores that candidate. Older, unsealed Game previews
+must reconcile before receiving a positive reconstruction verdict.
+
+The read-only inspectPreviewGameCheckpointCoverage(checkpointId) audits a
+previously authenticated immutable full-origin localStorage checkpoint:
+it checks generation and original checkpoint authenticity, independently
+validates the Game preview lineage, compares the checkpoint to both the
+current Game preview and the **current** V1 source, verifies exact snapshot
+bytes and all three independent Game preference values, rechecks origin,
+checkpoint and V2 evidence after hashing, then returns only metadata.
+A checkpoint that matches the Game bundle but predates unrelated origin
+keys is distinguished from one that predates Game edits or a V1 restore.
+A taskpoints-only legacy checkpoint cannot meet this proof.
+
+New contracts test exact Game and unknown field preservation, missing versus
+empty players, old preview sealing without loss, stale Game edits and source
+races, tampered player evidence, full-origin checkpoint coverage, newer
+checkpoints, unrelated-origin drift, stale V2 after synthetic V1 restore,
+partial/invalid checkpoints, generation changes and production/dark guards.
+The browser fixture also tests old-tab Game edits, parity failure, explicit
+reconciliation, old/new checkpoint differences and reload.
+
+All methods remain explicit, preview-host-only and V1 read/write
+authoritative. Full exports, images, production old-tab exclusion, off-device
+backup and real reversible cutover are still unproven. This does not
+satisfy the complete nonpilot or recovery milestones, and the weighted
+score remains **67/100**.

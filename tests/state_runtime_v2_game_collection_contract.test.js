@@ -297,3 +297,285 @@ test('Game preview unavailable on production hosts and when dark mode disabled',
   assert.equal((await seed(app)).reason,'dark_disabled');
   assert.equal(app.indexedDB.dump(DB),null);
 });
+
+
+test('Game preview reconstructed projection preserves every Game field and all unrelated snapshot fields',async()=>{
+  const app=await boot();
+  const s=JSON.parse(app.localStorage.getItem(V1));
+  s.futureGameFeature={id:'experimental',nested:{custom:[1,2,3]}};
+  s.tasks=[{id:'t1',name:'Keep original Task and its metadata'}];
+  app.localStorage.setItem(V1,JSON.stringify(s));
+  await seed(app);
+  const before=app.token();
+  const result=await app.api.inspectPreviewGameCompatibilityProjection();
+  assert.equal(result.gameProjectionVerified,true,JSON.stringify(result));
+  assert.equal(result.match,true);
+  assert.equal(result.playersPresent,true);
+  assert.equal(result.playerCount,2);
+  assert.equal(result.fullExportVerified,false);
+  assert.equal(result.canPromote,false);
+  assert.equal(result.readAuthority,'legacy_only');
+  assert.equal(app.token(),before);
+  assert.equal(JSON.stringify(result).includes('Keep original Task'),false);
+});
+
+test('Game preview preserves absent players property, not just an empty array',async()=>{
+  for(const present of [false,true]) {
+    const state=legacy();
+    if(present)state.players=[];
+    else delete state.players;
+    const app=await boot({state});
+    const init=await seed(app);
+    assert.equal(init.collectionParityVerified,true,JSON.stringify(init));
+    const rows=app.indexedDB.dump(DB);
+    assert.equal(rows.players.length,0);
+    assert.equal(rows.bundles[0].playersPresent,present);
+    const result=await app.api.inspectPreviewGameCompatibilityProjection();
+    assert.equal(result.match,true,JSON.stringify(result));
+    assert.equal(result.playersPresent,present);
+    assert.equal(result.playerCount,0);
+    assert.equal(app.localStorage.getItem(V1),JSON.stringify(state));
+  }
+});
+
+test('Game projection detects newer V1 state, then verifies explicit preview reconcile',async()=>{
+  const app=await boot();
+  await seed(app);
+  const initial=await app.api.inspectPreviewGameCompatibilityProjection();
+  assert.equal(initial.match,true);
+  const state=JSON.parse(app.localStorage.getItem(V1));
+  state.players[0].name='New saved player';
+  state.currentSeason={id:'season5',scores:{one:10}};
+  state.futureTopLevel={untouched:true};
+  app.localStorage.setItem(V1,JSON.stringify(state));
+  const stale=await app.api.inspectPreviewGameCompatibilityProjection();
+  assert.equal(stale.match,false,JSON.stringify(stale));
+  const updated=await reconcile(app,'new-source');
+  assert.equal(updated.collectionParityVerified,true,JSON.stringify(updated));
+  const fresh=await app.api.inspectPreviewGameCompatibilityProjection();
+  assert.equal(fresh.match,true,JSON.stringify(fresh));
+  assert.notEqual(fresh.snapshotFingerprint,initial.snapshotFingerprint);
+});
+
+test('Game projection fails closed on changed or corrupted preview player evidence',async()=>{
+  const app=await boot();
+  await seed(app);
+  const old=app.indexedDB.dump(DB);
+  const db=app.indexedDB._databases.get(DB);
+  Array.from(db._stores.get('players').values())[0].value.name='untrusted tampering';
+  const prior=app.indexedDB.dump(DB);
+  const proof=await app.api.inspectPreviewGameCompatibilityProjection();
+  assert.equal(proof.match,false,JSON.stringify(proof));
+  assert.equal(proof.canPromote,false);
+  assert.deepEqual(app.indexedDB.dump(DB),prior);
+  assert.notDeepEqual(prior,old);
+});
+
+function enableRecoveryWal(app) {
+  app.ctx.TaskPointsStateRuntimeV2Wal={
+    getPendingRows(){return {ok:true,rows:[]}}
+  };
+}
+async function checkpoint(app, scope='full_origin'){
+  enableRecoveryWal(app);
+  const proof=await app.api.createPreviewRecoveryCheckpoint({scope});
+  assert.equal(proof.saved,true,JSON.stringify(proof));
+  assert.equal(proof.canAutoRestore,false);
+  return proof.checkpointId;
+}
+
+test('Game full-origin checkpoint confirms exact snapshot, preferences and preview lineage',async()=>{
+  const app=await boot();
+  const cp=await checkpoint(app);
+  await seed(app);
+  const source=app.token();
+  const old=app.indexedDB.dump(DB);
+  const result=await app.api.inspectPreviewGameCheckpointCoverage(cp);
+  assert.equal(result.reason,'checkpoint_game_coverage_verified',JSON.stringify(result));
+  assert.equal(result.checkpointVerified,true);
+  assert.equal(result.gameBundleVerified,true);
+  assert.equal(result.checkpointMatchesPreviewOrigin,true);
+  assert.equal(result.checkpointMatchesPreviewGameState,true);
+  assert.equal(result.checkpointMatchesCurrentV1,true);
+  assert.equal(result.fullOriginLocalStorageCovered,true);
+  assert.equal(result.offDeviceBackupVerified,false);
+  assert.equal(result.coversImages,false);
+  assert.equal(result.coversIndexedDB,false);
+  assert.equal(result.canApply,false);
+  assert.equal(result.canPromote,false);
+  assert.equal(app.token(),source);
+  assert.deepEqual(app.indexedDB.dump(DB),old);
+});
+
+test('Game checkpoint correctly identifies older source versus reconciled preview and fresh checkpoint',async()=>{
+  const app=await boot();
+  const cp0=await checkpoint(app);
+  await seed(app);
+  app.localStorage.setItem(SORT,'created-asc');
+  const before=await app.api.inspectPreviewGameCheckpointCoverage(cp0);
+  assert.equal(before.checkpointVerified,true);
+  assert.equal(before.checkpointMatchesPreviewOrigin,true);
+  assert.equal(before.checkpointMatchesPreviewGameState,true);
+  assert.equal(before.checkpointMatchesCurrentV1,false);
+  assert.equal(before.reason,'checkpoint_older_than_current_origin');
+  assert.equal((await reconcile(app,'new-sort')).collectionParityVerified,true);
+  const old=await app.api.inspectPreviewGameCheckpointCoverage(cp0);
+  assert.equal(old.checkpointMatchesPreviewOrigin,false);
+  assert.equal(old.checkpointMatchesPreviewGameState,false);
+  assert.equal(old.reason,'checkpoint_game_bundle_differs');
+  const cp1=await checkpoint(app);
+  const latest=await app.api.inspectPreviewGameCheckpointCoverage(cp1);
+  assert.equal(latest.reason,'checkpoint_game_coverage_verified',JSON.stringify(latest));
+  assert.equal(latest.canApply,false);
+});
+
+test('Game checkpoint distinguishes unchanged Game metadata from unrelated origin drift',async()=>{
+  const app=await boot();
+  const cp=await checkpoint(app);
+  await seed(app);
+  app.localStorage.setItem('tp_projects_v1','separate unrelated Project key');
+  const report=await app.api.inspectPreviewGameCheckpointCoverage(cp);
+  assert.equal(report.checkpointMatchesPreviewOrigin,true);
+  assert.equal(report.checkpointMatchesPreviewGameState,true);
+  assert.equal(report.checkpointMatchesCurrentV1,false);
+  assert.equal(report.reason,'checkpoint_older_than_current_origin');
+  assert.equal(report.canApply,false);
+});
+
+test('Game recovery rehearsal rejects stale V2 evidence after synthetic same-generation V1 restore',async()=>{
+  const app=await boot();
+  const cp=await checkpoint(app);
+  await seed(app);
+  const original=app.token();
+  const updated=JSON.parse(app.localStorage.getItem(V1));
+  updated.players[0].name='newer';
+  app.localStorage.setItem(V1,JSON.stringify(updated));
+  await reconcile(app,'edit-before-restore');
+  assert.equal((await app.api.inspectPreviewGameCompatibilityProjection()).match,true);
+  // Simulate restore of the exact initial V1 snapshot. No V2 writer runs.
+  app.localStorage.setItem(V1,JSON.parse(original).find(([k])=>k===V1)[1]);
+  const report=await app.api.inspectPreviewGameCheckpointCoverage(cp);
+  assert.equal(report.checkpointMatchesCurrentV1,true,JSON.stringify(report));
+  assert.equal(report.checkpointMatchesPreviewOrigin,false);
+  assert.equal(report.canApply,false);
+  const parity=await app.api.inspectPreviewGameCollectionParity();
+  assert.equal(parity.match,false);
+  assert.equal(app.localStorage.getItem(V1),JSON.parse(original).find(([k])=>k===V1)[1]);
+});
+
+test('Game checkpoint partial scope, missing record, tampered payload and rotation fail closed',async()=>{
+  const app=await boot();
+  const local=await checkpoint(app,'taskpoints_namespace');
+  await seed(app);
+  const smaller=await app.api.inspectPreviewGameCheckpointCoverage(local);
+  assert.equal(smaller.reason,'checkpoint_full_origin_required',JSON.stringify(smaller));
+  assert.equal(smaller.canApply,false);
+  assert.equal((await app.api.inspectPreviewGameCheckpointCoverage(
+    'v1-preview:missing')).reason,'checkpoint_missing');
+  const cp=await checkpoint(app);
+  const before=await app.api.inspectPreviewGameCheckpointCoverage(cp);
+  assert.equal(before.checkpointVerified,true);
+  const recovery=app.indexedDB._databases.get('taskpoints_v2_recovery_checkpoints_preview');
+  recovery._stores.get('snapshots').get(cp).entries[0][1]='tampered';
+  const invalid=await app.api.inspectPreviewGameCheckpointCoverage(cp);
+  assert.equal(invalid.reason,'checkpoint_integrity_failed',JSON.stringify(invalid));
+  const fresh=await checkpoint(app);
+  app.localStorage.setItem('taskpoints_state_v2_generation_v1','new:epoch');
+  const rotated=await app.api.inspectPreviewGameCheckpointCoverage(fresh);
+  assert.equal(rotated.reason,'checkpoint_generation_mismatch',JSON.stringify(rotated));
+  assert.equal(rotated.canApply,false);
+});
+
+test('Game checkpoint and projection are preview-host-only and dark-only',async()=>{
+  const app=await boot();
+  const cp=await checkpoint(app);
+  await seed(app);
+  app.ctx.location.hostname='taskpoints.pages.dev';
+  assert.equal((await app.api.inspectPreviewGameCheckpointCoverage(cp)).reason,
+    'preview_host_required');
+  assert.equal((await app.api.inspectPreviewGameCompatibilityProjection()).reason,
+    'preview_host_required');
+  app.ctx.location.hostname='localhost';
+  app.localStorage.removeItem(DARK);
+  assert.equal((await app.api.inspectPreviewGameCheckpointCoverage(cp)).reason,
+    'dark_disabled');
+  assert.equal((await app.api.inspectPreviewGameCompatibilityProjection()).reason,
+    'dark_disabled');
+});
+
+test('Game projection catches V1 change during asynchronous digest and declines positive verdict',async()=>{
+  let app,armed=false;
+  const crypto={randomUUID(){return 'hash-race'},subtle:{
+    digest:async(...args)=>{
+      const digest=await webcrypto.subtle.digest(...args);
+      if(armed){armed=false;app.localStorage.setItem(SORT,'name-desc');}
+      return digest;
+    }
+  }};
+  app=await boot({crypto});
+  await seed(app);
+  armed=true;
+  const report=await app.api.inspectPreviewGameCompatibilityProjection();
+  assert.equal(report.match,false,JSON.stringify(report));
+  assert.equal(app.localStorage.getItem(SORT),'name-desc');
+  assert.equal(report.canPromote,false);
+});
+
+
+async function digestGamePreview(value) {
+  const bytes=new TextEncoder().encode(JSON.stringify(value));
+  const digest=await webcrypto.subtle.digest('SHA-256',bytes);
+  return 'sha256:'+Array.from(new Uint8Array(digest),
+    byte=>byte.toString(16).padStart(2,'0')).join('')+':'+bytes.length;
+}
+async function emulateLegacyGamePreviewWithoutPlayerPresence(app) {
+  const db=app.indexedDB._databases.get(DB);
+  const bundle=db._stores.get('bundles').get('game-source');
+  assert.equal(typeof bundle.playersPresent,'boolean');
+  delete bundle.playersPresent;
+  const rows=Array.from(db._stores.get('players').values()).sort((a,b)=>a.id-b.id);
+  const fingerprint=await digestGamePreview({bundle,rows});
+  db._stores.get('meta').get('game-source').bundleFingerprint=fingerprint;
+  db._stores.get('receipts').get('game-preview-seed:initial')
+    .bundleFingerprint=fingerprint;
+}
+test('Historical Game seed receipts remain inspectable and upgrade without evidence deletion',async()=>{
+  const app=await boot();
+  assert.equal((await seed(app)).committed,true);
+  await emulateLegacyGamePreviewWithoutPlayerPresence(app);
+  const original=app.indexedDB.dump(DB);
+  const parity=await app.api.inspectPreviewGameCollectionParity();
+  assert.equal(parity.match,true,JSON.stringify(parity));
+  assert.equal(parity.canPromote,false);
+  const projection=await app.api.inspectPreviewGameCompatibilityProjection();
+  assert.equal(projection.match,false);
+  assert.equal(projection.reason,'game_preview_player_presence_unsealed');
+  const duplicate=await seed(app,'duplicate');
+  assert.equal(duplicate.reason,'game_preview_already_verified',JSON.stringify(duplicate));
+  assert.deepEqual(app.indexedDB.dump(DB),original);
+  const upgraded=await reconcile(app,'seal-player-presence');
+  assert.equal(upgraded.reason,'game_preview_reconcile_verified',JSON.stringify(upgraded));
+  assert.equal(upgraded.changedPlayers,0);
+  assert.equal(upgraded.receiptCount,2);
+  const rows=app.indexedDB.dump(DB);
+  assert.equal(rows.bundles[0].playersPresent,true);
+  assert.deepEqual(rows.receipts.find(x=>x.id==='game-preview-seed:initial'),
+    original.receipts[0]);
+  assert.equal((await app.api.inspectPreviewGameCompatibilityProjection()).match,true);
+});
+test('Empty roster upgrades from historical source and preserves presence semantics',async()=>{
+  const state=legacy();delete state.players;
+  const app=await boot({state});
+  await seed(app);
+  await emulateLegacyGamePreviewWithoutPlayerPresence(app);
+  assert.equal((await app.api.inspectPreviewGameCollectionParity()).match,true);
+  assert.equal((await app.api.inspectPreviewGameCompatibilityProjection()).match,false);
+  const result=await reconcile(app,'seal-empty-absent');
+  assert.equal(result.collectionParityVerified,true,JSON.stringify(result));
+  const projection=await app.api.inspectPreviewGameCompatibilityProjection();
+  assert.equal(projection.match,true,JSON.stringify(projection));
+  assert.equal(projection.playersPresent,false);
+  assert.equal(app.indexedDB.dump(DB).players.length,0);
+  assert.equal(Object.prototype.hasOwnProperty.call(
+    JSON.parse(app.localStorage.getItem(V1)),'players'),false);
+});

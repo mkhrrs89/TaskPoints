@@ -5940,7 +5940,9 @@
       bundle={id:GAME_PREVIEW_ID,schemaVersion:1,
         resetGeneration:generation,originFingerprint,sourceFingerprint,
         snapshotFingerprint:await previewRecoveryFingerprint(raw),
-        playerCount:rows.length,fields,preferences};
+        playerCount:rows.length,
+        playersPresent:Object.prototype.hasOwnProperty.call(parsed,'players'),
+        fields,preferences};
       digest=await previewRecoveryFingerprint({bundle,rows});
     }catch(_){return {reason:'game_preview_digest_unavailable'};}
     try{if(!current()||raw!==global.localStorage.getItem(key))
@@ -5973,6 +5975,8 @@
       ||bundle.resetGeneration!==generation
       ||evidence.id!==GAME_PREVIEW_ID||evidence.schemaVersion!==1
       ||evidence.resetGeneration!==generation||bundle.playerCount!==rows.length
+      ||(bundle.playersPresent!==undefined
+        &&typeof bundle.playersPresent!=='boolean')
       ||evidence.bundleFingerprint===undefined
       ||typeof evidence.receiptId!=='string')
       return fail('game_preview_evidence_invalid');
@@ -6032,7 +6036,15 @@
     const lineage=await verifyGamePreviewLineage(
       original,captured.bundle.resetGeneration);
     if(!lineage.verified)return lineage;
-    if(stableJson(original.bundle)!==stableJson(captured.bundle)
+    // Earlier Game preview v1 receipts did not seal the distinction
+    // between an absent players field and an explicit empty array. Keep
+    // their original hash valid and their parity inspectable, but require
+    // explicit reconciliation before a new compatibility proof can certify
+    // property-presence semantics.
+    const comparableBundle={...captured.bundle};
+    if(original.bundle.playersPresent===undefined)
+      delete comparableBundle.playersPresent;
+    if(stableJson(original.bundle)!==stableJson(comparableBundle)
       ||stableJson(original.rows.slice().sort((a,b)=>a.id-b.id))
         !==stableJson(captured.rows)
       ||original.evidence.bundleFingerprint!==captured.digest)
@@ -6044,6 +6056,198 @@
       return {verified:false,reason:'game_preview_changed_during_digest'};
     return {verified:true,reason:'game_preview_parity_verified',
       receiptCount:lineage.receiptCount};
+  }
+
+
+  // A Game-only reconstructed compatibility projection: retain every other
+  // original V1 snapshot property untouched, then replace only the explicit
+  // Game/Players field boundary from VERIFIED preview records. Never use the
+  // projection as an exporter, restore source, or live application reader.
+  async function inspectPreviewGameCompatibilityProjection() {
+    const refuse=(reason,details={})=>({
+      checked:true,previewOnly:true,match:false,
+      gameProjectionVerified:false,fullExportVerified:false,
+      canPromote:false,gameMigrated:false,
+      productionWritersFenced:false,readAuthority:'legacy_only',
+      mutationAuthority:'legacy_only',reason,...details
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    const generation=currentGeneration({create:false});
+    if(!generation)return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    let db;
+    try {
+      const token=captureReadOnlyFullStorageInventory();
+      const captured=await capturePreviewGameSource(token,generation,epoch);
+      if(captured.reason)return refuse(captured.reason,{
+        prerequisiteReason:captured.prerequisiteReason
+      });
+      db=await openGamePreviewDb(generation,epoch);
+      const first=await readGamePreviewRows(db);
+      const proof=await verifyGamePreviewLineage(first,generation);
+      if(!proof.verified)return refuse(proof.reason);
+      if(!captured.current())return refuse('legacy_game_changed_before_projection');
+      if(first.bundle.playersPresent===undefined)
+        return refuse('game_preview_player_presence_unsealed');
+      if(first.bundle.originFingerprint!==captured.bundle.originFingerprint)
+        return refuse('game_preview_source_stale');
+      const sorted=first.rows.slice().sort((a,b)=>a.id-b.id);
+      const raw=global.localStorage.getItem(core.STORAGE_KEY||'taskpoints_v1');
+      if(typeof raw!=='string'||!raw)return refuse('legacy_game_snapshot_missing');
+      const original=core.parseTaskPointsStorageJson(raw);
+      if(!original||typeof original!=='object'||Array.isArray(original))
+        return refuse('legacy_game_snapshot_invalid');
+      const projected={...original};
+      // Property *absence* matters for round-trip compatibility; never
+      // materialize default [] just because the Game UI would do so.
+      if(first.bundle.playersPresent)
+        projected.players=sorted.map(row=>row.value);
+      else delete projected.players;
+      for(const key of GAME_ARRAY_FIELDS.filter(k=>k!=='players')
+        .concat(GAME_SCALAR_FIELDS)) {
+        const has=Object.prototype.hasOwnProperty.call(first.bundle.fields,key);
+        const sourceHas=Object.prototype.hasOwnProperty.call(original,key);
+        if(has!==sourceHas)return refuse('game_projection_property_presence_mismatch');
+        if(has)projected[key]=first.bundle.fields[key];
+        else delete projected[key];
+      }
+      if(Object.prototype.hasOwnProperty.call(original,'players')
+        !==first.bundle.playersPresent)
+        return refuse('game_projection_player_presence_mismatch');
+      const preferences=GAME_PREFERENCE_KEYS.map(key=>global.localStorage.getItem(key));
+      if(stableJson(preferences)!==stableJson(first.bundle.preferences))
+        return refuse('game_projection_preference_mismatch');
+      if(stableJson(original)!==stableJson(projected))
+        return refuse('game_projection_payload_mismatch');
+      const digest=await previewRecoveryFingerprint(stableJson(projected));
+      if(!captured.current()||raw!==global.localStorage.getItem(
+        core.STORAGE_KEY||'taskpoints_v1'))
+        return refuse('legacy_game_changed_after_projection_digest');
+      const second=await readGamePreviewRows(db);
+      if(stableJson(first)!==stableJson(second)||!captured.current())
+        return refuse('game_preview_changed_during_projection_digest');
+      return {
+        checked:true,previewOnly:true,match:true,
+        gameProjectionVerified:true,fullExportVerified:false,
+        snapshotFingerprint:digest,sourceFieldCount:
+          GAME_ARRAY_FIELDS.length+GAME_SCALAR_FIELDS.length,
+        playersPresent:first.bundle.playersPresent,
+        playerCount:sorted.length,receiptCount:proof.receiptCount,
+        comparisonScope:'game_fields_plus_original_v1_snapshot',
+        reason:'game_preview_compatibility_projection_verified',
+        canPromote:false,gameMigrated:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+      };
+    }catch(_){return refuse('game_preview_projection_unavailable');}
+    finally{try{db?.close();}catch(_){}}
+  }
+
+
+  // A full-origin local checkpoint can prove the Game preview's snapshot
+  // and auxiliary preference keys are covered. This is a local, READ-ONLY
+  // provenance comparison, not a restore plan or export package.
+  async function inspectPreviewGameCheckpointCoverage(checkpointId) {
+    const refuse=(reason,details={})=>({
+      checked:true,previewOnly:true,checkpointVerified:false,
+      gameBundleVerified:false,checkpointMatchesPreviewOrigin:false,
+      checkpointMatchesPreviewGameState:false,
+      checkpointMatchesCurrentV1:false,
+      fullOriginLocalStorageCovered:false,
+      coversImages:false,coversIndexedDB:false,
+      offDeviceBackupVerified:false,
+      canApply:false,canPromote:false,gameMigrated:false,
+      productionWritersFenced:false,readAuthority:'legacy_only',
+      mutationAuthority:'legacy_only',reason,...details
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    if(typeof checkpointId!=='string'
+      ||!checkpointId.startsWith('v1-preview:')||checkpointId.length>160)
+      return refuse('checkpoint_id_required');
+    const generation=currentGeneration({create:false});
+    if(!generation)return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    let recoveryDb,gameDb;
+    try {
+      const startingToken=captureReadOnlyFullStorageInventory();
+      recoveryDb=await openPreviewRecoveryDb();
+      const snapshotStore=PREVIEW_RECOVERY_STORE;
+      const record=await requestPromise(recoveryDb.transaction(
+        snapshotStore,'readonly').objectStore(snapshotStore).get(checkpointId));
+      if(!record)return refuse('checkpoint_missing');
+      if(!await validPreviewRecoveryRecord(record))
+        return refuse('checkpoint_integrity_failed');
+      if(record.integrityVersion!==3||record.captureScope!=='full_origin')
+        return refuse('checkpoint_full_origin_required',{checkpointVerified:true});
+      if(record.generation!==generation)
+        return refuse('checkpoint_generation_mismatch',{
+          checkpointVerified:true,fullOriginLocalStorageCovered:true
+        });
+      const checkpointToken=JSON.stringify(record.entries);
+      const stored=new Map(record.entries);
+      const rawSnapshot=stored.get(core.STORAGE_KEY||'taskpoints_v1');
+      if(typeof rawSnapshot!=='string'||!rawSnapshot)
+        return refuse('checkpoint_game_snapshot_missing',{
+          checkpointVerified:true,fullOriginLocalStorageCovered:true
+        });
+      const prefs=GAME_PREFERENCE_KEYS.map(key=>
+        stored.has(key)?stored.get(key):null);
+      const [checkpointOriginHash,checkpointSnapshotHash]=await Promise.all([
+        previewRecoveryFingerprint(checkpointToken),
+        previewRecoveryFingerprint(rawSnapshot)
+      ]);
+      gameDb=await openGamePreviewDb(generation,epoch);
+      const first=await readGamePreviewRows(gameDb);
+      const proof=await verifyGamePreviewLineage(first,generation);
+      if(!proof.verified)return refuse(proof.reason,{
+        checkpointVerified:true,fullOriginLocalStorageCovered:true
+      });
+      const bundle=first.bundle;
+      const checkpointMatchesPreviewOrigin=
+        checkpointOriginHash===bundle.originFingerprint;
+      const checkpointMatchesPreviewGameState=
+        checkpointSnapshotHash===bundle.snapshotFingerprint
+        &&stableJson(prefs)===stableJson(bundle.preferences);
+      // All async fingerprint operations above can yield to a second tab.
+      // Confirm the checkpoint and the original preview evidence were not
+      // changed underneath this audit, and inventory is still byte-identical.
+      const [second,checkpointAgain]=await Promise.all([
+        readGamePreviewRows(gameDb),
+        requestPromise(recoveryDb.transaction(snapshotStore,'readonly')
+          .objectStore(snapshotStore).get(checkpointId))
+      ]);
+      if(stableJson(second)!==stableJson(first)
+        ||stableJson(checkpointAgain)!==stableJson(record)
+        ||!isWalTestPreviewHost()||!isDarkEnabled()
+        ||darkMirrorModeEpoch!==epoch
+        ||currentGeneration({create:false})!==generation)
+        return refuse('game_checkpoint_evidence_changed_during_audit');
+      const currentToken=captureReadOnlyFullStorageInventory();
+      if(currentToken!==startingToken)
+        return refuse('game_checkpoint_origin_changed_during_audit');
+      const checkpointMatchesCurrentV1=
+        checkpointToken===currentToken;
+      return {
+        checked:true,previewOnly:true,checkpointVerified:true,
+        gameBundleVerified:true,fullOriginLocalStorageCovered:true,
+        checkpointMatchesPreviewOrigin,checkpointMatchesPreviewGameState,
+        checkpointMatchesCurrentV1,
+        reason:!checkpointMatchesPreviewOrigin
+          ? 'checkpoint_game_bundle_differs'
+          :!checkpointMatchesCurrentV1
+            ? 'checkpoint_older_than_current_origin'
+            :'checkpoint_game_coverage_verified',
+        coversImages:false,coversIndexedDB:false,
+        offDeviceBackupVerified:false,canApply:false,
+        canPromote:false,gameMigrated:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+      };
+    }catch(_){return refuse('game_checkpoint_coverage_unavailable');}
+    finally{
+      try{recoveryDb?.close();}catch(_){}
+      try{gameDb?.close();}catch(_){}
+    }
   }
 
   async function rehearsePreviewGameCollectionAction(sourceToken,actionId,reconcile) {
@@ -11391,6 +11595,8 @@
     rehearsePreviewGameCollectionSeed,
     rehearsePreviewGameCollectionReconcile,
     inspectPreviewGameCollectionParity,
+    inspectPreviewGameCompatibilityProjection,
+    inspectPreviewGameCheckpointCoverage,
     inspectPreviewTodaySource,
     rehearsePreviewTodayCollectionSeed,
     inspectPreviewTodayCollectionParity,
