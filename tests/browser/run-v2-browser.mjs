@@ -361,13 +361,13 @@ try {
     const upgrader=await context.newPage();
     await upgrader.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),{waitUntil:'load'});
     const newVersion=await upgrader.evaluate(()=>new Promise((resolve,reject)=>{
-      const req=indexedDB.open('taskpoints_state_v2',4);
+      const req=indexedDB.open('taskpoints_state_v2',5);
       req.onupgradeneeded=()=>{};
       req.onsuccess=()=>{const v=req.result.version;req.result.close();resolve(v);};
       req.onerror=()=>reject(req.error);
       req.onblocked=()=>reject(Error('existing V2 runtime refused to close for upgrade'));
     }));
-    assert.equal(newVersion,4);
+    assert.equal(newVersion,5);
     await page.waitForFunction(()=>window.TaskPointsStateRuntimeV2.getStatus().externalRevisionInvalidated,
       null,{timeout:10000});
     const stale=await page.evaluate(async()=>{
@@ -384,7 +384,7 @@ try {
     assert.equal(stale.candidate.eligible,false);
     assert.equal(stale.candidate.reason,'external_revision_invalidated');
     assert.equal(Object.hasOwn(stale.candidate,'habit'),false);
-    assert.ok(stale.openFailure,'stale version-3 open must not reopen a version-4 database');
+    assert.ok(stale.openFailure,'stale version-4 open must not reopen a version-5 database');
     assert.equal(stale.legacy,before.legacy);
     assert.equal(stale.wal,before.wal);
     assert.equal(stale.authority,'legacy_only');
@@ -392,7 +392,7 @@ try {
       newerSchemaUntouched:true,v1Retained:true};
   });
 
-  await run('real IndexedDB v1-to-v3 upgrade preserves cross-Habit index and adds Tasks without a live cutover', async context => {
+  await run('real IndexedDB v1-to-v4 upgrade preserves cross-Habit index, Tasks and Projects without a live cutover', async context => {
     const page=await context.newPage();
     page.on('pageerror',err=>console.warn('Upgrade fixture error: '+err.message));
     await page.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),{waitUntil:'load'});
