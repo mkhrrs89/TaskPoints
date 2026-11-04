@@ -5489,6 +5489,192 @@
     } catch (_) { return refuse('today_preview_parity_unreadable'); }
   }
 
+  // One-time PREVIEW ONLY provenance upgrade for Today previews created
+  // before the stored-row SHA seal existed. It only runs while V1 is
+  // unchanged and a full independent V1/V2 parity proof is still possible.
+  // The original seed receipt is preserved; no historical day row is edited.
+  async function rehearsePreviewTodayRowSeal(sourceToken,actionId) {
+    const refuse=(reason,detail={})=>({
+      checked:true,previewOnly:true,committed:false,confirmedDurable:false,
+      collectionParityVerified:false,todayMigrated:false,
+      canPromote:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...detail
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    if (typeof sourceToken!=='string' || !sourceToken)
+      return refuse('full_origin_token_required');
+    if (typeof actionId!=='string' || !actionId || actionId.length>128)
+      return refuse('today_preview_action_id_required');
+    const generation=currentGeneration({create:false});
+    if (!generation) return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    const sourceCurrent=()=>isDarkEnabled()
+      && epoch===darkMirrorModeEpoch
+      && currentGeneration({create:false})===generation
+      && captureReadOnlyFullStorageInventory()===sourceToken;
+    let source;
+    try {
+      if (!sourceCurrent()) return refuse('full_origin_changed');
+      source=await capturePreviewTodaySource();
+      if (source.reason) return refuse(source.reason,{
+        prerequisiteReason:source.prerequisiteReason
+      });
+      if (source.inventory!==sourceToken || !sourceCurrent())
+        return refuse('legacy_today_changed_during_capture');
+    } catch (_) { return refuse('legacy_today_storage_unreadable'); }
+    const proof=await inspectPreviewTodayCollectionParity();
+    if (!proof.match)
+      return refuse('today_preview_seal_parity_required',{
+        prerequisiteReason:proof.reason
+      });
+    try { if (!sourceCurrent()) return refuse('legacy_today_changed_before_seal'); }
+    catch (_) { return refuse('legacy_today_storage_unreadable'); }
+    let db,rows,evidence,runtimeMeta,seedReceipt,actionReceipt;
+    const receiptId='today-preview-seal:'+actionId;
+    try {
+      db=await open();
+      if (!db) return refuse('v2_unavailable');
+      const tx=db.transaction(['todayDays','mutations','meta'],'readonly');
+      const [storedRows,ev,meta,allReceipts]=await Promise.all([
+        requestPromise(tx.objectStore('todayDays').getAll()),
+        requestPromise(tx.objectStore('meta').get('today-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
+        requestPromise(tx.objectStore('mutations').getAll())
+      ]);
+      rows=storedRows;evidence=ev;runtimeMeta=meta;
+      seedReceipt=allReceipts.find(x=>x?.id===ev?.receiptId);
+      actionReceipt=allReceipts.find(x=>x?.id===receiptId);
+    } catch (_) { return refuse('today_preview_seal_read_unavailable'); }
+    if (!runtimeMeta || runtimeMeta.schemaVersion!==SCHEMA_VERSION
+      || runtimeMeta.resetGeneration!==generation
+      || runtimeMeta.legacyMissing===true)
+      return refuse('pilot_meta_not_ready');
+    if (!evidence) return refuse('today_preview_seed_required');
+    if (actionReceipt) return refuse('today_preview_action_id_conflict');
+    if (typeof evidence.recordsFingerprint==='string') {
+      return {
+        checked:true,previewOnly:true,committed:false,confirmedDurable:true,
+        collectionParityVerified:true,todayMigrated:false,
+        reason:'today_preview_row_seal_already_verified',
+        canPromote:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+      };
+    }
+    if (evidence.recordsFingerprint!==undefined
+      || evidence.schemaVersion!==1
+      || evidence.resetGeneration!==generation
+      || evidence.sourceFingerprint!==source.sourceFingerprint
+      || evidence.sourceInventory!==fnv1a(sourceToken)+':'+sourceToken.length
+      || evidence.sourcePresent!==(source.raw!==null)
+      || evidence.dayCount!==source.dayCount
+      || evidence.recordCount!==source.records.length
+      || !seedReceipt || seedReceipt.type!=='today-preview-seed'
+      || seedReceipt.resetGeneration!==generation
+      || seedReceipt.sourceFingerprint!==evidence.sourceFingerprint
+      || seedReceipt.sourceInventory!==evidence.sourceInventory
+      || seedReceipt.sourcePresent!==evidence.sourcePresent
+      || seedReceipt.dayCount!==evidence.dayCount
+      || seedReceipt.recordCount!==evidence.recordCount
+      || seedReceipt.recordsFingerprint!==undefined)
+      return refuse('today_preview_seal_existing_provenance_invalid');
+    const normalized=all=>all.slice().sort((a,b)=>
+      String(a.id).localeCompare(String(b.id)));
+    if (stableJson(normalized(rows))!==stableJson(normalized(source.records)))
+      return refuse('today_preview_seal_existing_records_invalid');
+    let fingerprint;
+    try {
+      fingerprint=await previewRecoveryFingerprint(normalized(rows));
+      if (!sourceCurrent()) return refuse('legacy_today_changed_during_seal_digest');
+    } catch (_) { return refuse('today_preview_seal_digest_unavailable'); }
+    const sealReceipt={
+      id:receiptId,type:'today-preview-seal',
+      resetGeneration:generation,sourceInventory:evidence.sourceInventory,
+      sourceFingerprint:evidence.sourceFingerprint,
+      sourcePresent:evidence.sourcePresent,dayCount:evidence.dayCount,
+      recordCount:evidence.recordCount,recordsFingerprint:fingerprint,
+      priorReceiptId:evidence.receiptId,
+      priorFingerprint:seedReceipt.sourceFingerprint,
+      priorCount:seedReceipt.recordCount,
+      priorDayCount:seedReceipt.dayCount
+    };
+    const newEvidence={
+      ...evidence,recordsFingerprint:fingerprint,
+      receiptId,capturedAtISO:nowIso()
+    };
+    let failure=null;
+    const abort=(tx,reason)=>{failure=reason;try{tx.abort();}catch(_){}};
+    try {
+      if (!sourceCurrent()) return refuse('legacy_today_changed_before_seal_write');
+      const tx=db.transaction(['todayDays','mutations','meta'],'readwrite');
+      const dayStore=tx.objectStore('todayDays');
+      const metaStore=tx.objectStore('meta');
+      const mutationStore=tx.objectStore('mutations');
+      const requests=[
+        dayStore.getAll(),metaStore.get('today-preview'),
+        metaStore.get(RUNTIME_META_ID),
+        mutationStore.get(evidence.receiptId),
+        mutationStore.get(receiptId)
+      ];
+      const values=new Array(requests.length);
+      let remaining=requests.length;
+      requests.forEach((request,index)=>{request.onsuccess=()=>{
+        values[index]=request.result;
+        if (--remaining!==0) return;
+        try {
+          if (!sourceCurrent())
+            return abort(tx,'legacy_today_changed_under_seal_transaction');
+          if (stableJson(values[0])!==stableJson(rows)
+            || stableJson(values[1])!==stableJson(evidence)
+            || stableJson(values[2])!==stableJson(runtimeMeta)
+            || stableJson(values[3])!==stableJson(seedReceipt)
+            || values[4])
+            return abort(tx,'today_preview_seal_concurrent_change');
+          mutationStore.add(sealReceipt);
+          metaStore.put(newEvidence);
+        } catch (_) { abort(tx,'today_preview_seal_atomic_write_failed'); }
+      };});
+      await transactionPromise(tx);
+    } catch (_) { return refuse(failure||'today_preview_seal_atomic_write_failed'); }
+    try {
+      const tx=db.transaction(['todayDays','mutations','meta'],'readonly');
+      const [freshRows,freshEvidence,freshMeta,freshReceipt]=await Promise.all([
+        requestPromise(tx.objectStore('todayDays').getAll()),
+        requestPromise(tx.objectStore('meta').get('today-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
+        requestPromise(tx.objectStore('mutations').get(receiptId))
+      ]);
+      if (stableJson(normalized(freshRows))!==stableJson(normalized(rows))
+        || stableJson(freshEvidence)!==stableJson(newEvidence)
+        || stableJson(freshMeta)!==stableJson(runtimeMeta)
+        || stableJson(freshReceipt)!==stableJson(sealReceipt))
+        return refuse('today_preview_seal_readback_unverified',{
+          committed:true,writeOutcomeUncertain:true
+        });
+      if (!sourceCurrent()) return refuse('legacy_today_changed_after_seal',{
+        committed:true,confirmedDurable:true,writeOutcomeUncertain:true
+      });
+      const parity=await inspectPreviewTodayCollectionParity();
+      if (!parity.match) return refuse('today_preview_seal_parity_unverified',{
+        prerequisiteReason:parity.reason,
+        committed:true,confirmedDurable:true,writeOutcomeUncertain:true
+      });
+      if (!sourceCurrent()) return refuse('legacy_today_changed_after_seal_parity',{
+        committed:true,confirmedDurable:true,writeOutcomeUncertain:true
+      });
+      return {
+        checked:true,previewOnly:true,committed:true,confirmedDurable:true,
+        collectionParityVerified:true,todayMigrated:false,
+        reason:'today_preview_row_sealed',
+        canPromote:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+      };
+    } catch (_) { return refuse('today_preview_seal_readback_unavailable',{
+      committed:true,writeOutcomeUncertain:true
+    }); }
+  }
+
   // Explicit PREVIEW ONLY: reconcile changed Today day rows after an
   // immutable seed. A whole-collection SHA proof binds existing rows to
   // the last receipt before any update or deletion is permitted.
@@ -10055,6 +10241,7 @@
     rehearsePreviewTodayCollectionSeed,
     inspectPreviewTodayCollectionParity,
     rehearsePreviewTodayCollectionReconcile,
+    rehearsePreviewTodayRowSeal,
     inspectPreviewProjectsSource,
     rehearsePreviewTaskCollectionSeed,
     rehearsePreviewTaskCollectionReconcile,
