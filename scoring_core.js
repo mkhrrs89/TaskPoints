@@ -38,6 +38,15 @@
   // Completion IDs are intentionally category-independent for historical
   // compatibility. Journal IDs may distinguish vice/habit for coalescing.
   function habitCompletionId(habitId, dayKey) { return `habit:${habitId}:${dayKey}`; }
+  // A backdated Habit/Vice tap belongs to its selected TaskPoints day.
+  // updatedAtISO is the real edit time (useful for journal ordering), never
+  // the completedAtISO used for daily scoring.
+  function selectedHabitDayCompletedAtISO(dayKey) {
+    if (typeof dayKey !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) return '';
+    const date = fromKey(dayKey);
+    if (!Number.isFinite(date.getTime()) || dateKey(date) !== dayKey) return '';
+    return new Date(date.getTime() + 12 * 60 * 60 * 1000).toISOString();
+  }
   function readPendingHabitDeltas(storageKey = PENDING_HABIT_DELTAS_KEY) {
     const raw = localStorage.getItem(storageKey);
     if (!raw) return [];
@@ -86,7 +95,7 @@
         if (delta.icy === true) habit.iceKeys.push(delta.dayKey);
         const points = Number.isFinite(Number(delta.completionPoints)) ? Number(delta.completionPoints) : (Number(habit.pointsPerDay) || 0) * fraction;
         const completionId = habitCompletionId(habit.id, delta.dayKey);
-        state.completions.unshift({ id: completionId, taskId: completionId, title: `[${delta.source === 'vice' ? 'Vice' : 'Habit'}] ${habit.name} (${delta.dayKey})`, points, completedAtISO: delta.updatedAtISO, source: delta.source, habitId: habit.id, dayKey: delta.dayKey, completionFraction: fraction });
+        state.completions.unshift({ id: completionId, taskId: completionId, title: `[${delta.source === 'vice' ? 'Vice' : 'Habit'}] ${habit.name} (${delta.dayKey})`, points, completedAtISO: selectedHabitDayCompletedAtISO(delta.dayKey) || delta.updatedAtISO, source: delta.source, habitId: habit.id, dayKey: delta.dayKey, completionFraction: fraction });
       } else if (failed) habit.failedKeys.push(delta.dayKey);
       habit.updatedAtISO = delta.updatedAtISO || habit.updatedAtISO;
       applied++; appliedDeltas.push(delta);
@@ -5446,6 +5455,20 @@ const workHoursMax = Object.prototype.hasOwnProperty.call(workInput, 'hoursMax')
       || title.toLowerCase().startsWith('calories');
     if (isMetric && (!c.source || c.source === 'task')) {
       c.source = 'metric';
+    }
+    // Repair a historical journal replay that stamped the edit time onto a
+    // backdated Habit/Vice completion. The explicit dayKey is authoritative;
+    // other completion sources and valid same-day timestamps are untouched.
+    // Only normalize the in-memory projection here. Normal app writes retain
+    // the existing verified storage / journal / recovery safeguards.
+    if ((c.source === 'habit' || c.source === 'vice')
+      && typeof c.completedAtISO === 'string'
+      && Number.isFinite(new Date(c.completedAtISO).getTime())
+      && typeof c.dayKey === 'string') {
+      const selectedDayISO = selectedHabitDayCompletedAtISO(c.dayKey);
+      if (selectedDayISO && dateKey(c.completedAtISO) !== c.dayKey) {
+        c.completedAtISO = selectedDayISO;
+      }
     }
     return c;
   }
