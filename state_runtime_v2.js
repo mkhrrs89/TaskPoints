@@ -5199,6 +5199,248 @@
       dayCount:days.size,records};
   }
 
+  // PREVIEW ONLY: materialize Today view one day at a time without
+  // normalizing away unknown top-level properties or absent day-map keys.
+  // No production Today writer or export path reads this isolated store.
+  async function rehearsePreviewTodayCollectionSeed(sourceToken,actionId) {
+    const refuse=(reason,detail={})=>({
+      checked:true,previewOnly:true,committed:false,confirmedDurable:false,
+      collectionParityVerified:false,todayMigrated:false,
+      canPromote:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...detail
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    if (typeof sourceToken!=='string' || !sourceToken)
+      return refuse('full_origin_token_required');
+    if (typeof actionId!=='string' || !actionId || actionId.length>128)
+      return refuse('today_preview_action_id_required');
+    const generation=currentGeneration({create:false});
+    if (!generation) return refuse('generation_unavailable');
+    const modeEpoch=darkMirrorModeEpoch;
+    const sourceCurrent=()=>isDarkEnabled()
+      && darkMirrorModeEpoch===modeEpoch
+      && currentGeneration({create:false})===generation
+      && captureReadOnlyFullStorageInventory()===sourceToken;
+    let captured;
+    try {
+      if (!sourceCurrent()) return refuse('full_origin_changed');
+      captured=await capturePreviewTodaySource();
+      if (captured.reason) return refuse(captured.reason,{
+        prerequisiteReason:captured.prerequisiteReason
+      });
+      if (captured.inventory!==sourceToken || !sourceCurrent())
+        return refuse('legacy_today_changed_during_capture');
+    } catch (_) { return refuse('legacy_today_storage_unreadable'); }
+    const {records,sourceFingerprint,dayCount,raw}=captured;
+    if (records.length>4097 || JSON.stringify(records).length>1258291)
+      return refuse('today_preview_seed_too_large');
+    const sourceInventory=fnv1a(sourceToken)+':'+sourceToken.length;
+    const receiptId='today-preview-seed:'+actionId;
+    const receipt={id:receiptId,type:'today-preview-seed',
+      resetGeneration:generation,sourceInventory,sourceFingerprint,
+      sourcePresent:raw!==null,dayCount,recordCount:records.length};
+    const evidence={id:'today-preview',schemaVersion:1,
+      resetGeneration:generation,sourceInventory,sourceFingerprint,
+      sourcePresent:raw!==null,dayCount,recordCount:records.length,
+      receiptId,capturedAtISO:nowIso()};
+    let db,initialRows,initialEvidence,initialMeta,priorReceipt;
+    try {
+      db=await open();
+      if (!db) return refuse('v2_unavailable');
+      const tx=db.transaction(['todayDays','mutations','meta'],'readonly');
+      const [rows,ev,meta,allReceipts]=await Promise.all([
+        requestPromise(tx.objectStore('todayDays').getAll()),
+        requestPromise(tx.objectStore('meta').get('today-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
+        requestPromise(tx.objectStore('mutations').getAll())
+      ]);
+      initialRows=rows;initialEvidence=ev;initialMeta=meta;
+      priorReceipt=ev?allReceipts.find(x=>x?.id===ev.receiptId):null;
+    } catch (_) { return refuse('today_preview_read_unavailable'); }
+    if (!initialMeta || initialMeta.schemaVersion!==SCHEMA_VERSION
+      || initialMeta.resetGeneration!==generation
+      || initialMeta.legacyMissing===true)
+      return refuse('pilot_meta_not_ready');
+    const normalizedRows=rows=>rows.slice().sort((a,b)=>
+      String(a.id).localeCompare(String(b.id)));
+    if (initialEvidence) {
+      if (initialEvidence.schemaVersion!==1
+        || initialEvidence.resetGeneration!==generation
+        || initialEvidence.sourceInventory!==sourceInventory
+        || initialEvidence.sourceFingerprint!==sourceFingerprint
+        || initialEvidence.sourcePresent!==(raw!==null)
+        || initialEvidence.dayCount!==dayCount
+        || initialEvidence.recordCount!==records.length
+        || !priorReceipt || priorReceipt.id!==initialEvidence.receiptId
+        || priorReceipt.type!=='today-preview-seed'
+        || priorReceipt.resetGeneration!==generation
+        || priorReceipt.sourceInventory!==sourceInventory
+        || priorReceipt.sourceFingerprint!==sourceFingerprint
+        || priorReceipt.sourcePresent!==(raw!==null)
+        || priorReceipt.dayCount!==dayCount
+        || priorReceipt.recordCount!==records.length
+        || stableJson(normalizedRows(initialRows))
+          !==stableJson(normalizedRows(records)))
+        return refuse('today_preview_existing_evidence_preserved');
+    } else if (initialRows.length) {
+      return refuse('today_preview_orphaned_rows_preserved');
+    }
+    try { if (!sourceCurrent()) return refuse('legacy_today_changed_before_seed'); }
+    catch (_) { return refuse('legacy_today_storage_unreadable'); }
+
+    if (!initialEvidence) {
+      let failure=null;
+      const abort=(tx,reason)=>{failure=reason;try{tx.abort();}catch(_){}};
+      try {
+        const tx=db.transaction(['todayDays','mutations','meta'],'readwrite');
+        const dayStore=tx.objectStore('todayDays');
+        const mutationStore=tx.objectStore('mutations');
+        const metaStore=tx.objectStore('meta');
+        const reads=[dayStore.getAll(),metaStore.get('today-preview'),
+          metaStore.get(RUNTIME_META_ID),mutationStore.get(receiptId)];
+        const values=new Array(reads.length);
+        let pending=reads.length;
+        reads.forEach((request,index)=>{request.onsuccess=()=>{
+          values[index]=request.result;
+          if (--pending!==0) return;
+          try {
+            if (!sourceCurrent())
+              return abort(tx,'legacy_today_changed_under_transaction');
+            if (stableJson(values[0])!==stableJson(initialRows)
+              || stableJson(values[1])!==stableJson(initialEvidence)
+              || stableJson(values[2])!==stableJson(initialMeta)
+              || values[3])
+              return abort(tx,'today_preview_concurrent_change');
+            for (const record of records) dayStore.add(record);
+            mutationStore.add(receipt);
+            metaStore.add(evidence);
+          } catch (_) { abort(tx,'today_preview_atomic_seed_failed'); }
+        };});
+        await transactionPromise(tx);
+      } catch (_) { return refuse(failure||'today_preview_atomic_seed_failed'); }
+    }
+
+    // Re-read all record rows, receipt, and metadata in one transaction.
+    // Any V1 edit during readback is reported as uncertain, not safe parity.
+    try {
+      const tx=db.transaction(['todayDays','mutations','meta'],'readonly');
+      const [rows,storedEvidence,storedMeta,storedReceipt]=await Promise.all([
+        requestPromise(tx.objectStore('todayDays').getAll()),
+        requestPromise(tx.objectStore('meta').get('today-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
+        requestPromise(tx.objectStore('mutations').get(
+          initialEvidence?initialEvidence.receiptId:receiptId))
+      ]);
+      if (stableJson(normalizedRows(rows))!==stableJson(normalizedRows(records))
+        || stableJson(storedEvidence)!==stableJson(initialEvidence||evidence)
+        || stableJson(storedMeta)!==stableJson(initialMeta)
+        || stableJson(storedReceipt)!==stableJson(
+          initialEvidence?{
+            id:initialEvidence.receiptId,type:'today-preview-seed',
+            resetGeneration:generation,sourceInventory,sourceFingerprint,
+            sourcePresent:raw!==null,dayCount,recordCount:records.length
+          }:receipt))
+        return refuse('today_preview_readback_unverified',{
+          committed:!initialEvidence,writeOutcomeUncertain:true
+        });
+      if (!sourceCurrent()) return refuse('legacy_today_changed_after_seed',{
+        committed:!initialEvidence,confirmedDurable:true,writeOutcomeUncertain:true
+      });
+      return {
+        checked:true,previewOnly:true,committed:!initialEvidence,
+        confirmedDurable:true,collectionParityVerified:true,
+        todayMigrated:false,dayCount,recordCount:records.length,
+        reason:initialEvidence?'today_preview_already_verified'
+          :'today_preview_seed_verified',
+        canPromote:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+      };
+    } catch (_) { return refuse('today_preview_readback_unavailable',{
+      committed:!initialEvidence,writeOutcomeUncertain:true
+    }); }
+  }
+
+  // Independent, read-only Today source vs record-level V2 proof. The V1
+  // Today page keeps complete write/read authority even on a green result.
+  async function inspectPreviewTodayCollectionParity() {
+    const refuse=(reason,detail={})=>({
+      checked:true,previewOnly:true,match:false,todayMigrated:false,
+      canPromote:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...detail
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    const generation=currentGeneration({create:false});
+    if (!generation) return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    let captured;
+    try {
+      captured=await capturePreviewTodaySource();
+      if (captured.reason) return refuse('today_source_preflight_required',{
+        prerequisiteReason:captured.prerequisiteReason||captured.reason
+      });
+    } catch (_) { return refuse('legacy_today_storage_unreadable'); }
+    const current=()=>isDarkEnabled() && epoch===darkMirrorModeEpoch
+      && currentGeneration({create:false})===generation
+      && captureReadOnlyFullStorageInventory()===captured.inventory;
+    try { if (!current()) return refuse('legacy_today_changed_before_parity'); }
+    catch (_) { return refuse('legacy_today_storage_unreadable'); }
+    let db,rows,evidence,meta,receipts;
+    try {
+      db=await open();
+      if (!db) return refuse('v2_unavailable');
+      const tx=db.transaction(['todayDays','mutations','meta'],'readonly');
+      [rows,evidence,meta,receipts]=await Promise.all([
+        requestPromise(tx.objectStore('todayDays').getAll()),
+        requestPromise(tx.objectStore('meta').get('today-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
+        requestPromise(tx.objectStore('mutations').getAll())
+      ]);
+    } catch (_) { return refuse('today_preview_read_unavailable'); }
+    try {
+      if (!current()) return refuse('legacy_today_changed_during_parity');
+      if (!meta || meta.schemaVersion!==SCHEMA_VERSION
+        || meta.resetGeneration!==generation || meta.legacyMissing===true)
+        return refuse('pilot_meta_not_ready');
+      if (!evidence) return refuse('today_preview_seed_required');
+      if (evidence.schemaVersion!==1 || evidence.resetGeneration!==generation
+        || evidence.sourceInventory!==fnv1a(captured.inventory)+':'+captured.inventory.length
+        || evidence.sourceFingerprint!==captured.sourceFingerprint
+        || evidence.sourcePresent!==(captured.raw!==null)
+        || evidence.dayCount!==captured.dayCount
+        || evidence.recordCount!==captured.records.length)
+        return refuse('today_preview_source_stale');
+      const normalized=rs=>rs.slice().sort((a,b)=>
+        String(a.id).localeCompare(String(b.id)));
+      if (stableJson(normalized(rows))!==stableJson(normalized(captured.records)))
+        return refuse('today_preview_record_mismatch',{
+          expectedCount:captured.records.length,actualCount:rows.length
+        });
+      const receipt=receipts.find(x=>x?.id===evidence.receiptId);
+      if (!receipt || receipt.id!==evidence.receiptId
+        || receipt.type!=='today-preview-seed'
+        || receipt.resetGeneration!==generation
+        || receipt.sourceInventory!==evidence.sourceInventory
+        || receipt.sourceFingerprint!==evidence.sourceFingerprint
+        || receipt.sourcePresent!==evidence.sourcePresent
+        || receipt.dayCount!==evidence.dayCount
+        || receipt.recordCount!==evidence.recordCount)
+        return refuse('today_preview_receipt_invalid');
+      if (!current()) return refuse('legacy_today_changed_after_parity');
+      return {
+        checked:true,previewOnly:true,match:true,todayMigrated:false,
+        dayCount:captured.dayCount,recordCount:captured.records.length,
+        hasSourceKey:captured.raw!==null,
+        reason:'today_preview_parity_verified',
+        canPromote:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+      };
+    } catch (_) { return refuse('today_preview_parity_unreadable'); }
+  }
+
   // PREVIEW-ONLY source inventory for the independent Projects mini-app.
   // Projects live in tp_projects_v1, NOT the main TaskPoints snapshot. This
   // validator deliberately does not normalize, seed, rewrite, or migrate.
@@ -9477,6 +9719,8 @@
     exercisePreviewSerializedSnapshotLease,
     rehearsePreviewAdmittedTaskCompletionBatch,
     inspectPreviewTodaySource,
+    rehearsePreviewTodayCollectionSeed,
+    inspectPreviewTodayCollectionParity,
     inspectPreviewProjectsSource,
     rehearsePreviewTaskCollectionSeed,
     rehearsePreviewTaskCollectionReconcile,
