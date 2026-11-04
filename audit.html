@@ -178,6 +178,7 @@
 
   <script src="scoring_core.js"></script>
   <script src="audit_integrity.js"></script>
+  <script src="audit_habit_vice_scoring_dates.js"></script>
   <script src="audit_selected_day_breakdown.js"></script>
 <script>
     const $ = (id) => document.getElementById(id);
@@ -2560,6 +2561,25 @@ if (!season) {
       const selected = dateInput?.value || defaultAuditDate();
       const dateKey = TaskPointsCore.dateKey(selected);
 
+      // Preserve a read-only view of saved completion dates before load-time
+      // normalization can repair their timestamps in memory.
+      let savedHabitViceCompletions = null;
+      let savedHabitViceReadError = '';
+      try {
+        const rawStored = localStorage.getItem(TaskPointsCore.STORAGE_KEY || 'taskpoints_v1');
+        if (rawStored) {
+          const rawState = TaskPointsCore.parseTaskPointsStorageJson(rawStored, null);
+          if (!rawState || !Array.isArray(rawState.completions)) {
+            savedHabitViceReadError = 'Saved snapshot has no readable completions array';
+          } else {
+            savedHabitViceCompletions = rawState.completions.filter(c =>
+              c && (c.source === 'habit' || c.source === 'vice'));
+          }
+        }
+      } catch (error) {
+        savedHabitViceReadError = error?.message || String(error);
+      }
+
       const loadedState = TaskPointsCore.loadAppState();
       let state = loadedState.state;
       const storageKeysFound = loadedState.storageKeysFound || [];
@@ -2600,6 +2620,30 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
       endSelectedDayBreakdown?.({ completionCount: state.completions?.length || 0, selectedDateKey: dateKey });
 
       const checks = [];
+
+      // Independent date-level invariant. A saved backdated vice can remain
+      // misdated even when normalizeState has already fixed its visible score.
+      if (typeof window.TaskPointsAuditHabitViceScoringDates?.buildHabitViceScoringDateAudit === 'function') {
+        checks.push(window.TaskPointsAuditHabitViceScoringDates.buildHabitViceScoringDateAudit(state, {
+          dateKey: value => TaskPointsCore.dateKey(value),
+          selectedDateKey: dateKey,
+          savedCompletions: savedHabitViceCompletions,
+          savedReadError: savedHabitViceReadError,
+          detailLimit: 75
+        }));
+      } else {
+        checks.push({
+          id: 'habit-vice-scoring-date-parity',
+          title: 'Habit/Vice scoring dates match selected days',
+          section: 'Habit Ledger Integrity',
+          status: 'FAIL',
+          expected: 'Read-only Habit/Vice scoring date audit is loaded',
+          actual: 'Audit helper unavailable',
+          details: ['The Habit/Vice date-audit script did not load.'],
+          trace: 'window.TaskPointsAuditHabitViceScoringDates',
+          tips: 'Refresh the Audit page after deployment.'
+        });
+      }
 
       const logTotal = round2((Number(snapshot.baseTotal) || 0) + (Number(snapshot.inertia) || 0));
       const sourcesTotal = round2(Number(dayBreak.total) || 0);
