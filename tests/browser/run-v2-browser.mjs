@@ -1080,6 +1080,79 @@ try {
       freshJournalWritePreserved:true,unfencedLegacyWritesStillPossible:true};
   });
 
+  await run('Projects preview seeds atomic V2 records and receipts while V1 stays primary',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const raw=JSON.stringify([
+        {id:'proj-b',name:'B',notes:'Private V1 note',subtasks:[
+          {id:'sub-b',text:'Task',done:false}]},
+        {id:'proj-a',name:'A',done:45,extension:{foo:'unchanged'}}
+      ]);
+      localStorage.setItem('tp_projects_v1',raw);
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const originalSnapshot=localStorage.getItem('taskpoints_v1');
+      const first=await api.rehearsePreviewProjectsCollectionSeed(token,'browser-projects');
+      const repeat=await api.rehearsePreviewProjectsCollectionSeed(token,'browser-repeat');
+      const parity=await api.inspectPreviewProjectsCollectionParity();
+      const db=await api.open();
+      const tx=db.transaction(['projects','mutations','meta'],'readonly');
+      const read=req=>new Promise((resolve,reject)=>{
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      const [records,receipt,evidence]=await Promise.all([
+        read(tx.objectStore('projects').getAll()),
+        read(tx.objectStore('mutations').get('projects-preview-seed:browser-projects')),
+        read(tx.objectStore('meta').get('projects-preview'))
+      ]);
+      return {first,repeat,parity,version:db.version,
+        values:records.sort((a,b)=>a.legacyIndex-b.legacyIndex).map(r=>r.value),
+        receipt,evidence,rawStillExact:localStorage.getItem('tp_projects_v1')===raw,
+        v1Unchanged:localStorage.getItem('taskpoints_v1')===originalSnapshot,
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(result.first.committed,true,JSON.stringify(result.first));
+    assert.equal(result.first.collectionParityVerified,true);
+    assert.equal(result.repeat.committed,false);
+    assert.equal(result.parity.match,true,JSON.stringify(result.parity));
+    assert.equal(result.version,4);
+    assert.equal(result.values.length,2);
+    assert.equal(result.values[0].id,'proj-b');
+    assert.equal(result.values[0].notes,'Private V1 note');
+    assert.equal(result.receipt.type,'projects-preview-seed');
+    assert.equal(result.evidence.receiptId,result.receipt.id);
+    assert.equal(result.rawStillExact,true);
+    assert.equal(result.v1Unchanged,true);
+    assert.equal(result.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>Boolean(window.TaskPointsStateRuntimeV2));
+    const after=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const reloaded=await api.inspectPreviewProjectsCollectionParity();
+      const before=localStorage.getItem('tp_projects_v1');
+      const changed=JSON.parse(before);
+      changed[0].notes='newer authoritative change';
+      localStorage.setItem('tp_projects_v1',JSON.stringify(changed));
+      const stale=await api.inspectPreviewProjectsCollectionParity();
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const reseed=await api.rehearsePreviewProjectsCollectionSeed(token,'unsafe-reseed');
+      return {reloaded,stale,reseed,
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(after.reloaded.match,true,JSON.stringify(after.reloaded));
+    assert.equal(after.stale.match,false);
+    assert.equal(after.stale.reason,'projects_preview_source_stale');
+    assert.equal(after.reseed.committed,false);
+    assert.equal(after.reseed.reason,'projects_preview_existing_evidence_preserved');
+    assert.equal(after.authority,'legacy_only');
+    return {v4ProjectRows:2,durableReload:true,
+      v1EditRefused:true,legacyAuthorityPreserved:true};
+  });
+
   await run('nonpilot Tasks preview seeds real effective V1 Task rows into isolated records without switching authority',async context=>{
     const page=await open(context);
     const seeded=await page.evaluate(async()=>{
