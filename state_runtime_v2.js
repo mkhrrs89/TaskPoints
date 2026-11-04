@@ -5083,6 +5083,117 @@
   // whole Task objects into an isolated V2 records store in one transaction.
   // Neither an interrupted/partial import nor a later stale tab can silently
   // overwrite an existing same-generation Task preview. No auto-repair.
+  // Today is a separate, independently writable V1 authority. Its four
+  // per-day maps do not live in the main TaskPoints snapshot. This preview
+  // capture never invokes Today page's forgiving fallback, which can erase
+  // malformed records by turning them into empty maps when saved.
+  async function inspectPreviewTodaySource() {
+    const refuse=(reason,detail={})=>({
+      checked:true,previewOnly:true,sourceVerified:false,
+      todayMigrated:false,canPromote:false,
+      productionWritersFenced:false,readAuthority:'legacy_only',
+      mutationAuthority:'legacy_only',reason,...detail
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    const generation=currentGeneration({create:false});
+    if (!generation) return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    const sourceKey='taskpoints_today_view_v1';
+    const fields=['tasksByDay','notesByDay','selectedHabitIdsByDay','orderByDay'];
+    let inventory,raw,payload,keys=new Set(),entryCount=0,noteCount=0;
+    try {
+      inventory=captureReadOnlyFullStorageInventory();
+      raw=global.localStorage.getItem(sourceKey);
+      if (raw===null) payload={};
+      else if (typeof raw==='string') {
+        try { payload=JSON.parse(raw); }
+        catch (_) { return refuse('legacy_today_json_malformed'); }
+      } else return refuse('legacy_today_storage_unreadable');
+      if (!payload || typeof payload!=='object' || Array.isArray(payload))
+        return refuse('legacy_today_object_required');
+      if (Object.prototype.hasOwnProperty.call(payload,'version')
+        && payload.version!==1)
+        return refuse('legacy_today_schema_unrecognized');
+      for (const field of fields) {
+        if (!Object.prototype.hasOwnProperty.call(payload,field)) continue;
+        const map=payload[field];
+        if (!map || typeof map!=='object' || Array.isArray(map))
+          return refuse('legacy_today_day_map_invalid',{field});
+        for (const [day,items] of Object.entries(map)) {
+          if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(day)
+            || !Array.isArray(items))
+            return refuse('legacy_today_day_entries_invalid',{field});
+          keys.add(day);
+          entryCount+=items.length;
+          if (field==='notesByDay') noteCount+=items.length;
+        }
+      }
+      if (keys.size>4096 || JSON.stringify(payload).length>1048576)
+        return refuse('legacy_today_preview_size_limit');
+      if (captureReadOnlyFullStorageInventory()!==inventory
+        || global.localStorage.getItem(sourceKey)!==raw)
+        return refuse('legacy_today_changed_during_capture');
+    } catch (_) { return refuse('legacy_today_storage_unreadable'); }
+    let sourceFingerprint;
+    try {
+      sourceFingerprint=await previewRecoveryFingerprint({
+        sourcePresent:raw!==null,payload
+      });
+    } catch (_) { return refuse('legacy_today_digest_unavailable'); }
+    try {
+      if (!isDarkEnabled() || epoch!==darkMirrorModeEpoch
+        || currentGeneration({create:false})!==generation
+        || captureReadOnlyFullStorageInventory()!==inventory
+        || global.localStorage.getItem(sourceKey)!==raw)
+        return refuse('legacy_today_changed_after_digest');
+    } catch (_) { return refuse('legacy_today_storage_unreadable'); }
+    return {
+      checked:true,previewOnly:true,sourceVerified:true,
+      todayMigrated:false,hasSourceKey:raw!==null,
+      dayCount:keys.size,entryCount,noteCount,sourceFingerprint,
+      comparisonScope:'independent_v1_today_complete_source',
+      canPromote:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason:'legacy_today_source_verified'
+    };
+  }
+
+  // Exact stable source capture for future record-by-day preview migration.
+  // Unknown top-level fields and sparse day-map membership are not normalized.
+  async function capturePreviewTodaySource() {
+    const inventory=captureReadOnlyFullStorageInventory();
+    const raw=global.localStorage.getItem('taskpoints_today_view_v1');
+    const proof=await inspectPreviewTodaySource();
+    if (!proof.sourceVerified)
+      return {reason:'today_source_preflight_required',
+        prerequisiteReason:proof.reason};
+    if (captureReadOnlyFullStorageInventory()!==inventory
+      || global.localStorage.getItem('taskpoints_today_view_v1')!==raw)
+      return {reason:'legacy_today_changed_during_capture'};
+    const payload=raw===null?{}:JSON.parse(raw);
+    const fields=['tasksByDay','notesByDay','selectedHabitIdsByDay','orderByDay'];
+    const root={};
+    for (const [key,value] of Object.entries(payload)) {
+      if (!fields.includes(key)) root[key]=clone(value);
+    }
+    const days=new Set();
+    for (const key of fields) {
+      for (const day of Object.keys(payload[key]||{})) days.add(day);
+    }
+    const records=[{id:'root',value:root}];
+    for (const day of [...days].sort()) {
+      const value={};
+      for (const key of fields) {
+        if (Object.prototype.hasOwnProperty.call(payload[key]||{},day))
+          value[key]=clone(payload[key][day]);
+      }
+      records.push({id:'day:'+day,dayKey:day,value});
+    }
+    return {inventory,raw,sourceFingerprint:proof.sourceFingerprint,
+      dayCount:days.size,records};
+  }
+
   // PREVIEW-ONLY source inventory for the independent Projects mini-app.
   // Projects live in tp_projects_v1, NOT the main TaskPoints snapshot. This
   // validator deliberately does not normalize, seed, rewrite, or migrate.
@@ -9360,6 +9471,7 @@
     exercisePreviewCooperativeWriterLease,
     exercisePreviewSerializedSnapshotLease,
     rehearsePreviewAdmittedTaskCompletionBatch,
+    inspectPreviewTodaySource,
     inspectPreviewProjectsSource,
     rehearsePreviewTaskCollectionSeed,
     rehearsePreviewTaskCollectionReconcile,
