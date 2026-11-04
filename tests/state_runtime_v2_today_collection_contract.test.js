@@ -698,7 +698,7 @@ test('Pre-row-SHA V5 Today seed can be sealed without changing any day then reco
     unsealedReceipt);
   const newEvidence=db._stores.get('meta').get('today-preview');
   assert.match(newEvidence.recordsFingerprint,/^sha256:[a-f0-9]{64}:\d+$/);
-  const sealReceipt=mutations.get('today-preview-seal:one-time-upgrade');
+  const sealReceipt=db._stores.get('mutations').get('today-preview-seal:one-time-upgrade');
   assert.equal(sealReceipt.priorReceiptId,'today-preview-seed:first');
   assert.equal(sealReceipt.type,'today-preview-seal');
   const retry=await app.api.rehearsePreviewTodayRowSeal(
