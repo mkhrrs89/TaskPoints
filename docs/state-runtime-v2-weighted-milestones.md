@@ -725,3 +725,57 @@ writer fence, or permission to switch read authority. It does not modify
 `projects.html`, its forgiving existing load behavior, or any TaskPoints
 UI. This preparatory work earns no entire 12-point migration-gate credit.
 **67/100; canPromote:false.**
+
+
+## Isolated record-level Projects preview seed — November 4
+
+V2 extends its own IndexedDB schema from **V3 to V4**, adding a `projects`
+object store while keeping the original Habit, completion, Task, mutation
+and metadata stores, their records and their existing production behavior.
+`STORE_NAMES` remains the *pilot mutation transaction scope*, not a claim
+that all other stores have moved to production authority.
+
+The explicit preview-only
+`rehearsePreviewProjectsCollectionSeed(fullOriginToken,actionId)`
+uses the read-only `tp_projects_v1` source inspector as its validator.
+It copies the **full original ordered Project objects** (including unknown
+fields, notes, timestamps, subtasks and progress) into individual
+`projects` rows, without changing V1. It is bounded at 2,048 Projects
+or 2 MiB of logical rows per *single* atomic seed. Every first seed requires
+the current origin inventory, unchanged V2 mode and reset generation, valid
+runtime metadata, and no existing orphaned Project row or unverified earlier
+source evidence. A changed V1 source refuses reseeding without altering the
+existing V2 records.
+
+One IndexedDB transaction stores every Project row, a unique mutation
+receipt, and Project-source metadata with a SHA-256 source fingerprint,
+full-origin inventory signature, explicit `tp_projects_v1` key-presence bit,
+row count and generation. Quota errors and concurrent V2 inserts abort the
+whole transaction. An independent readonly transaction verifies all rows,
+the exact receipt, runtime metadata and source before reporting success.
+An already seeded, unchanged source can be reverified without additional
+writes. The separate read-only
+`inspectPreviewProjectsCollectionParity()` compares exact record values
+and ordering, metadata and the durable receipt against the current V1
+Projects source, and refuses stale, corrupted or missing evidence.
+
+**Reset safety:** The empty-reset/export and parity guard now also counts
+the V4 Projects store in its same-transaction retained-evidence inspection;
+a stranded preview Project cannot be hidden by an empty V1 snapshot.
+Previously protected stores remain counted.
+
+Synthetic Node tests cover V3-to-V4 schema upgrade with pilot preservation,
+first seed, exact fields and ordering, replay/restart, stale V1, orphaned V2
+rows, corrupted records/receipt, quota rollback, competing V2 writes,
+malformed V1, absent versus explicit-empty Projects, and production-host
+restriction. Chromium/WebKit regression additionally seeds real browser
+Projects, reloads to verify durable parity, and refuses a later V1-only edit.
+
+**Scope:** A V4 Projects seed is not a live Projects journal bridge,
+automatic update/delete reconciliation, independent/off-device recovery,
+mandatory old-tab exclusion, V2 authority switch, or full compatibility
+export. The old `projects.html` page, user features, read/write paths,
+backups and recovery remain in place. An older V3-only dark tab may get
+a normal IndexedDB `VersionError` after V4 upgrade; V1 remains the
+authoritative fallback and old V2 connections are invalidated. No weighted
+cutover gate has fully passed: **67/100, canPromote:false**.
