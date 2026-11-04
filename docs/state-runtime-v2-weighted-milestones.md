@@ -1066,3 +1066,20 @@ Notes writer admission, stale old-tab exclusion and physical Safari/iOS
 standalone interruption evidence. This does NOT complete the nonpilot
 migration gate, does not authorize production cutover and does not change the
 V1 authority. Weighted readiness remains **67/100**.
+
+
+## Real Notes UI preview validation (supplemental browser contract)
+
+The real-Home Chromium/WebKit UI safety runner now includes a separate
+scenario that opens the actual Notes editor on a disposable localhost origin,
+types and saves general Notes, then deliberately clears them to the empty
+string. It confirms both legacy copy paths have persisted the intentional
+clear before invoking the **injected preview-only V2 runtime** (the deployed
+Notes page itself remains unchanged). The preview seed and subsequent
+reconcile must verify after real UI saves, preserve every live V1 byte,
+reopen without resurrecting old text, and retain readAuthority=legacy_only.
+
+This is stronger browser evidence for Notes source handling, not proof that
+production Notes writers participate in a V2 admission protocol or that
+iOS Safari standalone lifecycle interruptions are solved. It earns no
+additional weighted milestone points.

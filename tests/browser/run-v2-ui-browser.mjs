@@ -1291,6 +1291,68 @@ try{
     return {corrections:3,finalMood:'4.1',duplicates:0,parity:parity.match};
   });
 
+
+  await test('real Notes editor edit and clear are preserved through isolated V2 reconciliation',async ctx=>{
+    await home(ctx);
+    const page=await ctx.newPage();
+    await page.goto(origin+'/notes.html',{waitUntil:'load'});
+    const input=page.locator('#notesInput');
+    await input.waitFor({state:'visible'});
+    await input.fill('Real Notes UI test first draft');
+    await input.blur();
+    await page.waitForFunction(()=>
+      localStorage.getItem('taskpoints_notes_v1')==='Real Notes UI test first draft'
+      && window.TaskPointsCore.readTaskPointsStoredState()?.notes==='Real Notes UI test first draft',
+      null,{timeout:10000});
+    // The production Notes page is intentionally unchanged. Load the
+    // preview-only inspection API only in this disposable browser test.
+    await page.addScriptTag({url:origin+'/state_runtime_v2.js'});
+    await page.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
+    const seed=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const before=token();
+      const result=await api.rehearsePreviewNotesBundleSeed(before,'real-ui-notes-seed');
+      return {result,unchanged:before===token()};
+    });
+    assert.equal(seed.result.collectionParityVerified,true,JSON.stringify(seed.result));
+    assert.equal(seed.unchanged,true);
+    await input.fill('');
+    await input.blur();
+    await page.waitForFunction(()=>
+      localStorage.getItem('taskpoints_notes_v1')===''
+      && window.TaskPointsCore.readTaskPointsStoredState()?.notes==='',
+      null,{timeout:10000});
+    const reconciled=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const before=localStorage.getItem('taskpoints_v1');
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const result=await api.rehearsePreviewNotesBundleReconcile(
+        token(),'real-ui-notes-clear');
+      const parity=await api.inspectPreviewNotesBundleParity();
+      return {result,parity,unchanged:before===localStorage.getItem('taskpoints_v1'),
+        cache:localStorage.getItem('taskpoints_notes_v1'),
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(reconciled.result.collectionParityVerified,true,JSON.stringify(reconciled.result));
+    assert.equal(reconciled.result.receiptCount,2);
+    assert.equal(reconciled.parity.match,true,JSON.stringify(reconciled.parity));
+    assert.equal(reconciled.unchanged,true);
+    assert.equal(reconciled.cache,'');
+    assert.equal(reconciled.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    assert.equal(await page.locator('#notesInput').inputValue(),'');
+    await page.addScriptTag({url:origin+'/state_runtime_v2.js'});
+    await page.evaluate(()=>window.TaskPointsStateRuntimeV2.startCoordinatedDarkMirror());
+    const verified=await page.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.inspectPreviewNotesBundleParity());
+    assert.equal(verified.match,true,JSON.stringify(verified));
+    return {realNotesPage:true,intentionalClear:true,
+      dualSourceDurability:true,previewReconciled:true,reloadVerified:true};
+  });
+
   await test('unsaved Task creation form does not create a ghost Task after background and reload',async ctx=>{
     const {page}=await home(ctx);
     await page.locator('[data-home-tab="tasks"]').click({force:true});
