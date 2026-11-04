@@ -608,3 +608,39 @@ test('historical completion reconcile aborts if V2 changes inside write admissio
     row=>row.id==='task-preview-completion-reconcile:concurrent-v2'),false);
 });
 
+
+
+test('Task reconciliation preserves duplicate and ID-less Habit/vice pilot history',async()=>{
+  const pilots=[
+    {id:'pilot-duplicate',source:'habit',habitId:'h1',dayKey:'2026-11-01',points:1},
+    {id:'pilot-duplicate',source:'habit',habitId:'h1',dayKey:'2026-11-02',points:1},
+    {source:'vice',habitId:'h1',dayKey:'2026-11-03',points:1}
+  ];
+  const initial=base();
+  initial.completions=pilots;
+  const app=install(new FakeIndexedDB(),new FakeStorage({
+    [DARK]:'1',[KEY]:JSON.stringify(initial)
+  }));
+  await app.api.seedFromLegacy();
+  const seededTask=await app.api.rehearsePreviewTaskCollectionSeed();
+  assert.equal(seededTask.verified,true,JSON.stringify(seededTask));
+  await currentTasksWithHistory(app,[...pilots,completion(1)]);
+  const imported=await app.api.rehearsePreviewTaskCompletionHistoryCatchUp(
+    app.token(),'pilot-history-import');
+  assert.equal(imported.fullyMirrored,true,JSON.stringify(imported));
+  const beforePilot=app.indexedDB.dump(DB).completions.filter(
+    row=>row.id!=='work-completion-1');
+  assert.equal(beforePilot.length,2);
+  await resyncChangedHistory(app,[...pilots,{...completion(1),points:99}],
+    'pilot-history-edit');
+  const v1=app.localStorage.getItem(KEY);
+  const result=await app.api.rehearsePreviewTaskCompletionHistoryReconcile(
+    app.token(),'pilot-safe-reconcile');
+  assert.equal(result.committed,true,JSON.stringify(result));
+  assert.equal(result.collectionParityVerified,true);
+  const afterPilot=app.indexedDB.dump(DB).completions.filter(
+    row=>row.id!=='work-completion-1');
+  assert.deepEqual(afterPilot,beforePilot);
+  assert.equal(app.localStorage.getItem(KEY),v1);
+});
+
