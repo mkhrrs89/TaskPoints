@@ -206,14 +206,14 @@ Nothing visible on the page is built here. === -->
   
   <!-- Your app scripts + CSS -->
 <link rel="preload" href="assets/tailwind.css" as="style">
-<link rel="preload" href="styles.css?v=20261102-freeze-bold-date-1" as="style">
+<link rel="preload" href="styles.css?v=20261103-task-swipe-delete-1" as="style">
 
 <link rel="stylesheet" href="assets/tailwind.css" media="print" onload="this.media='all'">
-<link rel="stylesheet" href="styles.css?v=20261102-freeze-bold-date-1" media="print" onload="this.media='all'">
+<link rel="stylesheet" href="styles.css?v=20261103-task-swipe-delete-1" media="print" onload="this.media='all'">
 
 <noscript>
   <link rel="stylesheet" href="assets/tailwind.css">
-  <link rel="stylesheet" href="styles.css?v=20261102-freeze-bold-date-1">
+  <link rel="stylesheet" href="styles.css?v=20261103-task-swipe-delete-1">
 </noscript>
   <style>
 
@@ -11480,9 +11480,117 @@ function getTaskCardLayoutStateInput() {
   return state;
 }
 
+
+// Mobile-only left-swipe gesture. This opens the SAME confirmation and Trash
+// workflow as the existing Delete button; swipes never delete automatically.
+const TASK_SWIPE_DELETE_MIN_X = 76;
+const TASK_SWIPE_DELETE_MAX_Y_RATIO = 0.6;
+
+function isTaskSwipeDeleteGesture(deltaX, deltaY) {
+  return deltaX <= -TASK_SWIPE_DELETE_MIN_X
+    && Math.abs(deltaY) <= Math.abs(deltaX) * TASK_SWIPE_DELETE_MAX_Y_RATIO;
+}
+
+function installMobileTaskSwipeDelete(list) {
+  if (!list || list.dataset.tpSwipeDeleteAttached === '1') return;
+  list.dataset.tpSwipeDeleteAttached = '1';
+  let gesture = null;
+  let suppressClickTaskId = '';
+  let suppressClickUntil = 0;
+
+  const mobileTouch = event => event.pointerType === 'touch'
+    && (window.matchMedia?.('(max-width: 900px)')?.matches
+      ?? (window.innerWidth <= 900));
+
+  const resetCard = current => {
+    if (!current?.card) return;
+    current.card.classList.remove('task-swipe-delete-active');
+    current.card.style.removeProperty('--task-swipe-delete-offset');
+  };
+
+  const cancel = () => {
+    resetCard(gesture);
+    gesture = null;
+  };
+
+  list.addEventListener('pointerdown', event => {
+    cancel();
+    if (!mobileTouch(event) || event.isPrimary === false) return;
+    if (!(event.target instanceof Element)) return;
+    // Leave checkmarks, menus, inputs, edits and their existing behavior alone.
+    if (event.target.closest('button, input, select, textarea, a, [contenteditable], [data-task-action]')) return;
+    const card = event.target.closest('.task-priority-card[data-task-id]');
+    if (!card || !list.contains(card)) return;
+    const id = card.dataset.taskId;
+    if (!id || editingTaskId === id) return;
+    if (!Array.isArray(state?.tasks) || !state.tasks.some(t =>
+      t?.id === id && !t.completedAtISO && !t.hidden && !isTaskTrashed(t)
+    )) return;
+    gesture = {
+      pointerId: event.pointerId, id, card,
+      startX: event.clientX, startY: event.clientY,
+      dx: 0, dy: 0, axis: null
+    };
+  }, { passive: true });
+
+  document.addEventListener('pointermove', event => {
+    const current = gesture;
+    if (!current || event.pointerId !== current.pointerId) return;
+    current.dx = event.clientX - current.startX;
+    current.dy = event.clientY - current.startY;
+    if (!current.axis && (Math.abs(current.dx) > 12 || Math.abs(current.dy) > 12)) {
+      current.axis = Math.abs(current.dx) > Math.abs(current.dy) * 1.25
+        ? 'horizontal' : 'vertical';
+    }
+    if (current.axis !== 'horizontal' || current.dx >= 0) {
+      resetCard(current);
+      return;
+    }
+    // A short drag reveals a red Delete cue without permanently moving a row.
+    current.card.classList.add('task-swipe-delete-active');
+    current.card.style.setProperty('--task-swipe-delete-offset',
+      Math.max(-96, current.dx) + 'px');
+  }, { passive: true });
+
+  document.addEventListener('pointerup', event => {
+    const current = gesture;
+    if (!current || event.pointerId !== current.pointerId) return;
+    current.dx = event.clientX - current.startX;
+    current.dy = event.clientY - current.startY;
+    const shouldDelete = current.axis === 'horizontal'
+      && isTaskSwipeDeleteGesture(current.dx, current.dy)
+      && current.card.isConnected;
+    const id = current.id;
+    cancel();
+    if (!shouldDelete) return;
+    // Suppress the synthesized click that can follow touch-pointer release.
+    // Without this, a declined confirmation could still expand the card.
+    suppressClickTaskId = id;
+    suppressClickUntil = Date.now() + 750;
+    deleteTask(id); // Always shows "Move this task to Trash?" first.
+  }, { passive: true });
+
+  document.addEventListener('pointercancel', event => {
+    if (gesture && event.pointerId === gesture.pointerId) cancel();
+  }, { passive: true });
+
+  list.addEventListener('click', event => {
+    if (Date.now() > suppressClickUntil || !(event.target instanceof Element)) return;
+    const card = event.target.closest('.task-priority-card[data-task-id]');
+    if (!card || card.dataset.taskId !== suppressClickTaskId) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    suppressClickTaskId = '';
+    suppressClickUntil = 0;
+  }, true);
+
+  window.addEventListener('blur', cancel);
+}
+
 function initTaskListDelegation(){
   const list = document.getElementById('taskList');
   if (!list) return;
+  installMobileTaskSwipeDelete(list);
   if (list.dataset.tpDelegationAttached === '1') return;
 
   const handleTaskAction = (e) => {
@@ -13306,6 +13414,9 @@ function deleteTask(id){
   const t = state.tasks.find(x => x.id === id);
   if (!t || !moveTaskToTrash(t, 'TasksScreen')) return;
   if (editingTaskId === id) editingTaskId = null;
+  // Preserve the existing single-task delete journal optimization for gestures,
+  // which do not originate from a Delete-button click.
+  TaskPointsCore?.armTaskDeleteFastPath?.(id);
   save();
   renderTasks();
   window.updateCriticalTasksIsland?.();

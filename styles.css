@@ -7886,3 +7886,34 @@ body.tp-player-profile-open #cropModal:not(.hidden) { z-index: 1900 !important; 
 .habit-freeze-action-buttons { display:flex; gap:10px; flex-wrap:wrap; }
 .habit-freeze-action-buttons button { flex:1 1 auto; min-height:42px; }
 .habit-freeze-action-buttons button:disabled { cursor:not-allowed; opacity:.46; }
+
+
+/* Mobile task swipe-to-delete: vertical scrolling stays native.
+   The red cue is revealed only while the user drags left. */
+@media (max-width: 900px) and (pointer: coarse) {
+  #taskList .task-priority-card {
+    touch-action: pan-y;
+  }
+  #taskList .task-priority-card.task-swipe-delete-active {
+    position: relative;
+    overflow: visible;
+    transform: translate3d(var(--task-swipe-delete-offset, 0px), 0, 0);
+    will-change: transform;
+  }
+  #taskList .task-priority-card.task-swipe-delete-active::after {
+    content: "Delete";
+    position: absolute;
+    inset-block: 0;
+    left: 100%;
+    width: 96px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0 12px 12px 0;
+    background: #a22027;
+    color: #fff;
+    font-weight: 800;
+    font-size: 0.9rem;
+    pointer-events: none;
+  }
+}
