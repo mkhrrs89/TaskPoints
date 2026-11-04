@@ -1058,7 +1058,7 @@ test('nonpilot Tasks store is additive, explicit, source-verified and cannot bec
   assert.match(source,/const DB_VERSION = 5/);
   assert.match(source,/if \(!db\.objectStoreNames\.contains\('tasks'\)\) db\.createObjectStore\('tasks', \{ keyPath: 'id' \}\)/);
   assert.match(source,/if \(!db\.objectStoreNames\.contains\('projects'\)\) db\.createObjectStore\('projects', \{ keyPath: 'id' \}\)/);
-  assert.match(source,/if \\(!db\\.objectStoreNames\\.contains\\('todayDays'\\)\\) db\\.createObjectStore\\('todayDays', \\{ keyPath: 'id' \\}\\)/);
+  assert.match(source,/if \(!db\.objectStoreNames\.contains\('todayDays'\)\) db\.createObjectStore\('todayDays', \{ keyPath: 'id' \}\)/);
   assert.match(source,/const STORE_NAMES = Object\.freeze\(\['habits', 'completions', 'mutations', 'meta'\]\)/);
   for(const evidence of [
     'if (!isWalTestPreviewHost())',
