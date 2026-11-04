@@ -779,3 +779,50 @@ backups and recovery remain in place. An older V3-only dark tab may get
 a normal IndexedDB `VersionError` after V4 upgrade; V1 remains the
 authoritative fallback and old V2 connections are invalidated. No weighted
 cutover gate has fully passed: **67/100, canPromote:false**.
+
+
+## Receipt-proven incremental Projects reconciliation — November 4
+
+The V4 isolated Projects preview now supports an **explicit, non-authoritative**
+`rehearsePreviewProjectsCollectionReconcile(fullOriginToken, actionId)`.
+A V1 Project creation, edit (including notes, progress, and subtasks),
+deletion, or reordering can be mirrored into existing V2 Project rows
+without clearing/reseeding the entire store.
+
+The operation first requires a valid V1 `tp_projects_v1` source, a stable
+full-origin inventory, current reset generation/dark-mode epoch, and an intact
+previous V2 Projects snapshot. It checks the *entire* previous ordered
+Projects record set against the last SHA-256 source fingerprint, row IDs,
+contiguous positions, metadata and immutable seed/reconcile receipt before
+altering anything. Corruption, missing predecessor evidence, unrelated
+V2-only edits or a stale V1 token all fail closed. The independent Projects
+parity inspector now checks both seed and reconciliation receipts, including
+their immediately preceding receipt chain.
+
+At most **64 changed/added/deleted Project records** and **256 KiB of
+affected logical row data** may be reconciled per action (total source
+remains bounded by the V4 2 MiB/2,048 Project seed limits). The changed
+rows, delete tombstones, immutable action receipt, and successor source
+metadata are committed together inside one IndexedDB readwrite
+transaction. The transaction rechecks pre-write rows, metadata, receipts,
+and V1 full-origin token; a failed request/abort leaves prior V2 records
+untouched. A fresh readback and a full V1-to-V2 Project parity inspection
+are required to confirm durability. A true no-op independently rechecks
+live parity rather than relying on an earlier digest; if only another
+origin key changed, a metadata-only receipt advances the full-origin guard.
+Presence versus absence of an empty `tp_projects_v1` key is retained.
+
+New Node regression scenarios cover all four mutation types, no-op and
+reload, multiple reconciliations, unchanged origin vs unrelated key change,
+malformed source, corrupted Project row/receipt, quota rollback, competing
+V2 writer, stale source/action ID, 65+ changes, empty/absent transitions,
+broken predecessor and a race during no-op hashing. Chromium/WebKit
+exercise a V1 Projects edit, receipt-proven V2 reconciliation, and a second
+reload. Test completion and current CI results must be checked separately.
+
+**Not complete:** Project writes on `projects.html` still use V1;
+automatic preview import, live cross-tab writer admission, full reversible
+authority switch, whole-app backups and other nonpilot collections remain
+unmigrated. A cooperative prewrite check is not a fence against older tabs.
+This does not advance an entire weighted gate:
+**V2 readiness remains 67/100; canPromote:false.**
