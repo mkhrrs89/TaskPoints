@@ -1142,7 +1142,10 @@ try {
       const token=JSON.stringify(Array.from({length:localStorage.length},
         (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
       const reseed=await api.rehearsePreviewProjectsCollectionSeed(token,'unsafe-reseed');
-      return {reloaded,stale,reseed,
+      const reconciled=await api.rehearsePreviewProjectsCollectionReconcile(
+        token,'browser-reconcile');
+      const repaired=await api.inspectPreviewProjectsCollectionParity();
+      return {reloaded,stale,reseed,reconciled,repaired,
         authority:api.getStatus().readAuthority};
     });
     assert.equal(after.reloaded.match,true,JSON.stringify(after.reloaded));
@@ -1150,9 +1153,32 @@ try {
     assert.equal(after.stale.reason,'projects_preview_source_stale');
     assert.equal(after.reseed.committed,false);
     assert.equal(after.reseed.reason,'projects_preview_existing_evidence_preserved');
+    assert.equal(after.reconciled.committed,true,JSON.stringify(after.reconciled));
+    assert.equal(after.reconciled.changedRows,1);
+    assert.equal(after.reconciled.collectionParityVerified,true);
+    assert.equal(after.repaired.match,true,JSON.stringify(after.repaired));
     assert.equal(after.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    const last=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const proof=await api.inspectPreviewProjectsCollectionParity();
+      const db=await api.open();
+      const row=await new Promise((resolve,reject)=>{
+        const q=db.transaction('projects','readonly')
+          .objectStore('projects').get('proj-b');
+        q.onsuccess=()=>resolve(q.result);
+        q.onerror=()=>reject(q.error);
+      });
+      return {proof,notes:row?.value?.notes,
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(last.proof.match,true,JSON.stringify(last.proof));
+    assert.equal(last.notes,'newer authoritative change');
+    assert.equal(last.authority,'legacy_only');
     return {v4ProjectRows:2,durableReload:true,
-      v1EditRefused:true,legacyAuthorityPreserved:true};
+      staleV1SeedRefused:true,atomicReconcileAfterEdit:true,
+      reconciliationSurvivedReload:true,legacyAuthorityPreserved:true};
   });
 
   await run('nonpilot Tasks preview seeds real effective V1 Task rows into isolated records without switching authority',async context=>{
