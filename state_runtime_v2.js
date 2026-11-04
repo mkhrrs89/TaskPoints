@@ -5124,7 +5124,7 @@
         if (!map || typeof map!=='object' || Array.isArray(map))
           return refuse('legacy_today_day_map_invalid',{field});
         for (const [day,items] of Object.entries(map)) {
-          if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(day)
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(day)
             || !Array.isArray(items))
             return refuse('legacy_today_day_entries_invalid',{field});
           keys.add(day);
