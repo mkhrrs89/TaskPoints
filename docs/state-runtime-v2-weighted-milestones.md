@@ -826,3 +826,71 @@ authority switch, whole-app backups and other nonpilot collections remain
 unmigrated. A cooperative prewrite check is not a fence against older tabs.
 This does not advance an entire weighted gate:
 **V2 readiness remains 67/100; canPromote:false.**
+
+
+## V5 Today independent day-map preview — November 4
+
+The standalone Today page stores its canonical per-day view state under
+`taskpoints_today_view_v1`, **outside** the main `taskpoints_v1`
+snapshot. Its existing `loadTodayDb()` tolerantly falls back to
+empty objects when source JSON is malformed and normalizes invalid maps
+or arrays. Reusing that fallback for a V2 import would risk silent loss
+of dated task picks, inline notes, selected habits and exact drag order.
+
+V2 now includes an independent preview-host-only
+`inspectPreviewTodaySource()` read-only preflight that verifies a
+stable *full-origin* inventory, current reset generation, and dark-mode
+epoch before and after SHA-256 capture. It rejects malformed JSON,
+unrecognized schema versions, non-object day maps, unexpected day-key
+formats, non-array day values, denied storage and changed source
+bytes. The preflight covers all four canonical maps
+(`tasksByDay`, `notesByDay`, `selectedHabitIdsByDay`,
+`orderByDay`) and **does not export note contents** in its result.
+Its source limits are 4,096 distinct day keys and a 1 MiB JSON
+payload. Unknown top-level extensions are retained exactly.
+
+An additive schema upgrade to **V5** creates an independent
+`todayDays` object store in the isolated V2 IndexedDB database.
+The explicit `rehearsePreviewTodayCollectionSeed(token,actionId)`
+copies source data to one `day:<YYYY-MM-DD>` row per distinct day
+plus a `root` row containing every non-day-map top-level field
+and the exact list of present maps (distinguishing missing maps
+from present-but-empty maps). Missing source key, present `{}`,
+present empty day maps, empty dates, notes and unknown fields are
+preserved as distinct, non-destructive cases. Nothing changes
+the live Today page.
+
+Every first seed requires current pilot metadata, an exact original
+full-origin token, and an empty/unclaimed V2 Today store. It saves
+every per-day row, source checksum/metadata and an immutable
+`today-preview-seed:<actionId>` receipt in **one IndexedDB
+transaction**. An injected quota failure or concurrently inserted
+V2 row aborts without partially importing anything. Repeating
+the unchanged seed verifies the existing rows and receipt instead
+of rewriting them. Changed V1 Today data *does not* authorize
+blind reseeding or V2-over-V1 data repair.
+
+`inspectPreviewTodayCollectionParity()` independently compares
+all V2 Today rows (including sparse entries and root metadata)
+with the currently captured V1 source and verifies the exact
+seed receipt, runtime generation and source inventory.
+Readback/parity happens before any acknowledgement. A changed
+source, missing receipt or tampered V2 row refuses green parity.
+New Node and Chromium/WebKit tests exercise malformed data,
+sparse dates/notes, hidden top-level extensions, absent/empty
+distinctions, reload/replay, V4-to-V5 upgrade, stale V1, partial
+failure and concurrent V2 writers.
+
+The verified-empty reset/export proof now **counts Today rows in the
+same readonly transaction as the previous pilot, Task and Projects
+stores**, refusing an empty-export success if any old V2 Today data
+survives. The original `STORE_NAMES` pilot transaction list and
+existing storage/rollback features remain unchanged.
+
+**Not included:** V1 Today writer interception, incremental Today
+edit/delete reconciliation, production admission of old/sleeping
+tabs, automatic V2 promotion, independent off-device backups,
+physical iOS proof, or complete V2 migration of Notes/Game/other
+authoritative collections. V1 remains read/write authority;
+`todayMigrated:false`, `canPromote:false` and the weighted
+readiness estimate stays **67/100** until an entire gate passes.
