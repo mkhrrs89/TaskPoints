@@ -13,7 +13,7 @@ const base=()=>({habits:[{id:'h1',name:'Exercise',doneKeys:[],failedKeys:[],iceK
   completions:[],tasks:[{id:'a',title:'First',points:2},{id:'b',title:'Second',points:3}]});
 function install(indexedDB=new FakeIndexedDB(),localStorage=new FakeStorage({
   [DARK]:'1',[KEY]:JSON.stringify(base())
-})){
+}),subtle=webcrypto.subtle){
   let uuid=0;
   const core={
     STORAGE_KEY:KEY,
@@ -26,7 +26,7 @@ function install(indexedDB=new FakeIndexedDB(),localStorage=new FakeStorage({
     habitCompletionId(id,day){return 'habit:'+id+':'+day}
   };
   const ctx={indexedDB,localStorage,structuredClone,TextEncoder,
-    crypto:{subtle:webcrypto.subtle,randomUUID(){return 'reconcile-'+ ++uuid}},
+    crypto:{subtle,randomUUID(){return 'reconcile-'+ ++uuid}},
     location:{hostname:'localhost'},JSON,Date,Math,String,Number,Boolean,
     Array,Object,Map,Set,Promise,TaskPointsCore:core,
     document:{readyState:'loading',addEventListener(){}},
@@ -41,8 +41,8 @@ function install(indexedDB=new FakeIndexedDB(),localStorage=new FakeStorage({
       value.tasks=tasks;localStorage.setItem(KEY,JSON.stringify(value))}
   };
 }
-async function seeded(){
-  const app=install();
+async function seeded(subtle=webcrypto.subtle){
+  const app=install(undefined,undefined,subtle);
   await app.api.seedFromLegacy();
   const seed=await app.api.rehearsePreviewTaskCollectionSeed();
   assert.equal(seed.verified,true,JSON.stringify(seed));
@@ -78,6 +78,37 @@ test('preview Task reconciliation atomically applies edits, additions, deletions
   const recovered=await restart.api.inspectPreviewTaskCollectionParity();
   assert.equal(recovered.match,true,recovered.reason);
 });
+test('no-op Task reconciliation refuses V2 writes made after its initial read',async()=>{
+  // The first digest freezes the desired V1 collection, and the second
+  // freezes the earlier V2 rows. Tamper with the live store only AFTER the
+  // second digest returns: the old shortcut could still report parity true.
+  let app,armed=false,digests=0;
+  const subtle={digest:async (...args)=>{
+    const hash=await webcrypto.subtle.digest(...args);
+    if (armed && ++digests===2) {
+      const records=app.indexedDB._databases.get(DB)._stores.get('tasks');
+      const row=records.get('a');
+      records.set('a',{...row,value:{...row.value,title:'Raced V2-only edit'}});
+    }
+    return hash;
+  }};
+  app=await seeded(subtle);
+  const v1=app.localStorage.getItem(KEY);
+  armed=true;
+  const outcome=await app.api.rehearsePreviewTaskCollectionReconcile(
+    app.token(),'noop-v2-race');
+  assert.equal(digests>=2,true);
+  assert.equal(outcome.reason,'task_preview_noop_parity_mismatch',
+    JSON.stringify(outcome));
+  assert.equal(outcome.confirmedDurable,false);
+  assert.equal(outcome.collectionParityVerified,false);
+  assert.equal(outcome.committed,false);
+  assert.equal(outcome.canPromote,false);
+  assert.equal(app.localStorage.getItem(KEY),v1);
+  assert.equal(app.indexedDB.dump(DB).tasks.find(row=>row.id==='a')
+    .value.title,'Raced V2-only edit');
+});
+
 test('unexplained V2-only Task edits are never overwritten',async()=>{
   const app=await seeded();
   const rows=app.indexedDB._databases.get(DB)._stores.get('tasks');
