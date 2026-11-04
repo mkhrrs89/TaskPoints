@@ -5404,13 +5404,26 @@
         });
       const receipt=receipts.find(row=>row?.id===evidence.receiptId);
       if (!receipt || receipt.id!==evidence.receiptId
-        || receipt.type!=='projects-preview-seed'
+        || !['projects-preview-seed','projects-preview-reconcile']
+          .includes(receipt.type)
         || receipt.resetGeneration!==generation
         || receipt.sourceInventory!==inventorySignature
         || receipt.sourceFingerprint!==source.sourceFingerprint
         || receipt.sourcePresent!==(source.raw!==null)
         || receipt.projectCount!==expected.length)
         return refuse('projects_preview_receipt_missing_or_invalid');
+      if (receipt.type==='projects-preview-reconcile') {
+        const parent=receipts.find(row=>row?.id===receipt.priorReceiptId);
+        if (!parent || parent.id===receipt.id
+          || !['projects-preview-seed','projects-preview-reconcile']
+            .includes(parent.type)
+          || parent.resetGeneration!==generation
+          || receipt.nextFingerprint!==evidence.sourceFingerprint
+          || receipt.nextCount!==evidence.projectCount
+          || receipt.priorFingerprint!==parent.sourceFingerprint
+          || receipt.priorCount!==parent.projectCount)
+          return refuse('projects_preview_receipt_chain_invalid');
+      }
       if (!current()) return refuse('legacy_projects_changed_after_parity');
       return {
         checked:true,previewOnly:true,match:true,
