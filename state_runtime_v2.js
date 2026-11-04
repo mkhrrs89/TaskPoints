@@ -6042,12 +6042,19 @@
     // explicit reconciliation before a new compatibility proof can certify
     // property-presence semantics.
     const comparableBundle={...captured.bundle};
-    if(original.bundle.playersPresent===undefined)
-      delete comparableBundle.playersPresent;
+    const legacyPresenceUnsealed=original.bundle.playersPresent===undefined;
+    if(legacyPresenceUnsealed)delete comparableBundle.playersPresent;
+    // Historical receipts fingerprinted the exact old bundle shape; never
+    // compare their certified SHA with a newly expanded format's SHA.
+    // Verify each stored version using its original canonical digest.
+    const comparableDigest=legacyPresenceUnsealed
+      ? await previewRecoveryFingerprint({bundle:comparableBundle,
+          rows:captured.rows})
+      : captured.digest;
     if(stableJson(original.bundle)!==stableJson(comparableBundle)
       ||stableJson(original.rows.slice().sort((a,b)=>a.id-b.id))
         !==stableJson(captured.rows)
-      ||original.evidence.bundleFingerprint!==captured.digest)
+      ||original.evidence.bundleFingerprint!==comparableDigest)
       return {verified:false,reason:'game_preview_source_stale'};
     if(!captured.current())
       return {verified:false,reason:'legacy_game_changed_during_readback'};
