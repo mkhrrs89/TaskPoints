@@ -340,7 +340,7 @@ try {
         legacy:localStorage.getItem('taskpoints_v1'),
         authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
     });
-    assert.equal(retry.version,4);
+    assert.equal(retry.version,5);
     assert.equal(retry.tasksStorePresent, true);
     assert.deepEqual(retry.habitIds,['h1','h2']);
     assert.deepEqual(retry.sharedIndexRows,['shared-old']);
@@ -361,13 +361,13 @@ try {
     const upgrader=await context.newPage();
     await upgrader.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),{waitUntil:'load'});
     const newVersion=await upgrader.evaluate(()=>new Promise((resolve,reject)=>{
-      const req=indexedDB.open('taskpoints_state_v2',5);
+      const req=indexedDB.open('taskpoints_state_v2',6);
       req.onupgradeneeded=()=>{};
       req.onsuccess=()=>{const v=req.result.version;req.result.close();resolve(v);};
       req.onerror=()=>reject(req.error);
       req.onblocked=()=>reject(Error('existing V2 runtime refused to close for upgrade'));
     }));
-    assert.equal(newVersion,5);
+    assert.equal(newVersion,6);
     await page.waitForFunction(()=>window.TaskPointsStateRuntimeV2.getStatus().externalRevisionInvalidated,
       null,{timeout:10000});
     const stale=await page.evaluate(async()=>{
@@ -384,7 +384,7 @@ try {
     assert.equal(stale.candidate.eligible,false);
     assert.equal(stale.candidate.reason,'external_revision_invalidated');
     assert.equal(Object.hasOwn(stale.candidate,'habit'),false);
-    assert.ok(stale.openFailure,'stale version-4 open must not reopen a version-5 database');
+    assert.ok(stale.openFailure,'stale version-5 open must not reopen a version-6 database');
     assert.equal(stale.legacy,before.legacy);
     assert.equal(stale.wal,before.wal);
     assert.equal(stale.authority,'legacy_only');
@@ -419,14 +419,16 @@ try {
       return {version:db.version,indexPresent:store.indexNames.contains('by_habit_ids'),
         taskStoreReady:db.objectStoreNames.contains('tasks'),
         projectsStoreReady:db.objectStoreNames.contains('projects'),
+        todayStoreReady:db.objectStoreNames.contains('todayDays'),
         entries:all[0].entries,habitIds:all[0].habitIds,
         h1:h1.map(r=>r.id),h2:h2.map(r=>r.id),
         authority:runtime.getStatus().readAuthority,
         legacy:localStorage.getItem('taskpoints_v1')};
     });
-    assert.equal(changed.version,4);
+    assert.equal(changed.version,5);
     assert.equal(changed.taskStoreReady,true);
     assert.equal(changed.projectsStoreReady,true);
+    assert.equal(changed.todayStoreReady,true);
     assert.equal(changed.indexPresent,true);
     assert.deepEqual(changed.habitIds,['h1','h2']);
     assert.deepEqual(changed.h1,['shared-old']);
@@ -1119,7 +1121,7 @@ try {
     assert.equal(result.first.collectionParityVerified,true);
     assert.equal(result.repeat.committed,false);
     assert.equal(result.parity.match,true,JSON.stringify(result.parity));
-    assert.equal(result.version,4);
+    assert.equal(result.version,5);
     assert.equal(result.values.length,2);
     assert.equal(result.values[0].id,'proj-b');
     assert.equal(result.values[0].notes,'Private V1 note');
@@ -1216,7 +1218,7 @@ try {
     assert.equal(seeded.first.canPromote,false);
     assert.equal(seeded.second.reason,'task_preview_already_verified',JSON.stringify(seeded.second));
     assert.equal(seeded.second.stored,false);
-    assert.equal(seeded.version,4);
+    assert.equal(seeded.version,5);
     assert.equal(seeded.meta.taskCount,2);
     assert.equal(seeded.meta.resetGeneration,seeded.first.resetGeneration);
     assert.deepEqual(seeded.rows
