@@ -5158,6 +5158,270 @@
     };
   }
 
+  // Capture one immutable Projects source under the same full-origin and
+  // generation guards used elsewhere in V2. The existing read-only source
+  // inspector owns validation; this helper cannot downgrade bad JSON to [].
+  async function capturePreviewProjectsSnapshot() {
+    const inventory=captureReadOnlyFullStorageInventory();
+    const raw=global.localStorage.getItem('tp_projects_v1');
+    const proof=await inspectPreviewProjectsSource();
+    if (!proof.sourceVerified)
+      return {reason:'projects_source_preflight_required',prerequisiteReason:proof.reason};
+    if (captureReadOnlyFullStorageInventory()!==inventory
+      || global.localStorage.getItem('tp_projects_v1')!==raw)
+      return {reason:'legacy_projects_source_changed_during_capture'};
+    const projects=raw===null?[]:JSON.parse(raw);
+    if (proof.hasSourceKey!==(raw!==null) || !Array.isArray(projects))
+      return {reason:'legacy_projects_source_changed_during_capture'};
+    return {inventory,raw,projects,sourceFingerprint:proof.sourceFingerprint};
+  }
+
+  // Explicit preview-host-only, V1-backed Projects collection seed. This
+  // adds one record per Project to an isolated V2 store and commits the
+  // receipt+source evidence in that SAME IndexedDB transaction. Never clear
+  // earlier evidence or rewrite the separately authoritative V1 Projects key.
+  async function rehearsePreviewProjectsCollectionSeed(sourceToken,actionId) {
+    const refuse=(reason,detail={})=>({
+      checked:true,previewOnly:true,committed:false,confirmedDurable:false,
+      collectionParityVerified:false,projectsMigrated:false,
+      canPromote:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...detail
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    if (typeof sourceToken!=='string' || !sourceToken)
+      return refuse('full_origin_token_required');
+    if (typeof actionId!=='string' || !actionId || actionId.length>128)
+      return refuse('projects_preview_action_id_required');
+    const generation=currentGeneration({create:false});
+    if (!generation) return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    const sourceCurrent=()=>isDarkEnabled()
+      && epoch===darkMirrorModeEpoch
+      && currentGeneration({create:false})===generation
+      && captureReadOnlyFullStorageInventory()===sourceToken;
+    let captured;
+    try {
+      if (!sourceCurrent()) return refuse('full_origin_changed');
+      captured=await capturePreviewProjectsSnapshot();
+      if (captured.reason) return refuse(captured.reason,{
+        prerequisiteReason:captured.prerequisiteReason
+      });
+      if (captured.inventory!==sourceToken || !sourceCurrent())
+        return refuse('legacy_projects_source_changed_during_capture');
+    } catch (_) { return refuse('legacy_projects_source_unreadable'); }
+    const {projects,sourceFingerprint,raw}=captured;
+    const target=projects.map((value,legacyIndex)=>({
+      id:value.id,legacyIndex,value
+    }));
+    // A single bounded seed transaction never partially migrates a source.
+    if (projects.length>2048 || JSON.stringify(target).length>2097152)
+      return refuse('projects_preview_seed_too_large');
+    const sourceInventory=fnv1a(sourceToken)+':'+sourceToken.length;
+    const receiptId='projects-preview-seed:'+actionId;
+    const receipt={
+      id:receiptId,type:'projects-preview-seed',
+      resetGeneration:generation,sourceInventory,sourceFingerprint,
+      projectCount:projects.length,sourcePresent:raw!==null
+    };
+    const evidence={
+      id:'projects-preview',schemaVersion:1,resetGeneration:generation,
+      sourceInventory,sourceFingerprint,sourcePresent:raw!==null,
+      projectCount:projects.length,receiptId,capturedAtISO:nowIso()
+    };
+    let db,initialRows,initialEvidence,initialMeta;
+    try {
+      db=await open();
+      if (!db) return refuse('v2_unavailable');
+      const tx=db.transaction(['projects','meta'],'readonly');
+      [initialRows,initialEvidence,initialMeta]=await Promise.all([
+        requestPromise(tx.objectStore('projects').getAll()),
+        requestPromise(tx.objectStore('meta').get('projects-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID))
+      ]);
+    } catch (_) { return refuse('projects_preview_read_unavailable'); }
+    if (!initialMeta || initialMeta.schemaVersion!==SCHEMA_VERSION
+      || initialMeta.resetGeneration!==generation
+      || initialMeta.legacyMissing===true)
+      return refuse('pilot_meta_not_ready');
+    if (initialEvidence) {
+      // Never infer valid V2 state from source metadata alone. A later source
+      // edit remains V1-only until a separate explicit reconcile operation.
+      if (initialEvidence.resetGeneration!==generation
+        || initialEvidence.schemaVersion!==1
+        || initialEvidence.sourceFingerprint!==sourceFingerprint
+        || initialEvidence.sourceInventory!==sourceInventory
+        || initialEvidence.sourcePresent!==(raw!==null)
+        || initialEvidence.projectCount!==projects.length)
+        return refuse('projects_preview_existing_evidence_preserved');
+      if (stableJson(initialRows.slice().sort((a,b)=>a.legacyIndex-b.legacyIndex))
+        !==stableJson(target))
+        return refuse('projects_preview_existing_evidence_preserved');
+    } else if (initialRows.length) {
+      return refuse('projects_preview_orphaned_records_preserved');
+    }
+    try { if (!sourceCurrent()) return refuse('legacy_projects_changed_before_seed'); }
+    catch (_) { return refuse('legacy_projects_source_unreadable'); }
+    if (!initialEvidence) {
+      let failure=null;
+      const abort=(tx,reason)=>{failure=reason;try{tx.abort();}catch(_){}};
+      try {
+        const tx=db.transaction(['projects','mutations','meta'],'readwrite');
+        const projectStore=tx.objectStore('projects');
+        const metaStore=tx.objectStore('meta');
+        const mutationStore=tx.objectStore('mutations');
+        const reads=[
+          projectStore.getAll(),metaStore.get('projects-preview'),
+          metaStore.get(RUNTIME_META_ID),mutationStore.get(receiptId)
+        ];
+        const values=new Array(reads.length);
+        let outstanding=reads.length;
+        reads.forEach((req,index)=>{req.onsuccess=()=>{
+          values[index]=req.result;
+          if (--outstanding!==0) return;
+          try {
+            if (!sourceCurrent()) return abort(tx,'legacy_projects_changed_under_transaction');
+            if (stableJson(values[0])!==stableJson(initialRows)
+              || stableJson(values[1])!==stableJson(initialEvidence)
+              || stableJson(values[2])!==stableJson(initialMeta)
+              || values[3])
+              return abort(tx,'projects_preview_concurrent_change');
+            for (const row of target) projectStore.add(row);
+            mutationStore.add(receipt);
+            metaStore.add(evidence);
+          } catch (_) { abort(tx,'projects_preview_atomic_seed_failed'); }
+        };});
+        await transactionPromise(tx);
+      } catch (_) { return refuse(failure||'projects_preview_atomic_seed_failed'); }
+    }
+
+    // Independent complete readback of Projects records, evidence, receipt
+    // and runtime epoch. A durable write with later source drift is reported
+    // as uncertain instead of authorizing parity or a V2 read cutover.
+    try {
+      const tx=db.transaction(['projects','mutations','meta'],'readonly');
+      const [rows,storedEvidence,storedMeta,storedReceipt]=await Promise.all([
+        requestPromise(tx.objectStore('projects').getAll()),
+        requestPromise(tx.objectStore('meta').get('projects-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
+        requestPromise(tx.objectStore('mutations').get(
+          initialEvidence?initialEvidence.receiptId:receiptId))
+      ]);
+      const order=rows.slice().sort((a,b)=>a.legacyIndex-b.legacyIndex);
+      const expectedReceipt=initialEvidence
+        ? {id:initialEvidence.receiptId,type:'projects-preview-seed',
+          resetGeneration:generation,sourceInventory,sourceFingerprint,
+          projectCount:projects.length,sourcePresent:raw!==null}
+        : receipt;
+      if (stableJson(order)!==stableJson(target)
+        || stableJson(storedEvidence)!==stableJson(initialEvidence||evidence)
+        || stableJson(storedMeta)!==stableJson(initialMeta)
+        || stableJson(storedReceipt)!==stableJson(expectedReceipt))
+        return refuse('projects_preview_readback_unverified',{
+          committed:!initialEvidence,writeOutcomeUncertain:true
+        });
+      if (!sourceCurrent()) return refuse('legacy_projects_changed_after_seed',{
+        committed:!initialEvidence,confirmedDurable:true,writeOutcomeUncertain:true
+      });
+      return {
+        checked:true,previewOnly:true,committed:!initialEvidence,
+        confirmedDurable:true,collectionParityVerified:true,
+        projectsMigrated:false,projectCount:projects.length,
+        reason:initialEvidence?'projects_preview_already_verified'
+          :'projects_preview_seed_verified',
+        canPromote:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+      };
+    } catch (_) {
+      return refuse('projects_preview_readback_unavailable',{
+        committed:!initialEvidence,writeOutcomeUncertain:true
+      });
+    }
+  }
+
+  // Read-only, independent V1-vs-V2 Projects parity. This cannot certify
+  // source authority or safe future writes because old tabs remain unfenced.
+  async function inspectPreviewProjectsCollectionParity() {
+    const refuse=(reason,detail={})=>({
+      checked:true,previewOnly:true,match:false,
+      projectsMigrated:false,canPromote:false,
+      productionWritersFenced:false,readAuthority:'legacy_only',
+      mutationAuthority:'legacy_only',reason,...detail
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    const generation=currentGeneration({create:false});
+    if (!generation) return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    let source;
+    try {
+      source=await capturePreviewProjectsSnapshot();
+      if (source.reason) return refuse('projects_source_preflight_required',{
+        prerequisiteReason:source.prerequisiteReason||source.reason
+      });
+    } catch (_) { return refuse('legacy_projects_source_unreadable'); }
+    const current=()=>isDarkEnabled()
+      && epoch===darkMirrorModeEpoch
+      && currentGeneration({create:false})===generation
+      && captureReadOnlyFullStorageInventory()===source.inventory;
+    try { if (!current()) return refuse('legacy_projects_changed_before_parity'); }
+    catch (_) { return refuse('legacy_projects_source_unreadable'); }
+    const expected=source.projects.map((value,legacyIndex)=>({
+      id:value.id,legacyIndex,value
+    }));
+    const inventorySignature=fnv1a(source.inventory)+':'+source.inventory.length;
+    let rows,evidence,meta,receipt;
+    try {
+      const db=await open();
+      if (!db) return refuse('v2_unavailable');
+      const tx=db.transaction(['projects','mutations','meta'],'readonly');
+      [rows,evidence,meta]=await Promise.all([
+        requestPromise(tx.objectStore('projects').getAll()),
+        requestPromise(tx.objectStore('meta').get('projects-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID))
+      ]);
+      if (!evidence) return refuse('projects_preview_missing');
+      // Receipt has to come from a second read of the same store with exact
+      // expected metadata. The result is still checked against fresh source.
+      const receiptTx=db.transaction('mutations','readonly');
+      receipt=await requestPromise(receiptTx.objectStore('mutations').get(evidence.receiptId));
+    } catch (_) { return refuse('projects_preview_read_unavailable'); }
+    try {
+      if (!current()) return refuse('legacy_projects_changed_during_parity');
+      if (!meta || meta.schemaVersion!==SCHEMA_VERSION
+        || meta.resetGeneration!==generation || meta.legacyMissing===true)
+        return refuse('pilot_meta_not_ready');
+      if (evidence.schemaVersion!==1 || evidence.resetGeneration!==generation
+        || evidence.sourceInventory!==inventorySignature
+        || evidence.sourceFingerprint!==source.sourceFingerprint
+        || evidence.sourcePresent!==(source.raw!==null)
+        || evidence.projectCount!==expected.length)
+        return refuse('projects_preview_source_stale');
+      const ordered=rows.slice().sort((a,b)=>a.legacyIndex-b.legacyIndex);
+      if (stableJson(ordered)!==stableJson(expected))
+        return refuse('projects_preview_record_mismatch',{
+          expectedCount:expected.length,actualCount:rows.length
+        });
+      if (!receipt || receipt.id!==evidence.receiptId
+        || receipt.type!=='projects-preview-seed'
+        || receipt.resetGeneration!==generation
+        || receipt.sourceInventory!==inventorySignature
+        || receipt.sourceFingerprint!==source.sourceFingerprint
+        || receipt.sourcePresent!==(source.raw!==null)
+        || receipt.projectCount!==expected.length)
+        return refuse('projects_preview_receipt_missing_or_invalid');
+      if (!current()) return refuse('legacy_projects_changed_after_parity');
+      return {
+        checked:true,previewOnly:true,match:true,
+        projectCount:expected.length,hasSourceKey:source.raw!==null,
+        projectsMigrated:false,reason:'projects_preview_parity_verified',
+        canPromote:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+      };
+    } catch (_) { return refuse('projects_preview_parity_unreadable'); }
+  }
+
   async function rehearsePreviewTaskCollectionSeed() {
     const refuse = (reason, detail = {}) => ({
       checked: true, previewOnly: true, verified: false, stored: false,
@@ -8863,6 +9127,8 @@
     setPilotReadProbeEnabled,
     probePilotHabitRead,
     rehearsePreviewTaskCompletionHistoryReconcile,
+    rehearsePreviewProjectsCollectionSeed,
+    inspectPreviewProjectsCollectionParity,
     getStatus
   };
 
