@@ -6672,6 +6672,336 @@
     };
   }
 
+
+  // PREVIEW ONLY: reconcile previously imported Task/Work/metric completion
+  // history against V1 after edits, deletions or ordering changes. No V1
+  // writer, pilot row or other nonpilot collection is modified. A first
+  // reconcile requires intact batch-import receipts for EVERY older scoped
+  // row; later reconciles require the exact prior atomic checkpoint.
+  async function rehearsePreviewTaskCompletionHistoryReconcile(sourceToken, actionId) {
+    const refuse = (reason, detail = {}) => ({
+      checked:true, previewOnly:true, committed:false,
+      confirmedDurable:false, collectionParityVerified:false,
+      canPromote:false, productionWritersFenced:false,
+      readAuthority:'legacy_only', mutationAuthority:'legacy_only',
+      reason, ...detail
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    if (typeof sourceToken !== 'string' || !sourceToken)
+      return refuse('full_origin_token_required');
+    if (typeof actionId !== 'string' || !actionId || actionId.length > 128)
+      return refuse('task_completion_action_id_required');
+    if (typeof core.readTaskPointsStoredState !== 'function'
+      || typeof core.readPendingTaskMutations !== 'function')
+      return refuse('legacy_task_reader_unavailable');
+    const generation=currentGeneration({create:false});
+    const modeEpoch=darkMirrorModeEpoch;
+    if (!generation) return refuse('generation_unavailable');
+    const sourceCurrent=()=>isDarkEnabled()
+      && darkMirrorModeEpoch===modeEpoch
+      && currentGeneration({create:false})===generation
+      && captureReadOnlyFullStorageInventory()===sourceToken;
+    let tasks, desired, taskFingerprint;
+    try {
+      if (!sourceCurrent()) return refuse('full_origin_changed');
+      const pending=core.readPendingTaskMutations();
+      if (pending?.malformed) return refuse('legacy_task_journal_malformed');
+      const state=core.readTaskPointsStoredState();
+      if (!state || !Array.isArray(state.tasks)
+        || !Array.isArray(state.completions))
+        return refuse('legacy_tasks_or_completions_missing');
+      tasks=clone(state.tasks);
+      const taskIds=new Set();
+      for (const task of tasks) {
+        if (!task || typeof task!=='object' || Array.isArray(task)
+          || task.id == null || !String(task.id)
+          || taskIds.has(String(task.id)))
+          return refuse('legacy_task_ids_invalid');
+        taskIds.add(String(task.id));
+      }
+      const completionIds=new Set();
+      desired=[];
+      for (let index=0;index<state.completions.length;index+=1) {
+        const row=state.completions[index];
+        if (!row || typeof row!=='object' || Array.isArray(row))
+          return refuse('legacy_completion_history_invalid');
+        if (typeof row.id!=='string' || !row.id || row.id.length>128
+          || completionIds.has(row.id))
+          return refuse('legacy_completion_id_ambiguous');
+        completionIds.add(row.id);
+        if (isPilotCompletion(row)) continue;
+        if (!['task','work','metric'].includes(String(row.source||''))
+          || typeof row.taskId!=='string' || !row.taskId)
+          return refuse('unsupported_nonpilot_completion_classes');
+        if (!taskIds.has(row.taskId)) return refuse('linked_legacy_task_missing');
+        const packed=withCompletionHabitIds({
+          id:row.id,entries:[{value:clone(row),sequence:-(index+1)}]
+        });
+        if (JSON.stringify(packed).length>131072)
+          return refuse('task_completion_payload_too_large');
+        desired.push(packed);
+      }
+      if (!sourceCurrent()) return refuse('legacy_changed_during_capture');
+      taskFingerprint=await previewRecoveryFingerprint(tasks);
+    } catch (_) { return refuse('legacy_completion_history_unreadable'); }
+
+    const taskParity=await inspectPreviewTaskCollectionParity();
+    if (!taskParity.match) return refuse('task_preview_parity_required',{
+      prerequisiteReason:taskParity.reason
+    });
+    try { if (!sourceCurrent()) return refuse('legacy_changed_before_reconcile'); }
+    catch (_) { return refuse('legacy_unreadable_before_reconcile'); }
+
+    let db, beforeRows, receipts, seal, meta, taskEvidence, taskRows;
+    try {
+      db=await open();
+      if (!db) return refuse('v2_unavailable');
+      const tx=db.transaction(['tasks','completions','mutations','meta'],'readonly');
+      [beforeRows,receipts,seal,meta,taskEvidence,taskRows]=await Promise.all([
+        requestPromise(tx.objectStore('completions').getAll()),
+        requestPromise(tx.objectStore('mutations').getAll()),
+        requestPromise(tx.objectStore('meta').get('task-preview-completion-reconcile')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
+        requestPromise(tx.objectStore('meta').get('task-preview')),
+        requestPromise(tx.objectStore('tasks').getAll())
+      ]);
+    } catch (_) { return refuse('task_completion_reconcile_read_unavailable'); }
+    if (!meta || meta.schemaVersion!==SCHEMA_VERSION
+      || meta.resetGeneration!==generation || meta.legacyMissing===true)
+      return refuse('pilot_meta_not_ready');
+    const signature=fnv1a(sourceToken)+':'+sourceToken.length;
+    if (!taskEvidence || taskEvidence.schemaVersion!==1
+      || taskEvidence.resetGeneration!==generation
+      || taskEvidence.taskFingerprint!==taskFingerprint
+      || taskEvidence.sourceInventory!==signature
+      || taskEvidence.taskCount!==tasks.length)
+      return refuse('task_preview_source_not_seeded');
+    const sortedTasks=taskRows.slice().sort((a,b)=>a.legacyIndex-b.legacyIndex);
+    if (sortedTasks.length!==tasks.length
+      || sortedTasks.some((r,i)=>r.id!==String(tasks[i].id)
+        || r.legacyIndex!==i || stableJson(r.value)!==stableJson(tasks[i])))
+      return refuse('task_preview_record_mismatch');
+
+    const oldById=new Map();
+    const wanted=new Map(desired.map(row=>[row.id,row]));
+    const otherRows=[];
+    const rowIds=new Set();
+    for (const row of beforeRows) {
+      if (!row || typeof row.id!=='string' || !row.id
+        || rowIds.has(row.id)) return refuse('v2_completion_pack_invalid');
+      rowIds.add(row.id);
+      const entries=Array.isArray(row.entries) ? row.entries :
+        Object.prototype.hasOwnProperty.call(row,'value')
+          ? [{value:row.value,sequence:row.sequence}] : [];
+      if (!entries.length) return refuse('v2_completion_pack_invalid');
+      const nonpilot=entries.filter(e=>!isPilotCompletion(e?.value));
+      if (!nonpilot.length) {
+        if (wanted.has(row.id)) return refuse('v2_completion_id_collides_with_pilot');
+        otherRows.push(row);
+        continue;
+      }
+      if (nonpilot.length!==1 || entries.length!==1
+        || nonpilot[0].value?.id!==row.id
+        || !['task','work','metric'].includes(String(nonpilot[0].value?.source||''))
+        || typeof nonpilot[0].value?.taskId!=='string'
+        || !nonpilot[0].value.taskId)
+        return refuse('v2_nonpilot_completion_evidence_preserved',{conflictingId:row.id});
+      oldById.set(row.id,row);
+    }
+    if (!oldById.size && desired.length)
+      return refuse('task_completion_history_backfill_required');
+
+    const ordered=rows=>rows.slice().sort((a,b)=>a.id.localeCompare(b.id));
+    const oldOrdered=ordered([...oldById.values()]);
+    let oldFingerprint;
+    try { oldFingerprint=await previewRecoveryFingerprint(oldOrdered); }
+    catch (_) { return refuse('task_completion_reconcile_digest_unavailable'); }
+
+    if (seal) {
+      // The prior reconciliation's metadata and receipt form one committed
+      // provenance checkpoint. Any independent preview change makes it stale.
+      const priorReceipt=receipts.find(r=>r.id===seal.receiptId);
+      if (seal.schemaVersion!==1 || seal.resetGeneration!==generation
+        || seal.stateFingerprint!==oldFingerprint
+        || seal.count!==oldById.size
+        || !priorReceipt || priorReceipt.type!=='task-preview-completion-reconcile'
+        || priorReceipt.resetGeneration!==generation
+        || priorReceipt.nextFingerprint!==oldFingerprint
+        || priorReceipt.nextCount!==seal.count
+        || priorReceipt.id!==seal.receiptId)
+        return refuse('task_completion_reconcile_prior_seal_invalid');
+    } else if (oldById.size) {
+      // Old batch receipts include the SHA-256 of the exact ordered packed
+      // rows they atomically inserted. Require nonoverlapping, complete
+      // coverage before allowing any historical record to be overwritten.
+      const covered=new Set();
+      const batches=receipts.filter(r=>r.type==='task-preview-completion-batch'
+        && r.resetGeneration===generation);
+      if (!batches.length)
+        return refuse('task_completion_reconcile_provenance_missing');
+      try {
+        for (const receipt of batches) {
+          if (!Array.isArray(receipt.ids) || !receipt.ids.length
+            || receipt.ids.length>64 || new Set(receipt.ids).size!==receipt.ids.length)
+            return refuse('task_completion_reconcile_provenance_invalid');
+          const values=[];
+          for (const id of receipt.ids) {
+            if (!oldById.has(id) || covered.has(id))
+              return refuse('task_completion_reconcile_provenance_invalid');
+            covered.add(id);
+            values.push(oldById.get(id));
+          }
+          if (await previewRecoveryFingerprint(values)!==receipt.batchFingerprint)
+            return refuse('task_completion_reconcile_provenance_mismatch');
+        }
+      } catch (_) { return refuse('task_completion_reconcile_provenance_unreadable'); }
+      if (covered.size!==oldById.size)
+        return refuse('task_completion_reconcile_provenance_missing');
+    }
+    try { if (!sourceCurrent()) return refuse('legacy_changed_during_reconcile'); }
+    catch (_) { return refuse('legacy_unreadable_during_reconcile'); }
+
+    const target=ordered(desired);
+    const changed=target.filter(row=>stableJson(row)!==stableJson(oldById.get(row.id)));
+    const removed=oldOrdered.filter(row=>!wanted.has(row.id));
+    const newRows=changed.filter(row=>!oldById.has(row.id));
+    const deltaCount=changed.length+removed.length;
+    if (!deltaCount) {
+      // A no-op still needs an independent live comparison, not just the
+      // earlier read of V2 and its stored evidence.
+      let parity;
+      try { parity=desired.length
+        ? await inspectPreviewTaskCompletionOrderParity()
+        : await (async()=>{
+            const tx=db.transaction('completions','readonly');
+            const rows=await requestPromise(tx.objectStore('completions').getAll());
+            return {match:stableJson(ordered(rows))===stableJson(ordered(beforeRows))};
+          })(); }
+      catch (_) { return refuse('task_completion_reconcile_noop_unreadable'); }
+      if (!parity.match) return refuse('task_completion_reconcile_noop_mismatch',{
+        prerequisiteReason:parity.reason
+      });
+      try { if (!sourceCurrent()) return refuse('legacy_changed_after_noop_check'); }
+      catch (_) { return refuse('legacy_unreadable_after_noop_check'); }
+      return {
+        checked:true,previewOnly:true,committed:false,confirmedDurable:true,
+        collectionParityVerified:true,changedRows:0,deletedRows:0,
+        addedRows:0,reason:'task_completion_history_already_current',
+        canPromote:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+      };
+    }
+    if (deltaCount>64)
+      return refuse('task_completion_reconcile_batch_too_large',{
+        changedRows:deltaCount,maxAtomicRows:64
+      });
+    const bytes=changed.reduce((n,r)=>n+JSON.stringify(r).length+1,2)
+      +removed.reduce((n,r)=>n+JSON.stringify(r).length+1,0);
+    if (bytes>240000) return refuse('task_completion_reconcile_payload_too_large');
+    let nextFingerprint;
+    try { nextFingerprint=await previewRecoveryFingerprint(target); }
+    catch (_) { return refuse('task_completion_reconcile_digest_unavailable'); }
+    try { if (!sourceCurrent()) return refuse('legacy_changed_before_write'); }
+    catch (_) { return refuse('legacy_unreadable_before_write'); }
+    const receiptId='task-preview-completion-reconcile:'+actionId;
+    if (receipts.some(r=>r.id===receiptId))
+      return refuse('task_completion_reconcile_action_id_conflict');
+    const receipt={
+      id:receiptId,type:'task-preview-completion-reconcile',
+      resetGeneration:generation,sourceInventory:signature,
+      priorFingerprint:oldFingerprint,nextFingerprint,
+      priorCount:oldById.size,nextCount:target.length,
+      changedIds:changed.map(r=>r.id),deletedIds:removed.map(r=>r.id)
+    };
+    const nextSeal={
+      id:'task-preview-completion-reconcile',schemaVersion:1,
+      resetGeneration:generation,sourceInventory:signature,
+      stateFingerprint:nextFingerprint,count:target.length,
+      receiptId,capturedAtISO:nowIso()
+    };
+    let failure=null;
+    const abort=(tx,reason)=>{failure=reason;try{tx.abort();}catch(_){}};
+    try {
+      const tx=db.transaction(['tasks','completions','mutations','meta'],'readwrite');
+      const reads=[
+        tx.objectStore('completions').getAll(),
+        tx.objectStore('tasks').getAll(),
+        tx.objectStore('mutations').getAll(),
+        tx.objectStore('meta').get('task-preview-completion-reconcile'),
+        tx.objectStore('meta').get(RUNTIME_META_ID),
+        tx.objectStore('meta').get('task-preview')
+      ];
+      const values=new Array(reads.length);
+      let pending=reads.length;
+      reads.forEach((req,i)=>{req.onsuccess=()=>{
+        values[i]=req.result;
+        if (--pending!==0) return;
+        try {
+          if (!sourceCurrent()) return abort(tx,'legacy_changed_under_transaction');
+          if (stableJson(values[0])!==stableJson(beforeRows)
+            || stableJson(values[1])!==stableJson(taskRows)
+            || stableJson(values[2])!==stableJson(receipts)
+            || stableJson(values[3])!==stableJson(seal)
+            || stableJson(values[4])!==stableJson(meta)
+            || stableJson(values[5])!==stableJson(taskEvidence))
+            return abort(tx,'task_completion_reconcile_concurrent_change');
+          const completionStore=tx.objectStore('completions');
+          for (const row of removed) completionStore.delete(row.id);
+          for (const row of changed) completionStore.put(row);
+          tx.objectStore('mutations').add(receipt);
+          tx.objectStore('meta').put(nextSeal);
+        } catch (_) { abort(tx,'task_completion_reconcile_atomic_write_failed'); }
+      };});
+      await transactionPromise(tx);
+    } catch (_) { return refuse(failure||'task_completion_reconcile_atomic_write_failed'); }
+
+    // Durable evidence comes from a second independent read transaction.
+    const expectedAll=ordered(otherRows.concat(target));
+    try {
+      const tx=db.transaction(['completions','mutations','meta'],'readonly');
+      const [actual,storedReceipt,storedSeal,storedMeta]=await Promise.all([
+        requestPromise(tx.objectStore('completions').getAll()),
+        requestPromise(tx.objectStore('mutations').get(receiptId)),
+        requestPromise(tx.objectStore('meta').get('task-preview-completion-reconcile')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID))
+      ]);
+      if (stableJson(ordered(actual))!==stableJson(expectedAll)
+        || stableJson(storedReceipt)!==stableJson(receipt)
+        || stableJson(storedSeal)!==stableJson(nextSeal)
+        || stableJson(storedMeta)!==stableJson(meta))
+        return refuse('task_completion_reconcile_readback_unverified',{
+          committed:true,writeOutcomeUncertain:true
+        });
+      if (!sourceCurrent()) return refuse('legacy_changed_after_preview_commit',{
+        committed:true,confirmedDurable:true,writeOutcomeUncertain:true
+      });
+      const parity=target.length
+        ? await inspectPreviewTaskCompletionOrderParity()
+        : {match:true};
+      if (!parity.match) return refuse('task_completion_reconcile_parity_unverified',{
+        committed:true,confirmedDurable:true,writeOutcomeUncertain:true,
+        prerequisiteReason:parity.reason
+      });
+      if (!sourceCurrent()) return refuse('legacy_changed_after_parity',{
+        committed:true,confirmedDurable:true,writeOutcomeUncertain:true
+      });
+      return {
+        checked:true,previewOnly:true,committed:true,confirmedDurable:true,
+        collectionParityVerified:true,
+        changedRows:deltaCount,addedRows:newRows.length,
+        deletedRows:removed.length,taskCompletionCount:target.length,
+        reason:'task_completion_history_reconciled',
+        canPromote:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+      };
+    } catch (_) {
+      return refuse('task_completion_reconcile_readback_unavailable',{
+        committed:true,writeOutcomeUncertain:true
+      });
+    }
+  }
+
   async function inspectPreviewTaskCompletionOrderParity() {
     const refuse = (reason, details = {}) => ({
       checked: true, previewOnly: true, match: false,
@@ -8431,6 +8761,7 @@
     rehearsePreviewTaskLinkedCompletion,
     rehearsePreviewTaskLinkedCompletionBatch,
     rehearsePreviewTaskCompletionHistoryCatchUp,
+    rehearsePreviewTaskCompletionHistoryReconcile,
     inspectPreviewTaskCompletionOrderParity,
     inspectPreviewMixedCompletionExport,
     inspectPreviewWholeCompatibilityProjection,
