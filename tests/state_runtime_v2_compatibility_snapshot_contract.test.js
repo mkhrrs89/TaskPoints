@@ -612,7 +612,7 @@ async function verifiedEmptyResetApp() {
   return app;
 }
 
-for (const store of ['habits', 'completions', 'mutations', 'tasks']) {
+for (const store of ['habits', 'completions', 'mutations', 'tasks', 'projects']) {
   test(`V2 verified empty reset export rejects retained ${store} evidence`, async () => {
     const app = await verifiedEmptyResetApp();
     const rows = app.indexedDB._databases.get(DB_NAME)._stores.get(store);
@@ -675,7 +675,7 @@ test('V2 verified empty export counts stores without loading full record content
   };
   assert.equal(JSON.stringify(await app.api.buildCompatibilitySnapshot()), '{}');
   assert.deepEqual(operations.filter(([,op])=>op==='count')
-    .map(([store])=>store).sort(), ['completions','habits','mutations','tasks']);
+    .map(([store])=>store).sort(), ['completions','habits','mutations','projects','tasks']);
   assert.equal(operations.some(([,op])=>op==='getAll'), false,
     'verified empty exports should never deserialize all historical records');
 });
@@ -687,12 +687,12 @@ test('V2 parity verifies an authorized empty reset against all pilot/WAL stores'
   assert.equal(result.match, true);
   assert.equal(result.reason, 'verified_empty_reset');
   assert.deepEqual(JSON.parse(JSON.stringify(result.counts)), {
-    habits: 0, completions: 0, mutations: 0, tasks: 0
+    habits: 0, completions: 0, mutations: 0, tasks: 0, projects: 0
   });
   assert.equal(app.localStorage.getItem(LEGACY_KEY), null);
 });
 
-for (const store of ['habits', 'completions', 'mutations', 'tasks']) {
+for (const store of ['habits', 'completions', 'mutations', 'tasks', 'projects']) {
   test(`V2 parity never declares empty reset success with retained ${store} rows`, async () => {
     const app = await verifiedEmptyResetApp();
     const rows = app.indexedDB._databases.get(DB_NAME)._stores.get(store);
