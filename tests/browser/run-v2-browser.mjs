@@ -340,7 +340,7 @@ try {
         legacy:localStorage.getItem('taskpoints_v1'),
         authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
     });
-    assert.equal(retry.version,3);
+    assert.equal(retry.version,4);
     assert.equal(retry.tasksStorePresent, true);
     assert.deepEqual(retry.habitIds,['h1','h2']);
     assert.deepEqual(retry.sharedIndexRows,['shared-old']);
@@ -423,7 +423,7 @@ try {
         authority:runtime.getStatus().readAuthority,
         legacy:localStorage.getItem('taskpoints_v1')};
     });
-    assert.equal(changed.version,3);
+    assert.equal(changed.version,4);
     assert.equal(changed.taskStoreReady,true);
     assert.equal(changed.indexPresent,true);
     assert.deepEqual(changed.habitIds,['h1','h2']);
@@ -1115,7 +1115,7 @@ try {
     assert.equal(seeded.first.canPromote,false);
     assert.equal(seeded.second.reason,'task_preview_already_verified',JSON.stringify(seeded.second));
     assert.equal(seeded.second.stored,false);
-    assert.equal(seeded.version,3);
+    assert.equal(seeded.version,4);
     assert.equal(seeded.meta.taskCount,2);
     assert.equal(seeded.meta.resetGeneration,seeded.first.resetGeneration);
     assert.deepEqual(seeded.rows
