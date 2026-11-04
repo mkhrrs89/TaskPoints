@@ -16,8 +16,10 @@ function makeContext() {
     computeYourRecord: () => ({ wins: 7, losses: 4, ties: 1, games: 12 }),
     getPlayerRecordText: () => 'fallback',
     getHomeScoreboardSeasonThreeState: () => ({ marker: 'season-three' }),
+    getHomeScoreboardCurrentSeasonState: () => ({ marker: 'season-four' }),
     TaskPointsCore: {
-      computeRecord(_state, playerId) {
+      computeRecord(scopedState, playerId) {
+        if (scopedState?.marker !== 'season-four') return { wins: 19, losses: 6, ties: 1, games: 26 };
         if (playerId === 'TIED') return { wins: 5, losses: 4, ties: 2, games: 11 };
         if (playerId === 'UNTIED') return { wins: 3, losses: 2, ties: 0, games: 5 };
         return { wins: 0, losses: 0, ties: 0, games: 0 };
@@ -59,4 +61,20 @@ test('Home scoreboard opponent record follows the same tie-aware format', () => 
 
 test('tie-record patch does not alter Last 10 logic', () => {
   assert.doesNotMatch(patchSource, /last\s*10|lastTen|matchupLastTen/i);
+});
+
+test('Home scoreboard opponent record reads active Season 4 instead of old Season 3', () => {
+  const { context } = makeContext();
+  vm.runInNewContext(patchSource, context, { filename: 'home_scoreboard_tie_record_patch.js' });
+  assert.equal(context.getPlayerRecordText('TIED'), '5-4-2');
+  assert.equal(context.getPlayerRecordText('UNTIED'), '3-2');
+  assert.notEqual(context.getPlayerRecordText('TIED'), '19-6-1',
+    'the previous-season record must not leak into the active scoreboard');
+});
+
+test('opponent record wrapper retains the original function when season scoring is unavailable', () => {
+  const { context } = makeContext();
+  delete context.TaskPointsCore.computeRecord;
+  vm.runInNewContext(patchSource, context, { filename: 'home_scoreboard_tie_record_patch.js' });
+  assert.equal(context.getPlayerRecordText('TIED'), 'fallback');
 });
