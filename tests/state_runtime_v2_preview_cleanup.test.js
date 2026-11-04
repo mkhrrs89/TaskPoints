@@ -29,11 +29,13 @@ function runCleanup(hostname) {
   });
   const status = { className: '', textContent: '' };
   const deleteCalls = [];
+  const deleteRequests = [];
   let deleteRequest = null;
   const indexedDB = {
     deleteDatabase(name) {
       deleteCalls.push(String(name));
       deleteRequest = { onsuccess: null, onerror: null, onblocked: null };
+      deleteRequests.push(deleteRequest);
       return deleteRequest;
     }
   };
@@ -50,10 +52,10 @@ function runCleanup(hostname) {
   context.window = context;
   context.globalThis = context;
   vm.runInNewContext(source, context, { filename: 'state_v2_preview_cleanup.html' });
-  return { localStorage, status, deleteCalls, deleteRequest };
+  return { localStorage, status, deleteCalls, deleteRequests, deleteRequest };
 }
 
-test('preview cleanup removes only V2 keys and only the dedicated V2 IndexedDB database', () => {
+test('preview cleanup removes only V2 keys and both isolated V2 preview databases', () => {
   const app = runCleanup('agent-state-runtime-v2-plan.taskpoints.pages.dev');
 
   assert.equal(app.localStorage.getItem('taskpoints_state_v2_dark_mode_v1'), null);
@@ -65,6 +67,9 @@ test('preview cleanup removes only V2 keys and only the dedicated V2 IndexedDB d
   assert.deepEqual(app.deleteCalls, ['taskpoints_state_v2']);
 
   app.deleteRequest.onsuccess();
+  assert.deepEqual(app.deleteCalls, ['taskpoints_state_v2','taskpoints_v2_notes_preview']);
+  assert.notEqual(app.status.className, 'ok');
+  app.deleteRequests[1].onsuccess();
   assert.equal(app.status.className, 'ok');
   assert.match(app.status.textContent, /Production TaskPoints state and images were not touched/);
 });
@@ -86,6 +91,15 @@ test('cleanup source never targets the legacy state, image database, or verified
   assert.doesNotMatch(source, /removeItem\(['"]taskpoints_v1['"]\)/);
   assert.doesNotMatch(source, /removeItem\(['"]taskpoints_verified_secondary_v1['"]\)/);
   assert.doesNotMatch(source, /deleteDatabase\(['"]taskpoints['"]\)/);
-  assert.match(source, /deleteDatabase\(V2_DATABASE\)/);
+  assert.match(source, /indexedDB\.deleteDatabase\(databases\[index\]\)/);
   assert.match(source, /const V2_DATABASE = 'taskpoints_state_v2'/);
+  assert.match(source, /const NOTES_PREVIEW_DATABASE = 'taskpoints_v2_notes_preview'/);
+});
+
+test('cleanup refuses false success when isolated Notes DB deletion fails', () => {
+  const app=runCleanup('localhost');
+  app.deleteRequests[0].onsuccess();
+  app.deleteRequests[1].onerror();
+  assert.equal(app.status.className,'bad');
+  assert.match(app.status.textContent,/taskpoints_v2_notes_preview deletion failed/);
 });

@@ -1000,3 +1000,34 @@ implement bounded reconciliation and full origin/restore compatibility.
 Until those are proven, a Notes-source inspector is **not** a
 Notes migration or a production writer fence. The weighted
 readiness remains **67/100**.
+
+
+## Notes dual-source immutable seed rehearsal — November 4 (V2 only)
+
+The explicit preview-host-only method rehearsePreviewNotesBundleSeed(fullOriginToken,
+actionId) takes the verified V1 Notes source audit and snapshots BOTH Notes text
+copies, their presence/dirty/authoritative markers, legacy source precedence,
+and SHA-256 main snapshot/full-origin provenance into a separate opt-in
+IndexedDB database named taskpoints_v2_notes_preview.
+
+The source bundle, generation-bound metadata and immutable seed receipt commit
+atomically. Concurrent or stale writes, changed source inventories and failed
+quota writes refuse rather than replacing existing evidence. An independent
+inspectPreviewNotesBundleParity() compares the latest unchanged V1 sources with
+a verified V2 preview receipt and bundle, including post-digest rereads. No
+returned diagnostic contains Notes text. A repeated unchanged seed is a
+validated no-op instead of a second receipt.
+
+Preview cleanup deletes the new isolated database alongside the original V2
+database, and never deletes the V1 snapshot, verified secondary, existing
+image database or user backups. Node contracts cover intentionally empty dirty
+caches, no-op/reload durability, missing/invalid markers, stale sources, quota
+aborts in every object store, production-host refusal and race interruption.
+
+This is a Notes source-bundle *seed*, not Notes reconciliation, live read/write
+authority, off-device recovery coverage, or production old-tab writer fencing.
+It does not enable V2 or count as a completed nonpilot migration gate. V1
+remains authoritative and weighted readiness stays **67/100**.
+
+Next: bounded incremental Notes reconciliation with receipt chaining, parity
+across recovery/import, browser coverage and separate actual-device tests.

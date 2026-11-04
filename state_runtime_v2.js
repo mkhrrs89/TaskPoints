@@ -5197,6 +5197,286 @@
     };
   }
 
+
+  // Notes have two independent V1 copies plus authority/dirty markers. This
+  // source-bundle rehearsal is explicit, preview-host-only, and NEVER a V1
+  // reader/writer. A separate DB prevents preview text from inflating hot
+  // TaskPoints V2 meta scans or requiring a main V2 schema upgrade.
+  const NOTES_PREVIEW_DB = 'taskpoints_v2_notes_preview';
+  const NOTES_BUNDLE_ID = 'notes-source';
+
+  function openNotesPreviewDb(generation, epoch) {
+    return new Promise((resolve, reject) => {
+      if (!global.indexedDB?.open) {
+        reject(Error('notes_preview_indexeddb_unavailable'));
+        return;
+      }
+      let request, abandoned = false;
+      try { request = global.indexedDB.open(NOTES_PREVIEW_DB, 1); }
+      catch (error) { reject(error); return; }
+      const fail = error => {
+        if (abandoned) return;
+        abandoned = true;
+        reject(error || Error('notes_preview_open_failed'));
+      };
+      request.onupgradeneeded = () => {
+        if (abandoned || !isWalTestPreviewHost() || !isDarkEnabled()
+          || epoch !== darkMirrorModeEpoch
+          || currentGeneration({create:false}) !== generation) {
+          try { request.transaction?.abort(); } catch (_) {}
+          return;
+        }
+        try {
+          const db = request.result;
+          for (const name of ['bundles','receipts','meta']) {
+            if (!db.objectStoreNames.contains(name))
+              db.createObjectStore(name, {keyPath:'id'});
+          }
+        } catch (_) { try { request.transaction?.abort(); } catch (_) {} }
+      };
+      request.onsuccess = () => {
+        if (abandoned) {
+          try { request.result.close(); } catch (_) {}
+        } else resolve(request.result);
+      };
+      request.onerror = () => fail(request.error);
+      request.onblocked = () => fail(Error('notes_preview_open_blocked'));
+    });
+  }
+
+  async function capturePreviewNotesBundle(sourceToken, generation, epoch) {
+    const current = () => isWalTestPreviewHost() && isDarkEnabled()
+      && darkMirrorModeEpoch === epoch
+      && currentGeneration({create:false}) === generation
+      && captureReadOnlyFullStorageInventory() === sourceToken;
+    if (!current()) return {reason:'full_origin_changed'};
+    const audit = await inspectPreviewNotesSource();
+    if (!audit.sourceVerified)
+      return {reason:'notes_source_preflight_required',
+        prerequisiteReason:audit.reason};
+    if (!current()) return {reason:'legacy_notes_changed_during_capture'};
+    const keys = [core.STORAGE_KEY || 'taskpoints_v1',
+      'taskpoints_notes_v1', 'taskpoints_notes_dirty_v1',
+      'taskpoints_notes_authoritative_v1'];
+    let raw, stateNotes = '';
+    try {
+      raw = keys.map(key => global.localStorage.getItem(key));
+      if (raw[0] !== null) {
+        const parsed = core.parseTaskPointsStorageJson(raw[0]);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
+          || (parsed.notes !== undefined && typeof parsed.notes !== 'string'))
+          return {reason:'legacy_notes_snapshot_invalid'};
+        stateNotes = parsed.notes || '';
+      }
+      if (!current() || keys.some((key,i)=>
+        global.localStorage.getItem(key) !== raw[i]))
+        return {reason:'legacy_notes_changed_during_capture'};
+    } catch (_) { return {reason:'legacy_notes_storage_unreadable'}; }
+    const [snapshotRaw,cacheRaw,dirtyRaw,authorityRaw] = raw;
+    const cacheNotes = cacheRaw === null ? '' : cacheRaw;
+    const chosenFromCache = ['marked_cache','unmarked_cache_only',
+      'unmarked_cache_longer','unmarked_equal'].includes(audit.selectedSource);
+    const effectiveNotes = chosenFromCache ? cacheNotes : stateNotes;
+    if (effectiveNotes.length !== audit.selectedLength
+      || cacheNotes.length !== audit.cacheLength
+      || stateNotes.length !== audit.stateLength
+      || (snapshotRaw !== null) !== audit.hasSnapshot
+      || (cacheRaw !== null) !== audit.hasCache)
+      return {reason:'legacy_notes_changed_during_capture'};
+    let originFingerprint, snapshotFingerprint, sourceFingerprint;
+    try {
+      sourceFingerprint = await previewRecoveryFingerprint({
+        statePresent:snapshotRaw !== null,cachePresent:cacheRaw !== null,
+        stateNotes,cacheNotes,dirtyRaw,authorityRaw,
+        effectiveNotes,effectiveSource:audit.selectedSource
+      });
+      originFingerprint = await previewRecoveryFingerprint(sourceToken);
+      snapshotFingerprint = snapshotRaw === null ? null
+        : await previewRecoveryFingerprint(snapshotRaw);
+    } catch (_) { return {reason:'notes_preview_digest_unavailable'}; }
+    if (sourceFingerprint !== audit.sourceFingerprint)
+      return {reason:'legacy_notes_changed_during_capture'};
+    try {
+      if (!current() || keys.some((key,i)=>
+        global.localStorage.getItem(key) !== raw[i]))
+        return {reason:'legacy_notes_changed_after_digest'};
+    } catch (_) { return {reason:'legacy_notes_storage_unreadable'}; }
+    const bundle = {
+      id:NOTES_BUNDLE_ID,schemaVersion:1,resetGeneration:generation,
+      originFingerprint,snapshotFingerprint,sourceFingerprint,
+      snapshotPresent:snapshotRaw !== null,cachePresent:cacheRaw !== null,
+      stateNotes,cacheNotes,dirtyRaw,authorityRaw,
+      selectedSource:audit.selectedSource
+    };
+    let bundleFingerprint;
+    try { bundleFingerprint = await previewRecoveryFingerprint(bundle); }
+    catch (_) { return {reason:'notes_preview_digest_unavailable'}; }
+    try { if (!current()) return {reason:'legacy_notes_changed_after_digest'}; }
+    catch (_) { return {reason:'legacy_notes_storage_unreadable'}; }
+    return {bundle,bundleFingerprint,current};
+  }
+
+  async function readNotesPreviewRows(db) {
+    const tx = db.transaction(['bundles','receipts','meta'],'readonly');
+    const [bundle,evidence,receipts] = await Promise.all([
+      requestPromise(tx.objectStore('bundles').get(NOTES_BUNDLE_ID)),
+      requestPromise(tx.objectStore('meta').get(NOTES_BUNDLE_ID)),
+      requestPromise(tx.objectStore('receipts').getAll())
+    ]);
+    return {bundle,evidence,receipts};
+  }
+
+  async function verifyNotesPreviewRows(db, captured) {
+    const rows = await readNotesPreviewRows(db);
+    if (!rows.bundle && !rows.evidence && !rows.receipts.length)
+      return {verified:false,reason:'notes_preview_seed_required'};
+    const {bundle,evidence,receipts} = rows;
+    if (!bundle || !evidence || receipts.length !== 1
+      || bundle.id !== NOTES_BUNDLE_ID || bundle.schemaVersion !== 1
+      || stableJson(bundle) !== stableJson(captured.bundle)
+      || evidence.id !== NOTES_BUNDLE_ID || evidence.schemaVersion !== 1
+      || evidence.resetGeneration !== bundle.resetGeneration
+      || evidence.bundleFingerprint !== captured.bundleFingerprint
+      || evidence.originFingerprint !== bundle.originFingerprint
+      || evidence.sourceFingerprint !== bundle.sourceFingerprint
+      || evidence.receiptId !== receipts[0]?.id
+      || receipts[0]?.type !== 'notes-preview-seed'
+      || receipts[0]?.resetGeneration !== bundle.resetGeneration
+      || receipts[0]?.bundleFingerprint !== captured.bundleFingerprint
+      || receipts[0]?.originFingerprint !== bundle.originFingerprint
+      || receipts[0]?.sourceFingerprint !== bundle.sourceFingerprint)
+      return {verified:false,reason:'notes_preview_existing_evidence_preserved'};
+    const digest = await previewRecoveryFingerprint(bundle);
+    if (digest !== captured.bundleFingerprint)
+      return {verified:false,reason:'notes_preview_bundle_digest_mismatch'};
+    if (!captured.current())
+      return {verified:false,reason:'legacy_notes_changed_during_readback'};
+    const again = await readNotesPreviewRows(db);
+    if (stableJson(rows) !== stableJson(again) || !captured.current())
+      return {verified:false,reason:'notes_preview_changed_during_digest'};
+    return {verified:true,reason:'notes_preview_bundle_verified'};
+  }
+
+  async function rehearsePreviewNotesBundleSeed(sourceToken, actionId) {
+    const refuse = (reason,detail={}) => ({
+      checked:true,previewOnly:true,committed:false,confirmedDurable:false,
+      collectionParityVerified:false,notesMigrated:false,canPromote:false,
+      productionWritersFenced:false,readAuthority:'legacy_only',
+      mutationAuthority:'legacy_only',reason,...detail
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    if (typeof sourceToken !== 'string' || !sourceToken)
+      return refuse('full_origin_token_required');
+    if (typeof actionId !== 'string' || !actionId || actionId.length > 128)
+      return refuse('notes_preview_action_id_required');
+    const generation = currentGeneration({create:false});
+    if (!generation) return refuse('generation_unavailable');
+    const epoch = darkMirrorModeEpoch;
+    let captured;
+    try { captured = await capturePreviewNotesBundle(sourceToken,generation,epoch); }
+    catch (_) { return refuse('notes_preview_source_unreadable'); }
+    if (captured.reason) return refuse(captured.reason,{
+      prerequisiteReason:captured.prerequisiteReason
+    });
+    let db, committed = false;
+    try {
+      db = await openNotesPreviewDb(generation,epoch);
+      const initial = await readNotesPreviewRows(db);
+      if (initial.bundle || initial.evidence || initial.receipts.length) {
+        const verified = await verifyNotesPreviewRows(db,captured);
+        if (!verified.verified) return refuse(verified.reason);
+      } else {
+        if (!captured.current()) return refuse('legacy_notes_changed_before_seed');
+        const receiptId = 'notes-preview-seed:' + actionId;
+        const receipt = {id:receiptId,type:'notes-preview-seed',
+          resetGeneration:generation,bundleFingerprint:captured.bundleFingerprint,
+          originFingerprint:captured.bundle.originFingerprint,
+          sourceFingerprint:captured.bundle.sourceFingerprint};
+        const evidence = {id:NOTES_BUNDLE_ID,schemaVersion:1,
+          resetGeneration:generation,receiptId,
+          bundleFingerprint:captured.bundleFingerprint,
+          originFingerprint:captured.bundle.originFingerprint,
+          sourceFingerprint:captured.bundle.sourceFingerprint};
+        let failure = 'notes_preview_atomic_seed_failed';
+        const tx = db.transaction(['bundles','receipts','meta'],'readwrite');
+        const bundleStore = tx.objectStore('bundles');
+        const receiptStore = tx.objectStore('receipts');
+        const metaStore = tx.objectStore('meta');
+        const requests = [bundleStore.get(NOTES_BUNDLE_ID),
+          metaStore.get(NOTES_BUNDLE_ID),receiptStore.getAll()];
+        let pending = requests.length;
+        const values = [];
+        const abort = reason => {failure=reason;try{tx.abort();}catch(_){}};
+        requests.forEach((request,i) => {
+          request.onsuccess = () => {
+            values[i] = request.result;
+            if (--pending !== 0) return;
+            try {
+              if (!captured.current())
+                return abort('legacy_notes_changed_under_transaction');
+              if (values[0] || values[1] || values[2]?.length)
+                return abort('notes_preview_concurrent_change');
+              bundleStore.add(captured.bundle);
+              receiptStore.add(receipt);
+              metaStore.add(evidence);
+            } catch (_) { abort('notes_preview_atomic_seed_failed'); }
+          };
+        });
+        try { await transactionPromise(tx); }
+        catch (_) { return refuse(failure); }
+        committed = true;
+      }
+      const proof = await verifyNotesPreviewRows(db,captured);
+      if (!proof.verified) return refuse(proof.reason,{
+        committed,writeOutcomeUncertain:committed
+      });
+      return {
+        checked:true,previewOnly:true,committed,confirmedDurable:true,
+        collectionParityVerified:true,notesMigrated:false,
+        reason:committed?'notes_preview_bundle_seed_verified'
+          :'notes_preview_bundle_already_verified',
+        canPromote:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+      };
+    } catch (_) { return refuse('notes_preview_seed_or_read_unavailable',{
+      committed,writeOutcomeUncertain:committed
+    }); }
+    finally { try { db?.close(); } catch (_) {} }
+  }
+
+  async function inspectPreviewNotesBundleParity() {
+    const refuse = (reason,detail={}) => ({
+      checked:true,previewOnly:true,match:false,notesMigrated:false,
+      canPromote:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...detail
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    const generation = currentGeneration({create:false});
+    if (!generation) return refuse('generation_unavailable');
+    const epoch = darkMirrorModeEpoch;
+    let token,captured,db;
+    try {
+      token = captureReadOnlyFullStorageInventory();
+      captured = await capturePreviewNotesBundle(token,generation,epoch);
+      if (captured.reason) return refuse(captured.reason,{
+        prerequisiteReason:captured.prerequisiteReason
+      });
+      db = await openNotesPreviewDb(generation,epoch);
+      const proof = await verifyNotesPreviewRows(db,captured);
+      if (!proof.verified) return refuse(proof.reason);
+      return {
+        checked:true,previewOnly:true,match:true,
+        notesMigrated:false,reason:'notes_preview_bundle_parity_verified',
+        canPromote:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+      };
+    } catch (_) { return refuse('notes_preview_parity_unavailable'); }
+    finally { try { db?.close(); } catch (_) {} }
+  }
+
   // Today is a separate, independently writable V1 authority. Its four
   // per-day maps do not live in the main TaskPoints snapshot. This preview
   // capture never invokes Today page's forgiving fallback, which can erase
@@ -10355,6 +10635,8 @@
     exercisePreviewSerializedSnapshotLease,
     rehearsePreviewAdmittedTaskCompletionBatch,
     inspectPreviewNotesSource,
+    rehearsePreviewNotesBundleSeed,
+    inspectPreviewNotesBundleParity,
     inspectPreviewTodaySource,
     rehearsePreviewTodayCollectionSeed,
     inspectPreviewTodayCollectionParity,

@@ -20,6 +20,7 @@
 (() => {
   'use strict';
   const V2_DATABASE = 'taskpoints_state_v2';
+  const NOTES_PREVIEW_DATABASE = 'taskpoints_v2_notes_preview';
   const V2_KEYS = Object.freeze([
     'taskpoints_state_v2_dark_mode_v1',
     'taskpoints_state_v2_generation_v1',
@@ -56,24 +57,33 @@
     return;
   }
 
-  let request;
-  try {
-    request = indexedDB.deleteDatabase(V2_DATABASE);
-  } catch (error) {
-    fail('V2 preview flags were removed, but the V2 database could not be deleted: ' + String(error?.message || error));
-    return;
-  }
-
-  request.onsuccess = () => {
-    status.className = 'ok';
-    status.textContent = 'V2 dark mirroring is disabled and its isolated test database/WAL were deleted. Production TaskPoints state and images were not touched.';
+  // Preserve the original V2 cleanup and include the isolated Notes source
+  // rehearsal DB. Never target V1, backups, or the images database.
+  const databases = [V2_DATABASE, NOTES_PREVIEW_DATABASE];
+  const deleteNext = (index) => {
+    if (index === databases.length) {
+      status.className = 'ok';
+      status.textContent = 'V2 dark mirroring is disabled and its isolated test databases/WAL were deleted. Production TaskPoints state and images were not touched.';
+      return;
+    }
+    let request;
+    try { request = indexedDB.deleteDatabase(databases[index]); }
+    catch (error) {
+      fail('V2 preview flags were removed, but ' + databases[index] +
+        ' could not be deleted: ' + String(error?.message || error));
+      return;
+    }
+    request.onsuccess = () => deleteNext(index + 1);
+    request.onerror = () => {
+      fail('V2 preview flags were removed, but ' + databases[index] +
+        ' deletion failed. Reload this cleanup page and try again.');
+    };
+    request.onblocked = () => {
+      fail('V2 preview flags were removed. Database deletion of ' +
+        databases[index] + ' is blocked by an open preview tab; close those tabs, then reload this cleanup page.');
+    };
   };
-  request.onerror = () => {
-    fail('V2 preview flags were removed, but the isolated V2 database deletion failed. Reload this cleanup page and try again.');
-  };
-  request.onblocked = () => {
-    fail('V2 preview flags were removed. Database deletion is blocked by another open TaskPoints preview tab; close those tabs, then reload this cleanup page.');
-  };
+  deleteNext(0);
 })();
 </script>
 </body>
