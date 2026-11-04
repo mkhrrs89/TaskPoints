@@ -254,3 +254,288 @@ test('Projects preview writes are unavailable on production hosts',async()=>{
   assert.equal((await app.api.inspectPreviewProjectsCollectionParity()).reason,
     'preview_host_required');
 });
+
+
+test('Projects reconcile atomically edits, adds, deletes, and reorders while preserving V1',async()=>{
+  const app=await seeded(),before=app.indexedDB.dump(DB);
+  const modified=[
+    {id:'p3',name:'New Project',done:3,subtasks:[{id:'s3',text:'New',done:false}]},
+    {...projects()[0],notes:'authoritative revised note'}
+  ];
+  const raw=JSON.stringify(modified);
+  app.localStorage.setItem(PROJECTS,raw);
+  const result=await app.api.rehearsePreviewProjectsCollectionReconcile(
+    app.token(),'edit-delete-add');
+  assert.equal(result.reason,'projects_preview_reconciled',JSON.stringify(result));
+  assert.equal(result.committed,true);
+  assert.equal(result.confirmedDurable,true);
+  assert.equal(result.collectionParityVerified,true);
+  assert.equal(result.changedRows,3);
+  assert.equal(result.addedRows,1);
+  assert.equal(result.deletedRows,1);
+  assert.equal(result.canPromote,false);
+  assert.equal(result.projectsMigrated,false);
+  const after=app.indexedDB.dump(DB);
+  assert.deepEqual(after.projects.sort((a,b)=>a.legacyIndex-b.legacyIndex)
+    .map(x=>x.value),modified);
+  assert.deepEqual(after.habits,before.habits);
+  assert.deepEqual(after.completions,before.completions);
+  assert.deepEqual(after.tasks,before.tasks);
+  assert.equal(app.localStorage.getItem(PROJECTS),raw);
+  const receipt=after.mutations.find(x=>x.id==='projects-preview-reconcile:edit-delete-add');
+  assert.equal(receipt.type,'projects-preview-reconcile');
+  assert.equal(receipt.priorReceiptId,'projects-preview-seed:source-seed');
+  assert.deepEqual(receipt.deletedIds,['p1']);
+  assert.deepEqual(receipt.changedIds,['p3','p2']);
+  assert.equal(after.meta.find(x=>x.id==='projects-preview').receiptId,receipt.id);
+  const parity=await app.api.inspectPreviewProjectsCollectionParity();
+  assert.equal(parity.match,true,JSON.stringify(parity));
+});
+
+test('Projects reconciliation rechecks no-op parity and survives restart, second edit and new receipt',async()=>{
+  const app=await seeded();
+  app.localStorage.setItem(PROJECTS,JSON.stringify([
+    {...projects()[1],notes:'first change'},projects()[0]
+  ]));
+  const first=await app.api.rehearsePreviewProjectsCollectionReconcile(
+    app.token(),'first');
+  assert.equal(first.committed,true,JSON.stringify(first));
+  assert.equal(first.collectionParityVerified,true);
+  const afterFirst=app.indexedDB.dump(DB);
+  const noOp=await app.api.rehearsePreviewProjectsCollectionReconcile(
+    app.token(),'noop');
+  assert.equal(noOp.reason,'projects_preview_already_current',JSON.stringify(noOp));
+  assert.equal(noOp.committed,false);
+  assert.deepEqual(app.indexedDB.dump(DB),afterFirst);
+
+  // A different V1 key changes the full-origin fence, even if Projects
+  // itself is unchanged: advancing the evidence is metadata-only.
+  app.localStorage.setItem('some_external_key','cross-tab-change');
+  const scope=await app.api.rehearsePreviewProjectsCollectionReconcile(
+    app.token(),'origin-only');
+  assert.equal(scope.committed,true,JSON.stringify(scope));
+  assert.equal(scope.changedRows,0);
+  assert.equal(scope.collectionParityVerified,true);
+  assert.deepEqual(app.indexedDB.dump(DB).projects,afterFirst.projects);
+
+  app.localStorage.setItem(PROJECTS,JSON.stringify([
+    {...projects()[1],notes:'second change'},projects()[0]
+  ]));
+  const changed=await app.api.rehearsePreviewProjectsCollectionReconcile(
+    app.token(),'second');
+  assert.equal(changed.committed,true,JSON.stringify(changed));
+  assert.equal(changed.changedRows,1);
+  assert.equal(changed.collectionParityVerified,true);
+  const beforeReload=app.indexedDB.dump(DB);
+  const restart=await boot(undefined,{
+    indexedDB:app.indexedDB,localStorage:app.localStorage
+  });
+  const replay=await restart.api.inspectPreviewProjectsCollectionParity();
+  assert.equal(replay.match,true,JSON.stringify(replay));
+  const retry=await restart.api.rehearsePreviewProjectsCollectionReconcile(
+    restart.token(),'after-restart');
+  assert.equal(retry.reason,'projects_preview_already_current',
+    JSON.stringify(retry));
+  assert.deepEqual(restart.indexedDB.dump(DB),beforeReload);
+});
+
+test('Projects reconciliation refuses malformed source without overwriting preview',async()=>{
+  const app=await seeded(),before=app.indexedDB.dump(DB);
+  app.localStorage.setItem(PROJECTS,'not json');
+  const result=await app.api.rehearsePreviewProjectsCollectionReconcile(
+    app.token(),'malformed');
+  assert.equal(result.reason,'projects_source_preflight_required',
+    JSON.stringify(result));
+  assert.equal(result.prerequisiteReason,'legacy_projects_malformed_json');
+  assert.equal(result.committed,false);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('Projects reconciliation refuses independently tampered V2 row or metadata receipt',async()=>{
+  const app=await seeded();
+  const store=app.indexedDB._databases.get(DB)._stores.get('projects');
+  const row=store.get('p1');
+  store.set(row.id,{...row,value:{...row.value,notes:'V2-only unauthorized edit'}});
+  const before=app.indexedDB.dump(DB);
+  app.localStorage.setItem(PROJECTS,JSON.stringify([
+    {...projects()[0],name:'New'},projects()[1]
+  ]));
+  const denied=await app.api.rehearsePreviewProjectsCollectionReconcile(
+    app.token(),'tampered');
+  assert.equal(denied.reason,'projects_preview_existing_parity_mismatch',
+    JSON.stringify(denied));
+  assert.equal(denied.committed,false);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+  // Restore exact old row, then erase the receipt; both cases fail closed.
+  store.set(row.id,row);
+  app.indexedDB._databases.get(DB)._stores.get('mutations')
+    .delete('projects-preview-seed:source-seed');
+  const receiptBefore=app.indexedDB.dump(DB);
+  const missing=await app.api.rehearsePreviewProjectsCollectionReconcile(
+    app.token(),'missing-receipt');
+  assert.equal(missing.reason,'projects_preview_provenance_invalid',
+    JSON.stringify(missing));
+  assert.deepEqual(app.indexedDB.dump(DB),receiptBefore);
+});
+
+test('Projects reconciliation quota denial atomically retains old records, metadata, receipt',async()=>{
+  const app=await seeded(),old=app.indexedDB.dump(DB);
+  app.localStorage.setItem(PROJECTS,JSON.stringify([
+    {...projects()[0],notes:'new via V1'},projects()[1]
+  ]));
+  app.indexedDB.failNext({store:'projects',operation:'put',
+    error:new Error('QuotaExceededError')});
+  const result=await app.api.rehearsePreviewProjectsCollectionReconcile(
+    app.token(),'quota-denied');
+  assert.equal(result.reason,'projects_preview_reconcile_atomic_write_failed',
+    JSON.stringify(result));
+  assert.equal(result.committed,false);
+  assert.equal(result.confirmedDurable,false);
+  assert.deepEqual(app.indexedDB.dump(DB),old);
+});
+
+test('Projects reconciliation rejects V2 competing insertion in write-admission transaction',async()=>{
+  const app=await seeded(),db=app.indexedDB._databases.get(DB);
+  const original=db.transaction.bind(db);
+  app.localStorage.setItem(PROJECTS,JSON.stringify([
+    {...projects()[0],notes:'new via V1'},projects()[1]
+  ]));
+  let competing=false;
+  db.transaction=(stores,mode)=>{
+    if (!competing && mode==='readwrite'
+      && Array.isArray(stores)&&stores.includes('projects')) {
+      competing=true;
+      db._stores.get('projects').set('extra',{
+        id:'extra',legacyIndex:99,value:{id:'extra',notes:'other writer'}
+      });
+    }
+    return original(stores,mode);
+  };
+  const result=await app.api.rehearsePreviewProjectsCollectionReconcile(
+    app.token(),'race');
+  assert.equal(competing,true);
+  assert.equal(result.reason,'projects_preview_reconcile_concurrent_change',
+    JSON.stringify(result));
+  assert.equal(result.committed,false);
+  const current=app.indexedDB.dump(DB);
+  assert.equal(current.projects.find(x=>x.id==='extra').value.notes,'other writer');
+  assert.equal(current.projects.find(x=>x.id==='p2').value.notes,'long preserved note');
+  assert.equal(current.mutations.some(x=>x.id==='projects-preview-reconcile:race'),false);
+});
+
+test('Projects reconciliation refuses stale origin token and reused action ID',async()=>{
+  const app=await seeded(),token=app.token(),old=app.indexedDB.dump(DB);
+  app.localStorage.setItem(PROJECTS,JSON.stringify([
+    {...projects()[0],notes:'V1 changed'},projects()[1]
+  ]));
+  const stale=await app.api.rehearsePreviewProjectsCollectionReconcile(token,'stale');
+  assert.equal(stale.reason,'full_origin_changed');
+  assert.deepEqual(app.indexedDB.dump(DB),old);
+  const first=await app.api.rehearsePreviewProjectsCollectionReconcile(
+    app.token(),'used');
+  assert.equal(first.committed,true,JSON.stringify(first));
+  app.localStorage.setItem(PROJECTS,JSON.stringify([
+    {...projects()[0],notes:'another V1 change'},projects()[1]
+  ]));
+  const before=app.indexedDB.dump(DB);
+  const repeated=await app.api.rehearsePreviewProjectsCollectionReconcile(
+    app.token(),'used');
+  assert.equal(repeated.reason,'projects_preview_action_id_conflict');
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('Projects reconcile refuses more than 64 record changes and preserves source',async()=>{
+  const all=Array.from({length:66},(_,i)=>({
+    id:'id-'+i,name:'Project '+i,notes:'original',subtasks:[]
+  }));
+  const app=await boot(JSON.stringify(all));
+  const seed=await app.api.rehearsePreviewProjectsCollectionSeed(
+    app.token(),'large-seed');
+  assert.equal(seed.collectionParityVerified,true,JSON.stringify(seed));
+  const before=app.indexedDB.dump(DB);
+  app.localStorage.setItem(PROJECTS,JSON.stringify(
+    all.map(item=>({...item,notes:'updated'}))));
+  const result=await app.api.rehearsePreviewProjectsCollectionReconcile(
+    app.token(),'too-big');
+  assert.equal(result.reason,'projects_preview_reconcile_batch_too_large',
+    JSON.stringify(result));
+  assert.equal(result.changedRows,66);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('Projects reconcile keeps absent and explicit-empty source distinct',async()=>{
+  const app=await boot(null);
+  const seeded=await app.api.rehearsePreviewProjectsCollectionSeed(
+    app.token(),'missing');
+  assert.equal(seeded.collectionParityVerified,true);
+  app.localStorage.setItem(PROJECTS,'[]');
+  const added=await app.api.rehearsePreviewProjectsCollectionReconcile(
+    app.token(),'present-empty');
+  assert.equal(added.committed,true,JSON.stringify(added));
+  assert.equal(added.changedRows,0);
+  assert.equal((await app.api.inspectPreviewProjectsCollectionParity()).match,true);
+  assert.equal(app.indexedDB.dump(DB).meta.find(x=>x.id==='projects-preview')
+    .sourcePresent,true);
+  app.localStorage.removeItem(PROJECTS);
+  const deleted=await app.api.rehearsePreviewProjectsCollectionReconcile(
+    app.token(),'absent-again');
+  assert.equal(deleted.committed,true,JSON.stringify(deleted));
+  assert.equal(deleted.changedRows,0);
+  assert.equal((await app.api.inspectPreviewProjectsCollectionParity()).match,true);
+  assert.equal(app.indexedDB.dump(DB).meta.find(x=>x.id==='projects-preview')
+    .sourcePresent,false);
+  app.localStorage.setItem(PROJECTS,JSON.stringify([{
+    id:'project-later',name:'Created after empty',subtasks:[]
+  }]));
+  const afterEmpty=await app.api.rehearsePreviewProjectsCollectionReconcile(
+    app.token(),'after-empty');
+  assert.equal(afterEmpty.committed,true,JSON.stringify(afterEmpty));
+  assert.equal(afterEmpty.addedRows,1);
+  assert.equal((await app.api.inspectPreviewProjectsCollectionParity()).match,true);
+});
+
+test('Projects parity rejects broken predecessor receipt after reconciliation',async()=>{
+  const app=await seeded();
+  app.localStorage.setItem(PROJECTS,JSON.stringify([
+    {...projects()[0],notes:'changed'},projects()[1]
+  ]));
+  const changed=await app.api.rehearsePreviewProjectsCollectionReconcile(
+    app.token(),'first');
+  assert.equal(changed.collectionParityVerified,true,JSON.stringify(changed));
+  const receipts=app.indexedDB._databases.get(DB)._stores.get('mutations');
+  const prior=receipts.get('projects-preview-seed:source-seed');
+  receipts.set(prior.id,{...prior,sourceFingerprint:'bad'});
+  const before=app.indexedDB.dump(DB);
+  const inspected=await app.api.inspectPreviewProjectsCollectionParity();
+  assert.equal(inspected.match,false);
+  assert.equal(inspected.reason,'projects_preview_receipt_chain_invalid');
+  // Existing mirror data remains untouched, even when the receipt is bad.
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('Projects no-op reconciliation notices a V2-only write after its initial digest',async()=>{
+  const gate={armed:false,hashes:0,app:null};
+  const subtle={digest:async(...args)=>{
+    const hash=await webcrypto.subtle.digest(...args);
+    if (gate.armed && ++gate.hashes===2) {
+      const records=gate.app.indexedDB._databases.get(DB)._stores.get('projects');
+      const prior=records.get('p2');
+      records.set(prior.id,{...prior,value:{...prior.value,notes:'interleaved edit'}});
+    }
+    return hash;
+  }};
+  const app=await boot(undefined,{crypto:{subtle,randomUUID(){return 'test-digest'}}});
+  gate.app=app;
+  const initial=await app.api.rehearsePreviewProjectsCollectionSeed(
+    app.token(),'race-seed');
+  assert.equal(initial.collectionParityVerified,true,JSON.stringify(initial));
+  gate.armed=true;
+  const outcome=await app.api.rehearsePreviewProjectsCollectionReconcile(
+    app.token(),'no-op-race');
+  assert.equal(outcome.reason,'projects_preview_reconcile_noop_parity_mismatch',
+    JSON.stringify(outcome));
+  assert.equal(outcome.committed,false);
+  assert.equal(app.indexedDB.dump(DB).projects.find(x=>x.id==='p2').value.notes,
+    'interleaved edit');
+});
+
