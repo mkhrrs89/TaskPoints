@@ -98,12 +98,12 @@ function completion(snapshot, dayKey) {
   return snapshot.completions.find((row) => row.id === `habit:h1:${dayKey}`);
 }
 
-test('V2-01 opening V2 creates only the dedicated database and six expected stores (including nonauthoritative Tasks and Projects previews)', async () => {
+test('V2-01 opening V2 creates only the dedicated database and seven expected stores (including nonauthoritative Tasks, Projects and Today previews)', async () => {
   const app = installRuntime();
   await app.api.seedFromLegacy();
 
   assert.deepEqual(app.indexedDB.databaseNames(), [DB_NAME]);
-  assert.deepEqual(app.indexedDB.storeNames(DB_NAME), ['completions', 'habits', 'meta', 'mutations', 'projects', 'tasks']);
+  assert.deepEqual(app.indexedDB.storeNames(DB_NAME), ['completions', 'habits', 'meta', 'mutations', 'projects', 'tasks', 'todayDays']);
 });
 
 test('V2-02 State Runtime V2 never opens or creates the existing image database', async () => {
