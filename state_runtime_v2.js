@@ -5837,6 +5837,394 @@
     };
   }
 
+
+  // GAME SOURCE BOUNDARY. These are the Game/Players/Season snapshot-owned
+  // fields that the current Game page uses. Preserve unknown fields inside
+  // every record, row order, missing-property distinctions and raw independent
+  // gallery/sort/group preferences. This is a bounded preview, not yet a
+  // complete proof of every indirect Game, season or image writer.
+  const GAME_PREVIEW_DB='taskpoints_v2_game_preview';
+  const GAME_PREVIEW_ID='game-source';
+  const GAME_ARRAY_FIELDS=['players','gameHistory','matchups','schedule',
+    'opponentDripSchedules','seasonHistory'];
+  const GAME_SCALAR_FIELDS=['currentSeason','latestSeasonId',
+    'youImageId','youName','youNotes','youRivalId','youPrimaryColor',
+    'youSecondaryColor'];
+  const GAME_PREFERENCE_KEYS=['taskpoints_gallery_columns',
+    'taskpoints_player_sort_mode','taskpoints_group_active_players'];
+
+  function openGamePreviewDb(generation,epoch) {
+    return new Promise((resolve,reject)=>{
+      if(typeof global.indexedDB?.open!=='function')
+        return reject(Error('game_preview_indexeddb_unavailable'));
+      let request,failed=false;
+      try{request=global.indexedDB.open(GAME_PREVIEW_DB,1);}
+      catch(error){reject(error);return;}
+      const fail=error=>{
+        if(failed)return;
+        failed=true;reject(error||Error('game_preview_open_failed'));
+      };
+      request.onupgradeneeded=()=>{
+        if(failed||!isWalTestPreviewHost()||!isDarkEnabled()
+          || epoch!==darkMirrorModeEpoch
+          || currentGeneration({create:false})!==generation) {
+          try{request.transaction?.abort();}catch(_){}
+          return;
+        }
+        try{
+          const db=request.result;
+          for(const name of ['players','bundles','receipts','meta'])
+            if(!db.objectStoreNames.contains(name))
+              db.createObjectStore(name,{keyPath:'id'});
+        }catch(_){try{request.transaction?.abort();}catch(_){}}
+      };
+      request.onsuccess=()=>{
+        if(failed){try{request.result.close();}catch(_){}}
+        else resolve(request.result);
+      };
+      request.onerror=()=>fail(request.error);
+      request.onblocked=()=>fail(Error('game_preview_open_blocked'));
+    });
+  }
+
+  async function capturePreviewGameSource(sourceToken,generation,epoch) {
+    const current=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      && darkMirrorModeEpoch===epoch
+      && currentGeneration({create:false})===generation
+      && captureReadOnlyFullStorageInventory()===sourceToken;
+    if(!current())return {reason:'full_origin_changed'};
+    const preferenceAudit=await inspectPreviewGamePreferencesSource();
+    if(!preferenceAudit.sourceVerified)
+      return {reason:'game_preferences_preflight_required',
+        prerequisiteReason:preferenceAudit.reason};
+    if(!current())return {reason:'legacy_game_changed_during_preflight'};
+    const key=core.STORAGE_KEY||'taskpoints_v1';
+    let raw,parsed,fields,rows,preferences;
+    try{
+      raw=global.localStorage.getItem(key);
+      if(typeof raw!=='string'||!raw)
+        return {reason:'legacy_game_snapshot_required'};
+      parsed=core.parseTaskPointsStorageJson(raw);
+      if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))
+        return {reason:'legacy_game_snapshot_invalid'};
+      fields={};
+      for(const field of GAME_ARRAY_FIELDS) {
+        if(!Object.prototype.hasOwnProperty.call(parsed,field))continue;
+        if(!Array.isArray(parsed[field]))
+          return {reason:'legacy_game_array_invalid',field};
+        fields[field]=parsed[field];
+      }
+      for(const field of GAME_SCALAR_FIELDS)
+        if(Object.prototype.hasOwnProperty.call(parsed,field))
+          fields[field]=parsed[field];
+      const players=fields.players||[];
+      if(players.length>1024)return {reason:'game_preview_player_limit'};
+      for(const player of players)
+        if(!player||typeof player!=='object'||Array.isArray(player))
+          return {reason:'legacy_game_player_invalid'};
+      rows=players.map((value,id)=>({id,value}));
+      // Player objects are stored as individually addressable records. The
+      // rest of the Game/Season source is kept in its own immutable bundle.
+      delete fields.players;
+      preferences=GAME_PREFERENCE_KEYS.map(k=>global.localStorage.getItem(k));
+      if(!current()||raw!==global.localStorage.getItem(key)
+        ||preferences.some((v,i)=>v!==global.localStorage.getItem(
+          GAME_PREFERENCE_KEYS[i])))
+        return {reason:'legacy_game_changed_during_capture'};
+    }catch(_){return {reason:'legacy_game_source_unreadable'};}
+    let bundle,digest,originFingerprint,sourceFingerprint;
+    try{
+      sourceFingerprint=await previewRecoveryFingerprint({fields,
+        players:rows.map(x=>x.value),preferences});
+      originFingerprint=await previewRecoveryFingerprint(sourceToken);
+      bundle={id:GAME_PREVIEW_ID,schemaVersion:1,
+        resetGeneration:generation,originFingerprint,sourceFingerprint,
+        snapshotFingerprint:await previewRecoveryFingerprint(raw),
+        playerCount:rows.length,fields,preferences};
+      digest=await previewRecoveryFingerprint({bundle,rows});
+    }catch(_){return {reason:'game_preview_digest_unavailable'};}
+    try{if(!current()||raw!==global.localStorage.getItem(key))
+      return {reason:'legacy_game_changed_after_digest'};}
+    catch(_){return {reason:'legacy_game_source_unreadable'};}
+    const bytes=JSON.stringify({bundle,rows}).length;
+    if(bytes>2097152)return {reason:'game_preview_source_too_large'};
+    return {bundle,rows,digest,current,sourceToken};
+  }
+
+  async function readGamePreviewRows(db) {
+    const tx=db.transaction(['players','bundles','receipts','meta'],'readonly');
+    const [rows,bundle,evidence,receipts]=await Promise.all([
+      requestPromise(tx.objectStore('players').getAll()),
+      requestPromise(tx.objectStore('bundles').get(GAME_PREVIEW_ID)),
+      requestPromise(tx.objectStore('meta').get(GAME_PREVIEW_ID)),
+      requestPromise(tx.objectStore('receipts').getAll())
+    ]);
+    return {rows,bundle,evidence,receipts};
+  }
+
+  async function verifyGamePreviewLineage(result,generation) {
+    const fail=reason=>({verified:false,reason});
+    const {rows,bundle,evidence,receipts}=result;
+    if(!bundle&&!evidence&&!rows.length&&!receipts.length)
+      return fail('game_preview_seed_required');
+    if(!bundle||!evidence||!Array.isArray(receipts)
+      ||receipts.length<1||receipts.length>128
+      ||bundle.id!==GAME_PREVIEW_ID||bundle.schemaVersion!==1
+      ||bundle.resetGeneration!==generation
+      ||evidence.id!==GAME_PREVIEW_ID||evidence.schemaVersion!==1
+      ||evidence.resetGeneration!==generation||bundle.playerCount!==rows.length
+      ||evidence.bundleFingerprint===undefined
+      ||typeof evidence.receiptId!=='string')
+      return fail('game_preview_evidence_invalid');
+    const sorted=rows.slice().sort((a,b)=>a.id-b.id);
+    for(let i=0;i<sorted.length;i++)
+      if(sorted[i].id!==i||!sorted[i].value
+        ||typeof sorted[i].value!=='object'
+        ||Array.isArray(sorted[i].value))
+        return fail('game_preview_player_rows_invalid');
+    if(!bundle.fields||typeof bundle.fields!=='object'
+      ||Array.isArray(bundle.fields)
+      ||!Array.isArray(bundle.preferences)
+      ||bundle.preferences.length!==GAME_PREFERENCE_KEYS.length)
+      return fail('game_preview_bundle_shape_invalid');
+    const hash=await previewRecoveryFingerprint({bundle,rows:sorted});
+    if(hash!==evidence.bundleFingerprint)
+      return fail('game_preview_bundle_digest_mismatch');
+    const byId=new Map();
+    for(const r of receipts) {
+      if(!r||typeof r.id!=='string'||byId.has(r.id)
+        ||r.resetGeneration!==generation
+        ||!['game-preview-seed','game-preview-reconcile'].includes(r.type))
+        return fail('game_preview_receipts_invalid');
+      byId.set(r.id,r);
+    }
+    const head=byId.get(evidence.receiptId);
+    if(!head||head.bundleFingerprint!==hash
+      ||head.sourceFingerprint!==bundle.sourceFingerprint
+      ||head.originFingerprint!==bundle.originFingerprint)
+      return fail('game_preview_receipts_invalid');
+    const visited=new Set();
+    let cursor=head;
+    while(cursor) {
+      if(visited.has(cursor.id))return fail('game_preview_receipts_invalid');
+      visited.add(cursor.id);
+      if(cursor.type==='game-preview-seed') {
+        if('priorReceiptId' in cursor||'priorReceiptFingerprint' in cursor)
+          return fail('game_preview_receipts_invalid');
+        cursor=null;
+      }else{
+        const parent=byId.get(cursor.priorReceiptId);
+        if(!parent||typeof cursor.priorReceiptFingerprint!=='string'
+          ||await previewRecoveryFingerprint(parent)!==
+            cursor.priorReceiptFingerprint)
+          return fail('game_preview_receipts_invalid');
+        cursor=parent;
+      }
+    }
+    if(visited.size!==receipts.length)
+      return fail('game_preview_receipts_invalid');
+    return {verified:true,reason:'game_preview_evidence_verified',
+      head,receiptCount:receipts.length};
+  }
+
+  async function proveGamePreviewParity(db,captured) {
+    const original=await readGamePreviewRows(db);
+    const lineage=await verifyGamePreviewLineage(
+      original,captured.bundle.resetGeneration);
+    if(!lineage.verified)return lineage;
+    if(stableJson(original.bundle)!==stableJson(captured.bundle)
+      ||stableJson(original.rows.slice().sort((a,b)=>a.id-b.id))
+        !==stableJson(captured.rows)
+      ||original.evidence.bundleFingerprint!==captured.digest)
+      return {verified:false,reason:'game_preview_source_stale'};
+    if(!captured.current())
+      return {verified:false,reason:'legacy_game_changed_during_readback'};
+    const second=await readGamePreviewRows(db);
+    if(stableJson(original)!==stableJson(second)||!captured.current())
+      return {verified:false,reason:'game_preview_changed_during_digest'};
+    return {verified:true,reason:'game_preview_parity_verified',
+      receiptCount:lineage.receiptCount};
+  }
+
+  async function rehearsePreviewGameCollectionAction(sourceToken,actionId,reconcile) {
+    const refuse=(reason,extra={})=>({
+      checked:true,previewOnly:true,committed:false,confirmedDurable:false,
+      collectionParityVerified:false,gameMigrated:false,canPromote:false,
+      productionWritersFenced:false,readAuthority:'legacy_only',
+      mutationAuthority:'legacy_only',reason,...extra
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    if(typeof sourceToken!=='string'||!sourceToken)
+      return refuse('full_origin_token_required');
+    if(typeof actionId!=='string'||!actionId||actionId.length>128)
+      return refuse('game_preview_action_id_required');
+    const generation=currentGeneration({create:false});
+    if(!generation)return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    let captured,db,committed=false;
+    try{
+      captured=await capturePreviewGameSource(sourceToken,generation,epoch);
+      if(captured.reason)return refuse(captured.reason,{
+        prerequisiteReason:captured.prerequisiteReason
+      });
+      db=await openGamePreviewDb(generation,epoch);
+      const original=await readGamePreviewRows(db);
+      const any=original.rows.length||original.bundle
+        ||original.evidence||original.receipts.length;
+      let lineage=null;
+      if(any){
+        lineage=await verifyGamePreviewLineage(original,generation);
+        if(!lineage.verified)return refuse(lineage.reason);
+      }
+      if(!any&&reconcile)return refuse('game_preview_seed_required');
+      if(any&&!reconcile){
+        const proof=await proveGamePreviewParity(db,captured);
+        if(!proof.verified)return refuse(proof.reason);
+        return {
+          checked:true,previewOnly:true,committed:false,confirmedDurable:true,
+          collectionParityVerified:true,gameMigrated:false,
+          receiptCount:proof.receiptCount,reason:'game_preview_already_verified',
+          canPromote:false,productionWritersFenced:false,
+          readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+        };
+      }
+      if(!captured.current())return refuse('legacy_game_changed_before_write');
+      if(any&&stableJson(original.bundle)===stableJson(captured.bundle)
+        && stableJson(original.rows.slice().sort((a,b)=>a.id-b.id))
+          ===stableJson(captured.rows)) {
+        const proof=await proveGamePreviewParity(db,captured);
+        if(!proof.verified)return refuse(proof.reason);
+        return {
+          checked:true,previewOnly:true,committed:false,confirmedDurable:true,
+          collectionParityVerified:true,gameMigrated:false,
+          receiptCount:proof.receiptCount,reason:'game_preview_reconcile_no_change',
+          canPromote:false,productionWritersFenced:false,
+          readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+        };
+      }
+      if(original.receipts.length>=128)
+        return refuse('game_preview_receipt_limit');
+      const prior=new Map(original.rows.map(row=>[row.id,row]));
+      const changed=captured.rows.filter(row=>
+        stableJson(prior.get(row.id))!==stableJson(row));
+      const removed=original.rows.filter(row=>row.id>=captured.rows.length);
+      if(reconcile&&(changed.length+removed.length>64
+        ||JSON.stringify(changed.concat(removed)).length>262144))
+        return refuse('game_preview_reconcile_batch_too_large');
+      const receiptId=(reconcile?'game-preview-reconcile:':'game-preview-seed:')
+        +actionId;
+      if(original.receipts.some(row=>row.id===receiptId))
+        return refuse('game_preview_action_id_reused');
+      const receipt={
+        id:receiptId,
+        type:reconcile?'game-preview-reconcile':'game-preview-seed',
+        resetGeneration:generation,
+        originFingerprint:captured.bundle.originFingerprint,
+        sourceFingerprint:captured.bundle.sourceFingerprint,
+        bundleFingerprint:captured.digest,
+        ...(reconcile?{
+          priorReceiptId:lineage.head.id,
+          priorReceiptFingerprint:
+            await previewRecoveryFingerprint(lineage.head)
+        }:{})
+      };
+      const evidence={id:GAME_PREVIEW_ID,schemaVersion:1,
+        resetGeneration:generation,receiptId,
+        bundleFingerprint:captured.digest};
+      if(!captured.current())
+        return refuse('legacy_game_changed_before_transaction');
+      let failure='game_preview_atomic_write_failed';
+      const tx=db.transaction(['players','bundles','receipts','meta'],'readwrite');
+      const ps=tx.objectStore('players'),bs=tx.objectStore('bundles');
+      const rs=tx.objectStore('receipts'),ms=tx.objectStore('meta');
+      const reads=[ps.getAll(),bs.get(GAME_PREVIEW_ID),
+        ms.get(GAME_PREVIEW_ID),rs.getAll(),rs.get(receiptId)];
+      const results=[];
+      let pending=reads.length;
+      const abort=reason=>{failure=reason;try{tx.abort();}catch(_){}};
+      reads.forEach((request,index)=>{request.onsuccess=()=>{
+        results[index]=request.result;
+        if(--pending!==0)return;
+        try{
+          if(!captured.current())
+            return abort('legacy_game_changed_under_transaction');
+          if(stableJson(results[0])!==stableJson(original.rows)
+            ||stableJson(results[1])!==stableJson(original.bundle)
+            ||stableJson(results[2])!==stableJson(original.evidence)
+            ||stableJson(results[3])!==stableJson(original.receipts)
+            ||results[4])
+            return abort('game_preview_concurrent_change');
+          for(const row of removed)ps.delete(row.id);
+          for(const row of changed)ps.put(row);
+          // Seeds add all records, including index 0 (no fixed ID needed).
+          bs.put(captured.bundle);
+          rs.add(receipt);
+          ms.put(evidence);
+        }catch(_){abort('game_preview_atomic_write_failed');}
+      };});
+      try{await transactionPromise(tx);}
+      catch(_){return refuse(failure);}
+      committed=true;
+      const proof=await proveGamePreviewParity(db,captured);
+      if(!proof.verified)return refuse(proof.reason,{
+        committed:true,writeOutcomeUncertain:true
+      });
+      return {
+        checked:true,previewOnly:true,committed:true,confirmedDurable:true,
+        collectionParityVerified:true,gameMigrated:false,
+        changedPlayers:changed.length,removedPlayers:removed.length,
+        receiptCount:proof.receiptCount,
+        reason:reconcile?'game_preview_reconcile_verified'
+          :'game_preview_seed_verified',
+        canPromote:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+      };
+    }catch(_){return refuse('game_preview_action_unavailable',{
+      committed,writeOutcomeUncertain:committed
+    });}
+    finally{try{db?.close();}catch(_){}}
+  }
+
+  async function rehearsePreviewGameCollectionSeed(sourceToken,actionId) {
+    return rehearsePreviewGameCollectionAction(sourceToken,actionId,false);
+  }
+  async function rehearsePreviewGameCollectionReconcile(sourceToken,actionId) {
+    return rehearsePreviewGameCollectionAction(sourceToken,actionId,true);
+  }
+  async function inspectPreviewGameCollectionParity() {
+    const refuse=(reason,extra={})=>({
+      checked:true,previewOnly:true,match:false,gameMigrated:false,
+      canPromote:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...extra
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    const generation=currentGeneration({create:false});
+    if(!generation)return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    let db;
+    try{
+      const token=captureReadOnlyFullStorageInventory();
+      const captured=await capturePreviewGameSource(token,generation,epoch);
+      if(captured.reason)return refuse(captured.reason,{
+        prerequisiteReason:captured.prerequisiteReason
+      });
+      db=await openGamePreviewDb(generation,epoch);
+      const proof=await proveGamePreviewParity(db,captured);
+      if(!proof.verified)return refuse(proof.reason);
+      return {
+        checked:true,previewOnly:true,match:true,
+        receiptCount:proof.receiptCount,
+        gameMigrated:false,reason:'game_preview_collection_parity_verified',
+        canPromote:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+      };
+    }catch(_){return refuse('game_preview_parity_unavailable');}
+    finally{try{db?.close();}catch(_){}}
+  }
+
   // Today is a separate, independently writable V1 authority. Its four
   // per-day maps do not live in the main TaskPoints snapshot. This preview
   // capture never invokes Today page's forgiving fallback, which can erase
@@ -11000,6 +11388,9 @@
     inspectPreviewNotesBundleParity,
     inspectPreviewNotesCheckpointCoverage,
     inspectPreviewGamePreferencesSource,
+    rehearsePreviewGameCollectionSeed,
+    rehearsePreviewGameCollectionReconcile,
+    inspectPreviewGameCollectionParity,
     inspectPreviewTodaySource,
     rehearsePreviewTodayCollectionSeed,
     inspectPreviewTodayCollectionParity,

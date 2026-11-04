@@ -1145,3 +1145,52 @@ This is only a source inventory prerequisite, not Game/player storage
 migration or mandatory writer fencing. The Game/editor legacy writer family
 is still unfenced, canPromote stays false, and weighted readiness remains
 **67/100**.
+
+
+## Game/player/season preview collection — November 4 (V2 branch only)
+
+The existing Game preference source audit is extended by explicit preview-only
+rehearsePreviewGameCollectionSeed(fullOriginToken,actionId),
+rehearsePreviewGameCollectionReconcile(fullOriginToken,actionId) and
+inspectPreviewGameCollectionParity() methods. They store roster entries as
+**ordered, individually addressable player records** in the separate
+taskpoints_v2_game_preview IndexedDB database. A sibling source bundle
+preserves raw current Game/Players state fields: gameHistory, matchups,
+schedule, opponentDripSchedules, seasonHistory, currentSeason,
+latestSeasonId, user identity/rival/color/image references, and the three
+separately persisted Game preferences. Unknown fields inside player and
+season/game objects are retained without normalization or pruning. Player
+rows use their legacy position as the stable storage key so even duplicated
+or malformed optional player IDs are not silently dropped.
+
+A seeded or reconciled logical action updates all affected player rows,
+Game bundle and source evidence, and appends a SHA-256-linked immutable
+receipt in a **single IndexedDB readwrite transaction**. It refuses
+unverified legacy/companion inputs, stale full-origin tokens, changed
+generations, racing preview transactions, corrupt V2 records/receipts,
+action-ID reuse and interrupted/denied writes. Every success requires full
+durable re-read and origin/parity recheck. Up to 64 changed/removed roster
+rows and 256KiB of changed-row payload can be reconciled per action; no
+partial oversized mutation is applied. An unmodified Game source is a
+verified no-op, not a new receipt. Maximum 128 retained immutable receipts
+per preview generation, and a 2MiB initial source bundle ceiling. Exhaustion
+fails closed pending a future checkpoint/compaction design.
+
+The explicit preview cleanup page now also deletes this independent Game
+database, but never deletes the V1 snapshot, backup, or image database.
+New Node contracts cover full source preservation, order changes, additions,
+deletions, unknown fields, season and Game history, independent preferences,
+idempotence and reload, malformed source, source changes, injected quota
+failures for every store, concurrent writes, tampered receipts and row data,
+receipt reuse, oversize batches and host/mode denial. Chromium/WebKit
+cross-tab safety now exercises an old tab changing Game player and season
+fields outside the preview writer while a new tab detects stale parity and
+explicitly reconciles, preserving the legacy source after reload.
+
+**Boundary:** this only covers the enumerated Game/Season fields in the
+current Game page; it does not establish all other season-sidecar paths,
+images or external media bytes. It does not wire Game UI writes, authorize
+independent V2 Game reads, transfer authority, fence legacy writers or
+reduce current production storage size. The canonical V1 save/import/export
+and recovery implementation remains completely unchanged. The nonpilot
+migration gate remains incomplete; weighted V2 readiness stays **67/100**.

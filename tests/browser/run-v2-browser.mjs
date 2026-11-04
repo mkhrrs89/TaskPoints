@@ -1283,6 +1283,85 @@ try {
       badLegacyValueNotNormalized:true,noV1Writes:true,stillPreviewOnly:true};
   });
 
+
+  await run('Game collection preserves roster and season through old-tab edits and reload',async context=>{
+    const page=await open(context);
+    const first=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const saved=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      saved.players=[
+        {id:'p2',name:'Cinder',ratings:{streaky:70},future:{a:1}},
+        {id:'p1',name:'Morrow',rivalId:'p2',future:{b:[2,3]}}
+      ];
+      saved.matchups=[{id:'m1',homeId:'p2',awayId:'p1'}];
+      saved.gameHistory=[{id:'g1',winner:'p2'}];
+      saved.schedule=[{date:'2026-11-04',ids:['p2','p1']}];
+      saved.opponentDripSchedules=[{playerId:'p1',drip:[40,12]}];
+      saved.currentSeason={id:'S4',year:2026};
+      saved.seasonHistory=[{id:'S3',champ:'p2'}];
+      saved.youRivalId='p1';
+      localStorage.setItem('taskpoints_v1',JSON.stringify(saved));
+      localStorage.setItem('taskpoints_gallery_columns','{"portrait":3,"landscape":4}');
+      localStorage.setItem('taskpoints_player_sort_mode','pid-desc');
+      localStorage.setItem('taskpoints_group_active_players','true');
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const before=token();
+      const seed=await api.rehearsePreviewGameCollectionSeed(before,'browser-game-seed');
+      const parity=await api.inspectPreviewGameCollectionParity();
+      return {seed,parity,unchanged:before===token()};
+    });
+    assert.equal(first.seed.collectionParityVerified,true,JSON.stringify(first.seed));
+    assert.equal(first.parity.match,true,JSON.stringify(first.parity));
+    assert.equal(first.unchanged,true);
+    const older=await open(context);
+    await older.evaluate(()=>{
+      const state=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      state.players[0].name='Cinder after old-tab edit';
+      state.players.push({id:'p3',name:'Rook',extra:{note:'retained'}});
+      state.currentSeason.results={round:'semifinal',future:true};
+      localStorage.setItem('taskpoints_v1',JSON.stringify(state));
+      localStorage.setItem('taskpoints_player_sort_mode','overall-desc');
+    });
+    await requireCrossTabStorageValue(page,'taskpoints_player_sort_mode','overall-desc');
+    const updated=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const stale=await api.inspectPreviewGameCollectionParity();
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const before=token();
+      const reconciled=await api.rehearsePreviewGameCollectionReconcile(
+        before,'browser-game-edited');
+      const parity=await api.inspectPreviewGameCollectionParity();
+      const noOp=await api.rehearsePreviewGameCollectionReconcile(
+        token(),'browser-game-noop');
+      return {stale,reconciled,parity,noOp,unchanged:before===token(),
+        origin:JSON.parse(localStorage.getItem('taskpoints_v1')),
+        readAuthority:api.getStatus().readAuthority};
+    });
+    assert.equal(updated.stale.match,false,JSON.stringify(updated.stale));
+    assert.equal(updated.reconciled.collectionParityVerified,true,JSON.stringify(updated.reconciled));
+    assert.equal(updated.reconciled.receiptCount,2);
+    assert.equal(updated.parity.match,true,JSON.stringify(updated.parity));
+    assert.equal(updated.noOp.reason,'game_preview_reconcile_no_change',JSON.stringify(updated.noOp));
+    assert.equal(updated.unchanged,true);
+    assert.equal(updated.origin.players.length,3);
+    assert.equal(updated.origin.currentSeason.results.future,true);
+    assert.equal(updated.readAuthority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    const reload=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const parity=await api.inspectPreviewGameCollectionParity();
+      return {parity,players:JSON.parse(localStorage.getItem('taskpoints_v1')).players.length};
+    });
+    assert.equal(reload.parity.match,true,JSON.stringify(reload.parity));
+    assert.equal(reload.players,3);
+    return {rosterPreserved:true,seasonFieldsPreserved:true,
+      unfencedOldTabDetected:true,receiptRetained:true,reloadParity:true,
+      liveGameAuthorityStillV1:true};
+  });
+
   await run('Today V5 preview retains sparse day maps, survives reload and rejects stale V1',async context=>{
     const page=await open(context);
     const initial=await page.evaluate(async()=>{
