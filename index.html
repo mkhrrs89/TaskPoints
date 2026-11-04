@@ -11755,6 +11755,7 @@ function applyTaskRescheduleDate(newDateKey) {
       closeTaskRescheduleCalendar();
     }, TASK_RESCHEDULE_CONFIRMATION_MS);
   });
+  return true; // Accepted date tap; persistence completes after the feedback paints.
 }
 
 // Mobile-only left-swipe gesture. This opens the SAME confirmation and Trash
