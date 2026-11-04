@@ -206,14 +206,14 @@ Nothing visible on the page is built here. === -->
   
   <!-- Your app scripts + CSS -->
 <link rel="preload" href="assets/tailwind.css" as="style">
-<link rel="preload" href="styles.css?v=20261103-task-swipe-delete-1" as="style">
+<link rel="preload" href="styles.css?v=20261104-task-swipe-reschedule-1" as="style">
 
 <link rel="stylesheet" href="assets/tailwind.css" media="print" onload="this.media='all'">
-<link rel="stylesheet" href="styles.css?v=20261103-task-swipe-delete-1" media="print" onload="this.media='all'">
+<link rel="stylesheet" href="styles.css?v=20261104-task-swipe-reschedule-1" media="print" onload="this.media='all'">
 
 <noscript>
   <link rel="stylesheet" href="assets/tailwind.css">
-  <link rel="stylesheet" href="styles.css?v=20261103-task-swipe-delete-1">
+  <link rel="stylesheet" href="styles.css?v=20261104-task-swipe-reschedule-1">
 </noscript>
   <style>
 
@@ -11481,10 +11481,201 @@ function getTaskCardLayoutStateInput() {
 }
 
 
+
+/* Quick mobile task rescheduling: the calendar commits on a single day tap. */
+let taskRescheduleTaskId = null;
+let taskRescheduleDisplayMonth = null;
+let taskRescheduleReturnFocus = null;
+
+function isTaskRescheduleDateKey(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = fromKey(value);
+  return Number.isFinite(parsed.getTime()) && dateKey(parsed) === value;
+}
+
+function getTaskRescheduleCalendar() {
+  let overlay = $('taskRescheduleCalendar');
+  if (overlay) return overlay;
+  overlay = document.createElement('div');
+  overlay.id = 'taskRescheduleCalendar';
+  overlay.className = 'task-reschedule-backdrop hidden';
+  overlay.hidden = true;
+  overlay.setAttribute('aria-hidden', 'true');
+  overlay.innerHTML = `
+    <div class="task-reschedule-dialog" role="dialog" aria-modal="true" aria-labelledby="taskRescheduleTitle">
+      <div class="task-reschedule-heading">
+        <h2 id="taskRescheduleTitle">Reschedule task</h2>
+        <button type="button" class="task-reschedule-close" data-task-reschedule-action="close" aria-label="Close calendar">✕</button>
+      </div>
+      <div class="task-reschedule-task-name" id="taskRescheduleTaskName"></div>
+      <div class="task-reschedule-month-nav">
+        <button type="button" data-task-reschedule-action="previous" aria-label="Previous month">‹</button>
+        <strong id="taskRescheduleMonthLabel" aria-live="polite"></strong>
+        <button type="button" data-task-reschedule-action="next" aria-label="Next month">›</button>
+      </div>
+      <div class="task-reschedule-weekdays" aria-hidden="true">
+        <span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span>
+      </div>
+      <div id="taskRescheduleDayGrid" class="task-reschedule-day-grid" role="group" aria-label="Choose the new due date"></div>
+      <div class="task-reschedule-shortcuts">
+        <button type="button" data-task-reschedule-action="today">Today</button>
+        <button type="button" data-task-reschedule-action="tomorrow">Tomorrow</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener('click', event => {
+    if (event.target === overlay) {
+      closeTaskRescheduleCalendar();
+      return;
+    }
+    const button = event.target.closest?.('[data-task-reschedule-date], [data-task-reschedule-action]');
+    if (!button) return;
+    const chosen = button.getAttribute('data-task-reschedule-date');
+    if (chosen) {
+      applyTaskRescheduleDate(chosen);
+      return;
+    }
+    const action = button.getAttribute('data-task-reschedule-action');
+    if (action === 'close') return closeTaskRescheduleCalendar();
+    if (action === 'today') return applyTaskRescheduleDate(todayKey());
+    if (action === 'tomorrow') return applyTaskRescheduleDate(dateKey(addDays(new Date(), 1)));
+    if (action === 'previous' || action === 'next') {
+      const change = action === 'previous' ? -1 : 1;
+      taskRescheduleDisplayMonth = new Date(
+        taskRescheduleDisplayMonth.getFullYear(),
+        taskRescheduleDisplayMonth.getMonth() + change, 1
+      );
+      renderTaskRescheduleCalendar();
+    }
+  });
+  overlay.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeTaskRescheduleCalendar();
+    } else if (event.key === 'Tab') {
+      const focusables = Array.from(overlay.querySelectorAll('button:not([disabled])'));
+      if (!focusables.length) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault(); last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault(); first.focus();
+      }
+    }
+  });
+  return overlay;
+}
+
+function renderTaskRescheduleCalendar() {
+  const overlay = $('taskRescheduleCalendar');
+  const month = taskRescheduleDisplayMonth;
+  if (!overlay || !month) return;
+  const year = month.getFullYear();
+  const monthIndex = month.getMonth();
+  const currentTask = state.tasks.find(task => task?.id === taskRescheduleTaskId);
+  const selected = currentTask?.dueDateISO || '';
+  const firstWeekday = new Date(year, monthIndex, 1).getDay();
+  const numberOfDays = new Date(year, monthIndex + 1, 0).getDate();
+  const cells = Array.from({ length: firstWeekday }, () =>
+    '<span class="task-reschedule-empty" aria-hidden="true"></span>');
+  const today = todayKey();
+  for (let day = 1; day <= numberOfDays; day++) {
+    const when = new Date(year, monthIndex, day);
+    const key = dateKey(when);
+    const isSelected = key === selected;
+    const isToday = key === today;
+    const label = escapeHtml(when.toLocaleDateString(undefined, {
+      weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
+    }));
+    cells.push(`<button type="button" class="task-reschedule-day${isSelected ? ' is-selected' : ''}${isToday ? ' is-today' : ''}" data-task-reschedule-date="${key}" aria-label="${label}" aria-pressed="${isSelected}">${day}</button>`);
+  }
+  overlay.querySelector('#taskRescheduleMonthLabel').textContent =
+    month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  overlay.querySelector('#taskRescheduleDayGrid').innerHTML = cells.join('');
+}
+
+function openTaskRescheduleCalendar(id) {
+  const task = state.tasks.find(item => item?.id === id);
+  if (!task || task.completedAtISO || task.hidden || isTaskTrashed(task)
+    || getTaskStatus(task) === 'wontdo') return false;
+  taskRescheduleTaskId = id;
+  const initial = isTaskRescheduleDateKey(task.dueDateISO) ? task.dueDateISO : todayKey();
+  const dueDate = fromKey(initial);
+  taskRescheduleDisplayMonth = new Date(dueDate.getFullYear(), dueDate.getMonth(), 1);
+  taskRescheduleReturnFocus = document.activeElement;
+  const overlay = getTaskRescheduleCalendar();
+  overlay.querySelector('#taskRescheduleTaskName').textContent = task.title || 'Untitled task';
+  renderTaskRescheduleCalendar();
+  overlay.hidden = false;
+  overlay.classList.remove('hidden');
+  overlay.setAttribute('aria-hidden', 'false');
+  (overlay.querySelector('.task-reschedule-day.is-selected')
+    || overlay.querySelector('[data-task-reschedule-action="close"]'))?.focus();
+  return true;
+}
+
+function closeTaskRescheduleCalendar() {
+  const overlay = $('taskRescheduleCalendar');
+  if (overlay) {
+    overlay.hidden = true;
+    overlay.classList.add('hidden');
+    overlay.setAttribute('aria-hidden', 'true');
+  }
+  taskRescheduleTaskId = null;
+  taskRescheduleDisplayMonth = null;
+  if (taskRescheduleReturnFocus?.isConnected) taskRescheduleReturnFocus.focus?.();
+  taskRescheduleReturnFocus = null;
+}
+
+function applyTaskRescheduleDate(newDateKey) {
+  if (!isTaskRescheduleDateKey(newDateKey) || !taskRescheduleTaskId) return false;
+  const task = state.tasks.find(item => item?.id === taskRescheduleTaskId);
+  if (!task || task.completedAtISO || task.hidden || isTaskTrashed(task)
+    || getTaskStatus(task) === 'wontdo') {
+    closeTaskRescheduleCalendar();
+    return false;
+  }
+  if (task.dueDateISO === newDateKey) {
+    closeTaskRescheduleCalendar();
+    return true;
+  }
+  if (!assertTaskActionMutationWritable()) return false;
+
+  const previous = {
+    dueDateISO: task.dueDateISO,
+    originalDueDateISO: task.originalDueDateISO,
+    postponedDays: task.postponedDays,
+    updatedAtISO: task.updatedAtISO
+  };
+  task.dueDateISO = newDateKey;
+  trackDueDatePush(task, previous.dueDateISO, newDateKey);
+  task.updatedAtISO = new Date().toISOString();
+  try {
+    persistTaskActionMutation(task, 'swipe-right-reschedule');
+  } catch (error) {
+    Object.assign(task, previous);
+    console.warn('Failed to save the rescheduled task.', error);
+    alert('Could not save the new date. Please try again.');
+    return false;
+  }
+  closeTaskRescheduleCalendar();
+  renderTasks(state);
+  window.updateCriticalTasksIsland?.();
+  return true;
+}
+
 // Mobile-only left-swipe gesture. This opens the SAME confirmation and Trash
 // workflow as the existing Delete button; swipes never delete automatically.
 const TASK_SWIPE_DELETE_MIN_X = 76;
+const TASK_SWIPE_RESCHEDULE_MIN_X = 76;
 const TASK_SWIPE_DELETE_MAX_Y_RATIO = 0.6;
+
+function isTaskSwipeRescheduleGesture(deltaX, deltaY) {
+  return deltaX >= TASK_SWIPE_RESCHEDULE_MIN_X
+    && Math.abs(deltaY) <= Math.abs(deltaX) * TASK_SWIPE_DELETE_MAX_Y_RATIO;
+}
 
 function isTaskSwipeDeleteGesture(deltaX, deltaY) {
   return deltaX <= -TASK_SWIPE_DELETE_MIN_X
@@ -11505,7 +11696,9 @@ function installMobileTaskSwipeDelete(list) {
   const resetCard = current => {
     if (!current?.card) return;
     current.card.classList.remove('task-swipe-delete-active');
+    current.card.classList.remove('task-swipe-reschedule-active');
     current.card.style.removeProperty('--task-swipe-delete-offset');
+    current.card.style.removeProperty('--task-swipe-reschedule-offset');
   };
 
   const cancel = () => {
@@ -11542,14 +11735,22 @@ function installMobileTaskSwipeDelete(list) {
       current.axis = Math.abs(current.dx) > Math.abs(current.dy) * 1.25
         ? 'horizontal' : 'vertical';
     }
-    if (current.axis !== 'horizontal' || current.dx >= 0) {
+    if (current.axis !== 'horizontal') {
       resetCard(current);
       return;
     }
-    // A short drag reveals a red Delete cue without permanently moving a row.
-    current.card.classList.add('task-swipe-delete-active');
-    current.card.style.setProperty('--task-swipe-delete-offset',
-      Math.max(-96, current.dx) + 'px');
+    resetCard(current);
+    if (current.dx < 0) {
+      // Left swipe: original red Delete cue and confirmation flow.
+      current.card.classList.add('task-swipe-delete-active');
+      current.card.style.setProperty('--task-swipe-delete-offset',
+        Math.max(-96, current.dx) + 'px');
+    } else if (current.dx > 0) {
+      // Right swipe: teal Reschedule cue. A tap in the calendar will save.
+      current.card.classList.add('task-swipe-reschedule-active');
+      current.card.style.setProperty('--task-swipe-reschedule-offset',
+        Math.min(96, current.dx) + 'px');
+    }
   }, { passive: true });
 
   document.addEventListener('pointerup', event => {
@@ -11558,10 +11759,11 @@ function installMobileTaskSwipeDelete(list) {
     current.dx = event.clientX - current.startX;
     current.dy = event.clientY - current.startY;
     const wasHorizontalSwipe = current.axis === 'horizontal'
-      && current.dx < -16 && Math.abs(current.dy) <= Math.abs(current.dx) * 0.6;
-    const shouldDelete = wasHorizontalSwipe
-      && isTaskSwipeDeleteGesture(current.dx, current.dy)
-      && current.card.isConnected;
+      && Math.abs(current.dx) > 16 && Math.abs(current.dy) <= Math.abs(current.dx) * 0.6;
+    const shouldDelete = wasHorizontalSwipe && current.card.isConnected
+      && isTaskSwipeDeleteGesture(current.dx, current.dy);
+    const shouldReschedule = wasHorizontalSwipe && current.card.isConnected
+      && isTaskSwipeRescheduleGesture(current.dx, current.dy);
     const id = current.id;
     cancel();
     if (wasHorizontalSwipe) {
@@ -11569,11 +11771,14 @@ function installMobileTaskSwipeDelete(list) {
       suppressClickTaskId = id;
       suppressClickUntil = Date.now() + 750;
     }
-    if (!shouldDelete) return;
-    deleteTask(id); // Always shows "Move this task to Trash?" first.
-    // Native confirm can stay open for seconds; keep the following click
-    // suppressed AFTER the confirmation returns, including on Cancel.
-    suppressClickUntil = Date.now() + 750;
+    if (shouldDelete) {
+      deleteTask(id); // Always shows "Move this task to Trash?" first.
+      // Native confirm can stay open for seconds; suppress the click afterward.
+      suppressClickUntil = Date.now() + 750;
+    } else if (shouldReschedule) {
+      openTaskRescheduleCalendar(id);
+      suppressClickUntil = Date.now() + 750;
+    }
   }, { passive: true });
 
   document.addEventListener('pointercancel', event => {

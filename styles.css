@@ -7917,3 +7917,119 @@ body.tp-player-profile-open #cropModal:not(.hidden) { z-index: 1900 !important; 
     pointer-events: none;
   }
 }
+
+
+/* Swipe right to open the one-tap task reschedule calendar. */
+@media (max-width: 900px) and (pointer: coarse) {
+  #taskList .task-priority-card.task-swipe-reschedule-active {
+    position: relative;
+    overflow: visible;
+    transform: translate3d(var(--task-swipe-reschedule-offset, 0px), 0, 0);
+    will-change: transform;
+  }
+  #taskList .task-priority-card.task-swipe-reschedule-active::before {
+    content: "Reschedule";
+    position: absolute;
+    inset-block: 0;
+    right: 100%;
+    width: 96px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 12px 0 0 12px;
+    background: #0f766e;
+    color: #fff;
+    font-size: .79rem;
+    font-weight: 800;
+    pointer-events: none;
+  }
+}
+.task-reschedule-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 11000;
+  background: rgba(0, 0, 0, .72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(16px, env(safe-area-inset-top, 0px)) 14px max(16px, env(safe-area-inset-bottom, 0px));
+}
+.task-reschedule-backdrop[hidden] { display: none !important; }
+.task-reschedule-dialog {
+  width: min(100%, 366px);
+  max-height: min(92dvh, 740px);
+  overflow-y: auto;
+  border: 1px solid rgba(94, 234, 212, .32);
+  border-radius: 18px;
+  background: linear-gradient(160deg, #172e32, #12191f 65%);
+  color: #f4f7f8;
+  box-shadow: 0 24px 74px rgba(0,0,0,.6);
+  padding: 18px 16px 16px;
+}
+.task-reschedule-heading, .task-reschedule-month-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.task-reschedule-heading h2 { font-size: 1.08rem; font-weight: 800; margin: 0; }
+.task-reschedule-task-name {
+  font-size: .82rem;
+  color: #bdd5d6;
+  margin: 6px 0 12px;
+  overflow-wrap: anywhere;
+}
+.task-reschedule-close, .task-reschedule-month-nav button,
+.task-reschedule-shortcuts button {
+  border: 1px solid rgba(163, 191, 195, .24);
+  background: rgba(26, 56, 59, .8);
+  color: #fff;
+  border-radius: 10px;
+  min-width: 42px;
+  min-height: 42px;
+  cursor: pointer;
+}
+.task-reschedule-close { font-size: 1.05rem; }
+.task-reschedule-month-nav { margin: 0 0 8px; }
+.task-reschedule-month-nav strong { font-size: 1rem; font-weight: 800; }
+.task-reschedule-month-nav button { font-size: 1.6rem; line-height: 1; }
+.task-reschedule-weekdays, .task-reschedule-day-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 5px;
+}
+.task-reschedule-weekdays span {
+  text-align: center;
+  font-size: .73rem;
+  color: #aabec0;
+  padding: 8px 0 5px;
+}
+.task-reschedule-day {
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .055);
+  color: #f5f5f5;
+  font-weight: 650;
+  font-size: .93rem;
+  min-height: 42px;
+  padding: 0;
+  cursor: pointer;
+}
+.task-reschedule-day.is-today { border-color: #5eead4; }
+.task-reschedule-day.is-selected { background: #0f766e; border-color: #5eead4; }
+.task-reschedule-day:focus-visible, .task-reschedule-shortcuts button:focus-visible,
+.task-reschedule-month-nav button:focus-visible, .task-reschedule-close:focus-visible {
+  outline: 2px solid #a7f3d0;
+  outline-offset: 2px;
+}
+.task-reschedule-shortcuts {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+.task-reschedule-shortcuts button { flex: 1; font-weight: 700; }
+@media (max-width: 480px) {
+  .task-reschedule-backdrop { align-items: flex-end; padding-inline: 10px; }
+  .task-reschedule-dialog { width: 100%; border-radius: 18px 18px 12px 12px; }
+  .task-reschedule-day { min-height: 44px; }
+}

@@ -49,12 +49,14 @@ function fixture({ mobile = true, editing = false, startOnButton = false } = {})
     addEventListener(type, fn) { callbacks.window[type] = fn; }
   };
   const deleted = [];
+  const rescheduled = [];
   const context = {
     window, document, Element: FakeElement, Date, Math,
     editingTaskId: editing ? 'task-1' : null,
     state: { tasks: [{ id: 'task-1', completedAtISO: null, hidden: false }] },
     isTaskTrashed() { return false; },
-    deleteTask(id) { deleted.push(id); }
+    deleteTask(id) { deleted.push(id); },
+    openTaskRescheduleCalendar(id) { rescheduled.push(id); }
   };
   vm.createContext(context);
   vm.runInContext(snippet, context, { filename: 'mobile-task-swipe-delete.js' });
@@ -82,7 +84,7 @@ function fixture({ mobile = true, editing = false, startOnButton = false } = {})
     return event;
   };
   return {
-    context, callbacks, list, deleted, classes, props, card,
+    context, callbacks, list, deleted, rescheduled, classes, props, card,
     down, move, up, cancel, click
   };
 }
@@ -178,4 +180,55 @@ test('touch scrolling, feedback, and scope are mobile-only CSS', () => {
   assert.match(styles, /#taskList \.task-priority-card\s*\{\s*touch-action: pan-y;/);
   assert.match(styles, /task-swipe-delete-active::after/);
   assert.match(styles, /content: "Delete"/);
+});
+
+test('right swipe of at least 76px opens calendar without deleting', () => {
+  const f = fixture();
+  f.down();
+  f.move(343, 105);
+  assert.equal(f.classes.has('task-swipe-reschedule-active'), true);
+  assert.equal(f.props.get('--task-swipe-reschedule-offset'), '93px');
+  f.up(343, 105);
+  assert.deepEqual(f.rescheduled, ['task-1']);
+  assert.deepEqual(f.deleted, []);
+  assert.equal(f.classes.has('task-swipe-reschedule-active'), false);
+  assert.equal(f.props.has('--task-swipe-reschedule-offset'), false);
+  assert.equal(f.click().prevented, true);
+});
+
+test('partial right swipe and diagonal scroll neither open calendar nor expand task', () => {
+  const partial = fixture();
+  partial.down();
+  partial.move(293, 104);
+  partial.up(293, 104);
+  assert.deepEqual(partial.rescheduled, []);
+  assert.equal(partial.click().prevented, true);
+  const diagonal = fixture();
+  diagonal.down();
+  diagonal.move(335, 176);
+  diagonal.up(335, 176);
+  assert.deepEqual(diagonal.rescheduled, []);
+});
+
+test('right swipe is disabled while editing and for buttons, mouse, and desktop', () => {
+  for (const opts of [{editing:true}, {startOnButton:true}, {mobile:false}]) {
+    const f = fixture(opts);
+    f.down();
+    f.move(351,105);
+    f.up(351,105);
+    assert.deepEqual(f.rescheduled, []);
+  }
+  const f=fixture();
+  f.down(250,100,{pointerType:'mouse'});
+  f.move(350,100);
+  f.up(350,100);
+  assert.deepEqual(f.rescheduled, []);
+});
+
+test('reschedule uses a separate cue while the old delete swipe remains intact', () => {
+  assert.match(styles, /task-swipe-reschedule-active::before/);
+  assert.match(styles, /content: "Reschedule"/);
+  assert.match(styles, /task-swipe-delete-active::after/);
+  assert.match(snippet, /openTaskRescheduleCalendar\(id\)/);
+  assert.match(snippet, /deleteTask\(id\)/);
 });
