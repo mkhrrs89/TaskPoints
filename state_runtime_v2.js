@@ -3323,7 +3323,7 @@
             : !empty ? 'empty_reset_evidence_retained' : 'verified_empty_reset',
         counts: { habits: evidence.habits,
           completions: evidence.completions, mutations: evidence.mutations,
-          tasks: evidence.tasks, projects: evidence.projects }
+          tasks: evidence.tasks, projects: evidence.projects },
         checkedAtISO: nowIso()
       };
       return lastParity;
