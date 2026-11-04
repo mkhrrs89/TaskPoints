@@ -18,7 +18,9 @@ const main=(notes='snapshot general notes')=>({
 });
 async function boot(opts={}) {
   const state=opts.state===undefined?JSON.stringify(main()):opts.state;
-  const data={[DARK]:'1',...(state===null?{}:{[V1]:state}),
+  // Establish the normal pilot generation first, then inject Notes-specific
+  // damaged/compressed V1 source cases without asking the pilot to parse them.
+  const data={[DARK]:'1',[V1]:JSON.stringify(main()),
     ...(opts.cache===undefined||opts.cache===null?{}:{[NOTES]:opts.cache}),
     ...(opts.dirty===undefined||opts.dirty===null?{}:{[DIRTY]:opts.dirty}),
     ...(opts.authority===undefined||opts.authority===null?{}:{[AUTH]:opts.authority})};
@@ -47,7 +49,11 @@ async function boot(opts={}) {
     console:{log(){},warn(){},error(){}}};
   ctx.window=ctx;ctx.globalThis=ctx;
   vm.runInNewContext(script,ctx,{filename:'state_runtime_v2.js'});
-  return {api:ctx.TaskPointsStateRuntimeV2,ctx,localStorage,indexedDB,core};
+  const api=ctx.TaskPointsStateRuntimeV2;
+  await api.seedFromLegacy();
+  if (state===null) localStorage.removeItem(V1);
+  else if (opts.state!==undefined) localStorage.setItem(V1,state);
+  return {api,ctx,localStorage,indexedDB,core};
 }
 test('Notes preview reads both V1 copies, reports agreement, changes no storage and never reveals text',async()=>{
   const app=await boot({cache:'snapshot general notes',authority:'1'});
