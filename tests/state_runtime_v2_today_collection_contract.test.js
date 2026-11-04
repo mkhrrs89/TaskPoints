@@ -338,3 +338,337 @@ test('Today preview APIs are unavailable on production host',async()=>{
   assert.equal((await app.api.inspectPreviewTodayCollectionParity()).reason,
     'preview_host_required');
 });
+
+
+test('Today reconcile atomically edits notes, removes a day, adds a day and reorders items',async()=>{
+  const app=await seeded(),before=app.indexedDB.dump(DB);
+  const changed=sample();
+  delete changed.notesByDay['2026-11-03'];
+  changed.tasksByDay['2026-11-04']=['task-1','task-new'];
+  changed.notesByDay['2026-11-04'][0].done=true;
+  changed.orderByDay['2026-11-04'].reverse();
+  changed.selectedHabitIdsByDay['2026-11-05']=['h1','h2'];
+  changed.notesByDay['2026-11-06']=[{id:'note-new',text:'new day',done:false}];
+  const raw=JSON.stringify(changed);
+  app.localStorage.setItem(TODAY,raw);
+  const result=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'edit-add-delete');
+  assert.equal(result.reason,'today_preview_reconciled',JSON.stringify(result));
+  assert.equal(result.committed,true);
+  assert.equal(result.confirmedDurable,true);
+  assert.equal(result.collectionParityVerified,true);
+  assert.equal(result.changedRows,4);
+  assert.equal(result.addedRows,1);
+  assert.equal(result.deletedRows,1);
+  assert.equal(result.canPromote,false);
+  assert.equal(result.todayMigrated,false);
+  const after=app.indexedDB.dump(DB);
+  assert.equal(after.todayDays.some(r=>r.id==='day:2026-11-03'),false);
+  assert.equal(after.todayDays.find(r=>r.id==='day:2026-11-04')
+    .value.notesByDay[0].done,true);
+  assert.deepEqual(after.todayDays.find(r=>r.id==='day:2026-11-04')
+    .value.orderByDay,['note:note-1','task:task-1']);
+  assert.deepEqual(after.todayDays.find(r=>r.id==='day:2026-11-06')
+    .value.notesByDay,[{id:'note-new',text:'new day',done:false}]);
+  assert.deepEqual(after.habits,before.habits);
+  assert.deepEqual(after.completions,before.completions);
+  assert.deepEqual(after.tasks,before.tasks);
+  assert.deepEqual(after.projects,before.projects);
+  assert.equal(app.localStorage.getItem(TODAY),raw);
+  const receipt=after.mutations.find(r=>r.id==='today-preview-reconcile:edit-add-delete');
+  assert.equal(receipt.type,'today-preview-reconcile');
+  assert.equal(receipt.priorReceiptId,'today-preview-seed:first');
+  assert.deepEqual(receipt.deletedIds,['day:2026-11-03']);
+  assert.equal(receipt.changedIds.includes('day:2026-11-06'),true);
+  assert.equal(after.meta.find(r=>r.id==='today-preview').receiptId,receipt.id);
+  assert.equal((await app.api.inspectPreviewTodayCollectionParity()).match,true);
+});
+
+test('Today reconcile supports multiple receipts, restart and verified no-op',async()=>{
+  const app=await seeded();
+  const payload=sample();
+  payload.futureSettings.foo.bar=['first updated root'];
+  app.localStorage.setItem(TODAY,JSON.stringify(payload));
+  const first=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'first-update');
+  assert.equal(first.committed,true,JSON.stringify(first));
+  assert.equal(first.changedRows,1);
+  assert.equal(first.collectionParityVerified,true);
+  const firstDb=app.indexedDB.dump(DB);
+  const noop=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'no-op');
+  assert.equal(noop.reason,'today_preview_already_current',JSON.stringify(noop));
+  assert.equal(noop.committed,false);
+  assert.deepEqual(app.indexedDB.dump(DB),firstDb);
+  app.localStorage.setItem('unrelated_second_legacy_key','changed');
+  const metadataOnly=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'origin-metadata');
+  assert.equal(metadataOnly.committed,true,JSON.stringify(metadataOnly));
+  assert.equal(metadataOnly.changedRows,0);
+  assert.deepEqual(app.indexedDB.dump(DB).todayDays,firstDb.todayDays);
+  payload.notesByDay['2026-11-04'][0].done=true;
+  app.localStorage.setItem(TODAY,JSON.stringify(payload));
+  const second=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'second-update');
+  assert.equal(second.committed,true,JSON.stringify(second));
+  assert.equal(second.changedRows,1);
+  assert.equal(second.collectionParityVerified,true);
+  const snapshot=app.indexedDB.dump(DB);
+  const restart=await boot(undefined,{
+    localStorage:app.localStorage,indexedDB:app.indexedDB
+  });
+  const parity=await restart.api.inspectPreviewTodayCollectionParity();
+  assert.equal(parity.match,true,JSON.stringify(parity));
+  const again=await restart.api.rehearsePreviewTodayCollectionReconcile(
+    restart.token(),'after-restart');
+  assert.equal(again.reason,'today_preview_already_current',
+    JSON.stringify(again));
+  assert.deepEqual(restart.indexedDB.dump(DB),snapshot);
+});
+
+test('Today reconcile rejects malformed V1 and leaves every V2 record unchanged',async()=>{
+  const app=await seeded(),before=app.indexedDB.dump(DB);
+  app.localStorage.setItem(TODAY,'{bad');
+  const result=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'corrupt');
+  assert.equal(result.reason,'today_source_preflight_required',
+    JSON.stringify(result));
+  assert.equal(result.prerequisiteReason,'legacy_today_json_malformed');
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('Today reconcile fails closed after old V2 record or receipt tampering',async()=>{
+  const app=await seeded();
+  const db=app.indexedDB._databases.get(DB);
+  const rows=db._stores.get('todayDays');
+  const old=rows.get('day:2026-11-04');
+  rows.set(old.id,{...old,value:{
+    ...old.value,notesByDay:[{id:'evil',text:'V2-only'}]
+  }});
+  const before=app.indexedDB.dump(DB);
+  const payload=sample();
+  payload.notesByDay['2026-11-04'][0].text='new V1 note';
+  app.localStorage.setItem(TODAY,JSON.stringify(payload));
+  const denied=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'tampered');
+  assert.equal(denied.reason,'today_preview_existing_parity_mismatch',
+    JSON.stringify(denied));
+  assert.equal(denied.committed,false);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+  rows.set(old.id,old);
+  db._stores.get('mutations').delete('today-preview-seed:first');
+  const afterReceiptLoss=app.indexedDB.dump(DB);
+  const lost=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'missing-receipt');
+  assert.equal(lost.reason,'today_preview_existing_receipt_invalid',
+    JSON.stringify(lost));
+  assert.deepEqual(app.indexedDB.dump(DB),afterReceiptLoss);
+});
+
+test('Today reconcile quota failure rolls back changes, receipt and evidence atomically',async()=>{
+  const app=await seeded(),before=app.indexedDB.dump(DB);
+  const changed=sample();
+  changed.notesByDay['2026-11-04'][0].done=true;
+  app.localStorage.setItem(TODAY,JSON.stringify(changed));
+  app.indexedDB.failNext({store:'todayDays',operation:'put',
+    error:new Error('QuotaExceededError')});
+  const denied=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'quota-denied');
+  assert.equal(denied.committed,false,JSON.stringify(denied));
+  assert.equal(denied.confirmedDurable,false);
+  assert.equal(denied.reason,'today_preview_reconcile_atomic_write_failed');
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+  const recovered=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'retry-after-quota');
+  assert.equal(recovered.committed,true,JSON.stringify(recovered));
+});
+
+test('Today reconcile delete fault never drops a historical day',async()=>{
+  const app=await seeded(),before=app.indexedDB.dump(DB);
+  const changed=sample();
+  delete changed.notesByDay['2026-11-03'];
+  app.localStorage.setItem(TODAY,JSON.stringify(changed));
+  app.indexedDB.failNext({store:'todayDays',operation:'delete',
+    error:new Error('QuotaExceededError')});
+  const denied=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'delete-failure');
+  assert.equal(denied.reason,'today_preview_reconcile_atomic_write_failed',
+    JSON.stringify(denied));
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('Today reconcile rejects competing V2 insert during write-admission transaction',async()=>{
+  const app=await seeded(),db=app.indexedDB._databases.get(DB);
+  const changed=sample();
+  changed.notesByDay['2026-11-04'][0].done=true;
+  app.localStorage.setItem(TODAY,JSON.stringify(changed));
+  const original=db.transaction.bind(db);
+  let raced=false;
+  db.transaction=(stores,mode)=>{
+    if(!raced&&mode==='readwrite'
+      && Array.isArray(stores)&&stores.includes('todayDays')){
+      raced=true;
+      db._stores.get('todayDays').set('day:2026-11-07',{
+        id:'day:2026-11-07',dayKey:'2026-11-07',
+        value:{notesByDay:[{id:'peer-note',text:'other tab'}]}
+      });
+    }
+    return original(stores,mode);
+  };
+  const outcome=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'competing-peer');
+  assert.equal(raced,true);
+  assert.equal(outcome.reason,'today_preview_reconcile_concurrent_change',
+    JSON.stringify(outcome));
+  assert.equal(outcome.committed,false);
+  const after=app.indexedDB.dump(DB);
+  assert.equal(after.todayDays.find(r=>r.id==='day:2026-11-04')
+    .value.notesByDay[0].done,false);
+  assert.equal(after.todayDays.some(r=>r.id==='day:2026-11-07'),true);
+  assert.equal(after.mutations.some(r=>r.id==='today-preview-reconcile:competing-peer'),
+    false);
+});
+
+test('Today reconcile rejects stale source token and action-id reuse',async()=>{
+  const app=await seeded(),token=app.token();
+  const payload=sample();
+  payload.notesByDay['2026-11-04'][0].done=true;
+  app.localStorage.setItem(TODAY,JSON.stringify(payload));
+  const old=app.indexedDB.dump(DB);
+  const stale=await app.api.rehearsePreviewTodayCollectionReconcile(
+    token,'stale-token');
+  assert.equal(stale.reason,'full_origin_changed',JSON.stringify(stale));
+  assert.deepEqual(app.indexedDB.dump(DB),old);
+  const first=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'used');
+  assert.equal(first.committed,true,JSON.stringify(first));
+  payload.notesByDay['2026-11-04'][0].text='next change';
+  app.localStorage.setItem(TODAY,JSON.stringify(payload));
+  const beforeReplay=app.indexedDB.dump(DB);
+  const replay=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'used');
+  assert.equal(replay.reason,'today_preview_action_id_conflict',
+    JSON.stringify(replay));
+  assert.deepEqual(app.indexedDB.dump(DB),beforeReplay);
+});
+
+test('Today reconcile preserves absent versus present-empty source transitions',async()=>{
+  const app=await seeded(null);
+  app.localStorage.setItem(TODAY,'{}');
+  const first=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'make-present');
+  assert.equal(first.committed,true,JSON.stringify(first));
+  assert.equal(first.changedRows,0);
+  assert.equal((await app.api.inspectPreviewTodayCollectionParity()).match,true);
+  assert.equal(app.indexedDB.dump(DB).meta.find(r=>r.id==='today-preview')
+    .sourcePresent,true);
+  app.localStorage.removeItem(TODAY);
+  const second=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'make-absent');
+  assert.equal(second.committed,true,JSON.stringify(second));
+  assert.equal(second.changedRows,0);
+  assert.equal((await app.api.inspectPreviewTodayCollectionParity()).match,true);
+  const payload={version:1,notesByDay:{'2026-11-04':[
+    {id:'first-note',text:'first note after empty',done:false}
+  ]}};
+  app.localStorage.setItem(TODAY,JSON.stringify(payload));
+  const third=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'from-absent');
+  assert.equal(third.committed,true,JSON.stringify(third));
+  assert.equal(third.addedRows,1);
+  assert.equal(third.changedRows,2);
+  assert.equal((await app.api.inspectPreviewTodayCollectionParity()).match,true);
+});
+
+test('Today reconcile rejects more than 64 changed days with no partial update',async()=>{
+  const dates=Array.from({length:66},(_,i)=>{
+    const d=new Date(Date.UTC(2026,0,i+1));
+    return d.toISOString().slice(0,10);
+  });
+  const oldData={version:1,notesByDay:Object.fromEntries(
+    dates.map(day=>[day,[{id:'note:'+day,text:'old note'}]]))};
+  const app=await boot(JSON.stringify(oldData));
+  const initial=await app.api.rehearsePreviewTodayCollectionSeed(
+    app.token(),'many-days');
+  assert.equal(initial.collectionParityVerified,true,JSON.stringify(initial));
+  const before=app.indexedDB.dump(DB);
+  for(const day of dates)oldData.notesByDay[day][0].text='updated';
+  app.localStorage.setItem(TODAY,JSON.stringify(oldData));
+  const denied=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'over-limit');
+  assert.equal(denied.reason,'today_preview_reconcile_batch_too_large',
+    JSON.stringify(denied));
+  assert.equal(denied.changedRows,66);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('Today parity rejects damaged predecessor receipt after reconciliation',async()=>{
+  const app=await seeded();
+  const changed=sample();
+  changed.notesByDay['2026-11-04'][0].done=true;
+  app.localStorage.setItem(TODAY,JSON.stringify(changed));
+  const update=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'first-update');
+  assert.equal(update.collectionParityVerified,true,JSON.stringify(update));
+  const receipts=app.indexedDB._databases.get(DB)._stores.get('mutations');
+  const old=receipts.get('today-preview-seed:first');
+  receipts.set(old.id,{...old,recordsFingerprint:'invalid'});
+  const before=app.indexedDB.dump(DB);
+  const parity=await app.api.inspectPreviewTodayCollectionParity();
+  assert.equal(parity.match,false);
+  assert.equal(parity.reason,'today_preview_receipt_chain_invalid',
+    JSON.stringify(parity));
+  const attempt=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'after-tamper');
+  assert.equal(attempt.reason,'today_preview_existing_receipt_chain_invalid',
+    JSON.stringify(attempt));
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('Today parity re-reads V2 rows after asynchronous SHA to catch interleaved edit',async()=>{
+  let app,armed=false,hashes=0;
+  const crypto={
+    randomUUID(){return 'digest-race'},
+    subtle:{digest:async(...args)=>{
+      const result=await webcrypto.subtle.digest(...args);
+      if(armed && ++hashes===2) {
+        const rows=app.indexedDB._databases.get(DB)._stores.get('todayDays');
+        const row=rows.get('day:2026-11-04');
+        rows.set(row.id,{...row,value:{...row.value,notesByDay:[]}});
+      }
+      return result;
+    }}
+  };
+  app=await boot(undefined,{crypto});
+  const seed=await app.api.rehearsePreviewTodayCollectionSeed(
+    app.token(),'digest-seed');
+  assert.equal(seed.collectionParityVerified,true,JSON.stringify(seed));
+  armed=true;
+  const check=await app.api.inspectPreviewTodayCollectionParity();
+  assert.equal(check.match,false);
+  assert.ok(['today_preview_rows_fingerprint_invalid',
+    'today_preview_changed_during_parity'].includes(check.reason),
+    JSON.stringify(check));
+});
+
+test('Earlier Today V5 seeds without row SHA remain inspectable but cannot rewrite by reconciliation',async()=>{
+  const app=await seeded();
+  const db=app.indexedDB._databases.get(DB);
+  const meta=db._stores.get('meta');
+  const receipt=db._stores.get('mutations');
+  const ev=meta.get('today-preview');
+  const prior=receipt.get('today-preview-seed:first');
+  meta.set(ev.id,{...ev,recordsFingerprint:undefined});
+  receipt.set(prior.id,{...prior,recordsFingerprint:undefined});
+  const inspect=await app.api.inspectPreviewTodayCollectionParity();
+  assert.equal(inspect.match,true,JSON.stringify(inspect));
+  const before=app.indexedDB.dump(DB);
+  const payload=sample();
+  payload.notesByDay['2026-11-04'][0].done=true;
+  app.localStorage.setItem(TODAY,JSON.stringify(payload));
+  const denied=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'legacy-unsealed');
+  assert.equal(denied.reason,'today_preview_row_seal_required',
+    JSON.stringify(denied));
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
