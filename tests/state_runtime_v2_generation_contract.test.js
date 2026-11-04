@@ -1031,7 +1031,7 @@ test('V2 index upgrade atomically backfills old mixed-Habit completion packs wit
   const before = structuredClone(app.indexedDB.dump(DB_NAME));
   const savedV1 = app.localStorage.getItem(LEGACY_KEY);
   const db = await app.runtime.open();
-  assert.equal(db.version, 3);
+  assert.equal(db.version, 4);
   assert.ok(db.objectStoreNames.contains('tasks'));
   assert.equal(db.transaction('completions','readonly').objectStore('completions')
     .indexNames.contains('by_habit_ids'), true);
@@ -1073,7 +1073,7 @@ test('V2 index migration aborted by a failed backfill rolls back version, index 
   assert.deepEqual(app.indexedDB.dump(DB_NAME),original,'no partial upgrade may persist');
   assert.equal(app.localStorage.getItem(LEGACY_KEY),legacyRaw);
   const retry = await app.runtime.open();
-  assert.equal(retry.version,3);
+  assert.equal(retry.version,4);
   assert.deepEqual(app.indexedDB.dump(DB_NAME).completions[0].habitIds,['h1','h2']);
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
 });
@@ -1090,7 +1090,7 @@ test('V2 index migration read error aborts and retains all legacy completion evi
   assert.deepEqual(app.indexedDB.dump(DB_NAME),original);
   assert.equal(app.runtime.getStatus().readAuthority,'legacy_only');
   const retry=await app.runtime.open();
-  assert.equal(retry.version,3);
+  assert.equal(retry.version,4);
   assert.deepEqual(app.indexedDB.dump(DB_NAME).completions[0].habitIds,['h1']);
 });
 
@@ -1160,7 +1160,7 @@ test('blocked V2 open rejects immediately, aborts delayed upgrade and never supe
   assert.equal(lateClosed,1,'stale late-success connection must be closed');
   app.indexedDB.open=originalOpen;
   const healthy=await app.runtime.open();
-  assert.equal(healthy.version,3);
+  assert.equal(healthy.version,4);
   heldRequest.error=new Error('late blocked request error');
   heldRequest.onerror();
   assert.equal(await app.runtime.open(),healthy,
