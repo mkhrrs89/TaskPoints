@@ -5236,15 +5236,19 @@
     const {records,sourceFingerprint,dayCount,raw}=captured;
     if (records.length>4097 || JSON.stringify(records).length>1258291)
       return refuse('today_preview_seed_too_large');
+    let recordsFingerprint;
+    try { recordsFingerprint=await previewRecoveryFingerprint(records.slice().sort((a,b)=>String(a.id).localeCompare(String(b.id)))); }
+    catch (_) { return refuse('today_preview_records_digest_unavailable'); }
     const sourceInventory=fnv1a(sourceToken)+':'+sourceToken.length;
     const receiptId='today-preview-seed:'+actionId;
     const receipt={id:receiptId,type:'today-preview-seed',
       resetGeneration:generation,sourceInventory,sourceFingerprint,
-      sourcePresent:raw!==null,dayCount,recordCount:records.length};
+      sourcePresent:raw!==null,dayCount,recordCount:records.length,
+      recordsFingerprint};
     const evidence={id:'today-preview',schemaVersion:1,
       resetGeneration:generation,sourceInventory,sourceFingerprint,
       sourcePresent:raw!==null,dayCount,recordCount:records.length,
-      receiptId,capturedAtISO:nowIso()};
+      recordsFingerprint,receiptId,capturedAtISO:nowIso()};
     let db,initialRows,initialEvidence,initialMeta,priorReceipt;
     try {
       db=await open();
@@ -5273,6 +5277,8 @@
         || initialEvidence.sourcePresent!==(raw!==null)
         || initialEvidence.dayCount!==dayCount
         || initialEvidence.recordCount!==records.length
+        || (initialEvidence.recordsFingerprint!==undefined
+          && initialEvidence.recordsFingerprint!==recordsFingerprint)
         || !priorReceipt || priorReceipt.id!==initialEvidence.receiptId
         || priorReceipt.type!=='today-preview-seed'
         || priorReceipt.resetGeneration!==generation
@@ -5281,6 +5287,8 @@
         || priorReceipt.sourcePresent!==(raw!==null)
         || priorReceipt.dayCount!==dayCount
         || priorReceipt.recordCount!==records.length
+        || (priorReceipt.recordsFingerprint!==undefined
+          && priorReceipt.recordsFingerprint!==recordsFingerprint)
         || stableJson(normalizedRows(initialRows))
           !==stableJson(normalizedRows(records)))
         return refuse('today_preview_existing_evidence_preserved');
@@ -5340,7 +5348,9 @@
           initialEvidence?{
             id:initialEvidence.receiptId,type:'today-preview-seed',
             resetGeneration:generation,sourceInventory,sourceFingerprint,
-            sourcePresent:raw!==null,dayCount,recordCount:records.length
+            sourcePresent:raw!==null,dayCount,recordCount:records.length,
+            ...(initialEvidence.recordsFingerprint===undefined?{}
+              :{recordsFingerprint:initialEvidence.recordsFingerprint})
           }:receipt))
         return refuse('today_preview_readback_unverified',{
           committed:!initialEvidence,writeOutcomeUncertain:true
@@ -5427,7 +5437,9 @@
         || receipt.sourceFingerprint!==evidence.sourceFingerprint
         || receipt.sourcePresent!==evidence.sourcePresent
         || receipt.dayCount!==evidence.dayCount
-        || receipt.recordCount!==evidence.recordCount)
+        || receipt.recordCount!==evidence.recordCount
+        || (evidence.recordsFingerprint!==undefined
+          && evidence.recordsFingerprint!==receipt.recordsFingerprint))
         return refuse('today_preview_receipt_invalid');
       if (!current()) return refuse('legacy_today_changed_after_parity');
       return {
