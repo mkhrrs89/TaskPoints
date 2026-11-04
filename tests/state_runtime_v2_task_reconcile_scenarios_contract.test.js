@@ -513,6 +513,12 @@ test('historical reconciliation deletes the last completion without false parity
   assert.equal(app.indexedDB.dump(DB).completions.length,0);
   assert.equal((await app.api.rehearsePreviewTaskCompletionHistoryReconcile(
     app.token(),'no-op-empty')).collectionParityVerified,true);
+  await resyncChangedHistory(app,[completion(7)],'new-after-empty');
+  const renewed=await app.api.rehearsePreviewTaskCompletionHistoryReconcile(
+    app.token(),'new-after-empty');
+  assert.equal(renewed.committed,true,JSON.stringify(renewed));
+  assert.equal(renewed.addedRows,1);
+  assert.equal(renewed.collectionParityVerified,true);
 });
 
 test('historical reconcile fails closed if prior reconciliation seal is altered',async()=>{
