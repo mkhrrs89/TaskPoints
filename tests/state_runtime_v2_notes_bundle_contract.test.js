@@ -380,3 +380,169 @@ test('Current Notes source is rechecked after SHA work: no stale V2 commit on di
   assert.equal(app.localStorage.getItem(CACHE),'newest text');
   assert.deepEqual(app.indexedDB.dump(DB),before);
 });
+
+
+function enableSyntheticRecoveryWal(app) {
+  app.ctx.TaskPointsStateRuntimeV2Wal={
+    getPendingRows(){return {ok:true,rows:[]};}
+  };
+}
+async function fullOriginCheckpoint(app) {
+  enableSyntheticRecoveryWal(app);
+  const result=await app.api.createPreviewRecoveryCheckpoint({scope:'full_origin'});
+  assert.equal(result.saved,true,JSON.stringify(result));
+  assert.equal(result.captureScope,'full_origin');
+  assert.equal(result.canAutoRestore,false);
+  return result.checkpointId;
+}
+
+test('Notes checkpoint coverage binds verified dual-source bundle to full-origin localStorage checkpoint',async()=>{
+  const app=await boot({cache:'',dirty:'1',authority:'1'});
+  const cp=await fullOriginCheckpoint(app);
+  assert.equal((await app.api.rehearsePreviewNotesBundleSeed(app.token(),'seed')).collectionParityVerified,true);
+  const v1=app.token(),notesDb=app.indexedDB.dump(DB);
+  const audit=await app.api.inspectPreviewNotesCheckpointCoverage(cp);
+  assert.equal(audit.reason,'checkpoint_notes_coverage_verified',JSON.stringify(audit));
+  assert.equal(audit.checkpointVerified,true);
+  assert.equal(audit.notesBundleVerified,true);
+  assert.equal(audit.checkpointMatchesPreviewBundle,true);
+  assert.equal(audit.checkpointMatchesCurrentV1,true);
+  assert.equal(audit.fullOriginLocalStorageCovered,true);
+  assert.equal(audit.coversIndexedDB,false);
+  assert.equal(audit.coversImages,false);
+  assert.equal(audit.offDeviceBackupVerified,false);
+  assert.equal(audit.canApply,false);
+  assert.equal(audit.canPromote,false);
+  assert.equal(audit.readAuthority,'legacy_only');
+  assert.equal(JSON.stringify(audit).includes('snapshot secret'),false);
+  assert.equal(app.token(),v1);
+  assert.deepEqual(app.indexedDB.dump(DB),notesDb);
+});
+
+test('Notes checkpoint refuses false freshness after later Notes edit and reconciliation',async()=>{
+  const app=await boot({cache:'first',authority:'1'});
+  const checkpointOld=await fullOriginCheckpoint(app);
+  await app.api.rehearsePreviewNotesBundleSeed(app.token(),'seed');
+  app.localStorage.setItem(CACHE,'later');
+  const stale=await app.api.inspectPreviewNotesCheckpointCoverage(checkpointOld);
+  assert.equal(stale.checkpointVerified,true,JSON.stringify(stale));
+  assert.equal(stale.checkpointMatchesPreviewBundle,true);
+  assert.equal(stale.checkpointMatchesCurrentV1,false);
+  assert.equal(stale.reason,'checkpoint_older_than_current_origin');
+  assert.equal(stale.canApply,false);
+  assert.equal((await app.api.rehearsePreviewNotesBundleReconcile(
+    app.token(),'later-edit')).collectionParityVerified,true);
+  const olderAfterReconcile=await app.api.inspectPreviewNotesCheckpointCoverage(checkpointOld);
+  assert.equal(olderAfterReconcile.checkpointMatchesPreviewBundle,false);
+  assert.equal(olderAfterReconcile.checkpointMatchesCurrentV1,false);
+  assert.equal(olderAfterReconcile.reason,'checkpoint_notes_bundle_differs');
+  const checkpointNew=await fullOriginCheckpoint(app);
+  const fresh=await app.api.inspectPreviewNotesCheckpointCoverage(checkpointNew);
+  assert.equal(fresh.reason,'checkpoint_notes_coverage_verified',JSON.stringify(fresh));
+  assert.equal(fresh.checkpointMatchesPreviewBundle,true);
+  assert.equal(fresh.checkpointMatchesCurrentV1,true);
+});
+
+test('Notes checkpoint detects same-generation V1 restore without promoting stale V2',async()=>{
+  const app=await boot({cache:'first',authority:'1'});
+  const checkpoint=await fullOriginCheckpoint(app);
+  await app.api.rehearsePreviewNotesBundleSeed(app.token(),'seed');
+  app.localStorage.setItem(CACHE,'second');
+  await app.api.rehearsePreviewNotesBundleReconcile(app.token(),'update');
+  const current=app.localStorage.getItem(CACHE);
+  const saved=app.indexedDB._databases.get('taskpoints_v2_recovery_checkpoints_preview');
+  const record=saved._stores.get('snapshots').get(checkpoint);
+  const savedKeys=new Map(record.entries);
+  // A synthetic import/restore replay replaces the V1 Notes cache only.
+  // It does not call any V2 writer, and therefore must never grant authority.
+  app.localStorage.setItem(CACHE,savedKeys.get(CACHE));
+  const audit=await app.api.inspectPreviewNotesCheckpointCoverage(checkpoint);
+  assert.equal(audit.checkpointMatchesCurrentV1,true,JSON.stringify(audit));
+  assert.equal(audit.checkpointMatchesPreviewBundle,false);
+  assert.equal(audit.canApply,false);
+  assert.equal(audit.canPromote,false);
+  assert.equal(app.localStorage.getItem(CACHE),'first');
+  assert.equal(current,'second');
+});
+
+test('A taskpoints-only checkpoint is insufficient for full-origin Notes rollback proof',async()=>{
+  const app=await boot({cache:'notes',authority:'1'});
+  enableSyntheticRecoveryWal(app);
+  const cp=await app.api.createPreviewRecoveryCheckpoint();
+  assert.equal(cp.saved,true,JSON.stringify(cp));
+  assert.equal(cp.captureScope,'taskpoints_namespace');
+  await app.api.rehearsePreviewNotesBundleSeed(app.token(),'seed');
+  const audit=await app.api.inspectPreviewNotesCheckpointCoverage(cp.checkpointId);
+  assert.equal(audit.reason,'checkpoint_full_origin_required',JSON.stringify(audit));
+  assert.equal(audit.checkpointVerified,true);
+  assert.equal(audit.fullOriginLocalStorageCovered,false);
+  assert.equal(audit.canApply,false);
+});
+
+test('Tampered checkpoint, missing record, and unknown ID are all denied read-only',async()=>{
+  const app=await boot({cache:'notes',authority:'1'});
+  const cp=await fullOriginCheckpoint(app);
+  await app.api.rehearsePreviewNotesBundleSeed(app.token(),'seed');
+  assert.equal((await app.api.inspectPreviewNotesCheckpointCoverage(
+    'v1-preview:does-not-exist')).reason,'checkpoint_missing');
+  assert.equal((await app.api.inspectPreviewNotesCheckpointCoverage(
+    'not-a-checkpoint')).reason,'checkpoint_id_required');
+  const db=app.indexedDB._databases.get('taskpoints_v2_recovery_checkpoints_preview');
+  db._stores.get('snapshots').get(cp).entries[0][1]='untrusted altered data';
+  const before=app.indexedDB.dump('taskpoints_v2_recovery_checkpoints_preview');
+  const result=await app.api.inspectPreviewNotesCheckpointCoverage(cp);
+  assert.equal(result.reason,'checkpoint_integrity_failed',JSON.stringify(result));
+  assert.equal(result.canApply,false);
+  assert.deepEqual(app.indexedDB.dump('taskpoints_v2_recovery_checkpoints_preview'),before);
+});
+
+test('Rotated V2 generation denies even an intact full-origin Notes checkpoint',async()=>{
+  const app=await boot({cache:'notes',authority:'1'});
+  const cp=await fullOriginCheckpoint(app);
+  await app.api.rehearsePreviewNotesBundleSeed(app.token(),'seed');
+  app.localStorage.setItem('taskpoints_state_v2_generation_v1','restore:new-generation');
+  const notesBefore=app.indexedDB.dump(DB);
+  const result=await app.api.inspectPreviewNotesCheckpointCoverage(cp);
+  assert.equal(result.reason,'checkpoint_generation_mismatch',JSON.stringify(result));
+  assert.equal(result.checkpointVerified,true);
+  assert.equal(result.canApply,false);
+  assert.deepEqual(app.indexedDB.dump(DB),notesBefore);
+});
+
+test('Notes checkpoint audit detects cross-tab source write while hashing',async()=>{
+  let app,armed=false;
+  const crypto={randomUUID(){return 'checkpoint-race'},subtle:{
+    digest:async(...args)=>{
+      const hash=await webcrypto.subtle.digest(...args);
+      if(armed){
+        armed=false;
+        app.localStorage.setItem(CACHE,'newer text from another tab');
+      }
+      return hash;
+    }
+  }};
+  app=await boot({cache:'old',authority:'1',crypto});
+  const cp=await fullOriginCheckpoint(app);
+  await app.api.rehearsePreviewNotesBundleSeed(app.token(),'seed');
+  const before=app.indexedDB.dump(DB);
+  armed=true;
+  const check=await app.api.inspectPreviewNotesCheckpointCoverage(cp);
+  assert.equal(check.reason,'notes_checkpoint_origin_changed_during_audit',
+    JSON.stringify(check));
+  assert.equal(check.canApply,false);
+  assert.equal(app.localStorage.getItem(CACHE),'newer text from another tab');
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('Notes checkpoint proof is unavailable on production hosts or with dark mode off',async()=>{
+  const app=await boot({cache:'notes',authority:'1'});
+  const cp=await fullOriginCheckpoint(app);
+  await app.api.rehearsePreviewNotesBundleSeed(app.token(),'seed');
+  app.ctx.location.hostname='taskpoints.pages.dev';
+  assert.equal((await app.api.inspectPreviewNotesCheckpointCoverage(cp)).reason,
+    'preview_host_required');
+  app.ctx.location.hostname='localhost';
+  app.localStorage.removeItem(DARK);
+  assert.equal((await app.api.inspectPreviewNotesCheckpointCoverage(cp)).reason,
+    'dark_disabled');
+});

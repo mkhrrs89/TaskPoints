@@ -5655,6 +5655,99 @@
     finally { try { db?.close(); } catch (_) {} }
   }
 
+
+  // Read-only recovery coverage audit for a particular Notes preview
+  // generation. An intact localStorage checkpoint can still be stale or
+  // partial; it is NOT an off-device backup and never grants restore rights.
+  // This compares cryptographically verified checkpoint source provenance
+  // against the separately verified Notes preview without reading either as
+  // application authority or revealing the document's contents.
+  async function inspectPreviewNotesCheckpointCoverage(checkpointId) {
+    const refuse=(reason,detail={})=>({
+      checked:true,previewOnly:true,checkpointVerified:false,
+      notesBundleVerified:false,checkpointMatchesPreviewBundle:false,
+      checkpointMatchesCurrentV1:false,fullOriginLocalStorageCovered:false,
+      canApply:false,canPromote:false,notesMigrated:false,
+      productionWritersFenced:false,readAuthority:'legacy_only',
+      mutationAuthority:'legacy_only',reason,...detail
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    if (typeof checkpointId!=='string'
+      || !checkpointId.startsWith('v1-preview:') || checkpointId.length>160)
+      return refuse('checkpoint_id_required');
+    const generation=currentGeneration({create:false});
+    if (!generation) return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    let recoveryDb,notesDb;
+    try {
+      const startInventory=captureReadOnlyFullStorageInventory();
+      recoveryDb=await openPreviewRecoveryDb();
+      const tx=recoveryDb.transaction(PREVIEW_RECOVERY_STORE,'readonly');
+      const record=await requestPromise(
+        tx.objectStore(PREVIEW_RECOVERY_STORE).get(checkpointId));
+      if (!record) return refuse('checkpoint_missing');
+      if (!await validPreviewRecoveryRecord(record))
+        return refuse('checkpoint_integrity_failed');
+      if (record.integrityVersion!==3
+        || record.captureScope!=='full_origin')
+        return refuse('checkpoint_full_origin_required',{
+          checkpointVerified:true
+        });
+      if (record.generation!==generation)
+        return refuse('checkpoint_generation_mismatch',{
+          checkpointVerified:true,fullOriginLocalStorageCovered:true
+        });
+      // A full-origin checkpoint authenticates key presence AND absence,
+      // including Notes dirty and authority flags. Its full sorted inventory
+      // is exactly the canonical token bound into the Notes preview bundle.
+      const checkpointToken=JSON.stringify(record.entries);
+      const savedOriginFingerprint=await previewRecoveryFingerprint(checkpointToken);
+      notesDb=await openNotesPreviewDb(generation,epoch);
+      const first=await readNotesPreviewRows(notesDb);
+      const proof=await validateNotesPreviewLineage(first,generation);
+      if (!proof.verified) return refuse(proof.reason,{
+        checkpointVerified:true,fullOriginLocalStorageCovered:true
+      });
+      const currentBundle=first.bundle;
+      const checkpointMatchesPreviewBundle=
+        currentBundle.originFingerprint===savedOriginFingerprint;
+      // SHA work is async: recheck the exact committed V2 evidence, V1
+      // inventory, generation and dark mode before reporting any coverage.
+      const second=await readNotesPreviewRows(notesDb);
+      if (stableJson(first)!==stableJson(second)
+        || !isWalTestPreviewHost() || !isDarkEnabled()
+        || epoch!==darkMirrorModeEpoch
+        || currentGeneration({create:false})!==generation)
+        return refuse('notes_checkpoint_evidence_changed_during_audit');
+      const endInventory=captureReadOnlyFullStorageInventory();
+      if (startInventory!==endInventory)
+        return refuse('notes_checkpoint_origin_changed_during_audit');
+      const checkpointMatchesCurrentV1=checkpointToken===endInventory;
+      return {
+        checked:true,previewOnly:true,checkpointVerified:true,
+        notesBundleVerified:true,checkpointMatchesPreviewBundle,
+        checkpointMatchesCurrentV1,fullOriginLocalStorageCovered:true,
+        checkpointGenerationMatches:true,
+        reason:!checkpointMatchesPreviewBundle
+          ? 'checkpoint_notes_bundle_differs'
+          : !checkpointMatchesCurrentV1
+            ? 'checkpoint_older_than_current_origin'
+            : 'checkpoint_notes_coverage_verified',
+        // Local snapshots alone do not include Notes V2 IndexedDB,
+        // images, or off-device backups. No automatic rollback is safe.
+        coversIndexedDB:false,coversImages:false,offDeviceBackupVerified:false,
+        canApply:false,canPromote:false,notesMigrated:false,
+        productionWritersFenced:false,readAuthority:'legacy_only',
+        mutationAuthority:'legacy_only'
+      };
+    } catch (_) {return refuse('notes_checkpoint_coverage_unavailable');}
+    finally {
+      try{recoveryDb?.close();}catch(_){}
+      try{notesDb?.close();}catch(_){}
+    }
+  }
+
   // Today is a separate, independently writable V1 authority. Its four
   // per-day maps do not live in the main TaskPoints snapshot. This preview
   // capture never invokes Today page's forgiving fallback, which can erase
@@ -10816,6 +10909,7 @@
     rehearsePreviewNotesBundleSeed,
     rehearsePreviewNotesBundleReconcile,
     inspectPreviewNotesBundleParity,
+    inspectPreviewNotesCheckpointCoverage,
     inspectPreviewTodaySource,
     rehearsePreviewTodayCollectionSeed,
     inspectPreviewTodayCollectionParity,

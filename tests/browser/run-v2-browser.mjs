@@ -1192,6 +1192,48 @@ try {
       intentionalClearPreserved:true,reloadVerified:true,cutoverStillBlocked:true};
   });
 
+
+  await run('Notes full-origin checkpoint proves source coverage but refuses stale recovery',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      localStorage.setItem('taskpoints_notes_v1','first saved note');
+      localStorage.setItem('taskpoints_notes_dirty_v1','1');
+      localStorage.setItem('taskpoints_notes_authoritative_v1','1');
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(key=>[key,localStorage.getItem(key)]));
+      const old=await api.createPreviewRecoveryCheckpoint({scope:'full_origin'});
+      const seeded=await api.rehearsePreviewNotesBundleSeed(token(),'seed');
+      const intact=await api.inspectPreviewNotesCheckpointCoverage(old.checkpointId);
+      localStorage.setItem('taskpoints_notes_v1','second saved note');
+      const changed=await api.inspectPreviewNotesCheckpointCoverage(old.checkpointId);
+      const reconciled=await api.rehearsePreviewNotesBundleReconcile(token(),'change');
+      const older=await api.inspectPreviewNotesCheckpointCoverage(old.checkpointId);
+      const newer=await api.createPreviewRecoveryCheckpoint({scope:'full_origin'});
+      const fresh=await api.inspectPreviewNotesCheckpointCoverage(newer.checkpointId);
+      return {old,seeded,intact,changed,reconciled,older,newer,fresh,
+        v1Notes:localStorage.getItem('taskpoints_notes_v1'),
+        readAuthority:api.getStatus().readAuthority};
+    });
+    assert.equal(result.old.saved,true,JSON.stringify(result.old));
+    assert.equal(result.seeded.collectionParityVerified,true,JSON.stringify(result.seeded));
+    assert.equal(result.intact.reason,'checkpoint_notes_coverage_verified',JSON.stringify(result.intact));
+    assert.equal(result.intact.canApply,false);
+    assert.equal(result.changed.reason,'checkpoint_older_than_current_origin',
+      JSON.stringify(result.changed));
+    assert.equal(result.reconciled.collectionParityVerified,true,JSON.stringify(result.reconciled));
+    assert.equal(result.older.reason,'checkpoint_notes_bundle_differs',JSON.stringify(result.older));
+    assert.equal(result.newer.saved,true,JSON.stringify(result.newer));
+    assert.equal(result.fresh.reason,'checkpoint_notes_coverage_verified',JSON.stringify(result.fresh));
+    assert.equal(result.fresh.offDeviceBackupVerified,false);
+    assert.equal(result.fresh.canPromote,false);
+    assert.equal(result.v1Notes,'second saved note');
+    assert.equal(result.readAuthority,'legacy_only');
+    return {fullOriginCheckpoint:true,staleRecoveryDetected:true,
+      newerReconcileVerified:true,localBackupNotPromotion:true};
+  });
+
   await run('Today V5 preview retains sparse day maps, survives reload and rejects stale V1',async context=>{
     const page=await open(context);
     const initial=await page.evaluate(async()=>{

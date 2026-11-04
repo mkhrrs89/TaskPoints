@@ -1083,3 +1083,37 @@ This is stronger browser evidence for Notes source handling, not proof that
 production Notes writers participate in a V2 admission protocol or that
 iOS Safari standalone lifecycle interruptions are solved. It earns no
 additional weighted milestone points.
+
+
+## Notes and full-origin recovery checkpoint linkage (V2 preview only)
+
+An explicit read-only inspector, inspectPreviewNotesCheckpointCoverage(id),
+now verifies that an existing immutable full-origin V1 localStorage recovery
+checkpoint is intact AND proves its exact captured Notes source inventory
+matches the separately sealed Notes V2 preview bundle.
+
+Its checks:
+- Authenticate the original checkpoint record and require integrityVersion 3
+  and captureScope full_origin (older namespace-only captures are insufficient).
+- Require the checkpoint reset generation to match the current V2 preview.
+- Verify the Notes seed/reconcile receipt lineage, including each linked
+  predecessor, its cryptographic digest and current sealed bundle.
+- Recompute the full-origin source token fingerprint independently from the
+  checkpoint's immutable entries; distinguish source agreement with the V2
+  Notes preview from agreement with the current V1 localStorage origin.
+- Re-read preview evidence and V1 source after asynchronous hashes, refuse
+  concurrent changes, and report only booleans/reasons rather than note text.
+- Keep canApply:false and canPromote:false on every result. A valid local
+  checkpoint is NOT an off-device backup, not an image/IndexedDB copy, and
+  not a full-app rollback mechanism.
+
+Regression coverage includes intentionally empty authoritative Notes caches,
+a source updated after an older checkpoint, a newer reconciled Notes bundle,
+a synthetic same-generation Notes import/restore, invalid/tampered local
+checkpoints, partial-scope checkpoints, generation rotation, a race during
+cryptographic hashing, dark-mode/production refusal and an actual Chromium/
+WebKit browser fixture that exercises old/new checkpoint evidence.
+
+This is another prerequisite for reversible migration, not completion of the
+off-device backup or recovery gate. V1 remains authoritative, and the V2
+weighted score remains **67/100**.
