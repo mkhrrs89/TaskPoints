@@ -8045,7 +8045,7 @@ body.tp-player-profile-open #cropModal:not(.hidden) { z-index: 1900 !important; 
   box-shadow: 0 0 0 3px rgba(45, 212, 191, .19);
   animation: task-reschedule-tap 280ms cubic-bezier(.2, 1.15, .3, 1) both;
 }
-.task-reschedule-day.is-picking::after {
+.task-reschedule-day.is-saved::after {
   content: "✓";
   position: absolute;
   top: 1px;

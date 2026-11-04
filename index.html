@@ -11670,6 +11670,12 @@ function setTaskRescheduleFeedback(newDateKey, stage) {
   }
   const chosen = overlay.querySelector('[data-task-reschedule-date="' + newDateKey + '"]');
   if (!chosen) return;
+  if (stage === 'error') {
+    // A failed journal must never leave a green checkmark on the unsaved day.
+    chosen.classList.remove('is-picking', 'is-saved');
+    chosen.setAttribute('aria-pressed', 'false');
+    return;
+  }
   overlay.querySelectorAll('.task-reschedule-day.is-picking').forEach(button => {
     if (button !== chosen) button.classList.remove('is-picking', 'is-saved');
   });

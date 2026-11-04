@@ -166,3 +166,11 @@ test('calendar cannot close during the short pre-save paint window', () => {
  assert.equal(f.calls.saves.length,1);
  assert.equal(f.task.dueDateISO,'2026-11-09');
 });
+
+test('unsaved selections do not show a success checkmark', () => {
+ const style=fs.readFileSync(path.join(__dirname,'..','styles.css'),'utf8');
+ assert.match(style,/task-reschedule-day\.is-saved::after/);
+ assert.doesNotMatch(style,/task-reschedule-day\.is-picking::after/);
+ assert.match(source,/if \(stage === 'error'\) \{/);
+ assert.match(source,/chosen\.classList\.remove\('is-picking', 'is-saved'\)/);
+});
