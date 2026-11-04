@@ -5,9 +5,9 @@
   if (!global || !core || global.TaskPointsStateRuntimeV2?.__installedModule) return;
 
   const DB_NAME = 'taskpoints_state_v2';
-  // V4 adds an isolated, non-authoritative Projects preview object store.
-  // Existing pilot, Task preview and mutation/metadata stores are retained.
-  const DB_VERSION = 4;
+  // V5 adds an isolated per-day Today preview store. Production V1 remains
+  // authoritative; existing Task/Projects/Habit stores are retained.
+  const DB_VERSION = 5;
   const COMPLETION_HABIT_INDEX = 'by_habit_ids';
   const EXCLUSIVE_WRITER_REHEARSAL_LOCK = 'taskpoints_v2_writer_handoff_rehearsal_v1';
   const PEER_COORDINATION_CHANNEL = 'taskpoints_v2_preview_writer_peers_v1';
@@ -509,6 +509,7 @@
     if (!db.objectStoreNames.contains('mutations')) db.createObjectStore('mutations', { keyPath: 'id' });
     if (!db.objectStoreNames.contains('tasks')) db.createObjectStore('tasks', { keyPath: 'id' });
     if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects', { keyPath: 'id' });
+    if (!db.objectStoreNames.contains('todayDays')) db.createObjectStore('todayDays', { keyPath: 'id' });
     if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'id' });
     const completions = upgradeTransaction.objectStore('completions');
     if (!completions.indexNames.contains(COMPLETION_HABIT_INDEX)) {
@@ -2971,21 +2972,22 @@
 
   // A reset marked empty is not enough to prove the mirror contains no
   // surviving pilot, mutation or preview-only evidence. Count both Task
-  // and Project rehearsal stores; neither is authoritative.
+  // Projects and Today rehearsal stores; none is authoritative.
   // Count all stores with runtime metadata in ONE readonly transaction.
   async function readV2EmptyResetEvidence(db) {
     const tx = db.transaction(
-      ['habits', 'completions', 'mutations', 'tasks', 'projects', 'meta'], 'readonly'
+      ['habits', 'completions', 'mutations', 'tasks', 'projects', 'todayDays', 'meta'], 'readonly'
     );
-    const [meta, habits, completions, mutations, tasks, projects] = await Promise.all([
+    const [meta, habits, completions, mutations, tasks, projects, todayDays] = await Promise.all([
       requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
       requestPromise(tx.objectStore('habits').count()),
       requestPromise(tx.objectStore('completions').count()),
       requestPromise(tx.objectStore('mutations').count()),
       requestPromise(tx.objectStore('tasks').count()),
-      requestPromise(tx.objectStore('projects').count())
+      requestPromise(tx.objectStore('projects').count()),
+      requestPromise(tx.objectStore('todayDays').count())
     ]);
-    return { meta, habits, completions, mutations, tasks, projects };
+    return { meta, habits, completions, mutations, tasks, projects, todayDays };
   }
 
   function completionCompatibilityBase(completion) {
@@ -3101,7 +3103,7 @@
         throw new Error('state_runtime_v2_compatibility_legacy_missing_unverified');
       if (evidence.habits !== 0 || evidence.completions !== 0
         || evidence.mutations !== 0 || evidence.tasks !== 0
-        || evidence.projects !== 0)
+        || evidence.projects !== 0 || evidence.todayDays !== 0)
         throw new Error('state_runtime_v2_compatibility_empty_evidence_retained');
       // A separate metadata read rejects a revision committed after the
       // consistent emptiness check. An old noncooperating tab can still write
@@ -3314,7 +3316,7 @@
         && evidence.meta?.legacyMissing === true;
       const empty = evidence.habits === 0 && evidence.completions === 0
         && evidence.mutations === 0 && evidence.tasks === 0
-        && evidence.projects === 0;
+        && evidence.projects === 0 && evidence.todayDays === 0;
       lastParity = {
         checked: consistent, match: Boolean(consistent && markerValid && empty),
         legacyMissing: true,
@@ -3323,7 +3325,8 @@
             : !empty ? 'empty_reset_evidence_retained' : 'verified_empty_reset',
         counts: { habits: evidence.habits,
           completions: evidence.completions, mutations: evidence.mutations,
-          tasks: evidence.tasks, projects: evidence.projects },
+          tasks: evidence.tasks, projects: evidence.projects,
+          todayDays: evidence.todayDays },
         checkedAtISO: nowIso()
       };
       return lastParity;
@@ -5181,7 +5184,9 @@
     for (const key of fields) {
       for (const day of Object.keys(payload[key]||{})) days.add(day);
     }
-    const records=[{id:'root',value:root}];
+    const presentMaps=fields.filter(field=>
+      Object.prototype.hasOwnProperty.call(payload,field));
+    const records=[{id:'root',value:root,presentMaps}];
     for (const day of [...days].sort()) {
       const value={};
       for (const key of fields) {
