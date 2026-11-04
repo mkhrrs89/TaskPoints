@@ -80,6 +80,7 @@ jobs:
           tests/state_runtime_v2_projects_source_contract.test.js
           tests/state_runtime_v2_projects_seed_contract.test.js
           tests/state_runtime_v2_today_collection_contract.test.js
+          tests/state_runtime_v2_notes_source_contract.test.js
           tests/state_runtime_v2_task_reconcile_scenarios_contract.test.js
           tests/state_runtime_v2_revision_conflict_contract.test.js
           tests/state_runtime_v2_wal_contract.test.js
