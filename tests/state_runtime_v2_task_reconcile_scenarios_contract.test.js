@@ -532,3 +532,73 @@ test('historical reconcile fails closed if prior reconciliation seal is altered'
   assert.deepEqual(app.indexedDB.dump(DB),before);
 });
 
+
+
+test('historical completion reconcile refuses unproven single-record preview import',async()=>{
+  const app=await seeded();
+  await currentTasksWithHistory(app,[completion(1)]);
+  const lone=await app.api.rehearsePreviewTaskLinkedCompletion(
+    'work-completion-1',app.token(),'single');
+  assert.equal(lone.confirmedDurable,true,JSON.stringify(lone));
+  await resyncChangedHistory(app,[{...completion(1),points:75}],'single-new-v1');
+  const before=app.indexedDB.dump(DB);
+  const outcome=await app.api.rehearsePreviewTaskCompletionHistoryReconcile(
+    app.token(),'single-unproven');
+  assert.equal(outcome.reason,'task_completion_reconcile_provenance_missing');
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('historical completion reconcile refuses more than 64 logical deltas',async()=>{
+  const app=await seeded();
+  const original=Array.from({length:66},(_,i)=>completion(i));
+  await currentTasksWithHistory(app,original);
+  const first=await app.api.rehearsePreviewTaskCompletionHistoryCatchUp(
+    app.token(),'oversize-hist-1');
+  assert.equal(first.importedRows,64,JSON.stringify(first));
+  const second=await app.api.rehearsePreviewTaskCompletionHistoryCatchUp(
+    app.token(),'oversize-hist-2');
+  assert.equal(second.fullyMirrored,true,JSON.stringify(second));
+  await resyncChangedHistory(app,original.map(row=>({...row,points:row.points+400})),
+    'oversize');
+  const before=app.indexedDB.dump(DB);
+  const result=await app.api.rehearsePreviewTaskCompletionHistoryReconcile(
+    app.token(),'too-many');
+  assert.equal(result.reason,'task_completion_reconcile_batch_too_large',
+    JSON.stringify(result));
+  assert.equal(result.changedRows,66);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('historical completion reconcile aborts if V2 changes inside write admission',async()=>{
+  const app=await seeded();
+  await importedTaskHistory(app,[completion(1),completion(2)]);
+  await resyncChangedHistory(app,[{...completion(1),points:82},completion(2)],
+    'concurrent');
+  const database=app.indexedDB._databases.get(DB);
+  const original=database.transaction.bind(database);
+  let edited=false;
+  database.transaction=(stores,mode)=>{
+    if (!edited && mode==='readwrite'
+      && Array.isArray(stores) && stores.includes('completions')) {
+      edited=true;
+      const rows=database._stores.get('completions');
+      const row=rows.get('work-completion-2');
+      rows.set(row.id,{...row,entries:[{...row.entries[0],
+        value:{...row.entries[0].value,points:999}}]});
+    }
+    return original(stores,mode);
+  };
+  const result=await app.api.rehearsePreviewTaskCompletionHistoryReconcile(
+    app.token(),'concurrent-v2');
+  assert.equal(edited,true);
+  assert.equal(result.reason,'task_completion_reconcile_concurrent_change',
+    JSON.stringify(result));
+  assert.equal(result.committed,false);
+  assert.equal(app.indexedDB.dump(DB).completions.find(
+    row=>row.id==='work-completion-1').entries[0].value.points,1);
+  assert.equal(app.indexedDB.dump(DB).completions.find(
+    row=>row.id==='work-completion-2').entries[0].value.points,999);
+  assert.equal(app.indexedDB.dump(DB).mutations.some(
+    row=>row.id==='task-preview-completion-reconcile:concurrent-v2'),false);
+});
+
