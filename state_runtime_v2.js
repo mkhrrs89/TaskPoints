@@ -6597,6 +6597,14 @@
       if (!parity.match) return refuse('task_completion_history_parity_mismatch',{
         prerequisiteReason:parity.reason
       });
+      // The parity inspector captured its own source snapshot. An older V1
+      // tab can change an unrelated origin key after that inspector returns,
+      // so the original caller token must also survive this async boundary.
+      try {
+        if (!sourceCurrent()) return refuse('legacy_changed_after_history_check');
+      } catch (_) {
+        return refuse('legacy_unreadable_after_history_check');
+      }
       return {
         checked:true, previewOnly:true, committed:false,
         confirmedDurable:true, collectionParityVerified:true,
@@ -6622,6 +6630,21 @@
     if (remainingRows===0 && unsupported===0) {
       const parity=await inspectPreviewTaskCompletionOrderParity();
       fullVerified=parity.match === true;
+    }
+    // A durable V2 import is not the same as a fresh V1 parity proof. If an
+    // old/nonparticipating tab writes during the independent parity await,
+    // preserve the committed rows and report an uncertain source instead
+    // of claiming complete mirroring against the caller's stale token.
+    try {
+      if (!sourceCurrent()) return refuse('legacy_changed_after_history_import',{
+        committed:result.committed===true,confirmedDurable:true,
+        writeOutcomeUncertain:true,importedRows:selected.length
+      });
+    } catch (_) {
+      return refuse('legacy_unreadable_after_history_import',{
+        committed:result.committed===true,confirmedDurable:true,
+        writeOutcomeUncertain:true,importedRows:selected.length
+      });
     }
     return {
       checked:true,previewOnly:true, committed:result.committed===true,

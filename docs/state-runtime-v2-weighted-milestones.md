@@ -604,3 +604,25 @@ completion records. A later V1 edit that changes old completion ordering
 requires an explicit safe reconciliation strategy; the importer deliberately
 refuses stale evidence. Other nonpilot V1 collections and independent backup
 remain incomplete. **V2 67/100, canPromote:false.**
+
+
+## Final caller-token guard after Task history parity — November 4
+
+The developer-only Task-linked historical backlog importer performs a second
+full-origin V1 inventory and generation/epoch check **after** awaiting the
+independent scoped completion-order parity inspector. The inspector captures
+its own source baseline; its success alone cannot certify that the original
+backfill caller's token survived the await. A legacy-only tab may modify an
+independent key (such as `tp_projects_v1`) after that inspector's final check.
+
+The no-op/current-history case now refuses a stale or unreadable caller token
+instead of returning `fullyMirrored:true`. For an already-durable V2 import,
+the same late race preserves committed records and reports
+`confirmedDurable:true` with `writeOutcomeUncertain:true`, never an
+unqualified parity claim. Node regressions schedule an independent V1-origin
+mutation at the inspector's final read and check both cases. No production
+writer, scoring behavior, legacy fallback, or authority setting is altered.
+
+This is a race-detection hardening of a **cooperative preview**, not mandatory
+old-tab exclusion, a linearizable cross-store transaction, or permission to
+activate V2. The weighted cutover estimate remains **67/100**.

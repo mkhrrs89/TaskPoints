@@ -278,3 +278,75 @@ test('historical catchup refuses old full-origin tokens after unrelated changes'
   assert.equal(result.reason,'full_origin_changed');
   assert.deepEqual(app.indexedDB.dump(DB),before);
 });
+
+
+// Simulate a legacy-only tab writing immediately AFTER the parity inspector's
+// final source check. The async inspector can be internally consistent while
+// its independently captured origin is already stale for the caller.
+function injectAfterHistoryParity(app) {
+  const original=app.localStorage.getItem.bind(app.localStorage);
+  let inventoryChecks=0, scheduled=false;
+  app.localStorage.getItem=function(key) {
+    const value=original(key);
+    const stack=String(new Error().stack || '');
+    if (String(key)===KEY
+      && stack.includes('captureReadOnlyFullStorageInventory')
+      && stack.includes('inspectPreviewTaskCompletionOrderParity')) {
+      inventoryChecks+=1;
+      if (inventoryChecks===5) {
+        scheduled=true;
+        queueMicrotask(()=>app.localStorage.setItem(
+          'tp_projects_v1','late-legacy-only-project-edit'));
+      }
+    }
+    return value;
+  };
+  return {restore(){app.localStorage.getItem=original;},
+    observed(){return {inventoryChecks,scheduled};}};
+}
+
+test('historic completion no-op denies late V1 source change after parity await',async()=>{
+  const app=await seeded();
+  await currentTasksWithHistory(app,[completion(1)]);
+  const initial=await app.api.rehearsePreviewTaskCompletionHistoryCatchUp(
+    app.token(),'history-initial');
+  assert.equal(initial.fullyMirrored,true,JSON.stringify(initial));
+  const before=app.indexedDB.dump(DB),token=app.token();
+  const injection=injectAfterHistoryParity(app);
+  let result;
+  try {
+    result=await app.api.rehearsePreviewTaskCompletionHistoryCatchUp(
+      token,'history-noop-late-origin');
+  } finally {injection.restore();}
+  assert.equal(injection.observed().scheduled,true,
+    JSON.stringify(injection.observed()));
+  assert.equal(result.reason,'legacy_changed_after_history_check',
+    JSON.stringify(result));
+  assert.equal(result.confirmedDurable,false);
+  assert.equal(result.collectionParityVerified,false);
+  assert.equal(result.canPromote,false);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('historic completion durable import does not claim fresh parity after late V1 write',async()=>{
+  const app=await seeded();
+  await currentTasksWithHistory(app,[completion(1)]);
+  const token=app.token();
+  const injection=injectAfterHistoryParity(app);
+  let result;
+  try {
+    result=await app.api.rehearsePreviewTaskCompletionHistoryCatchUp(
+      token,'history-import-late-origin');
+  } finally {injection.restore();}
+  assert.equal(injection.observed().scheduled,true,
+    JSON.stringify(injection.observed()));
+  assert.equal(result.reason,'legacy_changed_after_history_import',
+    JSON.stringify(result));
+  assert.equal(result.committed,true);
+  assert.equal(result.confirmedDurable,true);
+  assert.equal(result.collectionParityVerified,false);
+  assert.equal(result.writeOutcomeUncertain,true);
+  assert.equal(result.canPromote,false);
+  assert.ok(app.indexedDB.dump(DB).completions.some(
+    row=>row.id==='work-completion-1'));
+});
