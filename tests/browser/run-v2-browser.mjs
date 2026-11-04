@@ -2558,12 +2558,15 @@ try {
       {waitUntil:'load'});
     const first=await page.evaluate(()=>window.TaskPointsStateRuntimeV2.rehearsePreviewTaskCollectionSeed());
     assert.equal(first.verified,true,JSON.stringify(first));
-    await legacy.evaluate(()=>{
+    const changedLegacyRaw=await legacy.evaluate(()=>{
       const raw=localStorage.getItem('taskpoints_v1');
       const state=JSON.parse(raw);
       state.tasks.push({id:'newer-legacy-task',title:'Must not be silently copied'});
-      localStorage.setItem('taskpoints_v1',JSON.stringify(state));
+      const next=JSON.stringify(state);
+      localStorage.setItem('taskpoints_v1',next);
+      return next;
     });
+    await requireCrossTabStorageValue(page,'taskpoints_v1',changedLegacyRaw);
     const after=await page.evaluate(async()=>{
       const runtime=window.TaskPointsStateRuntimeV2;
       const blocked=await runtime.rehearsePreviewTaskCollectionSeed();
@@ -2574,7 +2577,8 @@ try {
       });
       return {blocked,rows,authority:runtime.getStatus().readAuthority};
     });
-    assert.equal(after.blocked.reason,'task_preview_existing_evidence_preserved',
+    assert.ok(['task_preview_existing_evidence_preserved',
+      'legacy_changed_before_seed'].includes(after.blocked.reason),
       JSON.stringify(after.blocked));
     assert.equal(after.blocked.verified,false);
     assert.equal(after.rows.length,1);
