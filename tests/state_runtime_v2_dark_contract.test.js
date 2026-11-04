@@ -76,7 +76,25 @@ test('default-off installation does not wrap the production habit journal', () =
 test('V2 declares a separate state database and only the four pilot stores', () => {
   assert.match(runtimeSource, /const DB_NAME = 'taskpoints_state_v2'/);
   assert.match(runtimeSource, /\['habits', 'completions', 'mutations', 'meta'\]/);
-  assert.equal(runtimeSource.includes("indexedDB.open('taskpoints'"), false, 'must never open the image database');
+  // The only permitted image DB access is an explicit, read-only
+  // developer-preview audit after both preview-host and dark-mode gates.
+  // Default-off installation and all production mutation paths remain banned.
+  const start=runtimeSource.indexOf('async function inspectPreviewGameImageCoverage()');
+  const end=runtimeSource.indexOf('async function rehearsePreviewGameCollectionAction(',start);
+  assert.ok(start>0 && end>start,'gated Game photo auditor must be identifiable');
+  const imageAudit=runtimeSource.slice(start,end);
+  const outsideAudit=runtimeSource.slice(0,start)+runtimeSource.slice(end);
+  assert.equal(outsideAudit.includes("indexedDB.open('taskpoints'"),false,
+    'no automatic or production runtime path may open legacy image DB');
+  assert.match(imageAudit,/if\(!isWalTestPreviewHost\(\)\)return refuse\('preview_host_required'\)/);
+  assert.match(imageAudit,/if\(!isDarkEnabled\(\)\)return refuse\('dark_disabled'\)/);
+  assert.match(imageAudit,/typeof global\.indexedDB\?\.databases!=='function'/);
+  assert.match(imageAudit,/global\.indexedDB\.databases\(\)/);
+  assert.match(imageAudit,/req\.onupgradeneeded=\(\)=>/);
+  assert.match(imageAudit,/req\.transaction\?\.abort\(\)/);
+  assert.match(imageAudit,/transaction\('images','readonly'\)/);
+  assert.doesNotMatch(imageAudit,/objectStore\('images'\)\.(?:put|add|delete|clear)\(/);
+
   assert.equal(runtimeSource.includes('taskpoints_shadow_state_v1'), false, 'must not reuse the shadow migration database');
   assert.equal(runtimeSource.includes('taskpoints_verified_secondary_v1'), false, 'must not reuse verified-secondary storage');
 });
