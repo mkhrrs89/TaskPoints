@@ -381,3 +381,154 @@ test('historic completion durable import does not claim fresh parity after late 
   assert.ok(app.indexedDB.dump(DB).completions.some(
     row=>row.id==='work-completion-1'));
 });
+
+
+async function importedTaskHistory(app,items) {
+  await currentTasksWithHistory(app,items);
+  const imported=await app.api.rehearsePreviewTaskCompletionHistoryCatchUp(
+    app.token(),'initial-reconcile-history');
+  assert.equal(imported.fullyMirrored,true,JSON.stringify(imported));
+}
+async function resyncChangedHistory(app,items,actionId) {
+  updateCompletionHistory(app,items);
+  const result=await app.api.rehearsePreviewTaskCollectionReconcile(
+    app.token(),'task-evidence-'+actionId);
+  assert.equal(result.confirmedDurable,true,JSON.stringify(result));
+}
+
+test('historical Task completion reconcile safely edits, deletes, inserts and reorders',async()=>{
+  const app=await seeded();
+  await importedTaskHistory(app,[completion(1),completion(2,'b'),completion(3)]);
+  const changed=[completion(3),{...completion(2,'b'),points:777},completion(4)];
+  await resyncChangedHistory(app,changed,'first');
+  const authoritative=app.localStorage.getItem(KEY);
+  const before=app.indexedDB.dump(DB);
+  const result=await app.api.rehearsePreviewTaskCompletionHistoryReconcile(
+    app.token(),'reconcile-first');
+  assert.equal(result.reason,'task_completion_history_reconciled',JSON.stringify(result));
+  assert.equal(result.committed,true);
+  assert.equal(result.confirmedDurable,true);
+  assert.equal(result.collectionParityVerified,true);
+  assert.equal(result.changedRows,4);
+  assert.equal(result.addedRows,1);
+  assert.equal(result.deletedRows,1);
+  assert.equal(result.canPromote,false);
+  assert.equal(app.localStorage.getItem(KEY),authoritative);
+  const after=app.indexedDB.dump(DB);
+  assert.deepEqual(after.habits,before.habits);
+  assert.deepEqual(after.tasks,before.tasks);
+  assert.equal(after.completions.length,3);
+  assert.equal(after.completions.some(r=>r.id==='work-completion-1'),false);
+  assert.equal(after.completions.find(r=>r.id==='work-completion-2').entries[0].value.points,777);
+  assert.equal(after.completions.find(r=>r.id==='work-completion-3').entries[0].sequence,-1);
+  assert.equal((await app.api.inspectPreviewTaskCompletionOrderParity()).match,true);
+
+  const noOp=await app.api.rehearsePreviewTaskCompletionHistoryReconcile(
+    app.token(),'reconcile-noop');
+  assert.equal(noOp.reason,'task_completion_history_already_current',JSON.stringify(noOp));
+  assert.equal(noOp.committed,false);
+  assert.deepEqual(app.indexedDB.dump(DB),after);
+
+  const second=[{...completion(4),points:40},completion(3),completion(2,'b')];
+  await resyncChangedHistory(app,second,'second');
+  const again=await app.api.rehearsePreviewTaskCompletionHistoryReconcile(
+    app.token(),'reconcile-second');
+  assert.equal(again.collectionParityVerified,true,JSON.stringify(again));
+  assert.equal(again.changedRows,3);
+  const restart=install(app.indexedDB,app.localStorage);
+  await restart.api.seedFromLegacy();
+  const verified=await restart.api.rehearsePreviewTaskCompletionHistoryReconcile(
+    restart.token(),'reconcile-restart');
+  assert.equal(verified.reason,'task_completion_history_already_current',
+    JSON.stringify(verified));
+});
+
+test('historical reconciliation refuses unexpected V2-only edits and preserves them',async()=>{
+  const app=await seeded();
+  await importedTaskHistory(app,[completion(1),completion(2)]);
+  await resyncChangedHistory(app,[{...completion(1),points:90},completion(2)],'tamper');
+  const store=app.indexedDB._databases.get(DB)._stores.get('completions');
+  const prior=store.get('work-completion-1');
+  store.set(prior.id,{...prior,entries:[{...prior.entries[0],
+    value:{...prior.entries[0].value,points:999}}]});
+  const before=app.indexedDB.dump(DB);
+  const result=await app.api.rehearsePreviewTaskCompletionHistoryReconcile(
+    app.token(),'do-not-overwrite');
+  assert.equal(result.reason,'task_completion_reconcile_provenance_mismatch',
+    JSON.stringify(result));
+  assert.equal(result.committed,false);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('historical reconciliation refuses legacy source races without writes',async()=>{
+  const app=await seeded();
+  await importedTaskHistory(app,[completion(1)]);
+  const oldToken=app.token();
+  await resyncChangedHistory(app,[{...completion(1),points:9}],'fresh-source');
+  const before=app.indexedDB.dump(DB);
+  const result=await app.api.rehearsePreviewTaskCompletionHistoryReconcile(
+    oldToken,'stale-source');
+  assert.equal(result.reason,'full_origin_changed');
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('historical reconciliation preserves all data on an IndexedDB quota denial',async()=>{
+  const app=await seeded();
+  await importedTaskHistory(app,[completion(1),completion(2)]);
+  await resyncChangedHistory(app,[{...completion(1),points:80},completion(2)],'quota');
+  const before=app.indexedDB.dump(DB);
+  app.indexedDB.failNext({store:'completions',operation:'put',
+    error:new Error('QuotaExceededError')});
+  const result=await app.api.rehearsePreviewTaskCompletionHistoryReconcile(
+    app.token(),'reconcile-quota');
+  assert.equal(result.committed,false,JSON.stringify(result));
+  assert.equal(result.confirmedDurable,false);
+  assert.equal(result.reason,'task_completion_reconcile_atomic_write_failed');
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('historical reconciliation rejects a changed V1 action with reused action ID',async()=>{
+  const app=await seeded();
+  await importedTaskHistory(app,[completion(1)]);
+  await resyncChangedHistory(app,[{...completion(1),points:80}],'action-first');
+  assert.equal((await app.api.rehearsePreviewTaskCompletionHistoryReconcile(
+    app.token(),'used-action')).committed,true);
+  await resyncChangedHistory(app,[{...completion(1),points:81}],'action-second');
+  const before=app.indexedDB.dump(DB);
+  const result=await app.api.rehearsePreviewTaskCompletionHistoryReconcile(
+    app.token(),'used-action');
+  assert.equal(result.reason,'task_completion_reconcile_action_id_conflict');
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('historical reconciliation deletes the last completion without false parity',async()=>{
+  const app=await seeded();
+  await importedTaskHistory(app,[completion(1)]);
+  await resyncChangedHistory(app,[],'empty');
+  const result=await app.api.rehearsePreviewTaskCompletionHistoryReconcile(
+    app.token(),'delete-all');
+  assert.equal(result.committed,true,JSON.stringify(result));
+  assert.equal(result.deletedRows,1);
+  assert.equal(result.collectionParityVerified,true);
+  assert.equal(app.indexedDB.dump(DB).completions.length,0);
+  assert.equal((await app.api.rehearsePreviewTaskCompletionHistoryReconcile(
+    app.token(),'no-op-empty')).collectionParityVerified,true);
+});
+
+test('historical reconcile fails closed if prior reconciliation seal is altered',async()=>{
+  const app=await seeded();
+  await importedTaskHistory(app,[completion(1)]);
+  await resyncChangedHistory(app,[{...completion(1),points:8}],'sealed');
+  assert.equal((await app.api.rehearsePreviewTaskCompletionHistoryReconcile(
+    app.token(),'seal-initial')).committed,true);
+  const meta=app.indexedDB._databases.get(DB)._stores.get('meta');
+  const record=meta.get('task-preview-completion-reconcile');
+  meta.set(record.id,{...record,stateFingerprint:'invalid'});
+  await resyncChangedHistory(app,[{...completion(1),points:9}],'seal-followup');
+  const before=app.indexedDB.dump(DB);
+  const result=await app.api.rehearsePreviewTaskCompletionHistoryReconcile(
+    app.token(),'seal-invalid');
+  assert.equal(result.reason,'task_completion_reconcile_prior_seal_invalid');
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
