@@ -5371,21 +5371,20 @@
       id:value.id,legacyIndex,value
     }));
     const inventorySignature=fnv1a(source.inventory)+':'+source.inventory.length;
-    let rows,evidence,meta,receipt;
+    let rows,evidence,meta,receipts;
     try {
       const db=await open();
       if (!db) return refuse('v2_unavailable');
+      // One readonly transaction prevents mixing Project rows, metadata
+      // and receipts from different V2 revisions during a parity decision.
       const tx=db.transaction(['projects','mutations','meta'],'readonly');
-      [rows,evidence,meta]=await Promise.all([
+      [rows,evidence,meta,receipts]=await Promise.all([
         requestPromise(tx.objectStore('projects').getAll()),
         requestPromise(tx.objectStore('meta').get('projects-preview')),
-        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID))
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
+        requestPromise(tx.objectStore('mutations').getAll())
       ]);
       if (!evidence) return refuse('projects_preview_missing');
-      // Receipt has to come from a second read of the same store with exact
-      // expected metadata. The result is still checked against fresh source.
-      const receiptTx=db.transaction('mutations','readonly');
-      receipt=await requestPromise(receiptTx.objectStore('mutations').get(evidence.receiptId));
     } catch (_) { return refuse('projects_preview_read_unavailable'); }
     try {
       if (!current()) return refuse('legacy_projects_changed_during_parity');
@@ -5403,6 +5402,7 @@
         return refuse('projects_preview_record_mismatch',{
           expectedCount:expected.length,actualCount:rows.length
         });
+      const receipt=receipts.find(row=>row?.id===evidence.receiptId);
       if (!receipt || receipt.id!==evidence.receiptId
         || receipt.type!=='projects-preview-seed'
         || receipt.resetGeneration!==generation
