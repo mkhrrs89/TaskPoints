@@ -247,7 +247,7 @@ test('habit toggles use interactive deferred compression and Storage Health dist
   const coreSource = fs.readFileSync(path.join(__dirname, '..', 'scoring_core.js'), 'utf8');
   assert.match(coreSource, /addEventListener\('pagehide', flushPendingInteractiveRecompresses\)/);
   assert.match(coreSource, /visibilityState === 'hidden'/);
-  assert.match(coreSource, /const criticalArrays = \['completions', 'matchups', 'gameHistory', 'seasonHistory', 'weightHistory', 'vo2MaxHistory', 'reminders', 'players', 'habits'\]/);
+  assert.match(coreSource, /const criticalArrays = \['completions', 'matchups', 'gameHistory', 'seasonHistory', 'goldLedger', 'weightHistory', 'vo2MaxHistory', 'reminders', 'players', 'habits'\]/);
 });
 
 test('pending habit journals recover and compact the Work On Cal App fixture through shared loading', async () => {
