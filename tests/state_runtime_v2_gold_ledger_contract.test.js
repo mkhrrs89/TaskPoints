@@ -112,7 +112,7 @@ test('Gold preview distinguishes absent, present-empty, and partially lost metad
   assert.equal(absent.indexedDB.dump(DB).meta.find(x=>x.id==='gold-preview').present,false);
   assert.equal(absent.indexedDB.dump(DB).meta.find(x=>x.id==='gold-preview').metaPresent,false);
   const present=await boot({habits:[],completions:[],goldLedger:[],
-    goldEconomy:economy()});
+    goldEconomy:{...economy(),settledMatchupKeys:[]}});
   assert.equal((await seed(present)).collectionParityVerified,true);
   assert.equal(present.indexedDB.dump(DB).meta.find(x=>x.id==='gold-preview').present,true);
   const broken=await boot({habits:[],completions:[],
