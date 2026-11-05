@@ -6901,6 +6901,149 @@
     finally{try{db?.close();}catch(_){}}
   }
 
+
+  // Whole-application backup COVERAGE audit, not an import or a restore.
+  // The existing Game ZIP preflight authenticates the archive's structural
+  // envelope, Game fields, and referenced live image bytes. This separate
+  // read-only rehearsal checks *every* V1 snapshot field, including future
+  // unknown keys, plus independently persisted origin sidecars. It never
+  // calls a save, opens an image writer, or grants authority to V2.
+  async function inspectPreviewWholeBackupRestoreCoverage(archiveInput) {
+    const refuse=(reason,more={})=>({
+      checked:true,previewOnly:true,wholeSnapshotCompared:false,
+      rawSnapshotFieldsPreserved:false,
+      settingsNormalizationParityVerified:false,
+      rawImportFieldPreservationVerified:false,
+      independentOriginSidecarsCovered:false,
+      independentOriginSidecarsRestorable:false,
+      fullAppRestoreVerified:false,offDeviceBackupVerified:false,
+      canApply:false,canPromote:false,
+      productionWritersFenced:false,readAuthority:'legacy_only',
+      mutationAuthority:'legacy_only',reason,...more
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    if(typeof core.normalizeImportedFullBackupState!=='function')
+      return refuse('settings_import_normalizer_unavailable');
+    const generation=currentGeneration({create:false});
+    if(!generation)return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    try{
+      const origin=captureReadOnlyFullStorageInventory();
+      const game=await inspectPreviewGameBackupZip(archiveInput);
+      if(!game.archiveStructureVerified||!game.archiveGameFieldsVerified
+        ||!game.archiveReferencedImagesVerified)
+        return refuse('whole_backup_game_preflight_required',{
+          prerequisiteReason:game.reason
+        });
+      if(captureReadOnlyFullStorageInventory()!==origin
+        ||currentGeneration({create:false})!==generation
+        ||darkMirrorModeEpoch!==epoch||!isDarkEnabled())
+        return refuse('whole_backup_origin_changed');
+      const zip=parsePreviewGameBackupZip(archiveInput);
+      if(zip.reason)return refuse(zip.reason);
+      const manifest=JSON.parse(
+        new global.TextDecoder('utf-8',{fatal:true})
+          .decode(zip.entries.get('manifest.json')));
+      const stored=global.localStorage.getItem(core.STORAGE_KEY||'taskpoints_v1');
+      if(typeof stored!=='string')return refuse('whole_backup_source_missing');
+      const original=core.parseTaskPointsStorageJson(stored);
+      const imported=manifest?.state;
+      if(!original||typeof original!=='object'||Array.isArray(original)
+        ||!imported||typeof imported!=='object'||Array.isArray(imported)
+        ||!Array.isArray(original.tasks)
+        ||!Array.isArray(original.completions))
+        return refuse('whole_backup_snapshot_invalid');
+      // The Settings full-import path calls this normalizer. Invoke only
+      // its pure normalization entry point with detached arguments.
+      const copy=value=>JSON.parse(JSON.stringify(value));
+      const options={preserveMissingReminders:false,
+        preserveMissingProjects:false};
+      const normalizedOriginal=core.normalizeImportedFullBackupState(
+        copy(original),copy(original),options);
+      const normalizedImport=core.normalizeImportedFullBackupState(
+        copy(imported),copy(original),options);
+      if(!normalizedOriginal||typeof normalizedOriginal!=='object'
+        ||Array.isArray(normalizedOriginal)||!normalizedImport
+        ||typeof normalizedImport!=='object'||Array.isArray(normalizedImport))
+        return refuse('whole_backup_normalizer_result_invalid');
+      const difference=(left,right)=>{
+        const keys=new Set([...Object.keys(left),...Object.keys(right)]);
+        let mismatches=0;
+        for(const key of keys){
+          const a=Object.prototype.hasOwnProperty.call(left,key);
+          const b=Object.prototype.hasOwnProperty.call(right,key);
+          if(a!==b||a&&stableJson(left[key])!==stableJson(right[key]))
+            mismatches++;
+        }
+        return {compared:keys.size,mismatches};
+      };
+      const raw=difference(original,imported);
+      const normalized=difference(normalizedOriginal,normalizedImport);
+      const restoredRaw=difference(original,normalizedImport);
+      // Source keys outside taskpoints_v1 can be authoritative. A ZIP
+      // exporter may include an auxiliary value while Settings never
+      // restores it. Observe BOTH properties separately, never infer
+      // restorable=true from a matching manifest value.
+      const keys=[
+        'taskpoints_notes_v1',
+        'taskpoints_notes_dirty_v1',
+        'taskpoints_notes_authoritative_v1',
+        'tp_projects_v1',
+        'taskpoints_today_view_v1',
+        ...GAME_PREFERENCE_KEYS
+      ];
+      const aux=manifest.aux&&typeof manifest.aux==='object'
+        &&!Array.isArray(manifest.aux)?manifest.aux:{};
+      let sidecarCount=0,covered=0;
+      for(const key of keys){
+        const actual=global.localStorage.getItem(key);
+        if(actual===null)continue;
+        sidecarCount++;
+        if(Object.prototype.hasOwnProperty.call(aux,key)
+          &&typeof aux[key]==='string'&&aux[key]===actual)
+          covered++;
+      }
+      const sourceUnchanged=captureReadOnlyFullStorageInventory()===origin
+        &&global.localStorage.getItem(core.STORAGE_KEY||'taskpoints_v1')===stored
+        &&currentGeneration({create:false})===generation
+        &&darkMirrorModeEpoch===epoch&&isDarkEnabled()
+        &&isWalTestPreviewHost();
+      if(!sourceUnchanged)return refuse('whole_backup_origin_changed');
+      // The real Settings ZIP flow writes photos before confirming a full
+      // import, and never replays Today, Game prefs or Notes dirty flags.
+      // Therefore even 100% archive-field parity cannot certify a safe,
+      // reversible whole-app restore or an off-device copy.
+      const details={
+        wholeSnapshotCompared:true,
+        snapshotFieldCount:raw.compared,
+        snapshotFieldMismatchCount:raw.mismatches,
+        rawSnapshotFieldsPreserved:raw.mismatches===0,
+        normalizedFieldCount:normalized.compared,
+        normalizedFieldMismatchCount:normalized.mismatches,
+        settingsNormalizationParityVerified:normalized.mismatches===0,
+        rawImportFieldMismatchCount:restoredRaw.mismatches,
+        rawImportFieldPreservationVerified:restoredRaw.mismatches===0,
+        observedIndependentSidecarCount:sidecarCount,
+        archivedIndependentSidecarCount:covered,
+        missingIndependentSidecarCount:sidecarCount-covered,
+        independentOriginSidecarsCovered:covered===sidecarCount,
+        independentOriginSidecarsRestorable:false,
+        imagesWrittenBeforeImportConfirmation:true,
+        restoreOrderAndInterruptionValidated:false
+      };
+      return refuse(normalized.mismatches
+        ?'whole_backup_normalization_parity_mismatch'
+        :restoredRaw.mismatches
+          ?'whole_backup_normalization_drops_raw_fields'
+          :raw.mismatches
+            ?'whole_backup_snapshot_field_mismatch'
+            :covered!==sidecarCount
+              ?'whole_backup_independent_sidecars_missing'
+              :'whole_backup_import_and_rollback_unverified',details);
+    }catch(_){return refuse('whole_backup_coverage_unavailable');}
+  }
+
   async function rehearsePreviewGameCollectionAction(sourceToken,actionId,reconcile) {
     const refuse=(reason,extra={})=>({
       checked:true,previewOnly:true,committed:false,confirmedDurable:false,
@@ -12251,6 +12394,7 @@
     inspectPreviewGameImageCoverage,
     inspectPreviewGameBackupZip,
     rehearsePreviewGameZipRestoreInMemory,
+    inspectPreviewWholeBackupRestoreCoverage,
     inspectPreviewTodaySource,
     rehearsePreviewTodayCollectionSeed,
     inspectPreviewTodayCollectionParity,
