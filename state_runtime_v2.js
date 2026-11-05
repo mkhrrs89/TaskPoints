@@ -8144,10 +8144,16 @@
       ledger=present?state.goldLedger:[];
       metadata=metaPresent?state.goldEconomy:null;
       if(!Array.isArray(ledger))return fail('gold_ledger_array_required');
+      if(present!==metaPresent)
+        return fail('gold_ledger_economy_presence_mismatch');
       if(metaPresent&&(!metadata||typeof metadata!=='object'
         ||Array.isArray(metadata)||!Number.isSafeInteger(Number(metadata.version))
         ||Number(metadata.version)<1))
         return fail('gold_economy_metadata_invalid');
+      if(metaPresent&&ledger.length===0
+        &&[metadata.settledMatchupKeys,metadata.settledChampionKeys]
+          .some(keys=>Array.isArray(keys)&&keys.length>0))
+        return fail('gold_settlements_without_ledger_rows');
       if(ledger.length>8192||JSON.stringify(ledger).length>2097152)
         return fail('gold_ledger_preview_too_large');
       const ids=new Set();
@@ -8236,22 +8242,23 @@
       rowCount:rows.length,present:source.present,
       metaPresent:source.metaPresent,metadata:clone(source.metadata),
       receiptId:receipt.id};
-    let db,prior,priorEvidence,priorMeta,priorReceipt;
+    let db,prior,priorEvidence,priorMeta,priorReceipts;
     try{
       db=await open();if(!db)return fail('v2_unavailable');
       const tx=db.transaction(['goldLedger','mutations','meta'],'readonly');
-      [prior,priorEvidence,priorMeta,priorReceipt]=await Promise.all([
+      [prior,priorEvidence,priorMeta,priorReceipts]=await Promise.all([
         requestPromise(tx.objectStore('goldLedger').getAll()),
         requestPromise(tx.objectStore('meta').get('gold-preview')),
         requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
-        requestPromise(tx.objectStore('mutations').get(receipt.id))
+        requestPromise(tx.objectStore('mutations').getAll())
       ]);
     }catch(_){return fail('gold_preview_read_unavailable');}
     if(!priorMeta||priorMeta.schemaVersion!==SCHEMA_VERSION
       ||priorMeta.resetGeneration!==source.generation
       ||priorMeta.legacyMissing===true)
       return fail('pilot_meta_not_ready');
-    if(prior.length||priorEvidence||priorReceipt)
+    if(prior.length||priorEvidence||priorReceipts.some(row=>
+      typeof row?.id==='string'&&row.id.startsWith('gold-preview-')))
       return fail('gold_preview_existing_evidence_preserved');
     try{if(!current())return fail('gold_source_changed_before_seed');}
     catch(_){return fail('gold_source_unavailable_before_seed');}
@@ -8263,7 +8270,7 @@
       const mutations=tx.objectStore('mutations');
       const meta=tx.objectStore('meta');
       const reads=[store.getAll(),meta.get('gold-preview'),
-        meta.get(RUNTIME_META_ID),mutations.get(receipt.id)];
+        meta.get(RUNTIME_META_ID),mutations.getAll()];
       const values=new Array(reads.length);
       let pending=reads.length;
       reads.forEach((req,i)=>{req.onsuccess=()=>{
@@ -8274,7 +8281,7 @@
           if(stableJson(values[0])!==stableJson(prior)
             ||stableJson(values[1])!==stableJson(priorEvidence)
             ||stableJson(values[2])!==stableJson(priorMeta)
-            ||values[3])
+            ||stableJson(values[3])!==stableJson(priorReceipts))
             return abort(tx,'gold_preview_concurrent_change');
           rows.forEach(row=>store.add(row));
           mutations.add(receipt);meta.add(evidence);
