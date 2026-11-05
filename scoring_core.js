@@ -7302,6 +7302,48 @@ return { state: merged, storageKey };
       }
       next[key] = {};
     });
+    // Gold transactions are a permanent append-only economy ledger.
+    // An unrelated/stale page save may include an empty or shortened ledger
+    // even while matchup goldOutcome history still references old thefts.
+    // Never let that save erase previously verified Gold transactions.
+    // Only an explicit Gold-specific reset may bypass this protection.
+    if (options.allowGoldLedgerReset !== true && latest) {
+      const savedLedger = Array.isArray(latest.goldLedger) ? latest.goldLedger : [];
+      const incomingLedger = Array.isArray(next.goldLedger) ? next.goldLedger : [];
+      if (savedLedger.length) {
+        const incomingIds = new Set(incomingLedger.map((row) => String(row?.id || '')).filter(Boolean));
+        const ledgerWouldShrink = savedLedger.some((row) => !row?.id || !incomingIds.has(String(row.id)));
+        if (ledgerWouldShrink) {
+          next.goldLedger = savedLedger;
+          if (latest.goldEconomy && typeof latest.goldEconomy === 'object') next.goldEconomy = latest.goldEconomy;
+          console.warn('TaskPointsCore: prevented historical Gold ledger transactions from being overwritten', {
+            savePath: options.savePath || 'unknown',
+            savedRows: savedLedger.length,
+            incomingRows: incomingLedger.length
+          });
+        }
+      }
+      // Even when all rows survive, a stale metadata snapshot could forget
+      // settled matchup keys and replay old transfers on the next startup.
+      const savedEconomy = latest.goldEconomy;
+      const incomingEconomy = next.goldEconomy;
+      if (savedEconomy && typeof savedEconomy === 'object' && Number(savedEconomy.version) > 0) {
+        if (!incomingEconomy || Number(incomingEconomy.version) !== Number(savedEconomy.version)
+          || String(incomingEconomy.launchDateKey || '') !== String(savedEconomy.launchDateKey || '')) {
+          next.goldEconomy = savedEconomy;
+        } else {
+          const merged = { ...savedEconomy, ...incomingEconomy };
+          for (const key of ['ignoredSameDayMatchupKeys', 'settledMatchupKeys', 'ignoredChampionKeys', 'settledChampionKeys']) {
+            const oldValues = Array.isArray(savedEconomy[key]) ? savedEconomy[key] : [];
+            const newValues = Array.isArray(incomingEconomy[key]) ? incomingEconomy[key] : [];
+            merged[key] = [...new Set([...oldValues, ...newValues])];
+          }
+          merged.launchedAtISO = savedEconomy.launchedAtISO || merged.launchedAtISO;
+          merged.launchDateKey = savedEconomy.launchDateKey || merged.launchDateKey;
+          next.goldEconomy = merged;
+        }
+      }
+    }
     return preserveAuthoritativeNotesBeforeSave(next, storageKey, options);
   }
 
@@ -7470,7 +7512,7 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
       const endVerification = global.TaskPointsPerf?.span?.('storage.save.verifyReadback');
       const savedRaw = localStorage.getItem(storageKey);
       const saved = savedRaw ? (parseTaskPointsStorageJson(savedRaw, {}) || {}) : {};
-      const criticalArrays = ['completions', 'matchups', 'gameHistory', 'seasonHistory', 'weightHistory', 'vo2MaxHistory', 'reminders', 'players', 'habits'];
+      const criticalArrays = ['completions', 'matchups', 'gameHistory', 'seasonHistory', 'goldLedger', 'weightHistory', 'vo2MaxHistory', 'reminders', 'players', 'habits'];
       const failed = criticalArrays.filter((key) => (
         Array.isArray(candidateWithSticky[key])
         && candidateWithSticky[key].length > 0
