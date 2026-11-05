@@ -3401,6 +3401,39 @@ try {
     return {lostPriorWorkDetected:true,noFalseAcknowledgement:true};
   });
 
+  await run('preview Task admission refuses a duplicate completion ID even if one exact row survived',async context=>{
+    const page=await open(context);
+    if(!await page.evaluate(()=>typeof navigator.locks?.request==='function'))
+      return {unsupportedFailClosed:true};
+    const evidence=await page.evaluate(async()=>{
+      const core=window.TaskPointsCore;
+      const keys=[];
+      for(let i=0;i<localStorage.length;i++)keys.push(localStorage.key(i));
+      const token=JSON.stringify(keys.sort().map(key=>[key,localStorage.getItem(key)]));
+      const original=core.journalTaskCompletionBatch;
+      core.journalTaskCompletionBatch=function(rows){
+        const result=original.apply(this,arguments);
+        const key='taskpoints_pending_task_mutations_v1';
+        const saved=JSON.parse(localStorage.getItem(key));
+        saved.completionUpserts.push({id:rows[0].id,taskId:'wrong',points:999});
+        localStorage.setItem(key,JSON.stringify(saved));
+        return result;
+      };
+      let verdict;
+      try{
+        verdict=await window.TaskPointsStateRuntimeV2.rehearsePreviewAdmittedTaskCompletionBatch(
+          [{id:'no-duplicate-id',taskId:'synthetic',points:6}],token);
+      }finally{core.journalTaskCompletionBatch=original;}
+      const journal=JSON.parse(localStorage.getItem('taskpoints_pending_task_mutations_v1'));
+      return {verdict,matches:journal.completionUpserts.filter(row=>row.id==='no-duplicate-id').length};
+    });
+    assert.equal(evidence.matches,2);
+    assert.equal(evidence.verdict.reason,'task_journal_readback_unverified',JSON.stringify(evidence));
+    assert.equal(evidence.verdict.confirmedDurable,false);
+    assert.equal(evidence.verdict.writeOutcomeUncertain,true);
+    return {duplicateIdDetected:true,noFalseAcknowledgement:true};
+  });
+
   await run('preview Task admission reports uncertainty when unrelated storage changes during journal append',async context=>{
     const page=await open(context);
     if(!await page.evaluate(()=>typeof navigator.locks?.request==='function'))

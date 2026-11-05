@@ -11732,9 +11732,11 @@
               // work survived. A journal that dropped an older Task or
               // completion must not receive a clean durability acknowledgement.
               verified = stored.schemaVersion === 1
-                && rows.every(row =>
-                  upserts.filter(saved => saved?.id === row.id
-                    && stableJson(saved) === stableJson(row)).length === 1)
+                && rows.every(row => {
+                  const sameId = upserts.filter(saved => saved?.id === row.id);
+                  return sameId.length === 1
+                    && stableJson(sameId[0]) === stableJson(row);
+                })
                 && rows.every(row => !deletes.includes(row.id))
                 && stableJson(tasks) === stableJson(originalTasks)
                 && stableJson(untouchedUpserts(upserts))

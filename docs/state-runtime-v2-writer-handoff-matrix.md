@@ -854,3 +854,10 @@ legacy-only Projects write that slips into the journal call. Neither can
 receive `confirmedDurable:true`. These checks are preview-only and do NOT
 provide an atomic cross-tab fence or authorize production V2 cutover.
 The existing V1 save/recovery path and Main remain untouched. **67/100**.
+
+
+A further browser case injects **two rows sharing the new completion ID**
+(one correct and one conflicting). Exact readback now requires **one and only
+one row with that ID**, not merely one matching row among duplicates.
+The adapter refuses clean success and keeps V1 authoritative. This is
+still preview-only; no production writer has been moved or removed.
