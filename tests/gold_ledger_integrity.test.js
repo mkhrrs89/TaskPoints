@@ -1,0 +1,10 @@
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+const {analyzeGoldLedger}=require('../gold_ledger_integrity.js');
+function example(){return {
+goldEconomy:{version:1,launchDateKey:'2026-11-04'},
+goldLedger:[{id:'open',type:'opening_balance',playerId:'drumpf',amount:4.7},{id:'margin',type:'matchup_margin',playerId:'drumpf',amount:1.3},{id:'theft',type:'matchup_theft',playerId:'drumpf',matchupId:'today',amount:.2}],
+matchups:[{id:'old',dateKey:'2026-11-03',goldOutcome:{settled:true,winnerId:'drumpf',loserId:'b',theftGoldStolen:12}},{id:'today',dateKey:'2026-11-04',goldOutcome:{settled:true,winnerId:'drumpf',loserId:'b',theftGoldStolen:.2}}],gameHistory:[]};}
+test('Drumpf historical 12 Gold theft is flagged as prelaunch without changing wallet',()=>{const s=example(),raw=JSON.stringify(s),r=analyzeGoldLedger(s);assert.equal(r.historical.length,1);assert.equal(r.historical[0].amount,12);assert.equal(r.missing.length,0);assert.equal(JSON.stringify(s),raw);});
+test('postlaunch missing theft flagged across duplicate game history',()=>{const s=example(),m={id:'miss',dateKey:'2026-11-05',goldOutcome:{settled:true,winnerId:'drumpf',loserId:'b',theftGoldStolen:3.4}};s.matchups.push(m);s.gameHistory.push({...m});const r=analyzeGoldLedger(s);assert.equal(r.missing.length,1);assert.equal(r.missing[0].amount,3.4);assert.equal(s.goldLedger.length,3);});
+test('orphaned metadata is an explicit warning',()=>{const s=example();delete s.goldEconomy;const r=analyzeGoldLedger(s);assert.equal(r.metadataIssue,true);assert.equal(r.unresolved.length,2);});
+test('Gold Ledger page includes read-only breakdown by player',()=>{const html=fs.readFileSync(path.join(__dirname,'../gold_ledger.html'),'utf8');assert.match(html,/gold_ledger_integrity\.js\?v=20261105-gold-check-1/);assert.match(html,/id="goldLedgerHistoryCheck"/);assert.match(html,/renderGoldLedgerHistoryCheck\(playerId\)/);assert.match(html,/No Gold was added or removed/);});
