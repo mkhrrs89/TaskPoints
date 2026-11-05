@@ -6734,7 +6734,9 @@
       return refuse('settings_import_normalizer_unavailable');
     const epoch=darkMirrorModeEpoch;
     const frozen=freezePreviewGameZipInput(archiveInput);
-    if(frozen.reason)return refuse(frozen.reason);
+    if(frozen.reason)return refuse('game_backup_zip_preflight_required',{
+      prerequisiteReason:frozen.reason
+    });
     const input=frozen.bytes;
     let db;
     try {
