@@ -1490,3 +1490,53 @@ for single-stage callers. The 64 MiB cap and all fail-closed source, image,
 generation, parity and promotion checks remain in force. This is an
 in-memory TOCTOU fix only, not a complete restore, persistent WAL change,
 Main sync, or activation of V2. Readiness stays **67/100**.
+
+
+## V6 Gold ledger collection preview — independent V2 work
+
+Added an opt-in, preview-host-only per-record Gold ledger collection in the
+existing taskpoints_state_v2 IndexedDB database (schema version 6). The
+upgrade is additive: Habits, Completions, Tasks, Projects, Today, mutation
+history and recovery data remain in their previous stores. The live Gold
+engine, taskpoints_v1 and the separate legacy image database remain untouched.
+
+rehearsePreviewGoldLedgerSeed(fullOriginToken, actionId) can seal one bounded,
+explicit snapshot of the currently authoritative V1 goldLedger alongside the
+entire goldEconomy metadata object. It preserves original transaction order
+and every unknown row/metadata field. Even historically duplicated/missing
+transaction identifiers are not quietly deduplicated or synthesized: invalid
+sources refuse. Ledger presence and economy presence are distinct from an
+explicitly present empty array/metadata object.
+
+The source preflight rejects inconsistent ledger/economy presence, duplicate
+or malformed transaction IDs, invalid metadata, excessively large snapshots,
+and missing transaction rows when settled Game outcomes or economy settlement
+keys prove prior Gold activity. A SHA-256 fingerprint seals raw field presence,
+the ordered transactions and the complete economy metadata. The full origin
+storage inventory, reset generation, dark mode and preview-host guard must
+remain stable throughout the asynchronous work.
+
+The seed commits all ordered rows, metadata and a mutation receipt in ONE
+IndexedDB transaction. It refuses to overwrite orphaned Gold rows, markers
+or preexisting receipts. A separate complete readback and a new parity
+inspection must both succeed; otherwise the result remains unverified.
+inspectPreviewGoldLedgerParity() compares every row and economy field in an
+isolated readonly transaction, rechecks the source and generation, and refuses
+missing/tampered receipts or any stale independent V1 Gold update.
+
+Critical reset protection was extended: verified-empty V2 compatibility
+exports and reset parity now count the Gold store alongside all existing
+preview/WAL stores. A leftover Gold row is never compatible with a supposedly
+empty reset, and no stale preview history is silently erased. The focused
+contracts include missing/empty sources, settled-history loss, tampering,
+quota rollback, old-tab changes during asynchronous hashing, orphan receipts,
+dark/production-host denial, V5→V6 upgrades, and verified-empty reset guards.
+The Gold tests are now included in the required V2 CI contract job.
+
+**Not yet proven:** Gold ledger edits/additions/deletions reconciliation,
+full nonpilot/Gold read authority, production writer fencing, independent
+Gold+image backup/restore, iOS device interruption safety, and reversible
+production cutover. Every new API returns goldMigrated:false, canPromote:false
+and readAuthority:'legacy_only'. The weighted readiness score remains
+**67/100** because no entire remaining gate has been completed. This is a
+V2-only change; no Main sync or Main write was performed in this pass.
