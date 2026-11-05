@@ -11712,16 +11712,66 @@
             const after = global.localStorage.getItem('taskpoints_pending_task_mutations_v1');
             if (typeof after === 'string' && after !== priorJournal) {
               const stored = JSON.parse(after);
+              const before = priorJournal ? JSON.parse(priorJournal) : {};
+              const targetIds = new Set(rows.map(row => row.id));
+              const originalTasks = Array.isArray(before.tasks) ? before.tasks : [];
+              const originalUpserts = Array.isArray(before.completionUpserts)
+                ? before.completionUpserts : [];
+              const originalDeletes = Array.isArray(before.completionDeletes)
+                ? before.completionDeletes : [];
               const upserts = Array.isArray(stored.completionUpserts)
                 ? stored.completionUpserts : [];
-              verified = rows.every(row =>
-                upserts.some(saved => saved?.id === row.id
-                  && stableJson(saved) === stableJson(row)));
+              const tasks = Array.isArray(stored.tasks) ? stored.tasks : [];
+              const deletes = Array.isArray(stored.completionDeletes)
+                ? stored.completionDeletes : [];
+              const untouchedUpserts = list => list.filter(
+                row => !targetIds.has(String(row?.id || '')));
+              const untouchedDeletes = list => list.filter(
+                id => !targetIds.has(String(id)));
+              // Confirm both newly written rows AND all unrelated pending
+              // work survived. A journal that dropped an older Task or
+              // completion must not receive a clean durability acknowledgement.
+              verified = stored.schemaVersion === 1
+                && rows.every(row =>
+                  upserts.filter(saved => saved?.id === row.id
+                    && stableJson(saved) === stableJson(row)).length === 1)
+                && rows.every(row => !deletes.includes(row.id))
+                && stableJson(tasks) === stableJson(originalTasks)
+                && stableJson(untouchedUpserts(upserts))
+                  === stableJson(untouchedUpserts(originalUpserts))
+                && stableJson(untouchedDeletes(deletes))
+                  === stableJson(untouchedDeletes(originalDeletes));
             }
           } catch (_) {}
           if (!verified) {
             result = refuse('task_journal_readback_unverified', {
               writeOutcomeUncertain: true
+            });
+            return;
+          }
+          // The journal is the ONLY expected change to the complete origin.
+          // Detect a legacy writer that edits another key while the journal
+          // call is running. The journal may already be durable: report an
+          // uncertain commit, never pretend the action safely rolled back.
+          try {
+            const withoutJournal = token => {
+              const entries = JSON.parse(token);
+              if (!Array.isArray(entries)) throw Error('invalid_origin_inventory');
+              return entries.filter(entry =>
+                Array.isArray(entry)
+                && entry[0] !== 'taskpoints_pending_task_mutations_v1');
+            };
+            const currentInventory = captureReadOnlyFullStorageInventory();
+            if (stableJson(withoutJournal(currentInventory))
+              !== stableJson(withoutJournal(expectedInventoryToken))) {
+              result = refuse('full_origin_changed_during_journal_write', {
+                committed: true, writeOutcomeUncertain: true
+              });
+              return;
+            }
+          } catch (_) {
+            result = refuse('full_origin_unreadable_after_journal_write', {
+              committed: true, writeOutcomeUncertain: true
             });
             return;
           }

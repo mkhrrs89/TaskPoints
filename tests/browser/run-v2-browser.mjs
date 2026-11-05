@@ -3363,6 +3363,81 @@ try {
       independentLegacyDataPreserved:true};
   });
 
+  await run('preview Task admission detects lost older pending rows even if new rows survived',async context=>{
+    const page=await open(context);
+    if(!await page.evaluate(()=>typeof navigator.locks?.request==='function'))
+      return {unsupportedFailClosed:true};
+    const evidence=await page.evaluate(async()=>{
+      const core=window.TaskPointsCore;
+      core.journalTaskMutation({task:{id:'prior-pending-task',title:'Keep me',points:3}});
+      const before=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const keys=[];
+      for(let i=0;i<localStorage.length;i++)keys.push(localStorage.key(i));
+      const token=JSON.stringify(keys.sort().map(key=>[key,localStorage.getItem(key)]));
+      const original=core.journalTaskCompletionBatch;
+      core.journalTaskCompletionBatch=function(rows){
+        const result=original.apply(this,arguments);
+        const key='taskpoints_pending_task_mutations_v1';
+        const saved=JSON.parse(localStorage.getItem(key));
+        saved.tasks=[]; // Simulate an adapter silently erasing old pending data.
+        localStorage.setItem(key,JSON.stringify(saved));
+        return result;
+      };
+      let verdict;
+      try{
+        verdict=await window.TaskPointsStateRuntimeV2.rehearsePreviewAdmittedTaskCompletionBatch(
+          [{id:'new-row-survives',taskId:'synthetic',points:6}],token);
+      }finally{core.journalTaskCompletionBatch=original;}
+      const after=JSON.parse(localStorage.getItem('taskpoints_pending_task_mutations_v1'));
+      return {verdict,before,after,authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(JSON.parse(evidence.before).tasks[0].id,'prior-pending-task');
+    assert.equal(evidence.after.tasks.length,0);
+    assert.equal(evidence.after.completionUpserts.some(row=>row.id==='new-row-survives'),true);
+    assert.equal(evidence.verdict.reason,'task_journal_readback_unverified',JSON.stringify(evidence));
+    assert.equal(evidence.verdict.confirmedDurable,false);
+    assert.equal(evidence.verdict.writeOutcomeUncertain,true);
+    assert.equal(evidence.authority,'legacy_only');
+    return {lostPriorWorkDetected:true,noFalseAcknowledgement:true};
+  });
+
+  await run('preview Task admission reports uncertainty when unrelated storage changes during journal append',async context=>{
+    const page=await open(context);
+    if(!await page.evaluate(()=>typeof navigator.locks?.request==='function'))
+      return {unsupportedFailClosed:true};
+    const evidence=await page.evaluate(async()=>{
+      const core=window.TaskPointsCore;
+      const keys=[];
+      for(let i=0;i<localStorage.length;i++)keys.push(localStorage.key(i));
+      const token=JSON.stringify(keys.sort().map(key=>[key,localStorage.getItem(key)]));
+      const original=core.journalTaskCompletionBatch;
+      core.journalTaskCompletionBatch=function(rows){
+        const result=original.apply(this,arguments);
+        // A legacy-only tab ignores the cooperative Web Lock.
+        localStorage.setItem('tp_projects_v1','edit-arrived-mid-append');
+        return result;
+      };
+      let verdict;
+      try{
+        verdict=await window.TaskPointsStateRuntimeV2.rehearsePreviewAdmittedTaskCompletionBatch(
+          [{id:'row-may-be-durable',taskId:'synthetic',points:6}],token);
+      }finally{core.journalTaskCompletionBatch=original;}
+      const journal=JSON.parse(localStorage.getItem('taskpoints_pending_task_mutations_v1'));
+      return {verdict,project:localStorage.getItem('tp_projects_v1'),
+        newRowPresent:journal.completionUpserts.some(row=>row.id==='row-may-be-durable'),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(evidence.newRowPresent,true);
+    assert.equal(evidence.project,'edit-arrived-mid-append');
+    assert.equal(evidence.verdict.reason,'full_origin_changed_during_journal_write',
+      JSON.stringify(evidence));
+    assert.equal(evidence.verdict.committed,true);
+    assert.equal(evidence.verdict.confirmedDurable,false);
+    assert.equal(evidence.verdict.writeOutcomeUncertain,true);
+    assert.equal(evidence.authority,'legacy_only');
+    return {lateConflictingEditDetected:true,uncertainAlreadyCommittedWriteReported:true};
+  });
+
   await run('serialized snapshot source guard denies unreadable state and missing tokens',async context=>{
     const page=await open(context);
     const supported=await page.evaluate(()=>typeof navigator.locks?.request==='function');

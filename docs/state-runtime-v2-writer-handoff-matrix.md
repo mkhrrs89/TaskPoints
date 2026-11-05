@@ -830,3 +830,27 @@ still interleave at the last moment or write after an acknowledgement.
 Production writer families, V1 journal functionality and all existing
 backups are untouched. No writer authority is promoted, and the full
 11-point writer-admission gate remains uncredited (readiness **67/100**).
+
+
+### Pending-work retention and postwrite origin verification — November 5
+
+The explicitly invoked preview-only Task batch admission adapter now performs
+stronger **postwrite verification**. It checks that each requested completion
+appears exactly once and is not simultaneously marked deleted, AND that all
+previously pending unrelated Tasks, completion upserts and deletion markers
+are still present and unchanged. Finding the newly submitted rows alone was
+not enough to prove the older work had survived.
+
+A separate final full-origin inventory check permits only the expected Task
+journal change. If another key changes during the journal operation, the
+adapter reports `full_origin_changed_during_journal_write` and an
+**uncertain, potentially already committed** result; it never pretends
+the journal action was rolled back. Unreadable postwrite inventory also
+fails closed. No automatic repair or retry overwrites surviving data.
+
+New browser regressions deliberately simulate a journal implementation that
+drops a prior pending Task while keeping the newly appended completion, and a
+legacy-only Projects write that slips into the journal call. Neither can
+receive `confirmedDurable:true`. These checks are preview-only and do NOT
+provide an atomic cross-tab fence or authorize production V2 cutover.
+The existing V1 save/recovery path and Main remain untouched. **67/100**.
