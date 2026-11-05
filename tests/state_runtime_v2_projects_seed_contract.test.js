@@ -57,7 +57,7 @@ async function seeded(){
   return app;
 }
 
-test('V4 schema seeds Projects as separate ordered records with receipt and no V1 writes',async()=>{
+test('V6 schema retains Projects as separate ordered records with receipt and no V1 writes',async()=>{
   const app=await boot(),before=app.indexedDB.dump(DB);
   const oldSnapshot=app.localStorage.getItem(KEY);
   const oldProjects=app.localStorage.getItem(PROJECTS);
@@ -70,7 +70,7 @@ test('V4 schema seeds Projects as separate ordered records with receipt and no V
   assert.equal(outcome.projectsMigrated,false);
   assert.equal(outcome.canPromote,false);
   const database=await app.api.open();
-  assert.equal(database.version,5);
+  assert.equal(database.version,6);
   assert.equal(database.objectStoreNames.contains('projects'),true);
   const after=app.indexedDB.dump(DB);
   assert.deepEqual(after.habits,before.habits);
@@ -238,7 +238,7 @@ test('upgrading an existing V3 mirror retains prior pilot rows and adds Projects
   const restart=await boot(undefined,{
     indexedDB:app.indexedDB,localStorage:app.localStorage
   });
-  assert.equal((await restart.api.open()).version,5);
+  assert.equal((await restart.api.open()).version,6);
   assert.equal(restart.indexedDB.dump(DB).projects.length,0);
   assert.equal(restart.indexedDB.dump(DB).todayDays.length,0);
   assert.deepEqual(restart.indexedDB.dump(DB).habits,previous.habits);
