@@ -8097,3 +8097,6 @@ body.tp-player-profile-open #cropModal:not(.hidden) { z-index: 1900 !important; 
 #caloriesInput:disabled, #caloriesEditInput:disabled { opacity:.48; }
 .calories-tracking-toggle-stack input:disabled { opacity:.45; }
 @media(max-width:480px){.calories-tracking-toggle-stack{gap:6px}.calories-not-tracked-toggle{font-size:10px}}
+
+/* Intentional skipped-calorie days display text, not a numeric calorie stat. */
+.calories-today-card .calories-not-tracked-value { font-size: clamp(1.2rem, 3vw, 1.8rem); line-height: 1.3; }

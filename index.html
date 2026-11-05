@@ -12588,6 +12588,15 @@ setTodayCaloriesEditable(impactBelow);    // optional, makes the "adds X pts" li
   
   if (todayValueEl && todayImpactEl) {
     if (todayEntry) {
+      const didNotTrack = caloriesNotTrackedForEntry(todayEntry);
+      todayValueEl.classList.toggle('calories-not-tracked-value', didNotTrack);
+      if (didNotTrack) {
+        todayValueEl.textContent = 'Not tracked';
+        todayImpactEl.textContent = 'Adds 0 pts to today';
+        todayImpactEl.dataset.empty = 'false';
+        if (summaryValue) summaryValue.textContent = 'Not tracked';
+        if (impactBelow) impactBelow.textContent = 'adds 0 pts';
+      } else {
       const titleMatch = todayEntry.title.match(/\((\d+)\)/);
       const calNum = titleMatch ? Number(titleMatch[1]) : null;
 
@@ -12612,7 +12621,9 @@ if (calNum != null && !Number.isNaN(calNum)) {
         todayImpactEl.textContent = 'Adds — pts to today';
         todayImpactEl.dataset.empty = 'true';
       }
+      }
     } else {
+      todayValueEl.classList.remove('calories-not-tracked-value');
       todayValueEl.textContent = '—';
       todayImpactEl.textContent = 'Adds 0 pts to today';
       todayImpactEl.dataset.empty = 'true';
@@ -12635,7 +12646,9 @@ if (calNum != null && !Number.isNaN(calNum)) {
       day: 'numeric'
     });
 
-    const cal = entry.title.match(/\((\d+)\)/)?.[1] || '?';
+    const cal = caloriesNotTrackedForEntry(entry)
+      ? 'Not tracked'
+      : (entry.title.match(/\((\d+)\)/)?.[1] || '?');
     const pts = (Number(entry.points) || 0).toFixed(1);
 
     const block = document.createElement('div');
@@ -12654,7 +12667,7 @@ block.onclick = async () => {
 
   const result = await openCaloriesEditModal({
     title: "Edit calories for this day",
-    currentCalories: cal,
+    currentCalories: caloriesNotTrackedForEntry(target) ? '' : cal,
     currentBonusEnabled: isCalLogBonusEnabledForEntry(target),
     currentNotTracked: caloriesNotTrackedForEntry(target)
   });
