@@ -2435,6 +2435,10 @@ if (!season) {
         if (requiredMetrics.includes(derived?.formula)) {
           day.seenMetrics.add(derived.formula);
         }
+        // Explicitly skipped calorie tracking is not a forgotten metric.
+        if (entry.caloriesNotTracked === true && /^Calories\b/i.test(String(entry.title || ''))) {
+          day.seenMetrics.add('calories');
+        }
 
         // Include malformed work entries so they cannot silently count as a
         // valid primary score merely because the row is present.
@@ -3141,13 +3145,13 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
         id: 'recent-metric-coverage',
         title: 'Last 7 days include mood/calories/work entries',
         status: recentMissingMetrics.length ? 'WARN' : 'PASS',
-        expected: 'Mood and calories each day; weekdays require primary Work Score and positive Hours unless Work Score is explicitly 0; weekends exempt from Work',
+        expected: 'Mood and calories (or an intentional Not tracked calorie record) each day; weekdays require primary Work Score and positive Hours unless Work Score is explicitly 0; weekends exempt from Work',
         actual: recentMissingMetrics.length
           ? `${recentMissingMetrics.length} missing/invalid entr${recentMissingMetrics.length === 1 ? 'y' : 'ies'}`
           : 'All covered',
         details: recentMissingMetrics,
         trace: 'state.completions → TaskPointsCore.deriveCompletionPoints + Work Score title/workHours',
-        tips: 'Record mood and calories daily. On weekdays, record a primary Work Score and hours worked. An explicit Work Score of 0 marks a non-work day; PTO with 0 score and 8 hours is valid.'
+        tips: 'Record mood and calories daily, or mark calories as Not tracked to intentionally skip earning calorie points. On weekdays, record a primary Work Score and hours worked. An explicit Work Score of 0 marks a non-work day; PTO with 0 score and 8 hours is valid.'
       });
 
       const workHoursAudit = auditWorkHoursLast14Days(state);

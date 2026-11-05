@@ -2310,3 +2310,25 @@ test('central TaskPoints storage read/write helpers preserve histories from comp
   assert.equal(saved.gameHistory.length, 1);
   assert.equal(saved.seasonHistory.length, 1);
 });
+
+test('explicit Not tracked calorie completion earns zero and no logging bonus',()=>{
+ const entry={id:'skipped-cal',source:'metric',title:'Calories (Not tracked)',
+   calories:null,points:0,caloriesNotTracked:true,calLogBonusEnabled:false,
+   completedAtISO:'2026-11-04T12:00:00.000Z'};
+ const settings={scoringSettings:{calories:{target:2400,pointsPer100:1,minPoints:0,maxPoints:10,logBonus:2}}};
+ assert.equal(core.deriveCompletionPoints(entry,settings).formula,'calories');
+ assert.equal(core.pointsForCompletion(entry,settings),0);
+ assert.equal(core.computeCalLogBonusPoints([entry],settings),0);
+ assert.equal(core.aggregateCompletionsByDate([entry],settings).dailyTotals['2026-11-04'],0);
+});
+test('not tracked flag survives packed storage round trip',()=>{
+ const entry={id:'skipped-cal',source:'metric',title:'Calories (Not tracked)',
+   calories:null,points:0,caloriesNotTracked:true,calLogBonusEnabled:false,
+   completedAtISO:'2026-11-03T12:00:00.000Z'};
+ const normalized=core.normalizeState({completions:[entry],tasks:[],habits:[],players:[],matchups:[],gameHistory:[]});
+ const packed=core.packTaskPointsStorageState(normalized);
+ const unpacked=core.unpackTaskPointsStorageState(packed);
+ const restored=unpacked.completions.find(c=>c.id==='skipped-cal');
+ assert.equal(restored.caloriesNotTracked,true);
+ assert.equal(core.pointsForCompletion(restored,unpacked),0);
+});
