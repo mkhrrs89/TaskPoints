@@ -426,3 +426,18 @@ test('Gold transactions and settlement keys are protected by verified snapshot s
   assert.match(source, /'settledMatchupKeys', 'ignoredChampionKeys'/);
   assert.match(source, /const criticalArrays = \[[^\n]*'goldLedger'/);
 });
+
+test('both missing Gold ledger AND metadata cannot reset a previously settled Gold economy',()=>{
+ const {api}=install();
+ const state={
+   players:[{id:'A',greed:100},{id:'B',greed:100}],
+   matchups:[{id:'old',dateKey:'2026-11-03',playerAId:'A',playerBId:'B',
+     scoreA:60,scoreB:50,
+     goldOutcome:{settled:true,winnerId:'A',loserId:'B',theftGoldStolen:2}}],
+   gameHistory:[],seasonHistory:[]
+ };
+ const before=clone(state);
+ const result=api.reconcileGoldEconomy(state,{dateKey:'2026-11-05'});
+ assert.equal(result.blocked,true);
+ assert.deepEqual(state,before,'neither a new economy nor a new ledger may be synthesized');
+});

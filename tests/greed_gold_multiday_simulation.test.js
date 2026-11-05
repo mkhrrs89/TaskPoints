@@ -102,4 +102,9 @@ test('150 games over 30 days: Gold survives saves, restarts, and page edits with
  const orphan={players:final.players,goldLedger:clone(final.goldLedger),matchups:[],seasonHistory:[]};
  assert.equal(rt.api.reconcileGoldEconomy(orphan).blocked,true,'orphaned history must not be erased');
  assert.deepEqual(orphan.goldLedger,final.goldLedger);
+ const forgotten={players:final.players,matchups:clone(final.matchups),gameHistory:[],seasonHistory:[]};
+ assert.equal(rt.api.reconcileGoldEconomy(forgotten).blocked,true,
+   'recorded Gold outcomes must also block a full ledger+metadata reset');
+ assert.equal(forgotten.goldEconomy,undefined);
+ assert.equal(forgotten.goldLedger,undefined);
 });
