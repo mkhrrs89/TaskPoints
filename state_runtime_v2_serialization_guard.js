@@ -15,6 +15,7 @@
   let queued = 0;
   let completed = 0;
   let deduped = 0;
+  let uncacheableRequests = 0;
   let failures = 0;
   let maxQueueDepth = 0;
   let requestSequence = 0;
@@ -28,21 +29,25 @@
     try { global.TaskPointsPerf?.mark?.(name, detail); } catch (_) {}
   }
 
+  // Deduplication is only safe when BOTH the payload and every operation
+  // option are identical. In particular, verified WAL replay must never
+  // reuse a normal mirror result (or vice versa).
+  // Non-JSON-safe inputs cannot be compared reliably: serialize them in
+  // order, but never suppress one as a presumed duplicate.
   function stableKey(kind, args) {
-    const payload = args?.[0] ?? null;
-    const options = args?.[1] ?? null;
-    let serialized;
     try {
-      serialized = JSON.stringify([
-        kind,
-        options?.expectedGeneration || null,
-        options?.expectedRevision ?? null,
-        payload
-      ]);
-    } catch (_) {
-      serialized = `${kind}:${String(payload?.id || payload?.habitId || '')}:${String(payload?.dayKey || payload?.updatedAtISO || '')}`;
-    }
-    return serialized;
+      const serialized = JSON.stringify([
+        kind, args?.[0] ?? null, args?.[1] ?? null
+      ], (_field, value) => {
+        if (typeof value === 'function' || typeof value === 'symbol' ||
+            typeof value === 'bigint' || typeof value === 'undefined' ||
+            (typeof value === 'number' && !Number.isFinite(value))) {
+          throw new Error('state_v2_uncacheable_serialization');
+        }
+        return value;
+      });
+      return typeof serialized === 'string' ? serialized : null;
+    } catch (_) { return null; }
   }
 
   function pruneRecent(now = Date.now()) {
@@ -65,8 +70,12 @@
       const now = Date.now();
       const sequence = ++requestSequence;
       pruneRecent(now);
+      if (key === null) {
+        uncacheableRequests += 1;
+        mark('stateV2.serializationUncacheable', { kind, sequence });
+      }
 
-      const active = inFlight.get(key);
+      const active = key === null ? null : inFlight.get(key);
       if (active && isAdjacent(active.sequence, sequence)) {
         active.sequence = sequence;
         deduped += 1;
@@ -74,7 +83,7 @@
         return active.promise;
       }
 
-      const cached = recent.get(key);
+      const cached = key === null ? null : recent.get(key);
       if (cached && cached.expiresAt > now && isAdjacent(cached.sequence, sequence)) {
         cached.sequence = sequence;
         deduped += 1;
@@ -93,7 +102,11 @@
         try {
           const result = await original.apply(this, args);
           completed += 1;
-          recent.set(key, { result, expiresAt: Date.now() + RECENT_MS, sequence: entry.sequence });
+          // A refusal/no-op is not a durable acknowledgement and must never
+          // stop an immediately repeated attempt from reaching the runtime.
+          if (key !== null && result?.committed === true) {
+            recent.set(key, { result, expiresAt: Date.now() + RECENT_MS, sequence: entry.sequence });
+          }
           return result;
         } catch (error) {
           failures += 1;
@@ -103,10 +116,10 @@
       });
 
       entry.promise = run;
-      inFlight.set(key, entry);
+      if (key !== null) inFlight.set(key, entry);
       tail = run.catch(() => undefined);
       run.finally(() => {
-        if (inFlight.get(key) === entry) inFlight.delete(key);
+        if (key !== null && inFlight.get(key) === entry) inFlight.delete(key);
       }).catch(() => undefined);
       return run;
     };
@@ -131,6 +144,7 @@
         queued,
         completed,
         deduped,
+        uncacheableRequests,
         failures,
         active: inFlight.size,
         maxQueueDepth,

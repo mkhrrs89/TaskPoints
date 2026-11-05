@@ -1594,3 +1594,32 @@ testing, and an explicitly authorized reversible cutover. The entire 12-point
 nonpilot milestone is not complete. **V2 remains at 67/100**; Gold is
 non-authoritative with goldMigrated:false, canPromote:false and
 readAuthority:legacy_only. No Main sync or Main modifications were made.
+
+
+## Preview Habit serializer deduplication safety — November 5
+
+The existing preview-only Habit mutation serialization guard now considers
+**the entire operation-options object**, rather than only generation and
+revision. A verified WAL replay request with
+`skipInitialSeedForVerifiedReplay:true` can no longer reuse the result of an
+otherwise identical normal mirror write. Distinct caller options are treated
+as distinct requests.
+
+If an input cannot be represented safely by JSON (such as a cycle,
+BigInt, nonfinite number or function), the operation is still passed to the
+original runtime **in sequence**; the guard merely disables duplicate
+suppression for that request. It no longer falls back to a partial habit/date
+key that could mistake two different writes for one. A rejected or
+noncommitting result is never cached as successful durable work, so a quick
+retry reaches the runtime rather than receiving a stale denial.
+
+New focused regressions cover replay-vs-normal options, refused-then-retried
+writes, cyclic payload collisions, non-JSON values and distinct options.
+The existing adjacent identical-write optimization and A/B/A ordering
+semantics remain unchanged for regular JSON-safe payloads.
+
+This protects only the V2 preview Habit serializer. It does not fence old
+tabs, replace production V1 writes, make WAL replay authoritative, prove
+all other writer families or satisfy the full production writer-admission
+gate. **Readiness remains 67/100**, with V1 primary and V2 unpromoted.
+Main was not synced or modified.

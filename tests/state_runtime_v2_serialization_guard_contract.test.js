@@ -8,15 +8,20 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'state_runtime_v2_seri
 
 function install(options = {}) {
   const calls = [];
+  const optionCalls = [];
   let firstGateResolve = null;
   let firstGate = null;
   if (options.holdFirst) {
     firstGate = new Promise((resolve) => { firstGateResolve = resolve; });
   }
 
-  const applyHabitDelta = async (payload) => {
+  const applyHabitDelta = async (payload, actionOptions = {}) => {
     calls.push(payload.state);
+    optionCalls.push(actionOptions);
     if (firstGate && calls.length === 1) await firstGate;
+    if (options.firstDeclined && calls.length === 1) {
+      return { committed: false, reason: 'simulated_rejection' };
+    }
     return { committed: true, state: payload.state, call: calls.length };
   };
 
@@ -44,7 +49,7 @@ function install(options = {}) {
   context.window = context;
   context.globalThis = context;
   vm.runInNewContext(source, context, { filename: 'state_runtime_v2_serialization_guard.js' });
-  return { context, runtime, calls, marks, releaseFirst: () => firstGateResolve?.() };
+  return { context, runtime, calls, optionCalls, marks, releaseFirst: () => firstGateResolve?.() };
 }
 
 function payload(state) {
@@ -121,5 +126,63 @@ test('requests with distinct explicit revision preconditions never reuse a cache
   const { runtime, calls } = install();
   await runtime.applyHabitDelta(payload('full'), { expectedRevision: 1 });
   await runtime.applyHabitDelta(payload('full'), { expectedRevision: 2 });
+  assert.deepEqual(calls, ['full', 'full']);
+});
+
+test('normal writes and verified-WAL replay requests must never share a deduplication result', async () => {
+  const { runtime, calls, optionCalls } = install();
+  const data = payload('full');
+  await runtime.applyHabitDelta(data, {
+    expectedGeneration: 'generation-1', expectedRevision: 5,
+    skipInitialSeedForVerifiedReplay: false
+  });
+  await runtime.applyHabitDelta(data, {
+    expectedGeneration: 'generation-1', expectedRevision: 5,
+    skipInitialSeedForVerifiedReplay: true
+  });
+  assert.deepEqual(calls, ['full', 'full']);
+  assert.deepEqual(optionCalls.map(row => row.skipInitialSeedForVerifiedReplay), [false, true]);
+});
+
+test('a refused mutation is not reused from the completed-result cache', async () => {
+  const { runtime, calls, context } = install({ firstDeclined: true });
+  const first = await runtime.applyHabitDelta(payload('full'));
+  const retry = await runtime.applyHabitDelta(payload('full'));
+  assert.equal(first.committed, false);
+  assert.equal(retry.committed, true);
+  assert.deepEqual(calls, ['full', 'full']);
+  assert.equal(context.TaskPointsStateRuntimeV2SerializationGuard.getStatus().deduped, 0);
+});
+
+test('cyclic payloads cannot collide through the former fallback deduplication key', async () => {
+  const { runtime, calls, context } = install();
+  const first = payload('full');
+  first.extra = first;
+  const second = payload('off');
+  second.extra = second;
+  const results = await Promise.all([
+    runtime.applyHabitDelta(first), runtime.applyHabitDelta(second)
+  ]);
+  assert.deepEqual(calls, ['full', 'off']);
+  assert.deepEqual(results.map(row => row.state), ['full', 'off']);
+  assert.equal(context.TaskPointsStateRuntimeV2SerializationGuard.getStatus().uncacheableRequests, 2);
+});
+
+test('nonfinite and other non-JSON-safe inputs are never silently deduplicated', async () => {
+  const { runtime, calls, context } = install();
+  const first = { ...payload('full'), extra: Infinity };
+  const second = { ...payload('full'), extra: null };
+  const third = { ...payload('full'), extra: 1n };
+  await runtime.applyHabitDelta(first);
+  await runtime.applyHabitDelta(second);
+  await runtime.applyHabitDelta(third);
+  assert.deepEqual(calls, ['full', 'full', 'full']);
+  assert.equal(context.TaskPointsStateRuntimeV2SerializationGuard.getStatus().uncacheableRequests, 2);
+});
+
+test('distinct operation options are considered even when the payload is identical', async () => {
+  const { runtime, calls } = install();
+  await runtime.applyHabitDelta(payload('full'), { expectedGeneration: 'a', source: 'manual' });
+  await runtime.applyHabitDelta(payload('full'), { expectedGeneration: 'a', source: 'replay' });
   assert.deepEqual(calls, ['full', 'full']);
 });
