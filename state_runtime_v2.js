@@ -6423,20 +6423,27 @@
   // home_export_responsiveness.js and accepted by Settings. The existing
   // Settings importer does not independently authenticate ZIP contents;
   // this V2 preflight is read-only and does not change that importer.
-  function parsePreviewGameBackupZip(input) {
-    const fail=reason=>({reason});
+  // A caller may mutate an ArrayBuffer/Uint8Array after any await. Freeze
+  // once at the outermost multi-stage audit boundary, then pass only the
+  // private copy to ZIP CRC, live-asset SHA, and normalization rehearsals.
+  function freezePreviewGameZipInput(input) {
     let bytes;
-    try {
+    try{
       if(input instanceof ArrayBuffer)bytes=new Uint8Array(input);
       else if(ArrayBuffer.isView(input)&&input.BYTES_PER_ELEMENT===1)
         bytes=new Uint8Array(input.buffer,input.byteOffset,input.byteLength);
-      else return fail('game_backup_zip_bytes_required');
-    }catch(_){return fail('game_backup_zip_bytes_required');}
+      else return {reason:'game_backup_zip_bytes_required'};
+    }catch(_){return {reason:'game_backup_zip_bytes_required'};}
     if(bytes.byteLength<52||bytes.byteLength>67108864)
-      return fail('game_backup_zip_size_invalid');
-    // Freeze caller-supplied bytes before any async verification. Otherwise a
-    // caller could mutate a Uint8Array after CRC succeeds but before SHA.
-    bytes=Uint8Array.from(bytes);
+      return {reason:'game_backup_zip_size_invalid'};
+    return {bytes:Uint8Array.from(bytes)};
+  }
+
+  function parsePreviewGameBackupZip(input) {
+    const fail=reason=>({reason});
+    const frozen=freezePreviewGameZipInput(input);
+    if(frozen.reason)return fail(frozen.reason);
+    const bytes=frozen.bytes;
     if(typeof global.TextDecoder!=='function')
       return fail('game_backup_zip_decoder_unavailable');
     const decode=new global.TextDecoder('utf-8',{fatal:true});
@@ -6726,7 +6733,9 @@
     if(typeof core.normalizeImportedFullBackupState!=='function')
       return refuse('settings_import_normalizer_unavailable');
     const epoch=darkMirrorModeEpoch;
-    const input=archiveInput;
+    const frozen=freezePreviewGameZipInput(archiveInput);
+    if(frozen.reason)return refuse(frozen.reason);
+    const input=frozen.bytes;
     let db;
     try {
       const origin=captureReadOnlyFullStorageInventory();
@@ -6928,9 +6937,12 @@
     const generation=currentGeneration({create:false});
     if(!generation)return refuse('generation_unavailable');
     const epoch=darkMirrorModeEpoch;
+    const frozen=freezePreviewGameZipInput(archiveInput);
+    if(frozen.reason)return refuse(frozen.reason);
+    const input=frozen.bytes;
     try{
       const origin=captureReadOnlyFullStorageInventory();
-      const game=await inspectPreviewGameBackupZip(archiveInput);
+      const game=await inspectPreviewGameBackupZip(input);
       if(!game.archiveStructureVerified||!game.archiveGameFieldsVerified
         ||!game.archiveReferencedImagesVerified)
         return refuse('whole_backup_game_preflight_required',{
@@ -6940,7 +6952,7 @@
         ||currentGeneration({create:false})!==generation
         ||darkMirrorModeEpoch!==epoch||!isDarkEnabled())
         return refuse('whole_backup_origin_changed');
-      const zip=parsePreviewGameBackupZip(archiveInput);
+      const zip=parsePreviewGameBackupZip(input);
       if(zip.reason)return refuse(zip.reason);
       const manifest=JSON.parse(
         new global.TextDecoder('utf-8',{fatal:true})
