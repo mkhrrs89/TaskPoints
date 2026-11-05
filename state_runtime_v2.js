@@ -2973,22 +2973,23 @@
 
   // A reset marked empty is not enough to prove the mirror contains no
   // surviving pilot, mutation or preview-only evidence. Count both Task
-  // Projects and Today rehearsal stores; none is authoritative.
+  // Projects, Today and Gold preview stores; none is authoritative.
   // Count all stores with runtime metadata in ONE readonly transaction.
   async function readV2EmptyResetEvidence(db) {
     const tx = db.transaction(
-      ['habits', 'completions', 'mutations', 'tasks', 'projects', 'todayDays', 'meta'], 'readonly'
+      ['habits', 'completions', 'mutations', 'tasks', 'projects', 'todayDays', 'goldLedger', 'meta'], 'readonly'
     );
-    const [meta, habits, completions, mutations, tasks, projects, todayDays] = await Promise.all([
+    const [meta, habits, completions, mutations, tasks, projects, todayDays, goldLedger] = await Promise.all([
       requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
       requestPromise(tx.objectStore('habits').count()),
       requestPromise(tx.objectStore('completions').count()),
       requestPromise(tx.objectStore('mutations').count()),
       requestPromise(tx.objectStore('tasks').count()),
       requestPromise(tx.objectStore('projects').count()),
-      requestPromise(tx.objectStore('todayDays').count())
+      requestPromise(tx.objectStore('todayDays').count()),
+      requestPromise(tx.objectStore('goldLedger').count())
     ]);
-    return { meta, habits, completions, mutations, tasks, projects, todayDays };
+    return { meta, habits, completions, mutations, tasks, projects, todayDays, goldLedger };
   }
 
   function completionCompatibilityBase(completion) {
@@ -3104,7 +3105,8 @@
         throw new Error('state_runtime_v2_compatibility_legacy_missing_unverified');
       if (evidence.habits !== 0 || evidence.completions !== 0
         || evidence.mutations !== 0 || evidence.tasks !== 0
-        || evidence.projects !== 0 || evidence.todayDays !== 0)
+        || evidence.projects !== 0 || evidence.todayDays !== 0
+        || evidence.goldLedger !== 0)
         throw new Error('state_runtime_v2_compatibility_empty_evidence_retained');
       // A separate metadata read rejects a revision committed after the
       // consistent emptiness check. An old noncooperating tab can still write
@@ -3317,7 +3319,8 @@
         && evidence.meta?.legacyMissing === true;
       const empty = evidence.habits === 0 && evidence.completions === 0
         && evidence.mutations === 0 && evidence.tasks === 0
-        && evidence.projects === 0 && evidence.todayDays === 0;
+        && evidence.projects === 0 && evidence.todayDays === 0
+        && evidence.goldLedger === 0;
       lastParity = {
         checked: consistent, match: Boolean(consistent && markerValid && empty),
         legacyMissing: true,
@@ -3327,7 +3330,7 @@
         counts: { habits: evidence.habits,
           completions: evidence.completions, mutations: evidence.mutations,
           tasks: evidence.tasks, projects: evidence.projects,
-          todayDays: evidence.todayDays },
+          todayDays: evidence.todayDays, goldLedger: evidence.goldLedger }
         checkedAtISO: nowIso()
       };
       return lastParity;
