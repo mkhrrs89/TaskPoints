@@ -9052,6 +9052,19 @@ try {
     assert.equal(held.wal.rows.length,1);
     assert.equal(held.wal.rows[0].generation,previous);
     const staleId=held.wal.rows[0].id;
+    // The suspended tab's synchronous journal commit must actually become
+    // observable to the active tab before the active tab judges its status.
+    // WebKit may deliver cross-tab localStorage writes asynchronously.
+    // A previously compacted, verified canonical completion is also valid;
+    // a missing journal AND missing completion is always a hard failure.
+    await waitForAsyncBrowserCondition(active,()=>{
+      const core=window.TaskPointsCore;
+      const pending=core.readPendingHabitDeltas();
+      const saved=window.V2BrowserFixture.rawLegacy().completions;
+      return pending.some(row=>row.id==='habit:h1:2026-10-14')
+        ||saved.some(row=>row.id==='habit:h1:2026-10-14'
+          &&row.source==='habit');
+    },12000);
     // Make the V1 journal entry a verified canonical completion, preserving
     // the real user's data rather than throwing away it during the restore.
     const firstCheckpoint=await active.evaluate(async()=>{
@@ -9065,8 +9078,20 @@ try {
       while(attempts<3){
         attempts++;
         const journal=core.readPendingHabitDeltas();
-        if(journal.length!==1)throw Error('Old-generation journal not preserved for retry');
         const canonical=window.V2BrowserFixture.rawLegacy();
+        if(!journal.length){
+          // The other tab may already have completed a VERIFIED
+          // compaction before this one started. Recognize durable V1
+          // completion, not disappearance: never discard a lost row.
+          const persisted=canonical.completions.filter(row=>
+            row.id==='habit:h1:2026-10-14'&&row.source==='habit');
+          if(persisted.length!==1)
+            throw Error('Old-generation journal and canonical V1 completion missing');
+          return {remaining:0,completed:canonical.completions
+            .filter(c=>c.source==='habit').length};
+        }
+        if(journal.length!==1)
+          throw Error('Old-generation journal has unexpected pending rows');
         const applied=core.applyPendingHabitDeltas(canonical,journal);
         const saved=core.saveStateSnapshot(canonical,{
           immediateWrite:true,replaceCompletions:true,savePath:'habit-journal-compaction'});

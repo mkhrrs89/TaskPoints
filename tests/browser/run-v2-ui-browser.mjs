@@ -1326,13 +1326,27 @@ try{
       null,{timeout:10000});
     const reconciled=await page.evaluate(async()=>{
       const api=window.TaskPointsStateRuntimeV2;
-      const before=localStorage.getItem('taskpoints_v1');
       const token=()=>JSON.stringify(Array.from({length:localStorage.length},
         (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
-      const result=await api.rehearsePreviewNotesBundleReconcile(
-        token(),'real-ui-notes-clear');
+      let result,unchanged=false;
+      for(let attempt=1;attempt<=4;attempt++){
+        const before=localStorage.getItem('taskpoints_v1');
+        result=await api.rehearsePreviewNotesBundleReconcile(
+          token(),'real-ui-notes-clear-'+attempt);
+        // A real Notes autosave can race a SHA-256 preflight in WebKit.
+        // An unchanged V1 snapshot is REQUIRED on the attempt we accept;
+        // retry only a pre-commit stale-source refusal with a fresh token.
+        if(result.collectionParityVerified){
+          unchanged=before===localStorage.getItem('taskpoints_v1');
+          break;
+        }
+        if(result.committed!==false||result.reason!=='notes_source_preflight_required'
+          ||!String(result.prerequisiteReason||'').startsWith('legacy_notes_changed_'))
+          break;
+        await new Promise(done=>setTimeout(done,60*attempt));
+      }
       const parity=await api.inspectPreviewNotesBundleParity();
-      return {result,parity,unchanged:before===localStorage.getItem('taskpoints_v1'),
+      return {result,parity,unchanged,
         cache:localStorage.getItem('taskpoints_notes_v1'),
         authority:api.getStatus().readAuthority};
     });

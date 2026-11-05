@@ -1400,3 +1400,26 @@ Weighted score remains **67/100**: full production writer fencing,
 verified import/export including all sidecars/images, independent
 off-device rollback, and physical iOS interruption tests are still
 open gates. No Main merge or sync was requested.
+
+
+## Real WebKit test synchronization — retained safety contracts
+
+Two existing browser failure scenarios have been made more precise,
+without removing any test or weakening the underlying V1/V2 guards.
+
+- The suspended old-generation Habit journal scenario now waits until
+  the other tab can observe the durable pending V1 journal **or** an
+  already-persisted canonical completion. A missing journal AND
+  missing completion still fails. All subsequent generation, WAL,
+  replay, ordering, and V1 parity assertions remain in place.
+- The real Notes UI scenario retries only bounded, explicitly denied
+  pre-commit reconciliations whose source changed during its digest.
+  Every attempt takes a fresh full-origin token. The accepted commit
+  must leave V1 snapshot bytes untouched and pass reload parity.
+  Tampered evidence, partial commits and unrelated refusals are never
+  retried as successes.
+
+These adjustments address asynchronous multi-tab propagation in
+WebKit and real Notes autosave races. The actual browser workflows,
+not only focused unit tests, must pass before these gates are marked
+green. V1 remains authoritative and the weighted estimate stays 67%.
