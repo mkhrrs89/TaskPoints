@@ -1427,7 +1427,7 @@ green. V1 remains authoritative and the weighted estimate stays 67%.
 
 ## Whole-backup restoration coverage audit (preview only)
 
-The new explicit \`inspectPreviewWholeBackupRestoreCoverage(archiveBytes)\`
+The new explicit `inspectPreviewWholeBackupRestoreCoverage(archiveBytes)`
 builds on the existing authenticated Game ZIP/image preflight, then independently
 compares **all** raw V1 snapshot fields against the archived state. It covers
 Tasks, completions, Habits, Notes, unknown future fields and field presence
@@ -1464,10 +1464,29 @@ production-host/dark-mode denial.
 
 **Gate state unchanged: 67/100.** This is partial diagnostic evidence within
 the uncredited recovery and nonpilot-migration milestones. In particular
-\`independentOriginSidecarsRestorable:false\`,
-\`fullAppRestoreVerified:false\`, \`offDeviceBackupVerified:false\`,
-\`canApply:false\` and \`canPromote:false\` remain mandatory. A safe
+`independentOriginSidecarsRestorable:false`,
+`fullAppRestoreVerified:false`, `offDeviceBackupVerified:false`,
+`canApply:false` and `canPromote:false` remain mandatory. A safe
 production importer would require separately approved writer fencing,
 image staging/rollback, complete sidecar replay, independent authenticated
 backups, interrupted physical-iOS restore testing, and actual durable
 post-restart verification. No Main sync or authority promotion occurred.
+
+
+### Mutable archive buffer race hardening
+
+The existing Game import rehearsal and new whole-app coverage inspector now
+copy the bounded input ZIP **at API entry, before the first await**. Both
+use that same private immutable content for CRC validation, SHA-256 image
+comparison, and detached Settings normalization. Previously, a caller who
+retained a writable Uint8Array could alter the bytes during an asynchronous
+hash after the Game ZIP preflight but before a second ZIP parse. This could
+make two stages evaluate different caller-controlled archives.
+
+New negative tests corrupt the caller's original ZIP header during an
+in-flight SHA-256 call; both multi-stage rehearsals must continue to evaluate
+only the original verified bytes. The normal ZIP parser still freezes bytes
+for single-stage callers. The 64 MiB cap and all fail-closed source, image,
+generation, parity and promotion checks remain in force. This is an
+in-memory TOCTOU fix only, not a complete restore, persistent WAL change,
+Main sync, or activation of V2. Readiness stays **67/100**.
