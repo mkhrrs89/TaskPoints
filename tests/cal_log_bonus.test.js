@@ -2332,3 +2332,14 @@ test('not tracked flag survives packed storage round trip',()=>{
  assert.equal(restored.caloriesNotTracked,true);
  assert.equal(core.pointsForCompletion(restored,unpacked),0);
 });
+
+test('Not tracked calories remains distinguishable in personal score history CSV',()=>{
+ const entry={id:'explicit-no-calories',source:'metric',title:'Calories (Not tracked)',
+  points:0,calories:null,caloriesNotTracked:true,calLogBonusEnabled:false,
+  completedAtISO:'2026-11-04T12:00:00.000Z'};
+ const rows=core.buildPersonalScoreHistoryRows({completions:[entry],tasks:[],players:[],habits:[],matchups:[],gameHistory:[]});
+ const row=rows.find(r=>r.completion_id==='explicit-no-calories');
+ assert.equal(row.type,'calories');
+ assert.equal(row.raw_value,'Not tracked');
+ assert.equal(row.points,0);
+});

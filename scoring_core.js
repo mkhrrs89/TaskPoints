@@ -8164,6 +8164,9 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
 
   function classifyPersonalMetricCompletion(entry) {
     if (!entry || typeof entry !== 'object') return null;
+    if (entry.caloriesNotTracked === true && /^Calories\b/i.test(String(entry.title || ''))) {
+      return { type: 'calories', rawValue: 'Not tracked', secondaryValue: null };
+    }
     const sleep = getSleepInfo(entry);
     if (Number.isFinite(sleep.score)) {
       const explicitRested = Object.prototype.hasOwnProperty.call(entry, 'sleepRested')
