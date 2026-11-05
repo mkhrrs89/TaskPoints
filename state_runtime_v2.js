@@ -3330,7 +3330,7 @@
         counts: { habits: evidence.habits,
           completions: evidence.completions, mutations: evidence.mutations,
           tasks: evidence.tasks, projects: evidence.projects,
-          todayDays: evidence.todayDays, goldLedger: evidence.goldLedger }
+          todayDays: evidence.todayDays, goldLedger: evidence.goldLedger },
         checkedAtISO: nowIso()
       };
       return lastParity;
