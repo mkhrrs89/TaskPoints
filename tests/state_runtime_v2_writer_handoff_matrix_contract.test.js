@@ -1022,6 +1022,9 @@ test('mandatory preview-only Task batch admission validates source and generatio
     "mode: 'exclusive', ifAvailable: true",
     'currentInventory = captureReadOnlyFullStorageInventory()',
     'currentInventory !== expectedInventoryToken',
+    'full_origin_changed_after_writability_check',
+    'full_origin_unreadable_after_writability_check',
+    'generation_or_preview_changed_before_write',
     'core.assertTaskMutationJournalWritable()',
     'core.journalTaskCompletionBatch(rows)',
     "global.localStorage.getItem('taskpoints_pending_task_mutations_v1')",
@@ -1037,6 +1040,15 @@ test('mandatory preview-only Task batch admission validates source and generatio
   assert.ok(method.indexOf('currentInventory !== expectedInventoryToken')
     < method.indexOf('core.journalTaskCompletionBatch(rows)'),
     'freshness admission must precede the durable V1 journal write');
+  assert.ok(method.indexOf("captureReadOnlyFullStorageInventory() !== expectedInventoryToken") >
+    method.indexOf('core.assertTaskMutationJournalWritable()'),
+    'second full-origin freshness check must occur after writability probing');
+  assert.ok(method.indexOf("captureReadOnlyFullStorageInventory() !== expectedInventoryToken") <
+    method.indexOf('core.journalTaskCompletionBatch(rows)'),
+    'second full-origin freshness check must occur before durable append');
+  assert.ok(method.indexOf('generation_or_preview_changed_before_write') <
+    method.indexOf('core.journalTaskCompletionBatch(rows)'),
+    'a last-chance generation check must occur before the durable append');
   assert.ok(method.indexOf('core.journalTaskCompletionBatch(rows)')
     < method.indexOf('rows.every(row =>'),
     'readback may only verify a completed synchronous batch');

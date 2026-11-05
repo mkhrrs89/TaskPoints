@@ -3316,6 +3316,53 @@ try {
       noFalseDurabilityAcknowledgement:true};
   });
 
+  await run('preview Task batch admission refuses a late independent legacy edit before journal write',async context=>{
+    const page=await open(context);
+    if(!await page.evaluate(()=>typeof navigator.locks?.request==='function'))
+      return {unsupportedFailClosed:true};
+    const evidence=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      const core=window.TaskPointsCore;
+      const originalCheck=core.assertTaskMutationJournalWritable;
+      const journalKey='taskpoints_pending_task_mutations_v1';
+      const priorJournal=localStorage.getItem(journalKey);
+      const priorState=localStorage.getItem('taskpoints_v1');
+      const keys=[];
+      for(let i=0;i<localStorage.length;i++)keys.push(localStorage.key(i));
+      const token=JSON.stringify(keys.sort().map(key=>[key,localStorage.getItem(key)]));
+      let checks=0;
+      core.assertTaskMutationJournalWritable=function(){
+        checks++;
+        // Model an older tab writing a separate legacy key after the
+        // initial admission token check, while this tab owns the Web Lock.
+        localStorage.setItem('tp_projects_v1','noncooperating-legacy-edit');
+        return originalCheck.apply(this,arguments);
+      };
+      let verdict;
+      try{
+        verdict=await runtime.rehearsePreviewAdmittedTaskCompletionBatch([
+          {id:'late-preflight-edit-must-not-save',taskId:'synthetic-task',points:4}
+        ],token);
+      }finally{core.assertTaskMutationJournalWritable=originalCheck;}
+      return {verdict,checks,priorJournal,
+        afterJournal:localStorage.getItem(journalKey),
+        priorState,afterState:localStorage.getItem('taskpoints_v1'),
+        independentEdit:localStorage.getItem('tp_projects_v1'),
+        authority:runtime.getStatus().readAuthority};
+    });
+    assert.equal(evidence.checks,1);
+    assert.equal(evidence.verdict.reason,'full_origin_changed_after_writability_check',
+      JSON.stringify(evidence));
+    assert.equal(evidence.verdict.committed,false);
+    assert.equal(evidence.verdict.confirmedDurable,false);
+    assert.equal(evidence.priorJournal,evidence.afterJournal);
+    assert.equal(evidence.priorState,evidence.afterState);
+    assert.equal(evidence.independentEdit,'noncooperating-legacy-edit');
+    assert.equal(evidence.authority,'legacy_only');
+    return {lateLegacyEditDetected:true,noUnverifiedJournalWrite:true,
+      independentLegacyDataPreserved:true};
+  });
+
   await run('serialized snapshot source guard denies unreadable state and missing tokens',async context=>{
     const page=await open(context);
     const supported=await page.evaluate(()=>typeof navigator.locks?.request==='function');

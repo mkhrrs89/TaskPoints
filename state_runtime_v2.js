@@ -11676,6 +11676,25 @@
             result = refuse('task_journal_unreadable');
             return;
           }
+          // The journal-writability check above can take time or inspect
+          // storage. An older, non-cooperating tab may modify a different
+          // legacy key after our first full-origin preflight. Recheck the
+          // complete inventory right before the synchronous journal write.
+          // This narrows the race window; it is NOT an atomic cross-tab fence.
+          try {
+            if (captureReadOnlyFullStorageInventory() !== expectedInventoryToken) {
+              result = refuse('full_origin_changed_after_writability_check');
+              return;
+            }
+          } catch (_) {
+            result = refuse('full_origin_unreadable_after_writability_check');
+            return;
+          }
+          if (!isDarkEnabled() || darkMirrorModeEpoch !== originalEpoch
+            || currentGeneration({ create: false }) !== expectedGeneration) {
+            result = refuse('generation_or_preview_changed_before_write');
+            return;
+          }
           try {
             core.journalTaskCompletionBatch(rows);
           } catch (_) {

@@ -808,3 +808,25 @@ production writer-fencing milestone or authorize V2 IndexedDB cutover.
 `allLegacyWritersFenced:false`, `productionWritersFenced:false`,
 `canPromote:false`, legacy read authority and the complete V1 fallback
 and recovery system remain intact.
+
+
+### Final synchronous prewrite freshness check — November 5
+
+The explicit preview-host-only
+`rehearsePreviewAdmittedTaskCompletionBatch()` now checks the **complete
+localStorage inventory a second time**, after V1 Task journal writability
+preflight and journal read, immediately before invoking the actual atomic V1
+batch append. It also rechecks preview enablement, mode epoch and generation.
+A detectable independent legacy edit made during the prewrite preparation is
+refused with `full_origin_changed_after_writability_check`, without changing
+the Task journal or deleting the separate legacy edit. If the source
+inventory becomes unreadable, or the generation changes, it fails closed.
+
+Added a source-order contract and a Chromium/WebKit regression that injects
+an independent legacy Projects edit during the journal-writability step and
+verifies the Task batch is not appended. This is a **narrower race window,
+not an atomic cross-tab comparison-and-swap**: an older browser page can
+still interleave at the last moment or write after an acknowledgement.
+Production writer families, V1 journal functionality and all existing
+backups are untouched. No writer authority is promoted, and the full
+11-point writer-admission gate remains uncredited (readiness **67/100**).
