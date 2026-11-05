@@ -1055,7 +1055,7 @@ test('nonpilot Tasks store is additive, explicit, source-verified and cannot bec
   const end=source.indexOf('// A narrower stepping stone toward REQUIRED writer admission',begin);
   assert.ok(begin>0&&end>begin);
   const preview=source.slice(begin,end);
-  assert.match(source,/const DB_VERSION = 5/);
+  assert.match(source,/const DB_VERSION = 6/);
   assert.match(source,/if \(!db\.objectStoreNames\.contains\('tasks'\)\) db\.createObjectStore\('tasks', \{ keyPath: 'id' \}\)/);
   assert.match(source,/if \(!db\.objectStoreNames\.contains\('projects'\)\) db\.createObjectStore\('projects', \{ keyPath: 'id' \}\)/);
   assert.match(source,/if \(!db\.objectStoreNames\.contains\('todayDays'\)\) db\.createObjectStore\('todayDays', \{ keyPath: 'id' \}\)/);
