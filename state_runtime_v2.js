@@ -5,9 +5,9 @@
   if (!global || !core || global.TaskPointsStateRuntimeV2?.__installedModule) return;
 
   const DB_NAME = 'taskpoints_state_v2';
-  // V5 adds an isolated per-day Today preview store. Production V1 remains
-  // authoritative; existing Task/Projects/Habit stores are retained.
-  const DB_VERSION = 5;
+  // V6 adds isolated Gold transaction rows with a preview-only receipt.
+  // All legacy Gold authority, storage and recovery remain untouched.
+  const DB_VERSION = 6;
   const COMPLETION_HABIT_INDEX = 'by_habit_ids';
   const EXCLUSIVE_WRITER_REHEARSAL_LOCK = 'taskpoints_v2_writer_handoff_rehearsal_v1';
   const PEER_COORDINATION_CHANNEL = 'taskpoints_v2_preview_writer_peers_v1';
@@ -510,6 +510,7 @@
     if (!db.objectStoreNames.contains('tasks')) db.createObjectStore('tasks', { keyPath: 'id' });
     if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects', { keyPath: 'id' });
     if (!db.objectStoreNames.contains('todayDays')) db.createObjectStore('todayDays', { keyPath: 'id' });
+    if (!db.objectStoreNames.contains('goldLedger')) db.createObjectStore('goldLedger', { keyPath: 'id' });
     if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'id' });
     const completions = upgradeTransaction.objectStore('completions');
     if (!completions.indexNames.contains(COMPLETION_HABIT_INDEX)) {
@@ -8117,6 +8118,276 @@
     }); }
   }
 
+
+  // Opt-in Gold source capture: a complete ordered ledger and every economy
+  // metadata field are authoritative, even when Game results also refer to
+  // those transactions. This never initializes or repairs V1 Gold.
+  async function capturePreviewGoldSource() {
+    const fail=reason=>({reason});
+    const generation=currentGeneration({create:false});
+    if(!generation)return fail('gold_generation_unavailable');
+    const epoch=darkMirrorModeEpoch,key=core.STORAGE_KEY||'taskpoints_v1';
+    let inventory,raw,ledger,metadata,present,metaPresent;
+    try {
+      inventory=captureReadOnlyFullStorageInventory();
+      raw=global.localStorage.getItem(key);
+      if(typeof raw!=='string')return fail('gold_snapshot_missing');
+      const state=core.parseTaskPointsStorageJson(raw);
+      if(!state||typeof state!=='object'||Array.isArray(state)
+        ||!Array.isArray(state.habits)||!Array.isArray(state.completions))
+        return fail('gold_snapshot_invalid');
+      present=Object.prototype.hasOwnProperty.call(state,'goldLedger');
+      metaPresent=Object.prototype.hasOwnProperty.call(state,'goldEconomy');
+      ledger=present?state.goldLedger:[];
+      metadata=metaPresent?state.goldEconomy:null;
+      if(!Array.isArray(ledger))return fail('gold_ledger_array_required');
+      if(metaPresent&&(!metadata||typeof metadata!=='object'
+        ||Array.isArray(metadata)||!Number.isSafeInteger(Number(metadata.version))
+        ||Number(metadata.version)<1))
+        return fail('gold_economy_metadata_invalid');
+      if(ledger.length>8192||JSON.stringify(ledger).length>2097152)
+        return fail('gold_ledger_preview_too_large');
+      const ids=new Set();
+      for(const row of ledger){
+        if(!row||typeof row!=='object'||Array.isArray(row)
+          ||typeof row.id!=='string'||!row.id||row.id.length>256
+          ||ids.has(row.id))
+          return fail('gold_ledger_ids_invalid');
+        ids.add(row.id);
+      }
+      // Settled Game outcomes must not be taken as proof of zero Gold if
+      // storage has lost either ledger or its economic metadata.
+      if(!present||!metaPresent){
+        const groups=[state.matchups,state.gameHistory,
+          state.currentSeason?.tournamentMatchupResults];
+        if(Array.isArray(state.seasonHistory))
+          state.seasonHistory.forEach(season=>groups.push(
+            season?.tournamentMatchupResults));
+        if(groups.some(rows=>Array.isArray(rows)&&rows.some(
+          row=>row?.goldOutcome?.settled===true)))
+          return fail('gold_settlement_missing_ledger_or_metadata');
+      }
+      if(captureReadOnlyFullStorageInventory()!==inventory
+        ||global.localStorage.getItem(key)!==raw)
+        return fail('gold_source_changed_during_capture');
+      const fingerprint=await previewRecoveryFingerprint({
+        ledgerPresent:present,economyPresent:metaPresent,
+        ledger,economy:metadata
+      });
+      if(!isWalTestPreviewHost()||!isDarkEnabled()
+        ||darkMirrorModeEpoch!==epoch
+        ||currentGeneration({create:false})!==generation
+        ||captureReadOnlyFullStorageInventory()!==inventory
+        ||global.localStorage.getItem(key)!==raw)
+        return fail('gold_source_changed_during_hash');
+      return {generation,epoch,inventory,raw,ledger,metadata,present,
+        metaPresent,fingerprint};
+    }catch(_){return fail('gold_source_unavailable');}
+  }
+
+  function refuseGoldPreview(reason,more={}) {
+    return {checked:true,previewOnly:true,committed:false,
+      confirmedDurable:false,collectionParityVerified:false,
+      goldMigrated:false,canApply:false,canPromote:false,
+      productionWritersFenced:false,readAuthority:'legacy_only',
+      mutationAuthority:'legacy_only',reason,...more};
+  }
+
+  // One strictly bounded transaction writes all Gold rows, the sealed
+  // source metadata and the receipt. No production write/restore occurs.
+  async function rehearsePreviewGoldLedgerSeed(sourceToken,actionId) {
+    const fail=refuseGoldPreview;
+    if(!isWalTestPreviewHost())return fail('preview_host_required');
+    if(!isDarkEnabled())return fail('dark_disabled');
+    if(typeof sourceToken!=='string'||!sourceToken)
+      return fail('full_origin_token_required');
+    if(typeof actionId!=='string'||!actionId||actionId.length>128)
+      return fail('gold_action_id_required');
+    let source;
+    try{
+      if(captureReadOnlyFullStorageInventory()!==sourceToken)
+        return fail('full_origin_changed');
+      source=await capturePreviewGoldSource();
+      if(source.reason)return fail('gold_source_preflight_required',{
+        prerequisiteReason:source.reason});
+      if(source.inventory!==sourceToken)return fail('full_origin_changed');
+    }catch(_){return fail('gold_source_unreadable');}
+    const current=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&darkMirrorModeEpoch===source.epoch
+      &&currentGeneration({create:false})===source.generation
+      &&captureReadOnlyFullStorageInventory()===source.inventory
+      &&global.localStorage.getItem(core.STORAGE_KEY||'taskpoints_v1')
+        ===source.raw;
+    const rows=source.ledger.map((value,i)=>({
+      id:'gold-row:'+i,legacyIndex:i,value
+    }));
+    const signature=fnv1a(source.inventory)+':'+source.inventory.length;
+    const receipt={id:'gold-preview-seed:'+actionId,
+      type:'gold-preview-seed',resetGeneration:source.generation,
+      sourceFingerprint:source.fingerprint,sourceInventory:signature,
+      rowCount:rows.length,present:source.present,
+      metaPresent:source.metaPresent};
+    const evidence={id:'gold-preview',schemaVersion:1,
+      resetGeneration:source.generation,
+      sourceFingerprint:source.fingerprint,sourceInventory:signature,
+      rowCount:rows.length,present:source.present,
+      metaPresent:source.metaPresent,metadata:clone(source.metadata),
+      receiptId:receipt.id};
+    let db,prior,priorEvidence,priorMeta,priorReceipt;
+    try{
+      db=await open();if(!db)return fail('v2_unavailable');
+      const tx=db.transaction(['goldLedger','mutations','meta'],'readonly');
+      [prior,priorEvidence,priorMeta,priorReceipt]=await Promise.all([
+        requestPromise(tx.objectStore('goldLedger').getAll()),
+        requestPromise(tx.objectStore('meta').get('gold-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
+        requestPromise(tx.objectStore('mutations').get(receipt.id))
+      ]);
+    }catch(_){return fail('gold_preview_read_unavailable');}
+    if(!priorMeta||priorMeta.schemaVersion!==SCHEMA_VERSION
+      ||priorMeta.resetGeneration!==source.generation
+      ||priorMeta.legacyMissing===true)
+      return fail('pilot_meta_not_ready');
+    if(prior.length||priorEvidence||priorReceipt)
+      return fail('gold_preview_existing_evidence_preserved');
+    try{if(!current())return fail('gold_source_changed_before_seed');}
+    catch(_){return fail('gold_source_unavailable_before_seed');}
+    let failure=null;
+    const abort=(tx,reason)=>{failure=reason;try{tx.abort();}catch(_){}};
+    try{
+      const tx=db.transaction(['goldLedger','mutations','meta'],'readwrite');
+      const store=tx.objectStore('goldLedger');
+      const mutations=tx.objectStore('mutations');
+      const meta=tx.objectStore('meta');
+      const reads=[store.getAll(),meta.get('gold-preview'),
+        meta.get(RUNTIME_META_ID),mutations.get(receipt.id)];
+      const values=new Array(reads.length);
+      let pending=reads.length;
+      reads.forEach((req,i)=>{req.onsuccess=()=>{
+        values[i]=req.result;
+        if(--pending)return;
+        try{
+          if(!current())return abort(tx,'gold_source_changed_under_transaction');
+          if(stableJson(values[0])!==stableJson(prior)
+            ||stableJson(values[1])!==stableJson(priorEvidence)
+            ||stableJson(values[2])!==stableJson(priorMeta)
+            ||values[3])
+            return abort(tx,'gold_preview_concurrent_change');
+          rows.forEach(row=>store.add(row));
+          mutations.add(receipt);meta.add(evidence);
+        }catch(_){abort(tx,'gold_preview_atomic_seed_failed');}
+      };});
+      await transactionPromise(tx);
+    }catch(_){return fail(failure||'gold_preview_atomic_seed_failed');}
+    try{
+      const tx=db.transaction(['goldLedger','mutations','meta'],'readonly');
+      const [saved,proof,meta,receiptReadback]=await Promise.all([
+        requestPromise(tx.objectStore('goldLedger').getAll()),
+        requestPromise(tx.objectStore('meta').get('gold-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
+        requestPromise(tx.objectStore('mutations').get(receipt.id))
+      ]);
+      if(stableJson(saved.sort((a,b)=>a.legacyIndex-b.legacyIndex))
+          !==stableJson(rows)||stableJson(proof)!==stableJson(evidence)
+        ||stableJson(meta)!==stableJson(priorMeta)
+        ||stableJson(receiptReadback)!==stableJson(receipt))
+        return fail('gold_preview_readback_unverified',{
+          committed:true,writeOutcomeUncertain:true});
+      if(!current())return fail('gold_source_changed_after_commit',{
+        committed:true,confirmedDurable:true,writeOutcomeUncertain:true});
+      const parity=await inspectPreviewGoldLedgerParity();
+      if(!parity.match)return fail('gold_preview_parity_unverified',{
+        prerequisiteReason:parity.reason,committed:true,
+        confirmedDurable:true,writeOutcomeUncertain:true});
+      if(!current())return fail('gold_source_changed_after_parity',{
+        committed:true,confirmedDurable:true,writeOutcomeUncertain:true});
+      return {checked:true,previewOnly:true,committed:true,
+        confirmedDurable:true,collectionParityVerified:true,
+        goldMigrated:false,rowCount:rows.length,
+        reason:'gold_preview_seed_verified',canApply:false,
+        canPromote:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'};
+    }catch(_){return fail('gold_preview_readback_unavailable',{
+      committed:true,writeOutcomeUncertain:true});}
+  }
+
+  async function inspectPreviewGoldLedgerParity() {
+    const fail=(reason,more={})=>({...refuseGoldPreview(reason),
+      match:false,...more});
+    if(!isWalTestPreviewHost())return fail('preview_host_required');
+    if(!isDarkEnabled())return fail('dark_disabled');
+    const source=await capturePreviewGoldSource();
+    if(source.reason)return fail('gold_source_preflight_required',{
+      prerequisiteReason:source.reason});
+    const current=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&darkMirrorModeEpoch===source.epoch
+      &&currentGeneration({create:false})===source.generation
+      &&captureReadOnlyFullStorageInventory()===source.inventory
+      &&global.localStorage.getItem(core.STORAGE_KEY||'taskpoints_v1')
+        ===source.raw;
+    let rows,evidence,meta,receipt;
+    try{
+      const db=await open();if(!db)return fail('v2_unavailable');
+      // Keep row, evidence, current generation and receipt in ONE view.
+      const tx=db.transaction(['goldLedger','mutations','meta'],'readonly');
+      const store=tx.objectStore('meta');
+      const proofs=await Promise.all([
+        requestPromise(tx.objectStore('goldLedger').getAll()),
+        requestPromise(store.get('gold-preview')),
+        requestPromise(store.get(RUNTIME_META_ID))
+      ]);
+      [rows,evidence,meta]=proofs;
+      if(!evidence)return fail('gold_preview_missing');
+      const second=db.transaction(['goldLedger','mutations','meta'],'readonly');
+      [rows,evidence,meta,receipt]=await Promise.all([
+        requestPromise(second.objectStore('goldLedger').getAll()),
+        requestPromise(second.objectStore('meta').get('gold-preview')),
+        requestPromise(second.objectStore('meta').get(RUNTIME_META_ID)),
+        requestPromise(second.objectStore('mutations').get(evidence.receiptId))
+      ]);
+    }catch(_){return fail('gold_preview_read_unavailable');}
+    try{
+      if(!current())return fail('gold_source_changed_during_parity');
+      if(!meta||meta.schemaVersion!==SCHEMA_VERSION
+        ||meta.resetGeneration!==source.generation
+        ||meta.legacyMissing===true)
+        return fail('pilot_meta_not_ready');
+      const signature=fnv1a(source.inventory)+':'+source.inventory.length;
+      if(!evidence||evidence.schemaVersion!==1
+        ||evidence.resetGeneration!==source.generation
+        ||evidence.sourceFingerprint!==source.fingerprint
+        ||evidence.sourceInventory!==signature
+        ||evidence.present!==source.present
+        ||evidence.metaPresent!==source.metaPresent
+        ||evidence.rowCount!==source.ledger.length
+        ||stableJson(evidence.metadata)!==stableJson(source.metadata))
+        return fail('gold_preview_source_stale');
+      const expected=source.ledger.map((value,i)=>({
+        id:'gold-row:'+i,legacyIndex:i,value
+      }));
+      const ordered=rows.slice().sort((a,b)=>a.legacyIndex-b.legacyIndex);
+      if(stableJson(ordered)!==stableJson(expected))
+        return fail('gold_preview_record_mismatch',{
+          expectedCount:expected.length,actualCount:ordered.length});
+      if(!receipt||receipt.type!=='gold-preview-seed'
+        ||receipt.id!==evidence.receiptId
+        ||receipt.resetGeneration!==source.generation
+        ||receipt.sourceFingerprint!==source.fingerprint
+        ||receipt.sourceInventory!==signature
+        ||receipt.rowCount!==source.ledger.length
+        ||receipt.present!==source.present
+        ||receipt.metaPresent!==source.metaPresent)
+        return fail('gold_preview_receipt_missing_or_invalid');
+      if(!current())return fail('gold_source_changed_after_parity');
+      return {checked:true,previewOnly:true,match:true,
+        rowCount:ordered.length,goldMigrated:false,
+        present:source.present,metaPresent:source.metaPresent,
+        reason:'gold_preview_parity_verified',canApply:false,
+        canPromote:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'};
+    }catch(_){return fail('gold_preview_parity_unreadable');}
+  }
+
   // PREVIEW-ONLY source inventory for the independent Projects mini-app.
   // Projects live in tp_projects_v1, NOT the main TaskPoints snapshot. This
   // validator deliberately does not normalize, seed, rewrite, or migrate.
@@ -12415,6 +12686,8 @@
     rehearsePreviewTodayCollectionReconcile,
     rehearsePreviewTodayRowSeal,
     inspectPreviewProjectsSource,
+    rehearsePreviewGoldLedgerSeed,
+    inspectPreviewGoldLedgerParity,
     rehearsePreviewTaskCollectionSeed,
     rehearsePreviewTaskCollectionReconcile,
     inspectPreviewTaskCollectionParity,
