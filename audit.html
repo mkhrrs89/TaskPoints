@@ -179,6 +179,7 @@
   <script src="scoring_core.js"></script>
   <script src="audit_integrity.js"></script>
   <script src="audit_habit_vice_scoring_dates.js"></script>
+  <script src="audit_gold_integrity.js?v=20261105-1"></script>
   <script src="audit_selected_day_breakdown.js"></script>
 <script>
     const $ = (id) => document.getElementById(id);
@@ -2620,6 +2621,47 @@ const actualTotal = round2(Number(derivedActualTotal) || 0);
       endSelectedDayBreakdown?.({ completionCount: state.completions?.length || 0, selectedDateKey: dateKey });
 
       const checks = [];
+
+      // Gold accounting remains immutable during an Audit. Compare the live
+      // ledger with outcomes across ALL days and with readable rolling backups.
+      let goldBackups = [];
+      const goldBackupReadErrors = [];
+      const backupKeys = Array.isArray(TaskPointsCore.BACKUP_SLOT_KEYS)
+        ? TaskPointsCore.BACKUP_SLOT_KEYS
+        : ['taskpoints_backup_latest', 'taskpoints_backup_prev1', 'taskpoints_backup_prev2', 'taskpoints_backup_prev3'];
+      backupKeys.forEach((key) => {
+        const raw = localStorage.getItem(key);
+        if (!raw) return;
+        try {
+          const candidate = JSON.parse(raw);
+          if (candidate?.state && typeof candidate.state === 'object') {
+            goldBackups.push({ source: key, state: candidate.state });
+          }
+        } catch (error) {
+          goldBackupReadErrors.push(key + ': unreadable rolling backup (' + (error?.message || error) + ').');
+        }
+      });
+      if (typeof window.TaskPointsAuditGoldIntegrity?.buildGoldIntegrityChecks === 'function') {
+        checks.push(...window.TaskPointsAuditGoldIntegrity.buildGoldIntegrityChecks(state, {
+          rollingBackups: goldBackups,
+          backupReadErrors: goldBackupReadErrors,
+          getGoldBalance: typeof TaskPointsCore.getGoldBalance === 'function'
+            ? (currentState, playerId) => TaskPointsCore.getGoldBalance(currentState, playerId)
+            : null,
+          matchupIdentity: window.TaskPointsGreedGoldEconomy?.matchupIdentity
+        }));
+      } else {
+        checks.push({
+          id: 'gold-integrity-helper-unavailable',
+          title: 'Gold Ledger integrity checks loaded',
+          section: 'Gold Integrity',
+          status: 'FAIL',
+          expected: 'Gold integrity audit helper available',
+          actual: 'Gold integrity audit script failed to load',
+          details: ['Refresh the Audit page after deployment; no Gold balances were changed.'],
+          trace: 'window.TaskPointsAuditGoldIntegrity'
+        });
+      }
 
       // Independent date-level invariant. A saved backdated vice can remain
       // misdated even when normalizeState has already fixed its visible score.
