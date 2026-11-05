@@ -8321,6 +8321,79 @@
       committed:true,writeOutcomeUncertain:true});}
   }
 
+
+  // Verify every Gold preview receipt back to the initial seed. Orphaned
+  // receipts are never ignored: a missing/tampered ancestor or a second
+  // disconnected history makes the entire preview ineligible.
+  function verifyGoldPreviewReceiptChain(evidence, allMutations, generation) {
+    if(!evidence||typeof evidence.receiptId!=='string'
+      ||!evidence.receiptId.startsWith('gold-preview-'))
+      return 'gold_preview_receipt_missing_or_invalid';
+    if(!Array.isArray(allMutations))
+      return 'gold_preview_receipts_unreadable';
+    const gold=allMutations.filter(row=>typeof row?.id==='string'
+      &&row.id.startsWith('gold-preview-'));
+    const byId=new Map(gold.map(row=>[row.id,row]));
+    if(byId.size!==gold.length)return 'gold_preview_duplicate_receipts';
+    let cursor=evidence.receiptId;
+    let expected={fingerprint:evidence.sourceFingerprint,
+      inventory:evidence.sourceInventory,rowCount:evidence.rowCount,
+      present:evidence.present,metaPresent:evidence.metaPresent};
+    const seen=new Set();
+    while(cursor){
+      if(seen.has(cursor)||seen.size>8192)
+        return 'gold_preview_receipt_cycle';
+      seen.add(cursor);
+      const row=byId.get(cursor);
+      if(!row||row.resetGeneration!==generation
+        ||row.sourceFingerprint!==expected.fingerprint
+        ||row.sourceInventory!==expected.inventory
+        ||row.rowCount!==expected.rowCount
+        ||row.present!==expected.present
+        ||row.metaPresent!==expected.metaPresent)
+        return 'gold_preview_receipt_missing_or_invalid';
+      if(row.type==='gold-preview-seed'){
+        if(!row.id.startsWith('gold-preview-seed:')
+          ||row.priorReceiptId!=null)
+          return 'gold_preview_receipt_chain_invalid';
+        if(seen.size!==gold.length)
+          return 'gold_preview_orphan_receipts_preserved';
+        return null;
+      }
+      if(row.type!=='gold-preview-reconcile'
+        ||!row.id.startsWith('gold-preview-reconcile:')
+        ||typeof row.priorReceiptId!=='string'
+        ||!row.priorReceiptId.startsWith('gold-preview-')
+        ||typeof row.priorSourceFingerprint!=='string'
+        ||typeof row.priorSourceInventory!=='string'
+        ||!Number.isSafeInteger(row.priorRowCount)
+        ||typeof row.priorPresent!=='boolean'
+        ||typeof row.priorMetaPresent!=='boolean'
+        ||!Number.isSafeInteger(row.changedRows)
+        ||row.changedRows<0||row.changedRows>64)
+        return 'gold_preview_receipt_chain_invalid';
+      cursor=row.priorReceiptId;
+      expected={fingerprint:row.priorSourceFingerprint,
+        inventory:row.priorSourceInventory,rowCount:row.priorRowCount,
+        present:row.priorPresent,metaPresent:row.priorMetaPresent};
+    }
+    return 'gold_preview_receipt_chain_invalid';
+  }
+
+  function orderedGoldPreviewRows(rows) {
+    if(!Array.isArray(rows))return null;
+    const sorted=rows.slice().sort((a,b)=>a.legacyIndex-b.legacyIndex);
+    for(let i=0;i<sorted.length;i++){
+      const row=sorted[i];
+      if(!row||row.id!=='gold-row:'+i||row.legacyIndex!==i
+        ||!row.value||typeof row.value!=='object'
+        ||Array.isArray(row.value)||typeof row.value.id!=='string'
+        ||!row.value.id)
+        return null;
+    }
+    return sorted;
+  }
+
   async function inspectPreviewGoldLedgerParity() {
     const fail=(reason,more={})=>({...refuseGoldPreview(reason),
       match:false,...more});
@@ -8335,25 +8408,16 @@
       &&captureReadOnlyFullStorageInventory()===source.inventory
       &&global.localStorage.getItem(core.STORAGE_KEY||'taskpoints_v1')
         ===source.raw;
-    let rows,evidence,meta,receipt;
+    let rows,evidence,meta,mutations;
     try{
       const db=await open();if(!db)return fail('v2_unavailable');
-      // Keep row, evidence, current generation and receipt in ONE view.
+      // All provenance and record facts come from one IDB snapshot.
       const tx=db.transaction(['goldLedger','mutations','meta'],'readonly');
-      const store=tx.objectStore('meta');
-      const proofs=await Promise.all([
+      [rows,evidence,meta,mutations]=await Promise.all([
         requestPromise(tx.objectStore('goldLedger').getAll()),
-        requestPromise(store.get('gold-preview')),
-        requestPromise(store.get(RUNTIME_META_ID))
-      ]);
-      [rows,evidence,meta]=proofs;
-      if(!evidence)return fail('gold_preview_missing');
-      const second=db.transaction(['goldLedger','mutations','meta'],'readonly');
-      [rows,evidence,meta,receipt]=await Promise.all([
-        requestPromise(second.objectStore('goldLedger').getAll()),
-        requestPromise(second.objectStore('meta').get('gold-preview')),
-        requestPromise(second.objectStore('meta').get(RUNTIME_META_ID)),
-        requestPromise(second.objectStore('mutations').get(evidence.receiptId))
+        requestPromise(tx.objectStore('meta').get('gold-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
+        requestPromise(tx.objectStore('mutations').getAll())
       ]);
     }catch(_){return fail('gold_preview_read_unavailable');}
     try{
@@ -8372,22 +8436,17 @@
         ||evidence.rowCount!==source.ledger.length
         ||stableJson(evidence.metadata)!==stableJson(source.metadata))
         return fail('gold_preview_source_stale');
+      const ordered=orderedGoldPreviewRows(rows);
+      if(!ordered)return fail('gold_preview_row_invalid');
       const expected=source.ledger.map((value,i)=>({
         id:'gold-row:'+i,legacyIndex:i,value
       }));
-      const ordered=rows.slice().sort((a,b)=>a.legacyIndex-b.legacyIndex);
       if(stableJson(ordered)!==stableJson(expected))
         return fail('gold_preview_record_mismatch',{
           expectedCount:expected.length,actualCount:ordered.length});
-      if(!receipt||receipt.type!=='gold-preview-seed'
-        ||receipt.id!==evidence.receiptId
-        ||receipt.resetGeneration!==source.generation
-        ||receipt.sourceFingerprint!==source.fingerprint
-        ||receipt.sourceInventory!==signature
-        ||receipt.rowCount!==source.ledger.length
-        ||receipt.present!==source.present
-        ||receipt.metaPresent!==source.metaPresent)
-        return fail('gold_preview_receipt_missing_or_invalid');
+      const receiptProblem=verifyGoldPreviewReceiptChain(
+        evidence,mutations,source.generation);
+      if(receiptProblem)return fail(receiptProblem);
       if(!current())return fail('gold_source_changed_after_parity');
       return {checked:true,previewOnly:true,match:true,
         rowCount:ordered.length,goldMigrated:false,
@@ -8396,6 +8455,204 @@
         canPromote:false,productionWritersFenced:false,
         readAuthority:'legacy_only',mutationAuthority:'legacy_only'};
     }catch(_){return fail('gold_preview_parity_unreadable');}
+  }
+
+  // Advance one already sealed Gold history to a newer V1 authority. This
+  // supports append-only transactions, economy metadata changes, and
+  // explicitly opted-in in-place corrections. Deletions and transaction-ID
+  // swaps/reorders are NEVER normalized into apparent zero-Gold history.
+  // No live writer is installed, no source data is modified, and a
+  // confirmed V2 commit is still only a historical preview observation.
+  async function rehearsePreviewGoldLedgerReconcile(sourceToken,actionId,options={}) {
+    const fail=refuseGoldPreview;
+    if(!isWalTestPreviewHost())return fail('preview_host_required');
+    if(!isDarkEnabled())return fail('dark_disabled');
+    if(typeof sourceToken!=='string'||!sourceToken)
+      return fail('full_origin_token_required');
+    if(typeof actionId!=='string'||!actionId||actionId.length>128)
+      return fail('gold_action_id_required');
+    const correctionAllowed=options?.allowHistoricalCorrections===true;
+    let source;
+    try{
+      if(captureReadOnlyFullStorageInventory()!==sourceToken)
+        return fail('full_origin_changed');
+      source=await capturePreviewGoldSource();
+      if(source.reason)return fail('gold_source_preflight_required',{
+        prerequisiteReason:source.reason});
+      if(source.inventory!==sourceToken)return fail('full_origin_changed');
+    }catch(_){return fail('gold_source_unreadable');}
+    const current=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&source.epoch===darkMirrorModeEpoch
+      &&currentGeneration({create:false})===source.generation
+      &&captureReadOnlyFullStorageInventory()===source.inventory
+      &&global.localStorage.getItem(core.STORAGE_KEY||'taskpoints_v1')
+        ===source.raw;
+    let db,prior,proof,meta,mutations;
+    try{
+      db=await open();if(!db)return fail('v2_unavailable');
+      const tx=db.transaction(['goldLedger','mutations','meta'],'readonly');
+      [prior,proof,meta,mutations]=await Promise.all([
+        requestPromise(tx.objectStore('goldLedger').getAll()),
+        requestPromise(tx.objectStore('meta').get('gold-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
+        requestPromise(tx.objectStore('mutations').getAll())
+      ]);
+    }catch(_){return fail('gold_preview_read_unavailable');}
+    if(!meta||meta.schemaVersion!==SCHEMA_VERSION
+      ||meta.resetGeneration!==source.generation||meta.legacyMissing===true)
+      return fail('pilot_meta_not_ready');
+    if(!proof)return fail('gold_preview_seed_required');
+    if(proof.schemaVersion!==1||proof.resetGeneration!==source.generation
+      ||typeof proof.sourceFingerprint!=='string'
+      ||typeof proof.sourceInventory!=='string'
+      ||!Number.isSafeInteger(proof.rowCount)
+      ||typeof proof.present!=='boolean'
+      ||typeof proof.metaPresent!=='boolean')
+      return fail('gold_preview_prior_evidence_invalid');
+    const priorOrder=orderedGoldPreviewRows(prior);
+    if(!priorOrder||priorOrder.length!==proof.rowCount)
+      return fail('gold_preview_existing_records_invalid');
+    const chainProblem=verifyGoldPreviewReceiptChain(
+      proof,mutations,source.generation);
+    if(chainProblem)return fail(chainProblem);
+    let oldFingerprint;
+    try{
+      oldFingerprint=await previewRecoveryFingerprint({
+        ledgerPresent:proof.present,economyPresent:proof.metaPresent,
+        ledger:priorOrder.map(r=>r.value),economy:proof.metadata
+      });
+    }catch(_){return fail('gold_preview_prior_digest_unavailable');}
+    if(oldFingerprint!==proof.sourceFingerprint)
+      return fail('gold_preview_existing_parity_mismatch');
+    try{if(!current())return fail('gold_source_changed_during_reconcile');}
+    catch(_){return fail('gold_source_unreadable_during_reconcile');}
+
+    if(proof.present&&!source.present)
+      return fail('gold_preview_ledger_disappearance_requires_review');
+    if(source.ledger.length<priorOrder.length)
+      return fail('gold_preview_history_deletion_requires_review');
+    const changed=[],added=[];
+    for(let i=0;i<source.ledger.length;i++){
+      const row={id:'gold-row:'+i,legacyIndex:i,value:source.ledger[i]};
+      if(i<priorOrder.length){
+        if(row.value.id!==priorOrder[i].value.id)
+          return fail('gold_preview_history_reorder_or_replacement');
+        if(stableJson(row)!==stableJson(priorOrder[i]))
+          changed.push(row);
+      }else{changed.push(row);added.push(row);}
+    }
+    if(changed.length>added.length&&!correctionAllowed)
+      return fail('gold_preview_historical_correction_requires_optin',{
+        changedHistoricalRows:changed.length-added.length});
+    const metadataChanged=stableJson(proof.metadata)!==stableJson(source.metadata)
+      ||proof.present!==source.present
+      ||proof.metaPresent!==source.metaPresent;
+    const signature=fnv1a(source.inventory)+':'+source.inventory.length;
+    const noChange=changed.length===0&&!metadataChanged
+      &&proof.sourceInventory===signature
+      &&proof.sourceFingerprint===source.fingerprint;
+    if(noChange){
+      const parity=await inspectPreviewGoldLedgerParity();
+      if(!parity.match)return fail('gold_preview_noop_parity_unverified',{
+        prerequisiteReason:parity.reason});
+      if(!current())return fail('gold_source_changed_after_noop');
+      return {checked:true,previewOnly:true,committed:false,
+        confirmedDurable:true,collectionParityVerified:true,
+        goldMigrated:false,changedRows:0,addedRows:0,
+        reason:'gold_preview_already_current',
+        canApply:false,canPromote:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'};
+    }
+    if(changed.length>64)return fail('gold_preview_reconcile_batch_too_large',{
+      changedRows:changed.length,maxAtomicRows:64});
+    if(changed.reduce((sum,row)=>sum+JSON.stringify(row).length,0)>262144
+      ||JSON.stringify(source.metadata).length>262144)
+      return fail('gold_preview_reconcile_payload_too_large');
+    const receiptId='gold-preview-reconcile:'+actionId;
+    if(mutations.some(row=>row?.id===receiptId))
+      return fail('gold_preview_action_id_already_used');
+    const receipt={id:receiptId,type:'gold-preview-reconcile',
+      resetGeneration:source.generation,
+      sourceFingerprint:source.fingerprint,
+      sourceInventory:signature,rowCount:source.ledger.length,
+      present:source.present,metaPresent:source.metaPresent,
+      priorReceiptId:proof.receiptId,
+      priorSourceFingerprint:proof.sourceFingerprint,
+      priorSourceInventory:proof.sourceInventory,
+      priorRowCount:proof.rowCount,priorPresent:proof.present,
+      priorMetaPresent:proof.metaPresent,changedRows:changed.length,
+      addedRows:added.length,correctedRows:changed.length-added.length};
+    const evidence={id:'gold-preview',schemaVersion:1,
+      resetGeneration:source.generation,
+      sourceFingerprint:source.fingerprint,
+      sourceInventory:signature,rowCount:source.ledger.length,
+      present:source.present,metaPresent:source.metaPresent,
+      metadata:clone(source.metadata),receiptId};
+    try{if(!current())return fail('gold_source_changed_before_write');}
+    catch(_){return fail('gold_source_unreadable_before_write');}
+    let failure=null;
+    const abort=(tx,reason)=>{failure=reason;try{tx.abort();}catch(_){}};
+    try{
+      const tx=db.transaction(['goldLedger','mutations','meta'],'readwrite');
+      const rows=tx.objectStore('goldLedger');
+      const mut=tx.objectStore('mutations');
+      const m=tx.objectStore('meta');
+      const reads=[rows.getAll(),m.get('gold-preview'),
+        m.get(RUNTIME_META_ID),mut.getAll()];
+      const values=new Array(reads.length);
+      let pending=reads.length;
+      reads.forEach((request,i)=>{request.onsuccess=()=>{
+        values[i]=request.result;
+        if(--pending)return;
+        try{
+          if(!current())return abort(tx,'gold_source_changed_under_transaction');
+          if(stableJson(values[0])!==stableJson(prior)
+            ||stableJson(values[1])!==stableJson(proof)
+            ||stableJson(values[2])!==stableJson(meta)
+            ||stableJson(values[3])!==stableJson(mutations))
+            return abort(tx,'gold_preview_concurrent_change');
+          changed.forEach(row=>rows.put(row));
+          mut.add(receipt);
+          m.put(evidence);
+        }catch(_){abort(tx,'gold_preview_reconcile_atomic_write_failed');}
+      };});
+      await transactionPromise(tx);
+    }catch(_){return fail(failure||'gold_preview_reconcile_atomic_write_failed');}
+    try{
+      const tx=db.transaction(['goldLedger','mutations','meta'],'readonly');
+      const [saved,newEvidence,newMeta,savedReceipt]=await Promise.all([
+        requestPromise(tx.objectStore('goldLedger').getAll()),
+        requestPromise(tx.objectStore('meta').get('gold-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
+        requestPromise(tx.objectStore('mutations').get(receiptId))
+      ]);
+      const desired=source.ledger.map((value,i)=>({
+        id:'gold-row:'+i,legacyIndex:i,value
+      }));
+      if(stableJson(orderedGoldPreviewRows(saved))!==stableJson(desired)
+        ||stableJson(newEvidence)!==stableJson(evidence)
+        ||stableJson(newMeta)!==stableJson(meta)
+        ||stableJson(savedReceipt)!==stableJson(receipt))
+        return fail('gold_preview_reconcile_readback_unverified',{
+          committed:true,writeOutcomeUncertain:true});
+      if(!current())return fail('gold_source_changed_after_commit',{
+        committed:true,confirmedDurable:true,writeOutcomeUncertain:true});
+      const parity=await inspectPreviewGoldLedgerParity();
+      if(!parity.match)return fail('gold_preview_reconcile_parity_unverified',{
+        prerequisiteReason:parity.reason,committed:true,
+        confirmedDurable:true,writeOutcomeUncertain:true});
+      if(!current())return fail('gold_source_changed_after_parity',{
+        committed:true,confirmedDurable:true,writeOutcomeUncertain:true});
+      return {checked:true,previewOnly:true,committed:true,
+        confirmedDurable:true,collectionParityVerified:true,
+        goldMigrated:false,rowCount:desired.length,
+        changedRows:changed.length,addedRows:added.length,
+        correctedRows:changed.length-added.length,
+        reason:'gold_preview_reconciled',canApply:false,
+        canPromote:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'};
+    }catch(_){return fail('gold_preview_reconcile_readback_unavailable',{
+      committed:true,writeOutcomeUncertain:true});}
   }
 
   // PREVIEW-ONLY source inventory for the independent Projects mini-app.
@@ -12697,6 +12954,7 @@
     rehearsePreviewTodayRowSeal,
     inspectPreviewProjectsSource,
     rehearsePreviewGoldLedgerSeed,
+    rehearsePreviewGoldLedgerReconcile,
     inspectPreviewGoldLedgerParity,
     rehearsePreviewTaskCollectionSeed,
     rehearsePreviewTaskCollectionReconcile,
