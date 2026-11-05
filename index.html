@@ -1432,10 +1432,16 @@ Nothing visible on the page is built here. === -->
                 <div id="caloriesInputRow" class="stat-input-row caloriesEntryRow flex items-center gap-2 flex-nowrap">
 <input id="caloriesInput" class="input w-24" type="number" placeholder="0–3000">
 
-<label class="cal-log-bonus-toggle" title="Add the calorie logging bonus">
-  <input id="caloriesLogBonusToggle" type="checkbox" checked>
-  <span>+2</span>
-</label>
+<div class="calories-tracking-toggle-stack">
+  <label class="cal-log-bonus-toggle" title="Add the calorie logging bonus">
+    <input id="caloriesLogBonusToggle" type="checkbox" checked>
+    <span>+2</span>
+  </label>
+  <label class="calories-not-tracked-toggle" title="Intentional skip: zero calorie points and no missing-calories audit warning">
+    <input id="caloriesNotTrackedToggle" type="checkbox">
+    <span>Didn't track</span>
+  </label>
+</div>
 
 <div class="datePickWrap" title="Pick date">
                   <button class="btn date-trigger dateTriggerBtn" type="button" aria-hidden="true" tabindex="-1">
@@ -2526,15 +2532,17 @@ async function editTodayCalories() {
   const result = await openCaloriesEditModal({
     title: "Edit today's calories",
     currentCalories: current,
-    currentBonusEnabled: isCalLogBonusEnabledForEntry(entry)
+    currentBonusEnabled: isCalLogBonusEnabledForEntry(entry),
+    currentNotTracked: caloriesNotTrackedForEntry(entry)
   });
 
   if (!result) return;
 
-  const raw = Number(result.calories);
-  const calLogBonusEnabled = result.calLogBonusEnabled !== false;
+  const caloriesNotTracked = result.caloriesNotTracked === true;
+  const raw = caloriesNotTracked ? null : Number(result.calories);
+  const calLogBonusEnabled = !caloriesNotTracked && result.calLogBonusEnabled !== false;
 
-  if (!Number.isFinite(raw) || raw < 0) return alert("Invalid calories.");
+  if (!caloriesNotTracked && (!Number.isFinite(raw) || raw < 0)) return alert("Invalid calories.");
 
   const d = new Date();
   d.setHours(12, 0, 0, 0);
@@ -2543,14 +2551,15 @@ async function editTodayCalories() {
   const oldPts = (Number(entry.points) || 0)
     + (isCalLogBonusEnabledForEntry(entry) ? getCalLogBonusAmount() : 0);
 
-  const newPts = caloriesToPoints(raw);
-  const impactPts = caloriesTotalImpactPoints(raw, calLogBonusEnabled);
+  const newPts = caloriesNotTracked ? 0 : caloriesToPoints(raw);
+  const impactPts = caloriesTotalImpactPoints(raw, calLogBonusEnabled, caloriesNotTracked);
 
-  entry.title = `Calories (${raw})`;
-  entry.calories = raw;
+  entry.title = caloriesNotTracked ? 'Calories (Not tracked)' : `Calories (${raw})`;
+  entry.calories = caloriesNotTracked ? null : raw;
   entry.points = newPts;
   entry.calLogBonusEnabled = calLogBonusEnabled;
   entry.calLogBonusDisabled = !calLogBonusEnabled;
+  entry.caloriesNotTracked = caloriesNotTracked;
   entry.completedAtISO = d.toISOString();
   entry.source = 'metric';
 
@@ -3175,20 +3184,30 @@ function openCaloriesEditModal(options = {}) {
     const modal = $('caloriesEditModal');
     const input = $('caloriesEditInput');
     const toggle = $('caloriesEditBonusToggle');
+    const skipToggle = $('caloriesEditNotTrackedToggle');
     const saveBtn = $('caloriesEditSaveBtn');
     const cancelBtn = $('caloriesEditCancelBtn');
 
-    if (!modal || !input || !toggle || !saveBtn || !cancelBtn) {
+    if (!modal || !input || !toggle || !skipToggle || !saveBtn || !cancelBtn) {
       const fallback = prompt(options.title || 'Edit calories:', String(options.currentCalories || ''));
       if (fallback === null) return resolve(null);
       return resolve({
         calories: fallback,
-        calLogBonusEnabled: options.currentBonusEnabled !== false
+        calLogBonusEnabled: options.currentBonusEnabled !== false,
+        caloriesNotTracked: false
       });
     }
 
-    input.value = options.currentCalories || '';
+    input.value = options.currentNotTracked ? '' : (options.currentCalories ?? '');
     toggle.checked = options.currentBonusEnabled !== false;
+    skipToggle.checked = options.currentNotTracked === true;
+    const syncSkipEdit = () => {
+      input.disabled = skipToggle.checked;
+      toggle.disabled = skipToggle.checked;
+      toggle.checked = !skipToggle.checked && options.currentBonusEnabled !== false;
+    };
+    skipToggle.addEventListener('change', syncSkipEdit);
+    syncSkipEdit();
 
 modal.classList.remove('hidden');
 modal.classList.add('flex');
@@ -3202,21 +3221,27 @@ modal.classList.remove('flex');
 modal.setAttribute('aria-hidden', 'true');
 window.unlockScrollForModal?.();
 saveBtn.removeEventListener('click', onSave);
+      skipToggle.removeEventListener('change', syncSkipEdit);
+      input.disabled = false;
+      toggle.disabled = false;
       cancelBtn.removeEventListener('click', onCancel);
       modal.removeEventListener('click', onBackdrop);
       document.removeEventListener('keydown', onKeydown);
     };
 
     const onSave = () => {
-      const raw = Number(String(input.value || '').trim());
-      if (!Number.isFinite(raw) || raw < 0) {
-        alert('Invalid calories.');
+      const caloriesNotTracked = skipToggle.checked === true;
+      const entered = String(input.value || '').trim();
+      const raw = caloriesNotTracked ? null : Number(entered);
+      if (!caloriesNotTracked && (!entered || !Number.isFinite(raw) || raw < 0)) {
+        alert('Enter calories, or select "Didn\'t track".');
         return;
       }
 
       const result = {
-        calories: raw,
-        calLogBonusEnabled: toggle.checked !== false
+        calories: caloriesNotTracked ? null : raw,
+        calLogBonusEnabled: !caloriesNotTracked && toggle.checked !== false,
+        caloriesNotTracked
       };
 
       cleanup();
@@ -3244,6 +3269,21 @@ saveBtn.removeEventListener('click', onSave);
   });
 }
   
+
+function caloriesNotTrackedForEntry(entry) {
+  return entry?.caloriesNotTracked === true;
+}
+function syncCaloriesNotTrackedEntryToggle() {
+  const checkbox = $('caloriesNotTrackedToggle');
+  const input = $('caloriesInput');
+  const bonus = $('caloriesLogBonusToggle');
+  if (!checkbox) return;
+  if (input) input.disabled = checkbox.checked;
+  if (bonus) {
+    bonus.disabled = checkbox.checked;
+    bonus.checked = !checkbox.checked;
+  }
+}
 function getCalLogBonusAmount(){
   const configured = Number(state?.scoringSettings?.calories?.logBonus);
   return Number.isFinite(configured) ? configured : 2;
@@ -3251,13 +3291,15 @@ function getCalLogBonusAmount(){
 
 function isCalLogBonusEnabledForEntry(entry){
   if (!entry || typeof entry !== 'object') return true;
+  if (caloriesNotTrackedForEntry(entry)) return false;
   if (entry.calLogBonusEnabled === false) return false;
   if (entry.calLogBonusDisabled === true) return false;
   if (entry.skipCalLogBonus === true) return false;
   return true;
 }
 
-function caloriesTotalImpactPoints(cal, bonusEnabled = true){
+function caloriesTotalImpactPoints(cal, bonusEnabled = true, notTracked = false){
+  if (notTracked) return 0;
   const base = caloriesToPoints(cal);
   const bonus = bonusEnabled ? getCalLogBonusAmount() : 0;
   return Math.round((base + bonus) * 10) / 10;
@@ -7044,7 +7086,7 @@ function getCaloriesHistorySorted() {
 
   return entries
     .map((entry) => {
-      if (!entry) return null;
+      if (!entry || caloriesNotTrackedForEntry(entry)) return null;
 
       const caloriesRaw = Object.prototype.hasOwnProperty.call(entry, 'calories')
         ? Number(entry.calories)
@@ -12152,16 +12194,17 @@ function editTodaySleepScore() {
 
 
 function saveCalories(){
+  const caloriesNotTracked = $('caloriesNotTrackedToggle')?.checked === true;
   const rawStr = $('caloriesInput').value.trim();
-  if (rawStr === '') return alert("Enter today's calories.");
+  if (!caloriesNotTracked && rawStr === '') return alert("Enter today's calories or check Didn't track.");
 
-  const raw = Number(rawStr);
-  if (Number.isNaN(raw) || raw < 0) return alert("Calories can’t be negative.");
+  const raw = caloriesNotTracked ? null : Number(rawStr);
+  if (!caloriesNotTracked && (!Number.isFinite(raw) || raw < 0)) return alert("Calories can’t be negative.");
 
-  const pts = caloriesToPoints(raw);
+  const pts = caloriesNotTracked ? 0 : caloriesToPoints(raw);
 const bonusToggle = $('caloriesLogBonusToggle');
-const calLogBonusEnabled = bonusToggle ? bonusToggle.checked !== false : true;
-const impactPts = caloriesTotalImpactPoints(raw, calLogBonusEnabled);
+const calLogBonusEnabled = !caloriesNotTracked && (bonusToggle ? bonusToggle.checked !== false : true);
+const impactPts = caloriesTotalImpactPoints(raw, calLogBonusEnabled, caloriesNotTracked);
 
   // 1) Figure out what date this entry is for (date picker or today)
   const dateStr = $('caloriesDate') ? $('caloriesDate').value : '';
@@ -12193,31 +12236,33 @@ const impactPts = caloriesTotalImpactPoints(raw, calLogBonusEnabled);
 
   // 3) If we found one, UPDATE it; otherwise, create a new one
 if (existing) {
-  existing.title = `Calories (${raw})`;
-  existing.calories = raw;
+  existing.title = caloriesNotTracked ? 'Calories (Not tracked)' : `Calories (${raw})`;
+  existing.calories = caloriesNotTracked ? null : raw;
   existing.points = pts;
   existing.completedAtISO = whenISO;
   existing.source = 'metric';
   existing.calLogBonusEnabled = calLogBonusEnabled;
   existing.calLogBonusDisabled = !calLogBonusEnabled;
+  existing.caloriesNotTracked = caloriesNotTracked;
 } else {
   state.completions.unshift({
     id: crypto.randomUUID(),
-    title: `Calories (${raw})`,
-    calories: raw,
+    title: caloriesNotTracked ? 'Calories (Not tracked)' : `Calories (${raw})`,
+    calories: caloriesNotTracked ? null : raw,
     points: pts,
     completedAtISO: whenISO,
     source: "metric",
     calLogBonusEnabled,
-    calLogBonusDisabled: !calLogBonusEnabled
+    calLogBonusDisabled: !calLogBonusEnabled,
+    caloriesNotTracked
   });
 }
   toastPointsDeltaTodayAware(impactPts, oldPts, key);
   markCompletionsDirty();
   
   $('caloriesInput').value = '';
-
-if ($('caloriesLogBonusToggle')) $('caloriesLogBonusToggle').checked = true;
+  if ($('caloriesNotTrackedToggle')) $('caloriesNotTrackedToggle').checked = false;
+  syncCaloriesNotTrackedEntryToggle();
   
   save();
   scheduleRender(renderAll);
@@ -12610,27 +12655,30 @@ block.onclick = async () => {
   const result = await openCaloriesEditModal({
     title: "Edit calories for this day",
     currentCalories: cal,
-    currentBonusEnabled: isCalLogBonusEnabledForEntry(target)
+    currentBonusEnabled: isCalLogBonusEnabledForEntry(target),
+    currentNotTracked: caloriesNotTrackedForEntry(target)
   });
 
   if (!result) return;
 
-  const raw = Number(result.calories);
-  const calLogBonusEnabled = result.calLogBonusEnabled !== false;
+  const caloriesNotTracked = result.caloriesNotTracked === true;
+  const raw = caloriesNotTracked ? null : Number(result.calories);
+  const calLogBonusEnabled = !caloriesNotTracked && result.calLogBonusEnabled !== false;
 
-  if (!Number.isFinite(raw) || raw < 0) return alert('Invalid calories.');
+  if (!caloriesNotTracked && (!Number.isFinite(raw) || raw < 0)) return alert("Invalid calories.");
 
   const oldPts = (Number(target.points) || 0)
     + (isCalLogBonusEnabledForEntry(target) ? getCalLogBonusAmount() : 0);
 
-  const newPts = caloriesToPoints(raw);
-  const impactPts = caloriesTotalImpactPoints(raw, calLogBonusEnabled);
+  const newPts = caloriesNotTracked ? 0 : caloriesToPoints(raw);
+  const impactPts = caloriesTotalImpactPoints(raw, calLogBonusEnabled, caloriesNotTracked);
 
-  target.title = `Calories (${raw})`;
-  target.calories = raw;
+  target.title = caloriesNotTracked ? 'Calories (Not tracked)' : `Calories (${raw})`;
+  target.calories = caloriesNotTracked ? null : raw;
   target.points = newPts;
   target.calLogBonusEnabled = calLogBonusEnabled;
   target.calLogBonusDisabled = !calLogBonusEnabled;
+  target.caloriesNotTracked = caloriesNotTracked;
   target.source = "metric";
 
   toastPointsDeltaTodayAware(impactPts, oldPts, target);
@@ -14407,15 +14455,17 @@ if (key === "calories") {
   const result = await openCaloriesEditModal({
     title: "Edit today's calories",
     currentCalories: current,
-    currentBonusEnabled: isCalLogBonusEnabledForEntry(target)
+    currentBonusEnabled: isCalLogBonusEnabledForEntry(target),
+    currentNotTracked: caloriesNotTrackedForEntry(target)
   });
 
   if (!result) return;
 
-  const raw = Number(result.calories);
-  const calLogBonusEnabled = result.calLogBonusEnabled !== false;
+  const caloriesNotTracked = result.caloriesNotTracked === true;
+  const raw = caloriesNotTracked ? null : Number(result.calories);
+  const calLogBonusEnabled = !caloriesNotTracked && result.calLogBonusEnabled !== false;
 
-  if (!Number.isFinite(raw) || raw < 0) return alert("Invalid calories.");
+  if (!caloriesNotTracked && (!Number.isFinite(raw) || raw < 0)) return alert("Invalid calories.");
 
   const d = new Date(target?.completedAtISO || new Date());
   d.setHours(12, 0, 0, 0);
@@ -14437,27 +14487,29 @@ if (key === "calories") {
     ? ((Number(existing.points) || 0) + (isCalLogBonusEnabledForEntry(existing) ? getCalLogBonusAmount() : 0))
     : 0;
 
-  const newPts = caloriesToPoints(raw);
-  const impactPts = caloriesTotalImpactPoints(raw, calLogBonusEnabled);
+  const newPts = caloriesNotTracked ? 0 : caloriesToPoints(raw);
+  const impactPts = caloriesTotalImpactPoints(raw, calLogBonusEnabled, caloriesNotTracked);
 
   if (existing) {
-    existing.title = `Calories (${raw})`;
-    existing.calories = raw;
+    existing.title = caloriesNotTracked ? 'Calories (Not tracked)' : `Calories (${raw})`;
+    existing.calories = caloriesNotTracked ? null : raw;
     existing.points = newPts;
     existing.completedAtISO = whenISO;
     existing.source = "metric";
     existing.calLogBonusEnabled = calLogBonusEnabled;
     existing.calLogBonusDisabled = !calLogBonusEnabled;
+  existing.caloriesNotTracked = caloriesNotTracked;
   } else {
     state.completions.unshift({
       id: crypto.randomUUID(),
-      title: `Calories (${raw})`,
-      calories: raw,
+      title: caloriesNotTracked ? 'Calories (Not tracked)' : `Calories (${raw})`,
+      calories: caloriesNotTracked ? null : raw,
       points: newPts,
       completedAtISO: whenISO,
       source: "metric",
       calLogBonusEnabled,
-      calLogBonusDisabled: !calLogBonusEnabled
+      calLogBonusDisabled: !calLogBonusEnabled,
+    caloriesNotTracked
     });
   }
 
@@ -14739,15 +14791,17 @@ if (cat === "calories") {
   const result = await openCaloriesEditModal({
     title: "Edit calories for this day",
     currentCalories: current,
-    currentBonusEnabled: isCalLogBonusEnabledForEntry(entry)
+    currentBonusEnabled: isCalLogBonusEnabledForEntry(entry),
+    currentNotTracked: caloriesNotTrackedForEntry(entry)
   });
 
   if (!result) return;
 
-  const raw = Number(result.calories);
-  const calLogBonusEnabled = result.calLogBonusEnabled !== false;
+  const caloriesNotTracked = result.caloriesNotTracked === true;
+  const raw = caloriesNotTracked ? null : Number(result.calories);
+  const calLogBonusEnabled = !caloriesNotTracked && result.calLogBonusEnabled !== false;
 
-  if (!Number.isFinite(raw) || raw < 0) return alert("Invalid calories.");
+  if (!caloriesNotTracked && (!Number.isFinite(raw) || raw < 0)) return alert("Invalid calories.");
 
   const d = new Date(entry?.completedAtISO || `${dk}T12:00:00`);
   d.setHours(12,0,0,0);
@@ -14766,27 +14820,29 @@ if (cat === "calories") {
     ? ((Number(target.points) || 0) + (isCalLogBonusEnabledForEntry(target) ? getCalLogBonusAmount() : 0))
     : 0;
 
-  const newPts = caloriesToPoints(raw);
-  const impactPts = caloriesTotalImpactPoints(raw, calLogBonusEnabled);
+  const newPts = caloriesNotTracked ? 0 : caloriesToPoints(raw);
+  const impactPts = caloriesTotalImpactPoints(raw, calLogBonusEnabled, caloriesNotTracked);
 
   if (target) {
-    target.title = `Calories (${raw})`;
-    target.calories = raw;
+    target.title = caloriesNotTracked ? 'Calories (Not tracked)' : `Calories (${raw})`;
+    target.calories = caloriesNotTracked ? null : raw;
     target.points = newPts;
     target.completedAtISO = d.toISOString();
     target.source = "metric";
     target.calLogBonusEnabled = calLogBonusEnabled;
     target.calLogBonusDisabled = !calLogBonusEnabled;
+  target.caloriesNotTracked = caloriesNotTracked;
   } else {
     target = {
       id: crypto.randomUUID(),
-      title: `Calories (${raw})`,
-      calories: raw,
+      title: caloriesNotTracked ? 'Calories (Not tracked)' : `Calories (${raw})`,
+      calories: caloriesNotTracked ? null : raw,
       points: newPts,
       completedAtISO: d.toISOString(),
       source: "metric",
       calLogBonusEnabled,
-      calLogBonusDisabled: !calLogBonusEnabled
+      calLogBonusDisabled: !calLogBonusEnabled,
+    caloriesNotTracked
     };
     state.completions.unshift(target);
   }
@@ -15078,6 +15134,8 @@ try {
       if (e.key === 'Enter') submitWorkEditModal();
     });
   });
+  $('caloriesNotTrackedToggle')?.addEventListener('change', syncCaloriesNotTrackedEntryToggle);
+  syncCaloriesNotTrackedEntryToggle();
   $('saveCaloriesBtn')?.addEventListener('click', saveCalories);
   $('saveWorkScoreBtn')?.addEventListener('click', saveWorkScore);
   $('saveMoodScoreBtn')?.addEventListener('click', saveMoodScore);
@@ -16269,6 +16327,10 @@ const dismissReminderForSession = () => {
     <label class="cal-log-bonus-modal-toggle" title="Add the calorie logging bonus">
       <input id="caloriesEditBonusToggle" type="checkbox" checked>
       <span>Add +2 logging bonus</span>
+    </label>
+    <label class="cal-log-bonus-modal-toggle calories-not-tracked-modal-toggle" title="Skip tracking on this date for 0 calorie points and no missing-calories warning">
+      <input id="caloriesEditNotTrackedToggle" type="checkbox">
+      <span>Didn't track calories this day — 0 pts</span>
     </label>
 
     <div class="flex gap-2 justify-end mt-4">
