@@ -1283,3 +1283,172 @@ test('Game ZIP restore rehearsal never runs with dark mode off or outside localh
   assert.equal((await app.api.rehearsePreviewGameZipRestoreInMemory(zip)).reason,
     'dark_disabled');
 });
+
+
+
+// Whole-backup coverage inspector: unlike the Game-only ZIP check it must
+// account for every top-level V1 key, including unrelated future fields,
+// and the separately stored origin keys. All probes remain read-only.
+test('Whole-backup coverage inspector verifies every raw snapshot field but retains missing-sidecar blockers',async()=>{
+  const app=await boot({normalizer:root=>JSON.parse(JSON.stringify(root))});
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  const origin=app.token(),database=app.indexedDB.dump(DB);
+  const report=await app.api.inspectPreviewWholeBackupRestoreCoverage(
+    await archiveBytes());
+  assert.equal(report.reason,'whole_backup_independent_sidecars_missing',JSON.stringify(report));
+  assert.equal(report.wholeSnapshotCompared,true);
+  assert.equal(report.rawSnapshotFieldsPreserved,true);
+  assert.equal(report.snapshotFieldMismatchCount,0);
+  assert.equal(report.settingsNormalizationParityVerified,true);
+  assert.equal(report.rawImportFieldPreservationVerified,true);
+  assert.equal(report.observedIndependentSidecarCount,3);
+  assert.equal(report.archivedIndependentSidecarCount,0);
+  assert.equal(report.missingIndependentSidecarCount,3);
+  assert.equal(report.independentOriginSidecarsRestorable,false);
+  assert.equal(report.imagesWrittenBeforeImportConfirmation,true);
+  assert.equal(report.fullAppRestoreVerified,false);
+  assert.equal(report.canApply,false);
+  assert.equal(report.canPromote,false);
+  assert.equal(app.token(),origin);
+  assert.deepEqual(app.indexedDB.dump(DB),database);
+  assert.equal(JSON.stringify(report).includes('keep my notes'),false);
+});
+
+test('Whole-backup coverage rejects unrelated Tasks and unknown-property losses that Game parity alone misses',async()=>{
+  const state=legacy();
+  state.futureUnknownField={retained:['yes',4]};
+  state.tasks=[{id:'t-new',note:'retain private work'}];
+  const app=await boot({state,normalizer:root=>JSON.parse(JSON.stringify(root))});
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  const zipState=legacy();
+  const zip=await archiveBytes(zipState);
+  const game=await app.api.inspectPreviewGameBackupZip(zip);
+  assert.equal(game.archiveGameFieldsVerified,true,JSON.stringify(game));
+  const report=await app.api.inspectPreviewWholeBackupRestoreCoverage(zip);
+  assert.equal(report.reason,'whole_backup_normalization_parity_mismatch',JSON.stringify(report));
+  assert.equal(report.wholeSnapshotCompared,true);
+  assert.equal(report.rawSnapshotFieldsPreserved,false);
+  assert.ok(report.snapshotFieldMismatchCount>=2);
+  assert.equal(report.settingsNormalizationParityVerified,false);
+  assert.ok(report.normalizedFieldMismatchCount>=2);
+  assert.equal(report.canPromote,false);
+  assert.equal(JSON.stringify(report).includes('retain private work'),false);
+});
+
+test('Whole-backup coverage detects import normalizer silently dropping raw history despite normalized parity',async()=>{
+  const normalizer=root=>{
+    const out=JSON.parse(JSON.stringify(root));
+    delete out.notes;
+    delete out.youNotes;
+    return out;
+  };
+  const app=await boot({normalizer});
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  const report=await app.api.inspectPreviewWholeBackupRestoreCoverage(
+    await archiveBytes());
+  assert.equal(report.reason,'whole_backup_normalization_drops_raw_fields',JSON.stringify(report));
+  assert.equal(report.rawSnapshotFieldsPreserved,true);
+  assert.equal(report.settingsNormalizationParityVerified,true);
+  assert.equal(report.rawImportFieldPreservationVerified,false);
+  assert.ok(report.rawImportFieldMismatchCount>=2);
+  assert.equal(report.canApply,false);
+});
+
+test('Whole-backup coverage independently detects a tampered non-Game field',async()=>{
+  const app=await boot({normalizer:root=>JSON.parse(JSON.stringify(root))});
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  const bad=legacy();
+  bad.notes='different private note';
+  const report=await app.api.inspectPreviewWholeBackupRestoreCoverage(
+    await archiveBytes(bad));
+  assert.equal(report.reason,'whole_backup_normalization_parity_mismatch',JSON.stringify(report));
+  assert.equal(report.snapshotFieldMismatchCount,1);
+  assert.equal(report.canPromote,false);
+});
+
+test('Whole-backup coverage distinguishes copied auxiliary bytes from actual Settings restore support',async()=>{
+  const app=await boot({normalizer:root=>JSON.parse(JSON.stringify(root))});
+  for(const [key,value] of [
+    ['taskpoints_notes_v1','Notes are separately authoritative'],
+    ['taskpoints_notes_dirty_v1','1'],
+    ['taskpoints_notes_authoritative_v1','1'],
+    ['tp_projects_v1','[{"id":"p-new"}]'],
+    ['taskpoints_today_view_v1','{"days":["2026-11-05"]}']
+  ])app.localStorage.setItem(key,value);
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  // Seed only after changing the origin so its Game receipts bind to
+  // these sidecars, preventing a misleading stale-source success.
+  await seed(app);
+  const keys=[
+    'taskpoints_notes_v1','taskpoints_notes_dirty_v1',
+    'taskpoints_notes_authoritative_v1','tp_projects_v1',
+    'taskpoints_today_view_v1',COLS,SORT,GROUP
+  ];
+  const aux=Object.fromEntries(keys.map(key=>[key,
+    app.localStorage.getItem(key)]));
+  const report=await app.api.inspectPreviewWholeBackupRestoreCoverage(
+    await archiveBytes(legacy(),{'image-1':'photo'},aux));
+  assert.equal(report.reason,'whole_backup_import_and_rollback_unverified',JSON.stringify(report));
+  assert.equal(report.observedIndependentSidecarCount,8);
+  assert.equal(report.archivedIndependentSidecarCount,8);
+  assert.equal(report.missingIndependentSidecarCount,0);
+  assert.equal(report.independentOriginSidecarsCovered,true);
+  assert.equal(report.independentOriginSidecarsRestorable,false);
+  assert.equal(report.restoreOrderAndInterruptionValidated,false);
+  assert.equal(report.offDeviceBackupVerified,false);
+  assert.equal(report.canApply,false);
+});
+
+test('Whole-backup coverage fails on missing live photos before considering archive fields',async()=>{
+  const app=await boot({normalizer:root=>JSON.parse(JSON.stringify(root))});
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  const report=await app.api.inspectPreviewWholeBackupRestoreCoverage(
+    await archiveBytes(legacy(),{}));
+  assert.equal(report.reason,'whole_backup_game_preflight_required',JSON.stringify(report));
+  assert.equal(report.prerequisiteReason,'game_backup_referenced_images_missing');
+  assert.equal(report.wholeSnapshotCompared,false);
+  assert.equal(report.fullAppRestoreVerified,false);
+});
+
+test('Whole-backup coverage refuses a new old-tab origin write during asynchronous preflight',async()=>{
+  let app,armed=false;
+  const crypto={randomUUID(){return 'whole-backup-race'},subtle:{
+    digest:async(...args)=>{
+      const hash=await webcrypto.subtle.digest(...args);
+      if(armed&&Buffer.from(args[1]).toString()==='photo'){
+        armed=false;
+        app.localStorage.setItem('taskpoints_today_view_v1','{"updated":true}');
+      }
+      return hash;
+    }
+  }};
+  app=await boot({crypto,normalizer:root=>JSON.parse(JSON.stringify(root))});
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  armed=true;
+  const report=await app.api.inspectPreviewWholeBackupRestoreCoverage(
+    await archiveBytes());
+  assert.equal(report.fullAppRestoreVerified,false);
+  assert.equal(report.canApply,false);
+  assert.equal(report.canPromote,false);
+  assert.equal(report.wholeSnapshotCompared,false);
+  assert.equal(report.reason,'whole_backup_game_preflight_required',JSON.stringify(report));
+  assert.equal(armed,false);
+});
+
+test('Whole-backup coverage stays closed outside preview host or with dark mode off',async()=>{
+  const app=await boot({normalizer:root=>JSON.parse(JSON.stringify(root))});
+  const zip=await archiveBytes();
+  app.ctx.location.hostname='taskpoints.pages.dev';
+  assert.equal((await app.api.inspectPreviewWholeBackupRestoreCoverage(zip)).reason,
+    'preview_host_required');
+  app.ctx.location.hostname='localhost';
+  app.localStorage.removeItem(DARK);
+  assert.equal((await app.api.inspectPreviewWholeBackupRestoreCoverage(zip)).reason,
+    'dark_disabled');
+});
