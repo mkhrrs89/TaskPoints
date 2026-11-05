@@ -7,12 +7,12 @@ const season = fs.readFileSync('season.js', 'utf8');
 const seeds = fs.readFileSync('season_seed_sources.js', 'utf8');
 const core = fs.readFileSync('scoring_core.js', 'utf8');
 
-for (const scope of ['season3', 'season2', 'season1', 'lifetime']) assert(standings.includes(`data-standings-scope="${scope}"`));
+for (const scope of ['season4', 'season3', 'season2', 'season1', 'lifetime']) assert(standings.includes(`data-standings-scope="${scope}"`));
 assert(standings.includes('key >= STANDINGS_SEASON_TWO_START && key < STANDINGS_SEASON_THREE_START'));
 assert(standings.includes('key >= STANDINGS_SEASON_THREE_START && key < STANDINGS_SEASON_THREE_END_EXCLUSIVE'));
 assert(standings.includes('taskpoints_standings_scope_season3_rollover_v1'));
 
-for (const scope of ['season3', 'season2', 'season1', 'overall']) assert(rankings.includes(`data-rankings-scope="${scope}"`));
+for (const scope of ['season4', 'season3', 'season2', 'season1', 'overall']) assert(rankings.includes(`data-rankings-scope="${scope}"`));
 assert(rankings.includes('key >= RANKINGS_SEASON_TWO_START && key < RANKINGS_SEASON_THREE_START'));
 assert(rankings.includes('key >= RANKINGS_SEASON_THREE_START && key < RANKINGS_SEASON_THREE_END_EXCLUSIVE'));
 assert(rankings.includes('taskpoints_rankings_scope_season3_rollover_v1'));

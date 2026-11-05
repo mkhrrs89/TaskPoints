@@ -185,7 +185,7 @@ function makeHarness({ journalFails = false, batchFails = false, batchEnabled = 
 }
 
 test('loader keeps the Work fast path outside the core worker while loading the current Home version', () => {
-  assert.match(guardSource, /work_entry_fast_path\.js\?v=20261101-1/);
+  assert.match(guardSource, /work_entry_fast_path\.js\?v=20261102-2/);
   assert.match(guardSource, /data-taskpoints-work-entry-fast-path/);
 });
 
@@ -233,7 +233,7 @@ test('editing a Work entry journals the completion and uses targeted score rende
   assert.ok(h.calls.idleTouches > 0);
 
   const status = h.context.TaskPointsWorkEntryFastPath.getStatus();
-  assert.equal(h.context.TaskPointsWorkEntryFastPath.version, 4);
+  assert.equal(h.context.TaskPointsWorkEntryFastPath.version, 5);
   assert.equal(status.counters.fastCommits, 1);
   assert.equal(status.counters.suppressedFullSaves, 1);
   assert.equal(status.counters.targetedRenders, 1);
@@ -375,6 +375,50 @@ test('when SCWM defers the emergency fallback, flush it before returning after j
   assert.equal(h.calls.lastSavePath, 'work-entry-fast-path-fallback');
   assert.equal(pending, null);
 });
+
+
+test('live Home getter overrides stale global/test state and journals the edited row', () => {
+  const h = makeHarness();
+  h.context.TaskPointsWorkEntryAccess = {
+    getState: () => h.state,
+    getEditedRow: () => h.work
+  };
+  h.context.__tpWorkEntryStateForTest = { completions: [] }; // deliberately stale
+  h.context.submitWorkEditModal();
+  assert.equal(h.calls.journal.length, 1);
+  assert.equal(h.calls.journal[0].completionUpsert.workHours, 8.25);
+  assert.equal(h.calls.fullSaves, 0);
+});
+
+test('saving unchanged Work values re-journals the actual row instead of compressing all history', () => {
+  const h = makeHarness();
+  h.work.title = 'Work Score (8) — Hours 8.25';
+  h.work.points = 8.0825;
+  h.work.workHours = 8.25;
+  h.context.TaskPointsWorkEntryAccess = {
+    getState: () => h.state,
+    getEditedRow: () => h.work
+  };
+  h.context.submitWorkEditModal();
+  assert.equal(h.calls.journal.length, 1);
+  assert.equal(h.calls.journal[0].completionUpsert.id, 'work-today');
+  assert.equal(h.calls.fullSaves, 0);
+  assert.equal(h.context.TaskPointsWorkEntryFastPath.getStatus().counters.unchangedCommits, 1);
+});
+
+test('an unchanged Work edit with a detached row cannot bypass full-save confirmation', () => {
+  const h = makeHarness();
+  h.work.title = 'Work Score (8) — Hours 8.25';
+  h.work.points = 8.0825;
+  h.work.workHours = 8.25;
+  h.context.TaskPointsWorkEntryAccess = {
+    getState: () => h.state,
+    getEditedRow: () => ({ ...h.work, id: 'work-today' })
+  };
+  h.context.submitWorkEditModal();
+  assert.equal(h.calls.journal.length, 0);
+  assert.equal(h.calls.fullSaves, 1);
+  assert.equal(h.calls.lastSavePath, 'work-entry-fast-path-fallback');
 
 
 test('two Work completion edits use the atomic batch journal once when available',()=>{

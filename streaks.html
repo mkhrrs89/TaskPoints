@@ -288,7 +288,7 @@
 
   <div id="bottomToolbarMount"></div>
 
-  <script src="scoring_core.js"></script>
+  <script src="scoring_core.js?v=20261102-freeze-silver-credit-2"></script>
   <script>
     (function () {
       'use strict';
@@ -572,7 +572,20 @@
           // The lower Streak Table is intentionally today-only. Its Bonus is the
           // bonus actually earned at today's resulting streak level.
           if (todayState === 'done') {
-            const currentStreak = countStreakEndingOn(status.done, todayKey);
+            let currentStreak = countStreakEndingOn(status.done, todayKey);
+            if (todayKey >= '2026-11-02'
+              && habit.streakMultiplierEnabled === true
+              && (habit.category || 'habit') !== 'vice'
+              && typeof core?.getHabitFreezeStatus === 'function') {
+              // Include previously frozen days in the displayed streak without
+              // counting them as completed days or mutating the journal.
+              const projectedHabit = {
+                ...habit,
+                doneKeys: Array.from(status.done),
+                failedKeys: Array.from(status.failed)
+              };
+              currentStreak = core.getHabitFreezeStatus(projectedHabit, state, todayKey).streak;
+            }
             if (currentStreak > 0) current.push(makeRow(habit, currentStreak, todayKey, state));
           }
         }

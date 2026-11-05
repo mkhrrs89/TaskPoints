@@ -229,6 +229,157 @@
   }
 }
 
+/* Players roster toolbar: balanced controls on small screens, compact on desktop. */
+.players-controls-toolbar {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(113, 113, 122, .23);
+  border-radius: 16px;
+  background: rgba(244, 244, 245, .7);
+}
+.players-controls-primary,
+.players-controls-secondary {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 12px;
+}
+.players-controls-primary { justify-content: space-between; }
+.players-controls-secondary { margin-top: 10px; align-items: flex-end; }
+.players-view-switch {
+  display: inline-flex;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid rgba(113, 113, 122, .45);
+  border-radius: 11px;
+  padding: 2px;
+  gap: 2px;
+}
+.players-view-switch button {
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.25;
+  font-weight: 600;
+  color: inherit;
+  background: transparent;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.players-view-switch button[aria-pressed="true"] {
+  background: rgba(16, 185, 129, .18);
+  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, .25);
+  color: #065f46;
+}
+.players-group-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 0 1 auto;
+  min-width: 0;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.players-group-control .toggle-switch { flex-shrink: 0; margin: 0; }
+.players-control-field { min-width: 0; flex-direction: column; align-items: stretch; gap: 5px; }
+.players-control-field label {
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  opacity: .72;
+}
+.players-columns-control { flex: 0 0 94px; }
+.players-sort-control { display: flex; flex: 1 1 0; min-width: 0; }
+.players-control-field select.input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid rgba(113, 113, 122, .34);
+  border-radius: 10px;
+  background-color: rgba(255, 255, 255, .62);
+  color: inherit;
+  font-size: 13px;
+  line-height: 1.3;
+}
+.players-controls-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 7px;
+  font-size: 11px;
+  opacity: .65;
+}
+.players-view-switch button:focus-visible,
+.players-group-control:focus-within,
+.players-control-field select:focus-visible {
+  outline: 2px solid #10b981;
+  outline-offset: 2px;
+}
+@media (prefers-color-scheme: dark) {
+  .players-controls-toolbar {
+    border-color: rgba(113, 113, 122, .3);
+    background: rgba(24, 24, 27, .66);
+  }
+  .players-view-switch button[aria-pressed="true"] {
+    color: #d1fae5;
+    background: rgba(16, 185, 129, .21);
+  }
+  .players-control-field select.input {
+    background-color: rgba(12, 17, 21, .85);
+    border-color: rgba(113, 113, 122, .38);
+  }
+}
+@media (min-width: 641px) {
+  .players-controls-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+  }
+  .players-controls-secondary { margin-top: 0; margin-left: auto; }
+  .players-sort-control { flex: 0 1 220px; min-width: 170px; }
+  .players-controls-footer { margin: 0; }
+}
+@media (max-width: 360px) {
+  .players-controls-toolbar { padding: 10px; }
+  .players-controls-primary { gap: 7px; }
+  .players-view-switch button { padding-inline: 9px; }
+  .players-group-control { gap: 6px; font-size: 11px; }
+  .players-controls-secondary { gap: 9px; }
+  .players-columns-control { flex-basis: 86px; }
+}
+
+/* Stats Guide is closed in the HTML before scripts initialize, on every viewport. */
+#playerStatsGuide .mobile-collapsible-header {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+#playerStatsGuide .mobile-collapsible-header h2 { margin-bottom: 0; }
+#playerStatsGuide .mobile-collapsible-chevron { transition: transform .2s ease; }
+#playerStatsGuide[data-collapsed="true"] .mobile-collapsible-chevron { transform: rotate(-90deg); }
+#playerStatsGuide .mobile-collapsible-body { margin-top: .5rem; }
+#playerStatsGuide .mobile-collapsible-body[hidden] { display: none !important; }
+
 /* Mobile tweaks */
 @media (max-width: 640px) {
   /* 2-column card view grid on mobile */
@@ -864,41 +1015,18 @@ textarea{
             <a href="records.html"      class="btn btn-teal btn-toolbar nav-btn">Records</a>
           </div>
         </div>
-        <a href="projects.html" class="btn btn-teal btn-toolbar nav-btn">Projects</a>
         <a href="season.html" class="btn btn-teal btn-toolbar nav-btn">Season</a>
         <a href="settings.html" class="btn btn-teal btn-toolbar nav-btn">Settings</a>
       </div>
 
     </header>
 
-<!-- Player Stats Guide -->
-<section id="playerStatsGuide" class="card mb-6 mobile-collapsible" data-collapsed="false">
-  <button type="button" class="mobile-collapsible-header">
-    <h2 class="font-semibold text-lg mb-2">Player Stats Guide</h2>
-    <span class="mobile-collapsible-chevron">▾</span>
-  </button>
-
-  <div class="mobile-collapsible-body">
-    <ul class="text-sm space-y-2">
-      <li><strong>Baseline Δ</strong>: Difference between a player’s average score and their baseline (positive = above baseline).</li>
-      <li><strong>PPD</strong>: Points per day in the TaskPoints app (includes habits, flex actions, sleep, etc.).</li>
-      <li><strong>Baseline</strong>: Their “default” nightly performance.</li>
-      <li><strong>Variance</strong>: How swingy they are night-to-night.</li>
-      <li><strong>Momentum</strong>: How much recent good/bad nights affect next game.</li>
-      <li><strong>Risky</strong>: How much they chase boom-or-bust lines.</li>
-      <li><strong>Variance Tilt</strong>: What % of their swings land <em>above</em> baseline (0% = always below, 100% = always above).</li>
-      <li><strong>Style</strong>: Just flavor text for now (can inform future sim tweaks).</li>
-      <li><strong>INT</strong>: Suppresses an opponent’s positive roll ceiling in NPC vs NPC matchups.</li>
-      <li><strong>Poise</strong>: Lets a player resist pressure and play up against significantly higher-ranked opponents.</li>
-      <li><strong>Streaky</strong>: Reserved for future use; no game effect yet.</li>
-    </ul>
-  </div>
-</section>
 
 
-<div class="grid gap-6 md:grid-cols-2 mb-6">
 
-<!-- LEFT: Create player -->
+<div class="mb-6">
+
+<!-- Create player -->
 <section class="card mb-6">
   <button
     type="button"
@@ -1019,8 +1147,8 @@ textarea{
     <input id="playerGreed" type="number" min="0" max="100" class="input mt-1" value="25">
   </div>
   <div>
-    <label class="text-xs muted">Streaky (0–100)</label>
-    <input id="playerStreaky" type="number" min="0" max="100" class="input mt-1" value="0">
+    <label class="text-xs muted">Streaky (1–100)</label>
+    <input id="playerStreaky" type="number" min="1" max="100" class="input mt-1" value="50">
   </div>
   <div>
     <label class="text-xs muted">Active</label>
@@ -1061,140 +1189,87 @@ textarea{
   </div>
 </div>
 
-  <!-- RIGHT: Simulate Today -->
-  <section class="card mb-6">
-    <h2 class="font-semibold text-lg mb-3">Simulate Today</h2>
-    <button
-      id="openSimulationConfirmBtn"
-      type="button"
-      class="w-full btn btn-teal rounded-2xl px-4 py-2 font-semibold"
-      aria-haspopup="dialog"
-      aria-controls="runSimulationConfirmModal"
-      aria-expanded="false"
-    >
-      Run Simulation
-    </button>
-
-    <div id="simResults" class="mt-3 text-sm opacity-85"></div>
-  </section>
-
 </div>
-
-<div
-  id="runSimulationConfirmModal"
-  class="create-player-modal"
-  aria-hidden="true"
->
-  <div
-    class="card create-player-modal-panel"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="runSimulationConfirmTitle"
-    tabindex="-1"
-  >
-    <button
-      type="button"
-      class="create-player-modal-close"
-      id="closeSimulationConfirmModalBtn"
-      aria-label="Close run simulation confirmation"
-    >
-      ✕
-    </button>
-
-    <div class="space-y-3">
-      <div>
-        <div class="muted text-[11px] uppercase tracking-wide">Confirmation</div>
-        <h3 id="runSimulationConfirmTitle" class="font-semibold text-xl mt-1">Run Simulation?</h3>
-      </div>
-      <p class="text-sm opacity-80">Are you sure you want to run today’s simulation?</p>
-      <div class="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
-        <button
-          type="button"
-          class="btn btn-ghost"
-          id="cancelSimulationConfirmBtn"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          class="btn btn-teal"
-          id="confirmRunSimulationBtn"
-        >
-          Run Simulation
-        </button>
-      </div>
-    </div>
-  </div>
-</div>
-
 
     <!-- Players list -->
     <section class="mb-10">
-      <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
-        <div class="flex items-center gap-3">
-          <h2 class="text-lg font-semibold">Players</h2>
-
-          <!-- View toggle -->
-          <div class="inline-flex rounded-full border border-zinc-700 overflow-hidden text-xs">
-            <button
-              id="viewCardBtn"
-              type="button"
-              class="px-3 py-1 bg-zinc-800 text-white"
-            >
-              Card view
-            </button>
-            <button
-              id="viewGalleryBtn"
-              type="button"
-              class="px-3 py-1 bg-zinc-900/40"
-            >
-              Gallery view
-            </button>
+      <!-- Compact responsive roster controls: two aligned rows on mobile. -->
+      <div class="players-controls-toolbar mb-3" aria-label="Player display controls">
+        <div class="players-controls-primary">
+          <div class="players-view-switch" role="group" aria-label="Player view">
+            <button id="viewCardBtn" type="button" class="px-3 py-1 bg-zinc-900/40"
+                    aria-label="Card view" aria-pressed="false">Cards</button>
+            <button id="viewGalleryBtn" type="button" class="px-3 py-1 bg-zinc-800 text-white"
+                    aria-label="Gallery view" aria-pressed="true">Gallery</button>
           </div>
+          <label class="players-group-control" for="groupActiveToggle">
+            <span>Group active</span>
+            <input id="groupActiveToggle" type="checkbox" class="toggle-switch"
+                   aria-label="Group active players">
+          </label>
+        </div>
 
-          <div class="flex items-center gap-2 text-xs">
-            <input id="groupActiveToggle" type="checkbox" class="toggle-switch">
-            <label for="groupActiveToggle" class="opacity-70">Group active players</label>
+        <div class="players-controls-secondary">
+          <div id="galleryColumnsControl"
+               class="flex sm:hidden players-control-field players-columns-control">
+            <label for="galleryColumnsSelect">Columns</label>
+            <select id="galleryColumnsSelect" class="input" aria-label="Mobile gallery columns">
+              <option value="2">2 cols</option>
+              <option value="3">3 cols</option>
+            </select>
           </div>
-
-          <div id="galleryColumnsControl" class="hidden items-center gap-2 text-xs sm:hidden">
-            <label for="galleryColumnsSelect" class="opacity-70">Mobile columns</label>
-            <select id="galleryColumnsSelect" class="input px-2 py-1 text-xs">
-              <option value="2">2</option>
-              <option value="3">3</option>
+          <div class="players-control-field players-sort-control">
+            <label for="playerSort">Sort by</label>
+            <select id="playerSort" class="input">
+              <option value="name-asc">Name (A → Z)</option>
+              <option value="name-desc">Name (Z → A)</option>
+              <option value="pid-asc">PID (low → high)</option>
+              <option value="pid-desc">PID (high → low)</option>
+              <option value="avg-desc">PPD (high → low)</option>
+              <option value="overall-desc">Overall Rating (high → low)</option>
+              <option value="ranking-asc">Ranking</option>
+              <option value="baseline-desc">Baseline (high → low)</option>
+              <option value="created-desc">Recently added</option>
+              <option value="created-asc">Oldest first</option>
             </select>
           </div>
         </div>
-
-        <div class="flex flex-wrap items-center gap-2 text-xs">
-          <label for="playerSort" class="opacity-70">Sort by</label>
-          <select
-            id="playerSort"
-            class="input px-3 py-1 text-xs"
-          >
-            <option value="name-asc">Name (A → Z)</option>
-            <option value="name-desc">Name (Z → A)</option>
-            <option value="pid-asc">PID (low → high)</option>
-            <option value="pid-desc">PID (high → low)</option>
-            <option value="avg-desc">PPD (high → low)</option>
-            <option value="overall-desc">Overall Rating (high → low)</option>
-            <option value="ranking-asc">Ranking</option>
-            <option value="baseline-desc">Baseline (high → low)</option>
-            <option value="created-desc">Recently added</option>
-            <option value="created-asc">Oldest first</option>
-          </select>
-          <span id="playerCount" class="opacity-70"></span>
+        <div class="players-controls-footer">
+          <span id="playerCount"></span>
         </div>
       </div>
 
       <!-- NOTE: we’ll control the grid classes from JS now -->
-      <div id="playersList" class="grid gap-4"></div>
+      <div id="playersList" class="grid gap-4 gallery-view"></div>
 
       <div id="noPlayersMsg" class="text-sm opacity-60 mt-3 hidden">
         No players yet. Create your first fake hooper above.
       </div>
     </section>
 
+    <!-- Player Stats Guide -->
+    <section id="playerStatsGuide" class="card mb-6 mobile-collapsible" data-collapsed="true">
+      <button type="button" class="mobile-collapsible-header" aria-controls="playerStatsGuideBody" aria-expanded="false">
+        <h2 class="font-semibold text-lg mb-2">Player Stats Guide</h2>
+        <span class="mobile-collapsible-chevron">▾</span>
+      </button>
+    
+      <div id="playerStatsGuideBody" class="mobile-collapsible-body" hidden>
+        <ul class="text-sm space-y-2">
+          <li><strong>Baseline Δ</strong>: Difference between a player’s average score and their baseline (positive = above baseline).</li>
+          <li><strong>PPD</strong>: Points per day in the TaskPoints app (includes habits, flex actions, sleep, etc.).</li>
+          <li><strong>Baseline</strong>: Their “default” nightly performance.</li>
+          <li><strong>Variance</strong>: How swingy they are night-to-night.</li>
+          <li><strong>Momentum</strong>: How much recent good/bad nights affect next game.</li>
+          <li><strong>Risky</strong>: How much they chase boom-or-bust lines.</li>
+          <li><strong>Variance Tilt</strong>: What % of their swings land <em>above</em> baseline (0% = always below, 100% = always above).</li>
+          <li><strong>Style</strong>: Just flavor text for now (can inform future sim tweaks).</li>
+          <li><strong>INT</strong>: Suppresses an opponent’s positive roll ceiling in NPC vs NPC matchups.</li>
+          <li><strong>Poise</strong>: Lets a player resist pressure and play up against significantly higher-ranked opponents.</li>
+          <li><strong>Streaky</strong>: Win/loss streak sensitivity (1–100, average 50). Two or more consecutive wins boost the next NPC score; consecutive losses reduce it. Maximum effect at 10 games. Streaks reset each season and ignore points totals.</li>
+        </ul>
+      </div>
+    </section>
 
   <div id="playerEditorModal" class="player-editor-modal" aria-hidden="true">
     <div
@@ -1243,8 +1318,8 @@ textarea{
     </div>
   </div>
 
-<script src="scoring_core.js"></script>
-<script src="player_profile.js"></script>
+<script src="scoring_core.js?v=20261104-backdated-vice-correction-1"></script>
+<script src="player_profile.js?v=20261102-1"></script>
 <script>
 const STORAGE_KEY = "taskpoints_v1";
 const DEFAULT_PRIMARY_COLOR = "#FFFFFF";
@@ -1640,7 +1715,7 @@ if (rebuildGameHistoryFromMatchupsIfNeeded()) {
 }
     
 let editingPlayerId = null;
-let viewMode = "card"; // "card" | "gallery"
+let viewMode = "gallery"; // "card" | "gallery"
 const GALLERY_COLUMNS_STORAGE_KEY = "taskpoints_gallery_columns";
 let galleryColumns = loadGalleryColumns();
 const PLAYER_SORT_STORAGE_KEY = "taskpoints_player_sort_mode";
@@ -2126,7 +2201,7 @@ function simulateToday() {
       ? byeIds.map(id => `${namesById[id] || 'Unknown'} has no matchup scheduled.`).join('<br>')
       : 'No matchups scheduled for today.';
 
-    $('simResults').innerHTML = `
+    if ($('simResults')) $('simResults').innerHTML = `
       <h3 class="font-semibold mb-1">Matchups for ${todayKey}</h3>
       <div>${byeText}</div>
     `;
@@ -2242,14 +2317,27 @@ participantIds.forEach(id => {
     }
   });
 
+  // The stored scoring effect describes the modifier *before* the NPC score taper.
+  const linesWithStreaks = lines.map((line, index) => {
+    const matchup = todaysMatchups[index];
+    const descriptions = ['A', 'B'].map(side => {
+      const effects = matchup?.[`player${side}Effects`];
+      const bonus = Number(effects?.streakyBonus) || 0;
+      if (Math.abs(bonus) < 0.005) return '';
+      const id = matchup?.[`player${side}Id`];
+      const name = namesById[id] || id;
+      return `${name} Streaky ${bonus > 0 ? '+' : ''}${bonus.toFixed(1)} (${effects.streakyStreak > 0 ? 'W' : 'L'}${Math.abs(effects.streakyStreak)})`;
+    }).filter(Boolean);
+    return descriptions.length ? `${line} • ${descriptions.join(' · ')}` : line;
+  });
   const byeLines = byeIds.map(id => `${namesById[id] || 'Unknown'} has no matchup scheduled.`);
-  const combined = [...lines, ...byeLines];
+  const combined = [...linesWithStreaks, ...byeLines];
 
   const outHtml = combined.length
     ? combined.map(l => `<div>• ${l}</div>`).join("")
     : `<div>No matchups created.</div>`;
 
-  $('simResults').innerHTML = `
+  if ($('simResults')) $('simResults').innerHTML = `
     <h3 class="font-semibold mb-1">Matchups for ${todayKey}</h3>
     ${outHtml}
   `;
@@ -2276,7 +2364,7 @@ function maybeAutoSimToday(){
   const hasToday = state.gameHistory.some(g => g.date === todayKey);
   if (hasToday) return;
 
-  // Run one sim for today (this will also update #simResults)
+  // Run one sim for today; results are now shown in the regular matchup views.
   simulateToday();
 }
 
@@ -3286,7 +3374,7 @@ card.innerHTML = `
 <p>INT: ${typeof p.intimidation === "number" ? `${p.intimidation}%` : "0%"}</p>
 <p>Poise: ${typeof p.poise === "number" ? `${p.poise}%` : "0%"}</p>
 <p>Greed: ${Number.isFinite(Number(p.greed)) ? `${Math.min(100, Math.max(0, Number(p.greed)))}%` : "0%"}</p>
-<p>Streaky: ${Number.isFinite(Number(p.streaky)) ? `${Math.min(100, Math.max(0, Number(p.streaky)))}%` : "0%"}</p>
+<p>Streaky: ${Number.isFinite(Number(p.streaky)) && Number(p.streaky) > 0 ? `${Math.min(100, Math.max(1, Number(p.streaky)))}` : "50"}</p>
 <p>Style: ${escapeHtml(p.style || "—")}</p>
         </div>
 
@@ -3362,7 +3450,7 @@ function buildPlayerEditorContent(player) {
           <label>PID</label>
           <div class="flex items-center justify-between gap-2 rounded-lg border border-slate-600/60 px-2 py-2 text-sm">
             <strong>${escapeHtml(playerPid)}</strong>
-            <span class="text-[10px] uppercase tracking-wide opacity-60">Permanent</span>
+            <span class="text-[10px] uppercase tracking-wide opacity-60">Edit on player page</span>
           </div>
         </div>
       `
@@ -3373,7 +3461,7 @@ function buildPlayerEditorContent(player) {
             <input data-field="pid" inputmode="numeric" autocomplete="off" autocapitalize="characters" placeholder="P001" maxlength="8" />
             <button type="button" data-act="save-pid" data-id="${player.id}" class="rounded-lg border border-emerald-500/70 px-2 py-1 text-xs whitespace-nowrap">Save PID</button>
           </div>
-          <p class="text-[10px] opacity-60 mt-1">Permanent once saved. P000 is reserved for you.</p>
+          <p class="text-[10px] opacity-60 mt-1">You can edit this later on the player page. P000 is reserved for you.</p>
         </div>
       `;
 
@@ -3440,7 +3528,7 @@ function buildPlayerEditorContent(player) {
       </div>
       <div class="player-editor-field">
         <label>Streaky</label>
-        <input data-field="streaky" type="number" min="0" max="100" value="${Number.isFinite(Number(player.streaky)) ? Math.min(100, Math.max(0, Number(player.streaky))) : 0}" />
+        <input data-field="streaky" type="number" min="1" max="100" value="${Number.isFinite(Number(player.streaky)) && Number(player.streaky) > 0 ? Math.min(100, Math.max(1, Number(player.streaky))) : 50}" />
       </div>
       <div class="player-editor-field">
         <label>Style</label>
@@ -3836,8 +3924,8 @@ const greed = greedInput
   ? Number(greedInput.value || 0)
   : (Number.isFinite(Number(player.greed)) ? Number(player.greed) : 0);
 const streaky = streakyInput
-  ? Number(streakyInput.value || 0)
-  : (Number.isFinite(Number(player.streaky)) ? Number(player.streaky) : 0);
+  ? Number(streakyInput.value || 50)
+  : (Number.isFinite(Number(player.streaky)) && Number(player.streaky) > 0 ? Number(player.streaky) : 50);
 
   const style = styleInput
     ? (styleInput.value || "").trim()
@@ -3867,7 +3955,7 @@ player.risky    = isNaN(risky) ? 3 : risky;
 player.intimidation = Math.min(100, Math.max(0, isNaN(intimidation) ? 0 : intimidation));
 player.poise = Math.min(100, Math.max(0, isNaN(poise) ? 0 : poise));
 player.greed = Math.min(100, Math.max(0, isNaN(greed) ? 0 : greed));
-player.streaky = Math.min(100, Math.max(0, isNaN(streaky) ? 0 : streaky));
+player.streaky = Math.min(100, Math.max(1, !Number.isFinite(streaky) || streaky === 0 ? 50 : streaky));
 player.style    = style || "balanced";
 player.rivalId = rivalId && rivalId !== player.id ? rivalId : "";
     player.primaryColor = primaryColor;
@@ -3943,7 +4031,7 @@ const risky = riskyInputRaw / 10;
 const intimidation = Number($("playerIntimidation").value || 0);
 const poise = Number($("playerPoise").value || 0);
 const greed = Number($("playerGreed").value || 25);
-const streaky = Number($("playerStreaky").value || 0);
+const streaky = Number($("playerStreaky").value || 50);
 
   const style = ($("playerStyle").value || "").trim();
   const primaryColor = normalizePlayerColor($("playerPrimaryColor").value, DEFAULT_PRIMARY_COLOR);
@@ -3978,7 +4066,7 @@ risky: isNaN(risky) ? 1.5 : risky,
 intimidation: Math.min(100, Math.max(0, isNaN(intimidation) ? 0 : intimidation)),
 poise: Math.min(100, Math.max(0, isNaN(poise) ? 0 : poise)),
 greed: Math.min(100, Math.max(0, isNaN(greed) ? 25 : greed)),
-streaky: Math.min(100, Math.max(0, isNaN(streaky) ? 0 : streaky)),
+streaky: Math.min(100, Math.max(1, !Number.isFinite(streaky) || streaky === 0 ? 50 : streaky)),
 
 style: style || "balanced",
 primaryColor,
@@ -3998,7 +4086,7 @@ $("playerRisky").value = "15";
 $("playerIntimidation").value = "0";
 $("playerPoise").value = "0";
 $("playerGreed").value = "25";
-$("playerStreaky").value = "0";
+$("playerStreaky").value = "50";
 $("playerStyle").value = "";
     $("playerRivalId").value = "";
     populateCreatePlayerRivalSelect();
@@ -4059,7 +4147,7 @@ function updateGalleryColumnsControl() {
   const desired = galleryColumns[orientation];
   const nextOptions = options.map((value) => ({
     value,
-    label: `${value} columns`
+    label: `${value} cols`
   }));
 
   galleryColumnsSelect.innerHTML = nextOptions
@@ -4075,6 +4163,8 @@ function updateGalleryColumnsControl() {
 
 function updateViewToggleUI() {
   if (!viewCardBtn || !viewGalleryBtn) return;
+  viewCardBtn.setAttribute("aria-pressed", String(viewMode === "card"));
+  viewGalleryBtn.setAttribute("aria-pressed", String(viewMode === "gallery"));
 
   if (viewMode === "card") {
     viewCardBtn.classList.add("bg-zinc-800", "text-white");
@@ -4210,98 +4300,24 @@ function setupCreatePlayerModal() {
   modal.dataset.init = "true";
 }
 
-function setupSimulationConfirmModal() {
-  const modal = $("runSimulationConfirmModal");
-  const openBtn = $("openSimulationConfirmBtn");
-  const closeBtn = $("closeSimulationConfirmModalBtn");
-  const cancelBtn = $("cancelSimulationConfirmBtn");
-  const confirmBtn = $("confirmRunSimulationBtn");
-  const panel = modal?.querySelector(".create-player-modal-panel");
-  if (!modal || !openBtn || !closeBtn || !cancelBtn || !confirmBtn || modal.dataset.init === "true") return;
-
-  const closeModal = ({ returnFocus = true } = {}) => {
-    modal.classList.remove("is-open");
-    modal.setAttribute("aria-hidden", "true");
-    openBtn.setAttribute("aria-expanded", "false");
-    window.unlockScrollForModal?.();
-    if (returnFocus) {
-      openBtn.focus({ preventScroll: true });
-    }
-  };
-
-  const openModal = () => {
-    if (confirmBtn.disabled) return;
-    modal.classList.add("is-open");
-    modal.setAttribute("aria-hidden", "false");
-    openBtn.setAttribute("aria-expanded", "true");
-    window.lockScrollForModal?.();
-    window.requestAnimationFrame(() => {
-      (confirmBtn || panel)?.focus?.({ preventScroll: true });
-    });
-  };
-
-  openBtn.addEventListener("click", openModal);
-  closeBtn.addEventListener("click", () => closeModal());
-  cancelBtn.addEventListener("click", () => closeModal());
-  modal.addEventListener("click", () => closeModal());
-  panel?.addEventListener("click", (event) => event.stopPropagation());
-  modal.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closeModal();
-  });
-  confirmBtn.addEventListener("click", () => {
-    if (confirmBtn.disabled) return;
-    confirmBtn.disabled = true;
-    confirmBtn.setAttribute("aria-disabled", "true");
-    try {
-      closeModal({ returnFocus: false });
-      simulateToday();
-    } finally {
-      confirmBtn.disabled = false;
-      confirmBtn.removeAttribute("aria-disabled");
-    }
-  });
-
-  window.openSimulationConfirmModal = openModal;
-  window.closeSimulationConfirmModal = closeModal;
-  modal.dataset.init = "true";
-}
-
 // ----- Collapsible panel (Player Stats Guide) -----
 function setupMobileCollapsibles() {
-  const sections = document.querySelectorAll("#playerStatsGuide.mobile-collapsible");
+  document.querySelectorAll("#playerStatsGuide.mobile-collapsible").forEach((sec) => {
+    if (sec.dataset.init === "true") return;
+    const header = sec.querySelector(".mobile-collapsible-header");
+    const body = sec.querySelector(".mobile-collapsible-body");
+    if (!header || !body) return;
 
-  function syncForViewport() {
-    const isMobile = window.matchMedia("(max-width: 640px)").matches;
-
-    sections.forEach((sec) => {
-      // Wire header click once
-      if (!sec.dataset.init) {
-        const header = sec.querySelector(".mobile-collapsible-header");
-        if (header) {
-          header.addEventListener("click", () => {
-            // Toggle on ALL viewports
-            const collapsed = sec.dataset.collapsed === "true";
-            sec.dataset.collapsed = collapsed ? "false" : "true";
-          });
-        }
-        sec.dataset.init = "true";
-      }
-
-      const isStatsGuide = sec.id === "playerStatsGuide";
-
-      // Default per viewport:
-      // mobile → collapsed
-      // desktop → collapsed
-      if (isMobile) {
-        sec.dataset.collapsed = "true";
-      } else {
-        sec.dataset.collapsed = isStatsGuide ? "true" : "false";
-      }
-    });
-  }
-
-  syncForViewport();
-  window.addEventListener("resize", syncForViewport);
+    const setCollapsed = (collapsed) => {
+      sec.dataset.collapsed = collapsed ? "true" : "false";
+      body.hidden = collapsed;
+      header.setAttribute("aria-expanded", String(!collapsed));
+    };
+    // Honor HTML's initial collapsed state. Never open it for one frame.
+    setCollapsed(sec.dataset.collapsed !== "false");
+    header.addEventListener("click", () => setCollapsed(sec.dataset.collapsed !== "true"));
+    sec.dataset.init = "true";
+  });
 }
 
 
@@ -4317,6 +4333,7 @@ const playerProfiles = window.TaskPointsPlayerProfiles.create({
   getRecord: (id) => TaskPointsCore?.computeRecord?.(state, id, { includeToday: false, allowFallback: false }),
   getCanonicalStat: (id) => canonicalPlayerSummaryCache.get(String(id)),
   getPlayerPid: (currentState, id) => TaskPointsCore?.getPlayerPid?.(currentState, id),
+  assignPlayerPid: (currentState, id, pid, options) => TaskPointsCore?.assignPlayerPid?.(currentState, id, pid, options),
   todayKey: () => getGameDayKey(),
   cachedImageUrl: getCachedImageUrl,
   loadImageUrl,
@@ -4340,7 +4357,6 @@ playerProfiles.init();
 
 setupPlayerEditorModal();
 setupCreatePlayerModal();
-setupSimulationConfirmModal();
 setupMobileCollapsibles();
 
 

@@ -206,14 +206,14 @@ Nothing visible on the page is built here. === -->
   
   <!-- Your app scripts + CSS -->
 <link rel="preload" href="assets/tailwind.css" as="style">
-<link rel="preload" href="styles.css" as="style">
+<link rel="preload" href="styles.css?v=20261104-task-swipe-feedback-2" as="style">
 
 <link rel="stylesheet" href="assets/tailwind.css" media="print" onload="this.media='all'">
-<link rel="stylesheet" href="styles.css" media="print" onload="this.media='all'">
+<link rel="stylesheet" href="styles.css?v=20261104-task-swipe-feedback-2" media="print" onload="this.media='all'">
 
 <noscript>
   <link rel="stylesheet" href="assets/tailwind.css">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20261104-task-swipe-feedback-2">
 </noscript>
   <style>
 
@@ -1657,6 +1657,7 @@ Nothing visible on the page is built here. === -->
   <button id="weekBackBtnHabits" class="btn btn-secondary btn-compact" type="button">
     ◀︎ Week
   </button>
+  <button id="habitOlderWeekBtn" class="btn btn-secondary btn-compact hidden" type="button" title="View an earlier habit week">◀︎ Older</button>
 </div>
 </div>
 
@@ -1761,8 +1762,8 @@ Nothing visible on the page is built here. === -->
     window.__tpCompleteBootView(window.__tpBootRevealPending);
   }
 </script>
-<script src="scoring_core.js"></script>  
-<script src="home_rank_percentile_line.js"></script>
+<script src="scoring_core.js?v=20261104-backdated-vice-correction-1"></script>  
+<script src="home_rank_percentile_line.js?v=20261104-season4-opponent-record-1"></script>
 <script>
 const STORAGE_KEY="taskpoints_v1";
 const PENDING_HABIT_DELTAS_KEY="taskpoints_pending_habit_deltas_v1";
@@ -2668,6 +2669,21 @@ target.source = "metric";
 
 let workEditContext = null;
 let workEditOptions = null;
+
+// Expose the live Home state to the separately loaded Work journal fast path.
+// Home's top-level `let state` is not a window property, and indirect eval
+// is not a reliable contract for retrieving it across script wrappers.
+window.TaskPointsWorkEntryAccess = {
+  getState: () => state,
+  getEditedRow: (name) => {
+    const entry = name === 'submitWorkEditModal'
+      ? resolveCompletionRef(workEditContext, 'Work Score')
+      : (name === 'saveWorkScore' ? getTodayWorkEntry() : null);
+    if (!entry || !entry.id || !entry.title?.startsWith('Work Score')) return null;
+    // Do not journal a detached/stale editor object as if it were current.
+    return state.completions.find((row) => row === entry) || null;
+  }
+};
 
 function promptEditWorkEntry(entry, options = {}) {
   if (!entry) return;
@@ -3576,7 +3592,7 @@ function getPlayerRecordText(playerId) {
   if (!playerId || playerId === 'YOU') return '0-0';
 
   if (window.TaskPointsCore?.computeRecord) {
-    const record = TaskPointsCore.computeRecord(getHomeScoreboardSeasonThreeState(), playerId, { includeToday: false, allowFallback: false });
+    const record = TaskPointsCore.computeRecord(getHomeScoreboardCurrentSeasonState(), playerId, { includeToday: false, allowFallback: false });
     return record.games ? `${record.wins}-${record.losses}` : '0-0';
   }
 
@@ -3585,7 +3601,7 @@ function getPlayerRecordText(playerId) {
     ? player.baseline
     : null;
 
-  const scopedState = getHomeScoreboardSeasonThreeState();
+  const scopedState = getHomeScoreboardCurrentSeasonState();
   const history = Array.isArray(scopedState.gameHistory) ? scopedState.gameHistory : [];
 
   let wins = 0;
@@ -3615,7 +3631,7 @@ function getYourRecordText() {
 
 function computeYourRecord(){
   if (window.TaskPointsCore?.computeRecord) {
-    return TaskPointsCore.computeRecord(getHomeScoreboardSeasonThreeState(), 'YOU', { includeToday: false, allowFallback: false });
+    return TaskPointsCore.computeRecord(getHomeScoreboardCurrentSeasonState(), 'YOU', { includeToday: false, allowFallback: false });
   }
   const matchupRecord = computeYourMatchupRecord();
   if (matchupRecord.games > 0) return matchupRecord;
@@ -3997,6 +4013,7 @@ function getAllParticipantIds(){
 const HOME_SCOREBOARD_SEASON_TWO_START = "2026-07-01";
 const HOME_SCOREBOARD_SEASON_THREE_START = "2026-09-01";
 const HOME_SCOREBOARD_SEASON_THREE_END = "2026-11-01";
+const HOME_SCOREBOARD_SEASON_FOUR_START = "2026-11-01";
 
 function getHomeScoreboardDateKey(row) {
   if (!row) return "";
@@ -4031,10 +4048,33 @@ function getHomeScoreboardSeasonThreeState() {
   };
 }
 
+// The live Home scoreboard follows the active standings season. Season 3 remains
+// independently queryable and its Sep-Oct history is not changed or erased.
+function getHomeScoreboardCurrentSeasonRows(rows, asOfKey = getGameDayKey(new Date())) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (asOfKey < HOME_SCOREBOARD_SEASON_FOUR_START) {
+    return getHomeScoreboardSeasonThreeRows(list);
+  }
+  return list.filter((row) => {
+    const key = getHomeScoreboardDateKey(row);
+    return key && key >= HOME_SCOREBOARD_SEASON_FOUR_START;
+  });
+}
+
+function getHomeScoreboardCurrentSeasonState(asOfKey = getGameDayKey(new Date())) {
+  const s = state || {};
+  return {
+    ...s,
+    matchups: getHomeScoreboardCurrentSeasonRows(s.matchups, asOfKey),
+    gameHistory: getHomeScoreboardCurrentSeasonRows(s.gameHistory, asOfKey),
+    completions: getHomeScoreboardCurrentSeasonRows(s.completions, asOfKey)
+  };
+}
+
 function getCanonicalRankingMap(){
   if (!window.TaskPointsCore?.computeCanonicalRankings) return new Map();
 
-  const scopedState = getHomeScoreboardSeasonThreeState();
+  const scopedState = getHomeScoreboardCurrentSeasonState();
   const rows = TaskPointsCore.computeCanonicalRankings(scopedState);
   const byId = new Map();
 
@@ -8077,9 +8117,12 @@ function renderViceWeekLabels(){
 function updateWeekToggleButtons() {
   const habitsBtn = document.getElementById('weekBackBtnHabits');
   const vicesBtn  = document.getElementById('weekBackBtnVices');
-  const label = isViewingLastWeek() ? 'This ▶︎' : '◀︎ Week';
+  const label = habitViceWeekOffsetDays < 0 ? 'This ▶︎' : '◀︎ Week';
   if (habitsBtn) habitsBtn.textContent = label;
-  if (vicesBtn)  vicesBtn.textContent  = label;
+  if (vicesBtn) vicesBtn.textContent = label;
+  // Older weeks are optional; the original Week button still returns to Today.
+  const olderBtn = document.getElementById('habitOlderWeekBtn');
+  if (olderBtn) olderBtn.classList.toggle('hidden', habitViceWeekOffsetDays === 0);
 }
 
 async function swapWeekViewAnimated(direction) {
@@ -8130,6 +8173,15 @@ async function swapWeekViewAnimated(direction) {
     w.style.transform = '';
     w.style.opacity = '';
   });
+}
+
+async function goHabitViceWeekOlder() {
+  if (weekSwapInFlight || habitViceWeekOffsetDays >= 0) return;
+  weekSwapInFlight = true;
+  habitViceWeekOffsetDays -= 7;
+  updateWeekToggleButtons();
+  try { await swapWeekViewAnimated('back'); }
+  finally { weekSwapInFlight = false; }
 }
 
 async function toggleHabitViceWeek() {
@@ -8366,7 +8418,15 @@ function findHabitCompletionForDay(habitId, dayKey, visibleLookup = null) {
     : null;
 }
 
-function isHabitWeeklyCompleteForDays(h, days, visibleLookup = null) {
+function isHabitWeeklyCompleteForDays(h, days, visibleLookup = null, protectedDays = null) {
+  // Render uses one already-computed freeze status per habit. Direct row
+  // refreshes obtain the status only when a cached day list was not passed.
+  const freezeKeys = protectedDays ?? (
+    h.streakMultiplierEnabled === true
+      ? (TaskPointsCore?.getHabitFreezeStatus?.(h, state, getCurrentTaskPointsDayKey())?.protectedDays || [])
+      : []
+  );
+  const protectedDayKeys = new Set(freezeKeys);
   h.doneKeys = Array.isArray(h.doneKeys) ? h.doneKeys : [];
   const weeklyThresholdRaw = Number(h.daysPerCompleteWeek);
   const hasValidWeeklyThreshold = Number.isFinite(weeklyThresholdRaw)
@@ -8374,7 +8434,9 @@ function isHabitWeeklyCompleteForDays(h, days, visibleLookup = null) {
     && weeklyThresholdRaw <= 7;
   const weeklyThreshold = hasValidWeeklyThreshold ? Math.round(weeklyThresholdRaw) : 0;
   const completedCountForVisibleWeek = days.reduce((count, d) => {
-    if (!h.doneKeys.includes(d.key)) return count;
+    // A white frozen day counts as ONE toward silver, but is never a
+    // completion and never awards habit points or an extra streak day.
+    if (!h.doneKeys.includes(d.key)) return count + (protectedDayKeys.has(d.key) ? 1 : 0);
 
     const completion = findHabitCompletionForDay(h.id, d.key, visibleLookup);
 
@@ -8554,13 +8616,15 @@ function renderHabitRow(h, days, wrap, options = {}) {
   const isGrouped = options.isGrouped ?? false;
 
   const isWeeklyCompleteForVisibleWeek = options.isWeeklyCompleteForVisibleWeek
-    ?? isHabitWeeklyCompleteForDays(h, days, options.visibleCompletionLookup);
+    ?? isHabitWeeklyCompleteForDays(h, days, options.visibleCompletionLookup, options.protectedDays);
   const appendRow = options.appendRow
     ?? ((rowToAppend) => wrap.appendChild(rowToAppend));
 
   const streak     = Number(h.__streak || 0);
   const failedStreak = Number(h.__failedStreak || 0);
   const completion = Number(h.__completion || 0);
+  const freezeEnabled = options.freezeEnabled === true;
+  const protectedDayKeys = new Set(options.protectedDays || []);
   const streakBonusText = getHabitCurrentStreakBonusText(h, streak);
   const silverWeeks = Number(options.silverWeekCount) || 0;
 
@@ -8585,9 +8649,10 @@ const daysHtml = days.map(d => {
   const on = status !== 'off';
   const isIcy = status === 'on' && Array.isArray(h.iceKeys) && h.iceKeys.includes(d.key);
   const isHalfCompleteNormalHabit = status === 'half' && !isShowerHabit(h);
-  const isPastIncomplete = !on && d.key < dateKey(new Date());
+  const isFreezeProtected = status === 'off' && protectedDayKeys.has(d.key);
+  const isPastIncomplete = !on && !isFreezeProtected && d.key < dateKey(new Date());
   const styleAttr = getHabitBubbleStyleAttrForHabit(h, status);
-  return `<div class="habitDay ${status}${isHalfCompleteNormalHabit ? ' habit-half' : ''}${isIcy ? ' icy' : ''}${isPastIncomplete ? ' past-incomplete' : ''}"${styleAttr} data-habit="${h.id}" data-day="${d.key}">
+  return `<div class="habitDay ${status}${isHalfCompleteNormalHabit ? ' habit-half' : ''}${isIcy ? ' icy' : ''}${isPastIncomplete ? ' past-incomplete' : ''}${isFreezeProtected ? ' streak-freeze-used' : ''}"${styleAttr}${isFreezeProtected ? ' title="Streak freeze used"' : ''} data-habit="${h.id}" data-day="${d.key}">
     ${d.date.getDate()}
   </div>`;
 }).join('');
@@ -8663,7 +8728,7 @@ const daysHtml = days.map(d => {
         ${failedStreak}d
       </div>
     ` : '')}
-      <span class="tag habit-silver-weeks" data-silver-weeks="${silverWeeks}" title="Weeks meeting the silver threshold since Oct 12, 2026" aria-label="${silverWeeks} silver ${silverWeeks === 1 ? 'week' : 'weeks'}">${silverWeeks} wk</span>
+      <span class="tag habit-silver-weeks" data-silver-weeks="${silverWeeks}" title="${freezeEnabled ? 'Available streak freezes (earned by silver weeks; missed days spend one)' : 'Silver weeks completed since Oct 12, 2026 (enable the streak multiplier to use freezes)'}" aria-label="${silverWeeks} ${freezeEnabled ? 'available streak freezes' : 'silver weeks'}" style="display:inline-flex;align-items:center;justify-content:center;min-width:20px;padding:1px 5px !important;border:1px solid rgba(255,255,255,.95) !important;border-radius:4px !important;background:transparent !important;color:#fff !important">${silverWeeks}</span>
       <div class="tag bg-zinc-200/60 dark:bg-zinc-700/60 text-orange-400">
         ${completion}%
       </div>
@@ -8763,6 +8828,120 @@ function scheduleHomeStreaksAtRiskRender() {
   });
 }
 
+
+let activeHabitFreezePopup = null;
+let activeHabitFreezePopupCleanup = null;
+
+function closeHabitFreezePopup() {
+  if (activeHabitFreezePopupCleanup) activeHabitFreezePopupCleanup();
+  activeHabitFreezePopupCleanup = null;
+  if (activeHabitFreezePopup) activeHabitFreezePopup.remove();
+  activeHabitFreezePopup = null;
+}
+
+function showHabitFreezePopup(habitId, dayKey) {
+  const habit = (state.habits || []).find(h => String(h?.id) === String(habitId));
+  if (!habit || habit.retired || (habit.category || 'habit') === 'vice') return;
+  const asOf = getCurrentTaskPointsDayKey();
+  const selected = Array.isArray(habit.manualStreakFreezeDays) && habit.manualStreakFreezeDays.includes(dayKey);
+  const status = TaskPointsCore?.getHabitFreezeStatus?.(habit, state, asOf);
+  const canApply = TaskPointsCore?.getHabitManualFreezeEligibility?.(habit, state, dayKey, asOf);
+  if (!status || !canApply) return;
+  if (activeHabitFreezePopup?.dataset.habitId === String(habitId)
+    && activeHabitFreezePopup?.dataset.dayKey === String(dayKey)) return;
+  closeHabitFreezePopup();
+
+  const messages = {
+    disabled: 'Only habits with streak multipliers enabled can spend freezes.',
+    not_closed: 'This day is not finished yet. You can freeze it after the 5 a.m. rollover.',
+    completed: 'Already completed, including half-completed days. No freeze is needed.',
+    already_auto: 'An automatic streak freeze is already protecting this date.',
+    no_credits: 'You have no available freezes to spend.',
+    would_change_other_freezes: 'This would alter another protected day or use more than one freeze.'
+  };
+  const overlay = document.createElement('div');
+  overlay.className = 'habit-freeze-action-overlay';
+  overlay.dataset.habitId = String(habitId);
+  overlay.dataset.dayKey = dayKey;
+  overlay.innerHTML = '<div class="habit-freeze-action-panel" role="dialog" aria-modal="true" aria-labelledby="habitFreezeActionTitle" aria-describedby="habitFreezeActionDescription">' +
+    '<h3 id="habitFreezeActionTitle">Streak freeze</h3>' +
+    '<p class="habit-freeze-action-date"></p>' +
+    '<p id="habitFreezeActionDescription" class="habit-freeze-action-description"></p>' +
+    '<p class="habit-freeze-action-balance"></p>' +
+    '<div class="habit-freeze-action-buttons">' +
+    '<button type="button" class="btn btn-teal" data-habit-freeze-action="apply"></button>' +
+    '<button type="button" class="btn btn-ghost" data-habit-freeze-action="cancel">Cancel</button>' +
+    '</div></div>';
+  overlay.querySelector('.habit-freeze-action-date').textContent =
+    (habit.name || 'Habit') + ' · ' + niceDate(fromKey(dayKey));
+  overlay.querySelector('.habit-freeze-action-balance').textContent =
+    status.balance + ' available streak freeze' + (status.balance === 1 ? '' : 's');
+  overlay.querySelector('.habit-freeze-action-description').textContent = selected
+    ? 'Remove this manual override. If the day was missed, its streak protection is removed and the freeze is refunded.'
+    : canApply.ok
+      ? 'Spend one streak freeze on this missed day? It protects a streak without adding a completion, streak day, or points—even before automatic freezes began.'
+      : (messages[canApply.reason] || 'A manual freeze cannot be applied to this day.');
+  const apply = overlay.querySelector('[data-habit-freeze-action="apply"]');
+  apply.textContent = selected ? 'Remove manual freeze' : 'Apply 1 streak freeze';
+  apply.disabled = !selected && !canApply.ok;
+
+  const keyHandler = event => {
+    if (event.key === 'Escape') { event.preventDefault(); closeHabitFreezePopup(); }
+  };
+  document.addEventListener('keydown', keyHandler);
+  activeHabitFreezePopupCleanup = () => document.removeEventListener('keydown', keyHandler);
+  overlay.addEventListener('click', event => {
+    if (event.target === overlay || event.target.closest('[data-habit-freeze-action="cancel"]')) closeHabitFreezePopup();
+  });
+  apply.addEventListener('click', () => {
+    const liveHabit = (state.habits || []).find(h => String(h?.id) === String(habitId));
+    if (!liveHabit) { closeHabitFreezePopup(); return; }
+    const oldDays = Array.isArray(liveHabit.manualStreakFreezeDays) ? liveHabit.manualStreakFreezeDays.slice() : [];
+    if (oldDays.includes(dayKey) !== selected) { closeHabitFreezePopup(); return; }
+    if (!selected && !TaskPointsCore.getHabitManualFreezeEligibility(
+      liveHabit, state, dayKey, getCurrentTaskPointsDayKey()).ok) {
+      closeHabitFreezePopup();
+      alert('That freeze is no longer available. Nothing changed.');
+      return;
+    }
+    const hadField = Object.prototype.hasOwnProperty.call(liveHabit, 'manualStreakFreezeDays');
+    liveHabit.manualStreakFreezeDays = Array.from(new Set(selected
+      ? oldDays.filter(key => key !== dayKey) : [...oldDays, dayKey])).sort();
+    const success = save(selected ? 'habit-manual-freeze-remove' : 'habit-manual-freeze-apply', {
+      immediateWrite: true, userInitiated: true, interactive: true,
+      deferCompression: true, replaceCompletions: true
+    });
+    let verified = false;
+    if (success) {
+      try {
+        const decoded = TaskPointsCore.parseTaskPointsStorageJson(localStorage.getItem(STORAGE_KEY), {});
+        const storedHabit = (decoded?.habits || []).find(h => String(h?.id) === String(habitId));
+        verified = Boolean(storedHabit && Array.isArray(storedHabit.manualStreakFreezeDays)
+          && storedHabit.manualStreakFreezeDays.includes(dayKey) === !selected);
+      } catch (error) { console.warn('Manual freeze readback failed', error); }
+    }
+    if (!verified) {
+      const current = (state.habits || []).find(h => String(h?.id) === String(habitId));
+      if (current) {
+        if (hadField) current.manualStreakFreezeDays = oldDays;
+        else delete current.manualStreakFreezeDays;
+      }
+      closeHabitFreezePopup();
+      renderHabits();
+      alert('The manual freeze could not be safely saved. Nothing was applied.');
+      return;
+    }
+    closeHabitFreezePopup();
+    renderHabits();
+    renderHomeStreakBonusSidecar();
+    scheduleHomeStreaksAtRiskRender();
+    scheduleHabitTodayScoreReconciliation();
+  });
+  document.body.appendChild(overlay);
+  activeHabitFreezePopup = overlay;
+  apply.focus({ preventScroll: true });
+}
+
 let habitTapHandlerBound = false;
 let viceTapHandlerBound = false;
 // A restack must never replace a bubble while its pointer gesture is live.
@@ -8800,6 +8979,30 @@ function renderHabits(){
 
   const { entries } = buildHabitRenderEntries(habits, sortMode);
   const silverWeekCounts = computeHabitSilverWeekCounts(habits, state.completions);
+  // The silver thresholds still grant exactly one credit per qualifying week.
+  // Only multiplier-enabled habits spend credits; others retain the legacy
+  // silver-week count without changing their streak behavior.
+  const freezeStatuses = new Map();
+  const completedRowsByHabit = new Map();
+  // Build once per Home paint, rather than scanning thousands of history
+  // rows again for every single streak multiplier habit.
+  for (const completion of (Array.isArray(state.completions) ? state.completions : [])) {
+    if (completion?.source !== 'habit' || completion.habitId == null) continue;
+    const id = String(completion.habitId);
+    if (!completedRowsByHabit.has(id)) completedRowsByHabit.set(id, []);
+    completedRowsByHabit.get(id).push(completion);
+  }
+  const currentFreezeDay = getCurrentTaskPointsDayKey();
+  habits.forEach(h => {
+    if (h.streakMultiplierEnabled !== true) return;
+    const status = TaskPointsCore?.getHabitFreezeStatus?.(
+      h, { completions: completedRowsByHabit.get(String(h.id)) || [] }, currentFreezeDay
+    );
+    if (!status) return;
+    freezeStatuses.set(String(h.id), status);
+    h.__streak = status.streak;
+    h.__failedStreak = status.streak ? 0 : h.__failedStreak;
+  });
   const visibleCompletionLookup = buildVisibleHabitCompletionLookup(habits, days, state.completions);
 
   // Render every visible habit inside the same left-rail geometry.
@@ -8872,7 +9075,9 @@ function renderHabits(){
 
     const sectionRows = section.habits.map(h => ({
       h,
-      isWeeklyComplete: isHabitWeeklyCompleteForDays(h, days, visibleCompletionLookup)
+      isWeeklyComplete: isHabitWeeklyCompleteForDays(
+        h, days, visibleCompletionLookup, freezeStatuses.get(String(h.id))?.protectedDays || []
+      )
     }));
     const appendSectionRow = createHabitWeekCompleteAppender(body);
 
@@ -8881,7 +9086,9 @@ function renderHabits(){
       showTag: !isTaggedGroup,
       isGrouped: true,
       groupMoveTag: isTaggedGroup ? section.tag : '',
-      silverWeekCount: silverWeekCounts.get(String(h.id)) || 0,
+      silverWeekCount: freezeStatuses.get(String(h.id))?.balance ?? (silverWeekCounts.get(String(h.id)) || 0),
+      freezeEnabled: freezeStatuses.has(String(h.id)),
+      protectedDays: freezeStatuses.get(String(h.id))?.protectedDays || [],
       visibleCompletionLookup,
       isWeeklyCompleteForVisibleWeek: isWeeklyComplete,
       previousIsWeeklyComplete: sectionRows[index - 1]?.isWeeklyComplete === true,
@@ -8938,16 +9145,28 @@ wrap.querySelectorAll('[data-act="habit-group-down"]').forEach(btn => {
 if (!habitTapHandlerBound) {
   habitTapHandlerBound = true;
 
-  let tap = null; // { pointerId, habitId, dayKey, category, startX, startY, moved }
+  let tap = null;
+  const clearLongPressTimer = gesture => {
+    if (gesture?.longPressTimerId != null) clearTimeout(gesture.longPressTimerId);
+    if (gesture) gesture.longPressTimerId = null;
+  };
 
   wrap.addEventListener('pointerdown', (e) => {
     const bubble = e.target.closest('.habitDay[data-habit][data-day]');
-    if (!bubble || !wrap.contains(bubble)) return;
+    if (!bubble || !wrap.contains(bubble) || (e.pointerType === 'mouse' && e.button !== 0)) return;
 
     tap = {
       pointerId: e.pointerId, habitId: bubble.dataset.habit, dayKey: bubble.dataset.day,
-      category: 'habit', startX: e.clientX, startY: e.clientY, moved: false
+      category: 'habit', startX: e.clientX, startY: e.clientY, moved: false,
+      longPressed: false, longPressTimerId: null
     };
+    const gesture = tap;
+    gesture.longPressTimerId = setTimeout(() => {
+      if (tap !== gesture || gesture.moved) return;
+      gesture.longPressed = true;
+      gesture.longPressTimerId = null;
+      showHabitFreezePopup(gesture.habitId, gesture.dayKey);
+    }, 550);
     activeHabitPointerGesture = tap;
   }, { passive: true });
 
@@ -8957,7 +9176,10 @@ if (!habitTapHandlerBound) {
     const dx = Math.abs(e.clientX - tap.startX);
     const dy = Math.abs(e.clientY - tap.startY);
 
-    if (dx > 12 || dy > 12) tap.moved = true; // scroll threshold
+    if (dx > 12 || dy > 12) {
+      tap.moved = true;
+      clearLongPressTimer(tap);
+    }
   }, { passive: true });
 
   // A deferred Home render can replace Habit bubbles between pointerdown
@@ -8968,7 +9190,12 @@ if (!habitTapHandlerBound) {
   const finishHabitPointerGesture = (e) => {
     if (!tap || e.pointerId !== tap.pointerId) return;
     const gesture = tap;
+    clearLongPressTimer(gesture);
     tap = null; activeHabitPointerGesture = null;
+    if (gesture.longPressed) {
+      scheduleDeferredHabitRestack();
+      return; // a long press never also toggles completion
+    }
     if (gesture.moved || e.type === 'pointercancel') {
       scheduleDeferredHabitRestack(); return;
     }
@@ -8989,6 +9216,16 @@ if (!habitTapHandlerBound) {
   // replacement without accepting arbitrary outside releases.
   document.addEventListener('pointerup', finishHabitPointerGesture, { passive: true });
   document.addEventListener('pointercancel', finishHabitPointerGesture, { passive: true });
+  wrap.addEventListener('contextmenu', e => {
+    const bubble = e.target.closest('.habitDay[data-habit][data-day]');
+    if (!bubble || !wrap.contains(bubble)) return;
+    e.preventDefault();
+    if (tap && tap.habitId === bubble.dataset.habit && tap.dayKey === bubble.dataset.day) {
+      clearLongPressTimer(tap);
+      tap.longPressed = true;
+    }
+    showHabitFreezePopup(bubble.dataset.habit, bubble.dataset.day);
+  });
 }
 }
 
@@ -9976,7 +10213,7 @@ function getHabitBubbleStatusClass(h, dayKey, visibleLookup = null) {
 function applyCanonicalHabitBubbleVisual(bubble, habit, dayKey, statusClass) {
   // This is deliberately exhaustive: a bubble is a projection of canonical state,
   // never an incremental collection of classes from previous taps.
-  bubble.classList.remove('on', 'off', 'half', 'failed', 'habit-half', 'icy', 'past-incomplete', 'past-failed');
+  bubble.classList.remove('on', 'off', 'half', 'failed', 'habit-half', 'icy', 'past-incomplete', 'past-failed', 'streak-freeze-used');
   const primary = ['on', 'off', 'half', 'failed'].includes(statusClass) ? statusClass : 'off';
   bubble.classList.add(primary);
   const isVice = (habit.category || 'habit') === 'vice';
@@ -11275,9 +11512,426 @@ function getTaskCardLayoutStateInput() {
   return state;
 }
 
+
+
+/* Quick mobile task rescheduling: the calendar commits on a single day tap. */
+let taskRescheduleTaskId = null;
+let taskRescheduleDisplayMonth = null;
+let taskRescheduleReturnFocus = null;
+let taskReschedulePending = false;
+let taskRescheduleRevision = 0;
+let taskRescheduleFeedbackTimer = null;
+const TASK_RESCHEDULE_CONFIRMATION_MS = 360;
+
+function isTaskRescheduleDateKey(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = fromKey(value);
+  return Number.isFinite(parsed.getTime()) && dateKey(parsed) === value;
+}
+
+function getTaskRescheduleCalendar() {
+  let overlay = $('taskRescheduleCalendar');
+  if (overlay) return overlay;
+  overlay = document.createElement('div');
+  overlay.id = 'taskRescheduleCalendar';
+  overlay.className = 'task-reschedule-backdrop hidden';
+  overlay.hidden = true;
+  overlay.setAttribute('aria-hidden', 'true');
+  overlay.innerHTML = `
+    <div class="task-reschedule-dialog" role="dialog" aria-modal="true" aria-labelledby="taskRescheduleTitle">
+      <div class="task-reschedule-heading">
+        <h2 id="taskRescheduleTitle">Reschedule task</h2>
+        <button type="button" class="task-reschedule-close" data-task-reschedule-action="close" aria-label="Close calendar">✕</button>
+      </div>
+      <div class="task-reschedule-task-name" id="taskRescheduleTaskName"></div>
+      <div class="task-reschedule-month-nav">
+        <button type="button" data-task-reschedule-action="previous" aria-label="Previous month">‹</button>
+        <strong id="taskRescheduleMonthLabel" aria-live="polite"></strong>
+        <button type="button" data-task-reschedule-action="next" aria-label="Next month">›</button>
+      </div>
+      <div class="task-reschedule-weekdays" aria-hidden="true">
+        <span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span>
+      </div>
+      <div id="taskRescheduleDayGrid" class="task-reschedule-day-grid" role="group" aria-label="Choose the new due date"></div>
+      <div id="taskRescheduleFeedback" class="task-reschedule-feedback" role="status" aria-live="polite">Tap a day to reschedule</div>
+      <div class="task-reschedule-shortcuts">
+        <button type="button" data-task-reschedule-action="today">Today</button>
+        <button type="button" data-task-reschedule-action="tomorrow">Tomorrow</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener('click', event => {
+    if (taskReschedulePending) return;
+    if (event.target === overlay) {
+      closeTaskRescheduleCalendar();
+      return;
+    }
+    const button = event.target.closest?.('[data-task-reschedule-date], [data-task-reschedule-action]');
+    if (!button) return;
+    const chosen = button.getAttribute('data-task-reschedule-date');
+    if (chosen) {
+      applyTaskRescheduleDate(chosen);
+      return;
+    }
+    const action = button.getAttribute('data-task-reschedule-action');
+    if (action === 'close') return closeTaskRescheduleCalendar();
+    if (action === 'today') return applyTaskRescheduleDate(todayKey());
+    if (action === 'tomorrow') return applyTaskRescheduleDate(dateKey(addDays(new Date(), 1)));
+    if (action === 'previous' || action === 'next') {
+      const change = action === 'previous' ? -1 : 1;
+      taskRescheduleDisplayMonth = new Date(
+        taskRescheduleDisplayMonth.getFullYear(),
+        taskRescheduleDisplayMonth.getMonth() + change, 1
+      );
+      renderTaskRescheduleCalendar();
+    }
+  });
+  overlay.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeTaskRescheduleCalendar();
+    } else if (event.key === 'Tab') {
+      const focusables = Array.from(overlay.querySelectorAll('button:not([disabled])'));
+      if (!focusables.length) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault(); last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault(); first.focus();
+      }
+    }
+  });
+  return overlay;
+}
+
+function renderTaskRescheduleCalendar() {
+  const overlay = $('taskRescheduleCalendar');
+  const month = taskRescheduleDisplayMonth;
+  if (!overlay || !month) return;
+  const year = month.getFullYear();
+  const monthIndex = month.getMonth();
+  const currentTask = state.tasks.find(task => task?.id === taskRescheduleTaskId);
+  const selected = currentTask?.dueDateISO || '';
+  const firstWeekday = new Date(year, monthIndex, 1).getDay();
+  const numberOfDays = new Date(year, monthIndex + 1, 0).getDate();
+  const cells = Array.from({ length: firstWeekday }, () =>
+    '<span class="task-reschedule-empty" aria-hidden="true"></span>');
+  const today = todayKey();
+  for (let day = 1; day <= numberOfDays; day++) {
+    const when = new Date(year, monthIndex, day);
+    const key = dateKey(when);
+    const isSelected = key === selected;
+    const isToday = key === today;
+    const label = escapeHtml(when.toLocaleDateString(undefined, {
+      weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
+    }));
+    cells.push(`<button type="button" class="task-reschedule-day${isSelected ? ' is-selected' : ''}${isToday ? ' is-today' : ''}" data-task-reschedule-date="${key}" aria-label="${label}" aria-pressed="${isSelected}">${day}</button>`);
+  }
+  overlay.querySelector('#taskRescheduleMonthLabel').textContent =
+    month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  overlay.querySelector('#taskRescheduleDayGrid').innerHTML = cells.join('');
+}
+
+function openTaskRescheduleCalendar(id) {
+  if (taskReschedulePending) return false;
+  const task = state.tasks.find(item => item?.id === id);
+  if (!task || task.completedAtISO || task.hidden || isTaskTrashed(task)
+    || getTaskStatus(task) === 'wontdo') return false;
+  taskRescheduleTaskId = id;
+  const initial = isTaskRescheduleDateKey(task.dueDateISO) ? task.dueDateISO : todayKey();
+  const dueDate = fromKey(initial);
+  taskRescheduleDisplayMonth = new Date(dueDate.getFullYear(), dueDate.getMonth(), 1);
+  taskRescheduleReturnFocus = document.activeElement;
+  const overlay = getTaskRescheduleCalendar();
+  overlay.dataset.stage = 'idle';
+  overlay.querySelector('#taskRescheduleFeedback').textContent = 'Tap a day to reschedule';
+  overlay.querySelector('#taskRescheduleTaskName').textContent = task.title || 'Untitled task';
+  renderTaskRescheduleCalendar();
+  overlay.hidden = false;
+  overlay.classList.remove('hidden');
+  overlay.setAttribute('aria-hidden', 'false');
+  (overlay.querySelector('.task-reschedule-day.is-selected')
+    || overlay.querySelector('[data-task-reschedule-action="close"]'))?.focus();
+  return true;
+}
+
+function closeTaskRescheduleCalendar(force = false) {
+  if (taskReschedulePending && !force) return;
+  taskRescheduleRevision += 1; // Invalidate any uncommitted animation-frame callback.
+  taskReschedulePending = false;
+  if (taskRescheduleFeedbackTimer !== null) {
+    clearTimeout(taskRescheduleFeedbackTimer);
+    taskRescheduleFeedbackTimer = null;
+  }
+  const overlay = $('taskRescheduleCalendar');
+  if (overlay) {
+    overlay.hidden = true;
+    overlay.classList.add('hidden');
+    overlay.setAttribute('aria-hidden', 'true');
+    overlay.dataset.stage = 'idle';
+  }
+  taskRescheduleTaskId = null;
+  taskRescheduleDisplayMonth = null;
+  if (taskRescheduleReturnFocus?.isConnected) taskRescheduleReturnFocus.focus?.();
+  taskRescheduleReturnFocus = null;
+}
+
+function setTaskRescheduleFeedback(newDateKey, stage) {
+  const overlay = $('taskRescheduleCalendar');
+  if (!overlay) return;
+  const date = fromKey(newDateKey);
+  if (stage === 'saving'
+    && taskRescheduleDisplayMonth
+    && (date.getFullYear() !== taskRescheduleDisplayMonth.getFullYear()
+      || date.getMonth() !== taskRescheduleDisplayMonth.getMonth())) {
+    taskRescheduleDisplayMonth = new Date(date.getFullYear(), date.getMonth(), 1);
+    renderTaskRescheduleCalendar();
+  }
+  overlay.dataset.stage = stage;
+  const feedback = overlay.querySelector('#taskRescheduleFeedback');
+  if (feedback) {
+    feedback.textContent = stage === 'saving'
+      ? 'Saving new date…'
+      : stage === 'saved'
+        ? '✓ Rescheduled!'
+        : stage === 'unchanged'
+          ? '✓ Date already selected'
+          : 'Could not save. Tap a date to try again.';
+  }
+  const chosen = overlay.querySelector('[data-task-reschedule-date="' + newDateKey + '"]');
+  if (!chosen) return;
+  if (stage === 'error') {
+    // A failed journal must never leave a green checkmark on the unsaved day.
+    chosen.classList.remove('is-picking', 'is-saved');
+    chosen.setAttribute('aria-pressed', 'false');
+    return;
+  }
+  overlay.querySelectorAll('.task-reschedule-day.is-picking').forEach(button => {
+    if (button !== chosen) button.classList.remove('is-picking', 'is-saved');
+  });
+  chosen.classList.add('is-picking');
+  chosen.classList.toggle('is-saved', stage === 'saved' || stage === 'unchanged');
+  chosen.setAttribute('aria-pressed', 'true');
+}
+
+function queueTaskRescheduleAfterPaint(callback) {
+  // Two frames let WebKit actually paint the selected-day pulse before any
+  // synchronous storage work. No extra persistence or snapshot writes occur.
+  if (typeof window.requestAnimationFrame === 'function') {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(callback));
+  } else {
+    setTimeout(callback, 0);
+  }
+}
+
+function applyTaskRescheduleDate(newDateKey) {
+  if (taskReschedulePending || !isTaskRescheduleDateKey(newDateKey) || !taskRescheduleTaskId) return false;
+  const task = state.tasks.find(item => item?.id === taskRescheduleTaskId);
+  if (!task || task.completedAtISO || task.hidden || isTaskTrashed(task)
+    || getTaskStatus(task) === 'wontdo') {
+    closeTaskRescheduleCalendar();
+    return false;
+  }
+
+  const taskId = taskRescheduleTaskId;
+  const revision = ++taskRescheduleRevision;
+  taskReschedulePending = true;
+  setTaskRescheduleFeedback(newDateKey, task.dueDateISO === newDateKey ? 'unchanged' : 'saving');
+
+  if (task.dueDateISO === newDateKey) {
+    // A tap on the already-selected date still gets an acknowledgement.
+    taskRescheduleFeedbackTimer = setTimeout(() => {
+      if (revision !== taskRescheduleRevision || taskRescheduleTaskId !== taskId) return;
+      taskReschedulePending = false;
+      closeTaskRescheduleCalendar();
+    }, TASK_RESCHEDULE_CONFIRMATION_MS);
+    return true;
+  }
+
+  queueTaskRescheduleAfterPaint(() => {
+    if (revision !== taskRescheduleRevision || taskRescheduleTaskId !== taskId) return;
+    const liveTask = state.tasks.find(item => item?.id === taskId);
+    if (!liveTask || liveTask.completedAtISO || liveTask.hidden || isTaskTrashed(liveTask)
+      || getTaskStatus(liveTask) === 'wontdo') {
+      closeTaskRescheduleCalendar(true);
+      return;
+    }
+    if (!assertTaskActionMutationWritable()) {
+      taskReschedulePending = false;
+      setTaskRescheduleFeedback(newDateKey, 'error');
+      return;
+    }
+
+    const previous = {
+      dueDateISO: liveTask.dueDateISO,
+      originalDueDateISO: liveTask.originalDueDateISO,
+      postponedDays: liveTask.postponedDays,
+      updatedAtISO: liveTask.updatedAtISO
+    };
+    liveTask.dueDateISO = newDateKey;
+    trackDueDatePush(liveTask, previous.dueDateISO, newDateKey);
+    liveTask.updatedAtISO = new Date().toISOString();
+    try {
+      persistTaskActionMutation(liveTask, 'swipe-right-reschedule');
+    } catch (error) {
+      Object.assign(liveTask, previous);
+      taskReschedulePending = false;
+      setTaskRescheduleFeedback(newDateKey, 'error');
+      console.warn('Failed to save the rescheduled task.', error);
+      alert('Could not save the new date. Please try again.');
+      return;
+    }
+    // "Rescheduled!" only appears after the existing guarded journal succeeds.
+    setTaskRescheduleFeedback(newDateKey, 'saved');
+    renderTasks(state);
+    window.updateCriticalTasksIsland?.();
+    taskRescheduleFeedbackTimer = setTimeout(() => {
+      if (revision !== taskRescheduleRevision || taskRescheduleTaskId !== taskId) return;
+      taskReschedulePending = false;
+      closeTaskRescheduleCalendar();
+    }, TASK_RESCHEDULE_CONFIRMATION_MS);
+  });
+  return true; // Accepted date tap; persistence completes after the feedback paints.
+}
+
+// Mobile-only left-swipe gesture. This opens the SAME confirmation and Trash
+// workflow as the existing Delete button; swipes never delete automatically.
+const TASK_SWIPE_DELETE_MIN_X = 76;
+const TASK_SWIPE_RESCHEDULE_MIN_X = 76;
+const TASK_SWIPE_DELETE_MAX_Y_RATIO = 0.6;
+
+function isTaskSwipeRescheduleGesture(deltaX, deltaY) {
+  return deltaX >= TASK_SWIPE_RESCHEDULE_MIN_X
+    && Math.abs(deltaY) <= Math.abs(deltaX) * TASK_SWIPE_DELETE_MAX_Y_RATIO;
+}
+
+function isTaskSwipeDeleteGesture(deltaX, deltaY) {
+  return deltaX <= -TASK_SWIPE_DELETE_MIN_X
+    && Math.abs(deltaY) <= Math.abs(deltaX) * TASK_SWIPE_DELETE_MAX_Y_RATIO;
+}
+
+function installMobileTaskSwipeDelete(list) {
+  if (!list || list.dataset.tpSwipeDeleteAttached === '1') return;
+  list.dataset.tpSwipeDeleteAttached = '1';
+  let gesture = null;
+  let suppressClickTaskId = '';
+  let suppressClickUntil = 0;
+
+  const mobileTouch = event => event.pointerType === 'touch'
+    && (window.matchMedia?.('(max-width: 900px)')?.matches
+      ?? (window.innerWidth <= 900));
+
+  const resetCard = current => {
+    if (!current?.card) return;
+    current.card.classList.remove('task-swipe-delete-active');
+    current.card.classList.remove('task-swipe-reschedule-active');
+    current.card.style.removeProperty('--task-swipe-delete-offset');
+    current.card.style.removeProperty('--task-swipe-reschedule-offset');
+  };
+
+  const cancel = () => {
+    resetCard(gesture);
+    gesture = null;
+  };
+
+  list.addEventListener('pointerdown', event => {
+    cancel();
+    if (!mobileTouch(event) || event.isPrimary === false) return;
+    if (!(event.target instanceof Element)) return;
+    // Leave checkmarks, menus, inputs, edits and their existing behavior alone.
+    if (event.target.closest('button, input, select, textarea, a, [contenteditable], [data-task-action]')) return;
+    const card = event.target.closest('.task-priority-card[data-task-id]');
+    if (!card || !list.contains(card)) return;
+    const id = card.dataset.taskId;
+    if (!id || editingTaskId === id) return;
+    if (!Array.isArray(state?.tasks) || !state.tasks.some(t =>
+      t?.id === id && !t.completedAtISO && !t.hidden && !isTaskTrashed(t)
+    )) return;
+    gesture = {
+      pointerId: event.pointerId, id, card,
+      startX: event.clientX, startY: event.clientY,
+      dx: 0, dy: 0, axis: null
+    };
+  }, { passive: true });
+
+  document.addEventListener('pointermove', event => {
+    const current = gesture;
+    if (!current || event.pointerId !== current.pointerId) return;
+    current.dx = event.clientX - current.startX;
+    current.dy = event.clientY - current.startY;
+    if (!current.axis && (Math.abs(current.dx) > 12 || Math.abs(current.dy) > 12)) {
+      current.axis = Math.abs(current.dx) > Math.abs(current.dy) * 1.25
+        ? 'horizontal' : 'vertical';
+    }
+    if (current.axis !== 'horizontal') {
+      resetCard(current);
+      return;
+    }
+    resetCard(current);
+    if (current.dx < 0) {
+      // Left swipe: original red Delete cue and confirmation flow.
+      current.card.classList.add('task-swipe-delete-active');
+      current.card.style.setProperty('--task-swipe-delete-offset',
+        Math.max(-96, current.dx) + 'px');
+    } else if (current.dx > 0) {
+      // Right swipe: teal Reschedule cue. A tap in the calendar will save.
+      current.card.classList.add('task-swipe-reschedule-active');
+      current.card.style.setProperty('--task-swipe-reschedule-offset',
+        Math.min(96, current.dx) + 'px');
+    }
+  }, { passive: true });
+
+  document.addEventListener('pointerup', event => {
+    const current = gesture;
+    if (!current || event.pointerId !== current.pointerId) return;
+    current.dx = event.clientX - current.startX;
+    current.dy = event.clientY - current.startY;
+    const wasHorizontalSwipe = current.axis === 'horizontal'
+      && Math.abs(current.dx) > 16 && Math.abs(current.dy) <= Math.abs(current.dx) * 0.6;
+    const shouldDelete = wasHorizontalSwipe && current.card.isConnected
+      && isTaskSwipeDeleteGesture(current.dx, current.dy);
+    const shouldReschedule = wasHorizontalSwipe && current.card.isConnected
+      && isTaskSwipeRescheduleGesture(current.dx, current.dy);
+    const id = current.id;
+    cancel();
+    if (wasHorizontalSwipe) {
+      // Even an incomplete swipe must not synthesize a task-expansion click.
+      suppressClickTaskId = id;
+      suppressClickUntil = Date.now() + 750;
+    }
+    if (shouldDelete) {
+      deleteTask(id); // Always shows "Move this task to Trash?" first.
+      // Native confirm can stay open for seconds; suppress the click afterward.
+      suppressClickUntil = Date.now() + 750;
+    } else if (shouldReschedule) {
+      openTaskRescheduleCalendar(id);
+      suppressClickUntil = Date.now() + 750;
+    }
+  }, { passive: true });
+
+  document.addEventListener('pointercancel', event => {
+    if (gesture && event.pointerId === gesture.pointerId) cancel();
+  }, { passive: true });
+
+  list.addEventListener('click', event => {
+    if (Date.now() > suppressClickUntil || !(event.target instanceof Element)) return;
+    const card = event.target.closest('.task-priority-card[data-task-id]');
+    if (!card || card.dataset.taskId !== suppressClickTaskId) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    suppressClickTaskId = '';
+    suppressClickUntil = 0;
+  }, true);
+
+  window.addEventListener('blur', cancel);
+}
+
 function initTaskListDelegation(){
   const list = document.getElementById('taskList');
   if (!list) return;
+  installMobileTaskSwipeDelete(list);
   if (list.dataset.tpDelegationAttached === '1') return;
 
   const handleTaskAction = (e) => {
@@ -13109,6 +13763,9 @@ function deleteTask(id){
       || !moveTaskToTrash(t, 'TasksScreen')) return;
   if (TaskPointsCore?.journalTaskMutation) persistTaskActionMutation(t, 'move-to-trash');
   if (editingTaskId === id) editingTaskId = null;
+  // Preserve the existing single-task delete journal optimization for gestures,
+  // which do not originate from a Delete-button click.
+  TaskPointsCore?.armTaskDeleteFastPath?.(id);
   save();
   renderTasks();
   window.updateCriticalTasksIsland?.();
@@ -14420,6 +15077,8 @@ try {
   const b2 = document.getElementById('weekBackBtnVices');
   if (b1) b1.onclick = toggleHabitViceWeek;
   if (b2) b2.onclick = toggleHabitViceWeek;
+  const olderHabitWeekBtn = document.getElementById('habitOlderWeekBtn');
+  if (olderHabitWeekBtn) olderHabitWeekBtn.onclick = goHabitViceWeekOlder;
   $('addFlexBtn')?.addEventListener('click', openFlexModal);
   $('flexDayToggleBtn')?.addEventListener('click', toggleFlexDayView);
   $('saveSleepScoreBtn')?.addEventListener('click', saveSleepScore);

@@ -325,9 +325,29 @@
 
   function ensureGoldEconomy(state, options = {}) {
     if (!state || typeof state !== 'object') return { state, changed: false, initialized: false };
-    if (state.goldEconomy && Number(state.goldEconomy.version) === ECONOMY_VERSION) {
-      if (!Array.isArray(state.goldLedger)) state.goldLedger = [];
+    if (state.goldEconomy && Number(state.goldEconomy.version) === ECONOMY_VERSION
+      && Array.isArray(state.goldLedger)) {
       return { state, changed: false, initialized: false };
+    }
+    // A populated ledger or previously established economy is evidence of
+    // earlier settlement. Never reset that history to new opening balances
+    // just because an incomplete load/partial save omitted one field.
+    // If BOTH metadata and transactions disappear, settled matchup outcomes
+    // still prove that Gold was previously active. A new opening balance here
+    // would silently reset years of transfers. Refuse initialization instead.
+    const hasRecordedGoldSettlement = [
+      state.matchups,
+      state.gameHistory,
+      state.currentSeason?.tournamentMatchupResults,
+      ...(Array.isArray(state.seasonHistory)
+        ? state.seasonHistory.map(season => season?.tournamentMatchupResults)
+        : [])
+    ].some(rows => Array.isArray(rows) && rows.some(row => row?.goldOutcome?.settled === true));
+    if ((Array.isArray(state.goldLedger) && state.goldLedger.length > 0)
+      || (state.goldEconomy && typeof state.goldEconomy === 'object')
+      || hasRecordedGoldSettlement) {
+      console.warn('Gold Economy: existing transactions, metadata, or settled Gold history detected; refusing automatic ledger reset.');
+      return { state, changed: false, initialized: false, blocked: true };
     }
 
     const launchedAtISO = String(options.nowISO || new Date().toISOString());
@@ -521,6 +541,7 @@
   function reconcileGoldEconomy(state, options = {}) {
     const initialized = ensureGoldEconomy(state, options);
     if (!state || typeof state !== 'object') return { state, changed: initialized.changed, initialized: initialized.initialized };
+    if (initialized.blocked) return { state, changed: false, initialized: false, blocked: true };
     let changed = initialized.changed;
     const rows = collectCompleteMatchups(state).slice().sort((a, b) => {
       const dateCompare = rowDateKey(a).localeCompare(rowDateKey(b));

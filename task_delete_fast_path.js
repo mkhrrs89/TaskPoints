@@ -15,6 +15,12 @@
     armedTaskId = '';
   }
 
+  // Programmatic swipe deletion shares the original click-delete journal path.
+  // This is armed only AFTER the user confirms deletion.
+  core.armTaskDeleteFastPath = function armTaskDeleteFastPath(taskId) {
+    armedTaskId = String(taskId || '').trim();
+  };
+
   function extractTaskId(button) {
     const dataId = String(button?.getAttribute?.('data-task-id') || '').trim();
     if (dataId) return dataId;

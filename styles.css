@@ -2892,6 +2892,14 @@ header,
 }
 .habitDay.off{background:transparent}
 
+/* A genuinely spent streak freeze: a missed, scoreless day stays visually distinct. */
+.habitDay.off.streak-freeze-used{
+  background: #ffffff !important;
+  color: #000000 !important;
+  font-weight: 800 !important;
+  border-color: #ffffff !important;
+}
+
 /* Make sure the bubble can hold overlays */
 .habitDay{ position: relative; overflow: hidden; }
 
@@ -2952,7 +2960,7 @@ header,
 }
 
 /* Habits & Vices: make points, streak, Edit, Delete orange */
-.habitRow .flex.items-center.gap-2.flex-wrap.text-xs .tag:not(.streak-pill),
+.habitRow .flex.items-center.gap-2.flex-wrap.text-xs .tag:not(.streak-pill):not(.habit-silver-weeks),
 .habitRow .flex.items-center.gap-2.flex-wrap.text-xs button[data-act="habit-edit"],
 .habitRow .flex.items-center.gap-2.flex-wrap.text-xs button[data-act="habit-delete"]{
   color:#fb923c;
@@ -2976,22 +2984,24 @@ header,
   color:#ef4444;
 }
 
-/* Lifetime silver-week milestone count; keep its silver appearance even
-   alongside the generic orange Habit metric tags. */
+/* Weekly silver milestone count: a number-only, thin white outlined badge.
+   Keep milestone data, semantics and visibility unchanged. */
 .habitRow .habitLeft .tag.habit-silver-weeks {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  padding: 1px 6px !important;
-  border: 1px solid rgba(203, 213, 225, 0.48) !important;
-  border-radius: 6px !important;
-  background: linear-gradient(145deg, rgba(203, 213, 225, 0.16), rgba(100, 116, 139, 0.18)) !important;
-  color: #e2e8f0 !important;
+  justify-content: center;
+  min-width: 20px;
+  padding: 1px 5px !important;
+  border: 1px solid rgba(255, 255, 255, 0.95) !important;
+  border-radius: 4px !important;
+  background: transparent !important;
+  color: #fff !important;
   font-size: 11px;
   font-weight: 750;
   font-variant-numeric: tabular-nums;
   line-height: 1.35;
   white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
 /* Habits/Vices reorder arrows: remove faint outer ring from base .btn styles */
@@ -7854,4 +7864,227 @@ body.tp-player-profile-open #cropModal:not(.hidden) { z-index: 1900 !important; 
   .tp-profile-stats small { font-size: 8px; }
   .tp-profile-columns { grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 12px; }
   .tp-profile-panel { padding: 14px; }
+}
+
+/* Habit-day long-press menu: retain ordinary tap and scrolling behavior. */
+.habitDay:not(.viceDay) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.habit-freeze-action-overlay {
+  position:fixed; inset:0; z-index:100100; display:flex;
+  align-items:center; justify-content:center;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+  background:rgba(0,0,0,.72);
+}
+.habit-freeze-action-panel {
+  width:min(100%,390px); padding:20px; border-radius:16px;
+  border:1px solid rgba(255,255,255,.2); background:#17272c; color:#fff;
+  box-shadow:0 18px 60px rgba(0,0,0,.55);
+}
+.habit-freeze-action-panel h3 { font-size:1.15rem; font-weight:750; margin:0 0 7px; }
+.habit-freeze-action-date { font-weight:600; margin:0 0 12px; }
+.habit-freeze-action-description { color:#d2dcdf; line-height:1.5; margin-bottom:14px; }
+.habit-freeze-action-balance { font-size:.85rem; color:#b1c6cd; margin-bottom:16px; }
+.habit-freeze-action-buttons { display:flex; gap:10px; flex-wrap:wrap; }
+.habit-freeze-action-buttons button { flex:1 1 auto; min-height:42px; }
+.habit-freeze-action-buttons button:disabled { cursor:not-allowed; opacity:.46; }
+
+
+/* Mobile task swipe-to-delete: vertical scrolling stays native.
+   The red cue is revealed only while the user drags left. */
+@media (max-width: 900px) and (pointer: coarse) {
+  #taskList .task-priority-card {
+    touch-action: pan-y;
+  }
+  #taskList .task-priority-card.task-swipe-delete-active {
+    position: relative;
+    overflow: visible;
+    transform: translate3d(var(--task-swipe-delete-offset, 0px), 0, 0);
+    will-change: transform;
+  }
+  #taskList .task-priority-card.task-swipe-delete-active::after {
+    content: "Delete";
+    position: absolute;
+    inset-block: 0;
+    left: 100%;
+    width: 96px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0 12px 12px 0;
+    background: #a22027;
+    color: #fff;
+    font-weight: 800;
+    font-size: 0.9rem;
+    pointer-events: none;
+  }
+}
+
+
+/* Swipe right to open the one-tap task reschedule calendar. */
+@media (max-width: 900px) and (pointer: coarse) {
+  #taskList .task-priority-card.task-swipe-reschedule-active {
+    position: relative;
+    overflow: visible;
+    transform: translate3d(var(--task-swipe-reschedule-offset, 0px), 0, 0);
+    will-change: transform;
+  }
+  #taskList .task-priority-card.task-swipe-reschedule-active::before {
+    content: "Reschedule";
+    position: absolute;
+    inset-block: 0;
+    right: 100%;
+    width: 96px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 12px 0 0 12px;
+    background: #0f766e;
+    color: #fff;
+    font-size: .79rem;
+    font-weight: 800;
+    pointer-events: none;
+  }
+}
+.task-reschedule-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 11000;
+  background: rgba(0, 0, 0, .72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(16px, env(safe-area-inset-top, 0px)) 14px max(16px, env(safe-area-inset-bottom, 0px));
+}
+.task-reschedule-backdrop[hidden] { display: none !important; }
+.task-reschedule-dialog {
+  width: min(100%, 366px);
+  max-height: min(92dvh, 740px);
+  overflow-y: auto;
+  border: 1px solid rgba(94, 234, 212, .32);
+  border-radius: 18px;
+  background: linear-gradient(160deg, #172e32, #12191f 65%);
+  color: #f4f7f8;
+  box-shadow: 0 24px 74px rgba(0,0,0,.6);
+  padding: 18px 16px 16px;
+}
+.task-reschedule-heading, .task-reschedule-month-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.task-reschedule-heading h2 { font-size: 1.08rem; font-weight: 800; margin: 0; }
+.task-reschedule-task-name {
+  font-size: .82rem;
+  color: #bdd5d6;
+  margin: 6px 0 12px;
+  overflow-wrap: anywhere;
+}
+.task-reschedule-close, .task-reschedule-month-nav button,
+.task-reschedule-shortcuts button {
+  border: 1px solid rgba(163, 191, 195, .24);
+  background: rgba(26, 56, 59, .8);
+  color: #fff;
+  border-radius: 10px;
+  min-width: 42px;
+  min-height: 42px;
+  cursor: pointer;
+}
+.task-reschedule-close { font-size: 1.05rem; }
+.task-reschedule-month-nav { margin: 0 0 8px; }
+.task-reschedule-month-nav strong { font-size: 1rem; font-weight: 800; }
+.task-reschedule-month-nav button { font-size: 1.6rem; line-height: 1; }
+.task-reschedule-weekdays, .task-reschedule-day-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 5px;
+}
+.task-reschedule-weekdays span {
+  text-align: center;
+  font-size: .73rem;
+  color: #aabec0;
+  padding: 8px 0 5px;
+}
+.task-reschedule-day {
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .055);
+  color: #f5f5f5;
+  font-weight: 650;
+  font-size: .93rem;
+  min-height: 42px;
+  padding: 0;
+  cursor: pointer;
+}
+.task-reschedule-day.is-today { border-color: #5eead4; }
+.task-reschedule-day.is-selected { background: #0f766e; border-color: #5eead4; }
+.task-reschedule-day:focus-visible, .task-reschedule-shortcuts button:focus-visible,
+.task-reschedule-month-nav button:focus-visible, .task-reschedule-close:focus-visible {
+  outline: 2px solid #a7f3d0;
+  outline-offset: 2px;
+}
+.task-reschedule-shortcuts {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+.task-reschedule-shortcuts button { flex: 1; font-weight: 700; }
+@media (max-width: 480px) {
+  .task-reschedule-backdrop { align-items: flex-end; padding-inline: 10px; }
+  .task-reschedule-dialog { width: 100%; border-radius: 18px 18px 12px 12px; }
+  .task-reschedule-day { min-height: 44px; }
+}
+
+
+/* Immediate tactile feedback for the mobile one-tap reschedule calendar. */
+.task-reschedule-day.is-picking {
+  position: relative;
+  z-index: 1;
+  background: #0f766e;
+  border-color: #99f6e4;
+  color: #fff;
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, .19);
+  animation: task-reschedule-tap 280ms cubic-bezier(.2, 1.15, .3, 1) both;
+}
+.task-reschedule-day.is-saved::after {
+  content: "✓";
+  position: absolute;
+  top: 1px;
+  right: 4px;
+  font-size: .62rem;
+  font-weight: 900;
+  opacity: .9;
+}
+.task-reschedule-day.is-saved {
+  background: #15803d;
+  border-color: #86efac;
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, .18);
+}
+.task-reschedule-feedback {
+  min-height: 24px;
+  margin-top: 11px;
+  text-align: center;
+  color: #a9c5c6;
+  font-size: .8rem;
+  font-weight: 650;
+  transition: color 160ms ease, transform 160ms ease;
+}
+.task-reschedule-backdrop[data-stage="saving"] .task-reschedule-feedback {
+  color: #99f6e4;
+}
+.task-reschedule-backdrop[data-stage="saved"] .task-reschedule-feedback,
+.task-reschedule-backdrop[data-stage="unchanged"] .task-reschedule-feedback {
+  color: #86efac;
+  transform: scale(1.035);
+}
+.task-reschedule-backdrop[data-stage="error"] .task-reschedule-feedback {
+  color: #fda4af;
+}
+@keyframes task-reschedule-tap {
+  0% { transform: scale(.92); }
+  60% { transform: scale(1.13); }
+  100% { transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-reschedule-day.is-picking { animation: none; }
+  .task-reschedule-feedback { transition: none; }
 }

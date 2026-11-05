@@ -17,8 +17,9 @@ function functionSource(name) {
   throw new Error(`could not find end of ${name}`);
 }
 
-test('Home scoreboard rank, record, and PPD use the existing September–October Season 3 window', () => {
+test('Home scoreboard preserves the Season 3 ranking window and starts Season 4 on November 1', () => {
   assert.match(html, /const HOME_SCOREBOARD_SEASON_THREE_START = "2026-09-01";/);
+  assert.match(html, /const HOME_SCOREBOARD_SEASON_FOUR_START = "2026-11-01";/);
   assert.match(html, /const HOME_SCOREBOARD_SEASON_THREE_END = "2026-11-01";/);
 
   const rows = functionSource('getHomeScoreboardSeasonThreeRows');
@@ -30,10 +31,12 @@ test('Home scoreboard rank, record, and PPD use the existing September–October
   assert.match(state, /getHomeScoreboardSeasonThreeRows\(s\.gameHistory\)/);
   assert.match(state, /getHomeScoreboardSeasonThreeRows\(s\.completions\)/);
 
-  assert.match(functionSource('getPlayerRecordText'), /getHomeScoreboardSeasonThreeState\(\)/);
-  assert.match(functionSource('computeYourRecord'), /getHomeScoreboardSeasonThreeState\(\)/);
-  assert.match(functionSource('getCanonicalRankingMap'), /getHomeScoreboardSeasonThreeState\(\)/);
+  assert.match(functionSource('getPlayerRecordText'), /getHomeScoreboardCurrentSeasonState\(\)/);
+  assert.match(functionSource('computeYourRecord'), /getHomeScoreboardCurrentSeasonState\(\)/);
+  assert.match(functionSource('getCanonicalRankingMap'), /getHomeScoreboardCurrentSeasonState\(\)/);
   assert.match(functionSource('getHomepagePpdValue'), /getCanonicalRankingMap\(\)/);
+  assert.match(functionSource('getHomeScoreboardCurrentSeasonRows'), /key >= HOME_SCOREBOARD_SEASON_FOUR_START/);
+  assert.match(functionSource('getHomeScoreboardCurrentSeasonState'), /getHomeScoreboardCurrentSeasonRows\(s\.matchups, asOfKey\)/);
 });
 
 test('Home scoreboard Gold keeps its existing independent Season 2 cutoff', () => {

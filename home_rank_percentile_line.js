@@ -265,7 +265,7 @@
     if (
       typeof global.computeYourRecord !== 'function'
       || typeof global.getPlayerRecordText !== 'function'
-      || typeof global.getHomeScoreboardSeasonThreeState !== 'function'
+      || typeof global.getHomeScoreboardCurrentSeasonState !== 'function'
     ) {
       retries += 1;
       if (retries < 50) global.setTimeout?.(install, 50);
@@ -282,7 +282,7 @@
       try {
         const core = global.TaskPointsCore;
         if (core?.computeRecord) {
-          const record = core.computeRecord(global.getHomeScoreboardSeasonThreeState(), playerId, {
+          const record = core.computeRecord(global.getHomeScoreboardCurrentSeasonState(), playerId, {
             includeToday: false,
             allowFallback: false
           });

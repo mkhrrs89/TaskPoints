@@ -144,3 +144,62 @@ test('Work preflight failure keeps the original Home save path and its failure a
   assert.equal(events.journal.length, 0);
   assert.equal(events.fullSaves, 1);
 });
+
+
+test('real Home exposes its live state and current Work row to the separate fast-path script', () => {
+  assert.match(home, /window\.TaskPointsWorkEntryAccess\s*=\s*\{/);
+  assert.match(home, /getState:\s*\(\)\s*=>\s*state/);
+  assert.match(home, /getEditedRow:\s*\(name\)\s*=>/);
+  assert.match(home, /state\.completions\.find\(\(row\)\s*=>\s*row\s*===\s*entry\)/);
+});
+
+test('unchanged Work score and hours can still be confirmed by the durable journal', () => {
+  const { ctx, fields, events, state } = makeHome({ fullSaveOutcome: false });
+  // Match exactly what the real Home Work handler will assign on Save.
+  const existing = state.completions[0];
+  existing.points = 8.08;
+  fields.workEditScoreInput.value = '8';
+  fields.workEditHoursInput.value = '8';
+  ctx.TaskPointsWorkEntryAccess = {
+    getState: () => state,
+    getEditedRow: () => state.completions.find(row => row.id === existing.id)
+  };
+  ctx.submitWorkEditModal();
+  assert.equal(events.alerts.length, 0);
+  assert.equal(events.closed, 1);
+  assert.equal(events.journal.length, 1);
+  assert.equal(events.journal[0].completionUpsert.id, existing.id);
+  assert.equal(events.fullSaves, 0, 'unchanged Work edits must not trigger a 2-second compressed snapshot save');
+});
+
+
+test('Home Work access follows replaced canonical state, not a stale completion reference', () => {
+  const start = home.indexOf('window.TaskPointsWorkEntryAccess = {');
+  const end = home.indexOf('\n};', start);
+  assert.ok(start >= 0 && end > start, 'real Home accessor source is present');
+  const source = home.slice(start, end + 3);
+  const row = {
+    id: 'work-history-1', title: 'Work Score (8) — Hours 8',
+    points: 8, workHours: 8, source: 'work'
+  };
+  const liveWindow = {};
+  const setup = new Function('window', 'firstRow',
+    'let state = { completions: [firstRow] };' +
+    'let workEditContext = firstRow;' +
+    'function resolveCompletionRef(ref) {' +
+      'return state.completions.find(entry => entry.id === ref?.id) || null;' +
+    '}' +
+    'function getTodayWorkEntry() { return state.completions[0] || null; }' +
+    source +
+    'return { access: window.TaskPointsWorkEntryAccess,' +
+      'replaceState: next => { state = next; } };'
+  )(liveWindow, row);
+  assert.equal(setup.access.getState().completions[0], row);
+  assert.equal(setup.access.getEditedRow('submitWorkEditModal'), row);
+  const newestRow = { ...row, points: 9, workHours: 9 };
+  const newerState = { completions: [newestRow] };
+  setup.replaceState(newerState);
+  assert.equal(setup.access.getState(), newerState);
+  assert.equal(setup.access.getEditedRow('submitWorkEditModal'), newestRow);
+  assert.equal(setup.access.getEditedRow('saveWorkScore'), newestRow);
+});

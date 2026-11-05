@@ -34,6 +34,10 @@
     .gold-type-pill { display:inline-flex; border:1px solid rgba(148,163,184,.2); border-radius:999px; padding:3px 7px; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; white-space:nowrap; }
     .gold-detail { color:#cbd5e1; line-height:1.35; min-width:190px; }
     .gold-empty { padding:26px 12px; text-align:center; color:#94a3b8; }
+    .gold-ledger-check { margin-bottom:14px; padding:12px 14px; border:1px solid rgba(148,163,184,.28); background:rgba(148,163,184,.08); border-radius:12px; font-size:13px; line-height:1.45; }
+    .gold-ledger-check.warning { border-color:rgba(251,146,60,.55); background:rgba(154,52,18,.13); }
+    .gold-ledger-check strong { color:#fdba74; }
+    .gold-ledger-check p + p { margin-top:7px; }
     @media (max-width:640px) {
       .gold-shell { padding-left:12px; padding-right:12px; }
       .gold-card { border-radius:15px; }
@@ -96,10 +100,11 @@
           <div>
             <div class="text-xs uppercase tracking-[.16em] gold-muted">Gold Economy</div>
             <h2 class="text-2xl font-black gold-title mt-1">Gold Ledger</h2>
-            <p class="text-sm gold-muted mt-1">Permanent Gold transactions from the Greed economy. Historical activity before launch is represented only by opening balances.</p>
+            <p class="text-sm gold-muted mt-1">Permanent Gold transactions from the Greed economy. Historical activity before launch is condensed into a legacy-rule opening balance; previous Gold thefts can remain visible in Records without appearing as individual ledger transactions.</p>
           </div>
           <div id="ledgerLaunchMeta" class="text-xs gold-muted text-right"></div>
         </div>
+        <div id="goldLedgerHistoryCheck" class="gold-ledger-check hidden" role="status" aria-live="polite"></div>
         <div id="goldBalances" class="gold-balance-grid"></div>
       </section>
 
@@ -132,6 +137,7 @@
   </div>
 
   <script src="scoring_core.js"></script>
+  <script src="gold_ledger_integrity.js?v=20261105-gold-check-1"></script>
   <script>
   (function () {
     const core = window.TaskPointsCore || {};
@@ -157,6 +163,46 @@
       if (String(id) === 'YOU') return String(state.youName || 'You');
       return String(players.get(String(id))?.name || id || 'Unknown');
     };
+
+    // Historical records may outlive their underlying Gold ledger rows.
+    // Show the discrepancy without inventing transfers or changing balances.
+    const historicalCheck = window.TaskPointsGoldLedgerIntegrity?.analyzeGoldLedger?.(state);
+    function renderGoldLedgerHistoryCheck(selectedId = '') {
+      const el = document.getElementById('goldLedgerHistoryCheck');
+      if (!el) return;
+      const relevant = rows => (rows || []).filter(row => !selectedId || row.playerId === selectedId);
+      const missing = relevant(historicalCheck?.missing);
+      const historical = relevant(historicalCheck?.historical);
+      const uncertain = relevant(historicalCheck?.unresolved);
+      const badMeta = !historicalCheck || historicalCheck.metadataIssue;
+      const warning = badMeta || missing.length > 0 || uncertain.length > 0;
+      if (!warning && !historical.length) {
+        el.classList.add('hidden');
+        el.textContent='';
+        return;
+      }
+      el.classList.remove('hidden');
+      el.classList.toggle('warning', warning);
+      const what = row => esc(playerName(row.playerId)) + ' (' + esc(row.dateKey) + ', ' + row.amount.toFixed(1) + ' Gold)';
+      const messages = [];
+      if (badMeta) messages.push('<p><strong>Gold ledger metadata incomplete.</strong> Historical balances cannot be fully verified.</p>');
+      if (missing.length) {
+        messages.push('<p><strong>Potential missing Gold transactions:</strong> ' + missing.length +
+          ' settled theft(s) on or after ledger launch have no matching gain entry. Examples: ' +
+          missing.slice(0, 4).map(what).join(', ') + '. Current balances may be incomplete.</p>');
+      }
+      if (historical.length) {
+        messages.push('<p><strong>Older theft records:</strong> ' + historical.length +
+          ' theft(s) before the ledger launch (' + esc(historicalCheck.launchDateKey) + '). Examples: ' +
+          historical.slice(0, 4).map(what).join(', ') +
+          '. These survive in Records, but the opening balance used legacy win-margin/bonus rules rather than replaying historical thefts.</p>');
+      }
+      if (uncertain.length) messages.push('<p>Some theft records lack sufficient date information to compare safely.</p>');
+      messages.push('<p class="gold-muted">Read-only check. No Gold was added or removed.</p>');
+      el.innerHTML = messages.join('');
+    }
+
+
     const typeLabel = (type) => ({
       opening_balance: 'Opening Balance',
       matchup_margin: 'Matchup Margin',
@@ -240,6 +286,7 @@
         </tr>`;
       }).join('');
       empty.classList.toggle('hidden', filtered.length !== 0);
+      renderGoldLedgerHistoryCheck(playerId);
     }
 
     const economy = state.goldEconomy || {};

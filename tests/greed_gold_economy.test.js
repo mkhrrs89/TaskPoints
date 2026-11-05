@@ -394,3 +394,50 @@ test('Cloudflare core bundle includes Greed Gold runtime last with a diagnostic 
   assert.match(workerSource, /storageIdleSource, greedGoldSource\]\.filter\(Boolean\)/);
   assert.match(workerSource, /x-taskpoints-greed-gold-economy/);
 });
+
+test('orphaned Gold transactions are not erased by accidental economy reinitialization', () => {
+  const { api } = install();
+  const state = {
+    players: [{id:'A',greed:100},{id:'B',greed:50}],
+    goldLedger: [{id:'saved-theft',type:'matchup_theft',playerId:'A',opponentId:'B',amount:12,dateKey:'2026-10-01'}],
+    matchups: [], gameHistory:[], seasonHistory:[]
+  };
+  const before = clone(state.goldLedger);
+  const result = api.reconcileGoldEconomy(state, {dateKey:'2026-11-05'});
+  assert.equal(result.blocked, true);
+  assert.deepEqual(state.goldLedger, before);
+  assert.equal(state.goldEconomy, undefined);
+});
+
+test('established economy without readable ledger is blocked, not silently reset', () => {
+  const { api } = install();
+  const state = {goldEconomy:{version:1,launchedAtISO:'2026-09-01T08:00:00Z',launchDateKey:'2026-09-01'},players:[],matchups:[],gameHistory:[],seasonHistory:[]};
+  const result = api.reconcileGoldEconomy(state, {dateKey:'2026-11-05'});
+  assert.equal(result.blocked, true);
+  assert.equal(state.goldLedger, undefined);
+  assert.equal(state.goldEconomy.launchDateKey, '2026-09-01');
+});
+
+test('Gold transactions and settlement keys are protected by verified snapshot save', () => {
+  const source = fs.readFileSync(path.resolve(__dirname,'..','scoring_core.js'),'utf8');
+  assert.match(source, /options\.allowGoldLedgerReset !== true/);
+  assert.match(source, /const ledgerWouldShrink = savedLedger\.some/);
+  assert.match(source, /next\.goldLedger = savedLedger/);
+  assert.match(source, /'settledMatchupKeys', 'ignoredChampionKeys'/);
+  assert.match(source, /const criticalArrays = \[[^\n]*'goldLedger'/);
+});
+
+test('both missing Gold ledger AND metadata cannot reset a previously settled Gold economy',()=>{
+ const {api}=install();
+ const state={
+   players:[{id:'A',greed:100},{id:'B',greed:100}],
+   matchups:[{id:'old',dateKey:'2026-11-03',playerAId:'A',playerBId:'B',
+     scoreA:60,scoreB:50,
+     goldOutcome:{settled:true,winnerId:'A',loserId:'B',theftGoldStolen:2}}],
+   gameHistory:[],seasonHistory:[]
+ };
+ const before=clone(state);
+ const result=api.reconcileGoldEconomy(state,{dateKey:'2026-11-05'});
+ assert.equal(result.blocked,true);
+ assert.deepEqual(state,before,'neither a new economy nor a new ledger may be synthesized');
+});

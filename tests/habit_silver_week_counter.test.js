@@ -99,9 +99,9 @@ test('no configured threshold cannot earn new weeks; Vices remain unchanged', ()
 
 test('counter renders a visible silver stat without replacing the silver slab logic', () => {
   assert.match(home, /const silverWeekCounts = computeHabitSilverWeekCounts\(habits, state\.completions\)/);
-  assert.match(home, /silverWeekCount: silverWeekCounts\.get\(String\(h\.id\)\) \|\| 0/);
+  assert.match(home, /silverWeekCount: freezeStatuses\.get\(String\(h\.id\)\)\?\.balance \?\? \(silverWeekCounts\.get\(String\(h\.id\)\) \|\| 0\)/);
   assert.match(home, /class="tag habit-silver-weeks"/);
-  assert.match(home, /isWeeklyComplete: isHabitWeeklyCompleteForDays\(h, days\)/);
+  assert.match(home, /isWeeklyComplete: isHabitWeeklyCompleteForDays\(\s*h, days, visibleCompletionLookup, freezeStatuses\.get\(String\(h\.id\)\)\?\.protectedDays \|\| \[\]\s*\)/);
   assert.match(styles, /\.habitRow \.habitLeft \.tag\.habit-silver-weeks/);
 });
 
@@ -121,4 +121,37 @@ test('removing a qualifying completion recalculates the count rather than granti
   assert.equal(count([item], [], '2026-10-18').get(item.id), 1);
   item.doneKeys = ['2026-10-12'];
   assert.equal(count([item], [], '2026-10-18').get(item.id), 0);
+});
+
+
+test('silver-week badge displays only the count, retaining its tooltip and accessible label', () => {
+  const rendered = home.match(/<span class="tag habit-silver-weeks"[^>]*>[^<]*<\/span>/);
+  assert.ok(rendered, 'habit week counter should remain present');
+  assert.match(rendered[0], /data-silver-weeks="\$\{silverWeeks\}"/);
+  assert.match(rendered[0], /aria-label="\$\{silverWeeks\} \$\{freezeEnabled \?/);
+  assert.match(rendered[0], />\$\{silverWeeks\}<\/span>$/);
+  assert.doesNotMatch(rendered[0], /\$\{silverWeeks\} wk/);
+});
+
+test('silver-week number has a thin white outline with no solid badge fill', () => {
+  const rule = styles.match(/\.habitRow \.habitLeft \.tag\.habit-silver-weeks\s*\{([^}]+)\}/);
+  assert.ok(rule, 'the habit week badge style is present');
+  assert.match(rule[1], /border:\s*1px solid rgba\(255, 255, 255, 0\.95\)\s*!important/);
+  assert.match(rule[1], /background:\s*transparent\s*!important/);
+  assert.match(rule[1], /justify-content:\s*center/);
+  assert.match(rule[1], /color:\s*#fff\s*!important/);
+});
+
+
+test('general Habits tag reset cannot erase the white outlined silver-week badge', () => {
+  const genericRule = styles.match(/\.habitRow \.flex\.items-center\.gap-2\.flex-wrap\.text-xs \.tag:not\(\.streak-pill\)([^,]*),/);
+  assert.ok(genericRule, 'general Habit metric styles must remain available');
+  assert.match(genericRule[1], /:not\(\.habit-silver-weeks\)/,
+    'silver week counter must not inherit border:none !important');
+  assert.match(home, /class="tag habit-silver-weeks"[^>]*style="[^"]*border:1px solid rgba\(255,255,255,\.95\) !important/);
+});
+
+test('Home requests updated CSS instead of a potentially stale iPhone stylesheet', () => {
+  assert.match(home, /href="styles\.css\?v=20261102-freeze-bold-date-1"/);
+  assert.equal((home.match(/href="styles\.css\?v=20261102-freeze-bold-date-1"/g) || []).length, 3);
 });

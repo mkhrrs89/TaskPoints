@@ -108,7 +108,7 @@ async function runBootstrap({ raw = 'compressed-authoritative-state', revision =
 
 test('Home starts the native IndexedDB read before the main app script', () => {
   const bootstrapAt = home.indexOf('<script src="home_indexeddb_bootstrap.js"></script>');
-  const coreAt = home.indexOf('<script src="scoring_core.js"></script>');
+  const coreAt = home.indexOf('<script src="scoring_core.js?v=20261102-habit-freezes-1"></script>');
   assert.ok(bootstrapAt >= 0);
   assert.ok(coreAt > bootstrapAt);
   assert.match(home, /const nativeCandidate = nativeBoot\?\.takeReadyState\?\.\(\) \|\| null;/);

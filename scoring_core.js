@@ -38,6 +38,15 @@
   // Completion IDs are intentionally category-independent for historical
   // compatibility. Journal IDs may distinguish vice/habit for coalescing.
   function habitCompletionId(habitId, dayKey) { return `habit:${habitId}:${dayKey}`; }
+  // A backdated Habit/Vice tap belongs to its selected TaskPoints day.
+  // updatedAtISO is the real edit time (useful for journal ordering), never
+  // the completedAtISO used for daily scoring.
+  function selectedHabitDayCompletedAtISO(dayKey) {
+    if (typeof dayKey !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) return '';
+    const date = fromKey(dayKey);
+    if (!Number.isFinite(date.getTime()) || dateKey(date) !== dayKey) return '';
+    return new Date(date.getTime() + 12 * 60 * 60 * 1000).toISOString();
+  }
   // V2-only, per-event durable keys protect concurrent browser tabs from
   // clobbering each other's V1 read-modify-write Habit journal.
   const V2_HABIT_EVENT_PREFIX = 'taskpoints_v2_habit_journal_event_v1:';
@@ -137,7 +146,7 @@
         if (delta.icy === true) habit.iceKeys.push(delta.dayKey);
         const points = Number.isFinite(Number(delta.completionPoints)) ? Number(delta.completionPoints) : (Number(habit.pointsPerDay) || 0) * fraction;
         const completionId = habitCompletionId(habit.id, delta.dayKey);
-        state.completions.unshift({ id: completionId, taskId: completionId, title: `[${delta.source === 'vice' ? 'Vice' : 'Habit'}] ${habit.name} (${delta.dayKey})`, points, completedAtISO: delta.completedAtISO || delta.updatedAtISO, source: delta.source, habitId: habit.id, dayKey: delta.dayKey, completionFraction: fraction });
+        state.completions.unshift({ id: completionId, taskId: completionId, title: `[${delta.source === 'vice' ? 'Vice' : 'Habit'}] ${habit.name} (${delta.dayKey})`, points, completedAtISO: delta.completedAtISO || selectedHabitDayCompletedAtISO(delta.dayKey) || delta.updatedAtISO, source: delta.source, habitId: habit.id, dayKey: delta.dayKey, completionFraction: fraction });
       } else if (failed) habit.failedKeys.push(delta.dayKey);
       habit.updatedAtISO = delta.updatedAtISO || habit.updatedAtISO;
       applied++; appliedDeltas.push(delta);
@@ -5531,6 +5540,20 @@ const workHoursMax = Object.prototype.hasOwnProperty.call(workInput, 'hoursMax')
     if (isMetric && (!c.source || c.source === 'task')) {
       c.source = 'metric';
     }
+    // Repair a historical journal replay that stamped the edit time onto a
+    // backdated Habit/Vice completion. The explicit dayKey is authoritative;
+    // other completion sources and valid same-day timestamps are untouched.
+    // Only normalize the in-memory projection here. Normal app writes retain
+    // the existing verified storage / journal / recovery safeguards.
+    if ((c.source === 'habit' || c.source === 'vice')
+      && typeof c.completedAtISO === 'string'
+      && Number.isFinite(new Date(c.completedAtISO).getTime())
+      && typeof c.dayKey === 'string') {
+      const selectedDayISO = selectedHabitDayCompletedAtISO(c.dayKey);
+      if (selectedDayISO && dateKey(c.completedAtISO) !== c.dayKey) {
+        c.completedAtISO = selectedDayISO;
+      }
+    }
     return c;
   }
 
@@ -5725,7 +5748,7 @@ if (maxEntries !== null && finalSchedules.length > maxEntries) {
     return player?.id ? String(player.id) : '';
   }
 
-  function assignPlayerPid(stateInput, playerId, pidInput) {
+  function assignPlayerPid(stateInput, playerId, pidInput, options = {}) {
     const state = normalizeState(stateInput || {});
     const playerKey = String(playerId || '');
     const pid = normalizePlayerPid(pidInput);
@@ -5750,9 +5773,15 @@ if (maxEntries !== null && finalSchedules.length > maxEntries) {
     const player = state.players[playerIndex];
     const existingPid = normalizePlayerPid(player?.pid);
     if (existingPid) {
-      return existingPid === pid
-        ? { ok: true, changed: false, pid: existingPid, playerId: playerKey, state }
-        : { ok: false, changed: false, error: 'pid_locked', pid: existingPid, state };
+      if (existingPid === pid) {
+        return { ok: true, changed: false, pid: existingPid, playerId: playerKey, state };
+      }
+      // Standard initial assignment remains locked. Only the explicit edit
+      // control on a player profile may opt into a reassignment. Old PIDs stay
+      // reserved, preserving historical identity and preventing accidental reuse.
+      if (options.allowReassign !== true) {
+        return { ok: false, changed: false, error: 'pid_locked', pid: existingPid, state };
+      }
     }
 
     const currentOwner = state.players.find((entry, index) => (
@@ -5782,7 +5811,8 @@ if (maxEntries !== null && finalSchedules.length > maxEntries) {
       players: nextPlayers,
       reservedPlayerPids: Array.from(new Set([
         ...(Array.isArray(state.reservedPlayerPids) ? state.reservedPlayerPids : []),
-        pid
+        pid,
+        ...(existingPid ? [existingPid] : [])
       ]))
     });
 
@@ -5799,12 +5829,13 @@ if (maxEntries !== null && finalSchedules.length > maxEntries) {
     if (!player || typeof player !== 'object' || Array.isArray(player)) return player;
     const greed = Number(player.greed);
     const streaky = Number(player.streaky);
+    const normalizedStreaky = player.streaky == null || !Number.isFinite(streaky) || streaky === 0 ? 50 : Math.min(100, Math.max(1, streaky));
     return {
       ...player,
       pid: normalizePlayerPid(player.pid),
       greed: Number.isFinite(greed) ? Math.min(100, Math.max(0, greed)) : 0,
-      // Placeholder: 0–100, not used in simulation or OVR.
-      streaky: Number.isFinite(streaky) ? Math.min(100, Math.max(0, streaky)) : 0
+      // Existing 0/absent values migrate to the new average rating of 50.
+      streaky: normalizedStreaky
     };
   }
 
@@ -7378,6 +7409,48 @@ return { state: merged, storageKey };
       }
       next[key] = {};
     });
+    // Gold transactions are a permanent append-only economy ledger.
+    // An unrelated/stale page save may include an empty or shortened ledger
+    // even while matchup goldOutcome history still references old thefts.
+    // Never let that save erase previously verified Gold transactions.
+    // Only an explicit Gold-specific reset may bypass this protection.
+    if (options.allowGoldLedgerReset !== true && latest) {
+      const savedLedger = Array.isArray(latest.goldLedger) ? latest.goldLedger : [];
+      const incomingLedger = Array.isArray(next.goldLedger) ? next.goldLedger : [];
+      if (savedLedger.length) {
+        const incomingIds = new Set(incomingLedger.map((row) => String(row?.id || '')).filter(Boolean));
+        const ledgerWouldShrink = savedLedger.some((row) => !row?.id || !incomingIds.has(String(row.id)));
+        if (ledgerWouldShrink) {
+          next.goldLedger = savedLedger;
+          if (latest.goldEconomy && typeof latest.goldEconomy === 'object') next.goldEconomy = latest.goldEconomy;
+          console.warn('TaskPointsCore: prevented historical Gold ledger transactions from being overwritten', {
+            savePath: options.savePath || 'unknown',
+            savedRows: savedLedger.length,
+            incomingRows: incomingLedger.length
+          });
+        }
+      }
+      // Even when all rows survive, a stale metadata snapshot could forget
+      // settled matchup keys and replay old transfers on the next startup.
+      const savedEconomy = latest.goldEconomy;
+      const incomingEconomy = next.goldEconomy;
+      if (savedEconomy && typeof savedEconomy === 'object' && Number(savedEconomy.version) > 0) {
+        if (!incomingEconomy || Number(incomingEconomy.version) !== Number(savedEconomy.version)
+          || String(incomingEconomy.launchDateKey || '') !== String(savedEconomy.launchDateKey || '')) {
+          next.goldEconomy = savedEconomy;
+        } else {
+          const merged = { ...savedEconomy, ...incomingEconomy };
+          for (const key of ['ignoredSameDayMatchupKeys', 'settledMatchupKeys', 'ignoredChampionKeys', 'settledChampionKeys']) {
+            const oldValues = Array.isArray(savedEconomy[key]) ? savedEconomy[key] : [];
+            const newValues = Array.isArray(incomingEconomy[key]) ? incomingEconomy[key] : [];
+            merged[key] = [...new Set([...oldValues, ...newValues])];
+          }
+          merged.launchedAtISO = savedEconomy.launchedAtISO || merged.launchedAtISO;
+          merged.launchDateKey = savedEconomy.launchDateKey || merged.launchDateKey;
+          next.goldEconomy = merged;
+        }
+      }
+    }
     return preserveAuthoritativeNotesBeforeSave(next, storageKey, options);
   }
 
@@ -7546,7 +7619,7 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
       const endVerification = global.TaskPointsPerf?.span?.('storage.save.verifyReadback');
       const savedRaw = localStorage.getItem(storageKey);
       const saved = savedRaw ? (parseTaskPointsStorageJson(savedRaw, {}) || {}) : {};
-      const criticalArrays = ['completions', 'matchups', 'gameHistory', 'seasonHistory', 'weightHistory', 'vo2MaxHistory', 'reminders', 'players', 'habits'];
+      const criticalArrays = ['completions', 'matchups', 'gameHistory', 'seasonHistory', 'goldLedger', 'weightHistory', 'vo2MaxHistory', 'reminders', 'players', 'habits'];
       const failed = criticalArrays.filter((key) => (
         Array.isArray(candidateWithSticky[key])
         && candidateWithSticky[key].length > 0
@@ -8412,8 +8485,170 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
     return state.habits.find(h => h && h.id === habitId) || null;
   }
 
-  function getHabitStreakDayForKey(habit, dayKeyStr) {
+  // One freeze is earned the instant a silver-week threshold is reached.
+  // Existing silver weeks (since Oct 12) are carried forward, but missed
+  // days are charged only after the feature launches. This is a read-only
+  // projection of canonical habit/completion history, not separate storage.
+  const HABIT_FREEZE_EARN_START = '2026-10-12';
+  const HABIT_FREEZE_SPEND_START = '2026-11-02';
+
+  // Manual freezes are per-habit, user-selected missed dates. A manual date
+  // uses one earned silver credit but never adds a completion or awards points.
+  // Manual dates may precede the automatic-spend launch date.
+  function getHabitFreezeStatus(habit, state, asOfDayKey = todayKey()) {
+    const empty = { balance: 0, earned: 0, spent: 0, streak: 0, protectedDays: [] };
+    if (!habit || habit.streakMultiplierEnabled !== true
+      || (habit.category || 'habit') === 'vice'
+      || !/^\d{4}-\d{2}-\d{2}$/.test(String(asOfDayKey))) return empty;
+
+    const done = new Set((Array.isArray(habit.doneKeys) ? habit.doneKeys : [])
+      .filter(key => /^\d{4}-\d{2}-\d{2}$/.test(String(key))));
+    const failed = new Set((Array.isArray(habit.failedKeys) ? habit.failedKeys : [])
+      .filter(key => /^\d{4}-\d{2}-\d{2}$/.test(String(key))));
+    const fractions = new Map();
+    for (const entry of (Array.isArray(state?.completions) ? state.completions : [])) {
+      if (entry?.source !== 'habit' || String(entry.habitId || '') !== String(habit.id)
+        || !entry.dayKey || fractions.has(entry.dayKey)) continue;
+      fractions.set(entry.dayKey, getHabitCompletionFraction(entry));
+    }
+    const lastClosed = addDaysToDateKey(asOfDayKey, -1);
+    const isComplete = key => done.has(key) && !failed.has(key);
+    const manualDays = new Set((Array.isArray(habit.manualStreakFreezeDays) ? habit.manualStreakFreezeDays : [])
+      .filter(key => /^\d{4}-\d{2}-\d{2}$/.test(String(key))
+        && key <= lastClosed && !isComplete(key)));
+
+    // Count ordinary completions first to reserve existing credits for manual
+    // overrides. This preserves previously protected automatic misses.
+    // A frozen day may then earn silver, but can never create the first credit
+    // needed to freeze *itself*. Newly earned credits fund future auto misses.
+    const thresholdRaw = Number(habit.daysPerCompleteWeek);
+    const threshold = Number.isFinite(thresholdRaw) && thresholdRaw > 0 && thresholdRaw <= 7
+      ? Math.round(thresholdRaw) : 0;
+    const weekFor = key => addDaysToDateKey(key, -((fromKey(key).getDay() + 6) % 7));
+    const completedWeekTotals = new Map();
+    const completedEarnedWeeks = new Set();
+    for (let key = HABIT_FREEZE_EARN_START; key <= asOfDayKey; key = addDaysToDateKey(key, 1)) {
+      if (!threshold || !isComplete(key)) continue;
+      const weekKey = weekFor(key);
+      const sum = (completedWeekTotals.get(weekKey) || 0) + (fractions.get(key) ?? 1);
+      completedWeekTotals.set(weekKey, sum);
+      if (sum >= threshold) completedEarnedWeeks.add(weekKey);
+    }
+    let autoBudget = Math.max(0, completedEarnedWeeks.size - manualDays.size);
+
+    // An older manually protected day can connect an existing prelaunch
+    // streak, but protected days never increase the streak's completed count.
+    const firstManualDay = manualDays.size ? [...manualDays].sort()[0] : null;
+    const scanStart = firstManualDay && firstManualDay < HABIT_FREEZE_EARN_START
+      ? firstManualDay : HABIT_FREEZE_EARN_START;
+    const beforeStart = addDaysToDateKey(scanStart, -1);
+    let streak = getHabitStreakDayForKey(habit, beforeStart);
+    let eligible = streak >= 2;
+    let availableAuto = 0, autoSpent = 0, earned = 0;
+    const protectedDays = [];
+    const manualProtectedDays = [];
+    const weeklyTotals = new Map(), earnedWeekKeys = new Set();
+
+    for (let key = scanStart; key <= asOfDayKey; key = addDaysToDateKey(key, 1)) {
+      const complete = isComplete(key);
+      let protectedMiss = false;
+      if (complete) {
+        streak += 1;
+        if (streak >= 2) eligible = true;
+      } else if (key <= lastClosed) {
+        if (manualDays.has(key)) {
+          manualProtectedDays.push(key);
+          protectedDays.push(key);
+          protectedMiss = true;
+        } else {
+          const freezeCanSpend = key >= HABIT_FREEZE_SPEND_START
+            && (!habit.streakMultiplierStartDateKey
+                || key >= habit.streakMultiplierStartDateKey)
+            && eligible && streak >= 2 && availableAuto > 0 && autoSpent < autoBudget;
+          if (freezeCanSpend) {
+            availableAuto -= 1;
+            autoSpent += 1;
+            protectedDays.push(key);
+            protectedMiss = true;
+          } else {
+            streak = 0;
+            eligible = false;
+          }
+        }
+      }
+
+      // Silver thresholds count a frozen missed day as one day, while half
+      // completions remain half. No points/completion rows are synthesized.
+      // A week still earns one credit at most, regardless of how many
+      // completed or freeze-protected days it contains.
+      if (threshold && key >= HABIT_FREEZE_EARN_START && (complete || protectedMiss)) {
+        const weekKey = weekFor(key);
+        const sum = (weeklyTotals.get(weekKey) || 0)
+          + (complete ? (fractions.get(key) ?? 1) : 1);
+        weeklyTotals.set(weekKey, sum);
+        if (sum >= threshold && !earnedWeekKeys.has(weekKey)) {
+          earnedWeekKeys.add(weekKey);
+          earned += 1;
+          availableAuto += 1;
+          // This week could not earn from completions alone, so its silver
+          // credit is genuinely new, usable for later automatic misses.
+          if (!completedEarnedWeeks.has(weekKey)) autoBudget += 1;
+        }
+      }
+    }
+
+    // A backfilled/completed manually selected day is dormant, not charged.
+    // The original manual choice remains saved so it can be explicitly undone.
+    const spent = manualDays.size + autoSpent;
+    return {
+      balance: Math.max(0, earned - spent),
+      earned, spent, streak, protectedDays, manualProtectedDays
+    };
+  }
+
+  function getHabitManualFreezeEligibility(habit, state, dayKeyStr, asOfDayKey = todayKey()) {
+    const day = String(dayKeyStr || '');
+    const asOf = String(asOfDayKey || '');
+    if (!habit || habit.streakMultiplierEnabled !== true || (habit.category || 'habit') === 'vice')
+      return { ok: false, reason: 'disabled' };
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !/^\d{4}-\d{2}-\d{2}$/.test(asOf) || day >= asOf)
+      return { ok: false, reason: 'not_closed' };
+    const manuallySelected = Array.isArray(habit.manualStreakFreezeDays) && habit.manualStreakFreezeDays.includes(day);
+    if (manuallySelected)
+      return { ok: false, reason: 'already_manual' };
+    if (Array.isArray(habit.doneKeys) && habit.doneKeys.includes(day)
+      && !(Array.isArray(habit.failedKeys) && habit.failedKeys.includes(day)))
+      return { ok: false, reason: 'completed' };
+    const current = getHabitFreezeStatus(habit, state, asOf);
+    if (current.protectedDays.includes(day)) return { ok: false, reason: 'already_auto', status: current };
+    if (current.balance < 1) return { ok: false, reason: 'no_credits', status: current };
+    const previewHabit = {
+      ...habit,
+      manualStreakFreezeDays: [...(habit.manualStreakFreezeDays || []), day]
+    };
+    const next = getHabitFreezeStatus(previewHabit, state, asOf);
+    // A manual freeze can also make a week silver, earning one new credit.
+    // That credit may fund a later automatic freeze in the same projection.
+    // Existing protected days may never be displaced to pay for the override.
+    const earnedDelta = next.earned - current.earned;
+    const spentDelta = next.spent - current.spent;
+    if (!next.manualProtectedDays.includes(day) || spentDelta < 1
+      || earnedDelta < 0 || spentDelta > earnedDelta + 1
+      || next.balance !== current.balance + earnedDelta - spentDelta
+      || current.protectedDays.some(key => !next.protectedDays.includes(key))) {
+      return { ok: false, reason: 'would_change_other_freezes', status: current };
+    }
+    return { ok: true, status: current, nextStatus: next };
+  }
+
+  function getHabitStreakDayForKey(habit, dayKeyStr, state = null) {
     if (!habit || !dayKeyStr) return 0;
+    if (state && habit.streakMultiplierEnabled === true && (habit.category || 'habit') !== 'vice'
+      && (dayKeyStr >= HABIT_FREEZE_SPEND_START
+        || (Array.isArray(habit.manualStreakFreezeDays)
+          && habit.manualStreakFreezeDays.some(key => key < dayKeyStr)))) {
+      return getHabitFreezeStatus(habit, state, dayKeyStr).streak;
+    }
 
     const doneKeys = Array.isArray(habit.doneKeys) ? habit.doneKeys : [];
     if (!doneKeys.length) return 0;
@@ -8446,7 +8681,7 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
     // This is the important part: old days stay normal.
     if (dayKeyStr < startKey) return null;
 
-    const streakDay = getHabitStreakDayForKey(habit, dayKeyStr);
+    const streakDay = getHabitStreakDayForKey(habit, dayKeyStr, state);
     if (streakDay <= 1) return null;
 
     const storedPoints = Number(entry?.points);
@@ -8556,7 +8791,20 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
       }
 
       if (done.has(today) || failed.has(today)) continue;
-      const streak = countStreakEndingOn(done, yesterday);
+      let streak = countStreakEndingOn(done, yesterday);
+      if (today >= HABIT_FREEZE_SPEND_START
+        && habit.streakMultiplierEnabled === true
+        && (habit.category || 'habit') !== 'vice') {
+        // A freeze preserves the accumulated streak even when yesterday (or
+        // an earlier day) was missed. Keep "streaks at risk" in sync with
+        // the Home streak display, including pending journal overlays.
+        const projectedHabit = {
+          ...habit,
+          doneKeys: Array.from(done),
+          failedKeys: Array.from(failed)
+        };
+        streak = getHabitFreezeStatus(projectedHabit, state, today).streak;
+      }
       if (streak <= 0) continue;
 
       const basePoints = roundPoints(Number(habit.pointsPerDay) || 0, 2);
@@ -9805,6 +10053,73 @@ function softCurbNpcScore(rawScore) {
   return Number(cappedScore.toFixed(1));
 }
   
+
+  // Season 4 starts November 1. Before it, the standings seasons begin on
+  // September 1, July 1 and June 1 respectively. Tournament results count;
+  // prior seasons never carry momentum into the next win/loss streak.
+  function getStreakySeasonStart(dateKeyStr) {
+    const key = String(dateKeyStr || '').slice(0, 10);
+    if (key >= '2026-11-01') return '2026-11-01';
+    if (key >= '2026-09-01') return '2026-09-01';
+    if (key >= '2026-07-01') return '2026-07-01';
+    return '2026-06-01';
+  }
+
+  function computeNpcWinLossStreak(state, playerId, beforeDateKey) {
+    if (!playerId || playerId === 'YOU') return 0;
+    const date = String(beforeDateKey || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return 0;
+    const seasonStart = getStreakySeasonStart(date);
+    const matches = Array.isArray(state?.matchups) ? state.matchups : [];
+    const results = [];
+    matches.forEach((matchup, index) => {
+      if (!matchup || matchup.completed === false || matchup.result === 'pending') return;
+      const key = String(matchup.dateKey || matchup.date || matchup.dateISO || '').slice(0, 10);
+      if (key < seasonStart || key >= date) return; // never use today's result
+      const aId = String(matchup.playerAId || '');
+      const bId = String(matchup.playerBId || '');
+      if (aId !== playerId && bId !== playerId) return;
+      // Null/undefined scores are unplayed, not zero-point games.
+      if (matchup.scoreA == null || matchup.scoreB == null ||
+          matchup.scoreA === '' || matchup.scoreB === '') return;
+      const a = Number(matchup.scoreA);
+      const b = Number(matchup.scoreB);
+      if (!Number.isFinite(a) || !Number.isFinite(b)) return;
+      results.push({
+        key,
+        order: index,
+        game: Number(matchup.gameNumber || matchup.seriesGameNumber) || 0,
+        result: a === b ? 0 : ((aId === playerId ? a > b : b > a) ? 1 : -1)
+      });
+    });
+    // Sort only that player's recorded season games, including tournament games.
+    results.sort((a, b) => b.key.localeCompare(a.key) || b.game - a.game || b.order - a.order);
+    if (!results.length || results[0].result === 0) return 0;
+    const direction = results[0].result;
+    let count = 0;
+    for (const result of results) {
+      if (result.result !== direction) break;
+      count++;
+    }
+    return count * direction;
+  }
+
+  function computeStreakyEffect(player, signedStreak) {
+    const rawRating = Number(player?.streaky);
+    const rating = player?.streaky == null || !Number.isFinite(rawRating) || rawRating <= 0
+      ? 50 : Math.max(1, Math.min(100, rawRating));
+    const streak = Number.isFinite(Number(signedStreak))
+      ? Math.trunc(Number(signedStreak))
+      : 0;
+    const cappedStreak = Math.sign(streak) * Math.min(10, Math.abs(streak));
+    // At 100 Streaky: two consecutive wins ≈ +1.2, five +3, ten +6.
+    // Losses mirror wins; a lone win/loss has no effect.
+    const bonus = Math.abs(streak) >= 2
+      ? Number((cappedStreak * 0.6 * rating / 100).toFixed(3))
+      : 0;
+    return { rating, streak, bonus };
+  }
+
 function simulateAiScoreForPlayerCore(player, dateKey, options = {}) {
   if (!player) {
     return NPC_SCORE_LOW_SOFT_CAP_MIN;
@@ -9823,6 +10138,7 @@ function simulateAiScoreForPlayerCore(player, dateKey, options = {}) {
     typeof player.varianceTilt === "number" ? player.varianceTilt : (player.varianceTilt || 50)
   );
   const momentum = Number(player.momentum);
+  const streakyEffect = computeStreakyEffect(player, computeNpcWinLossStreak(state, player.id, dateKey));
 
   let riskyRating = Number(player.risky);
   if (isNaN(riskyRating)) riskyRating = 0;
@@ -9912,7 +10228,7 @@ if (poiseRating > 0 && Math.random() < poiseChance) {
     }
   }
 
-const score = baseline + finalUpside + Math.min(0, rawScore - baseline);
+const score = baseline + finalUpside + Math.min(0, rawScore - baseline) + streakyEffect.bonus;
 
   const cappedScore = softCurbNpcScore(score);
 
@@ -9920,6 +10236,10 @@ if (typeof context.captureEffects === "function") {
   context.captureEffects({
     intimidationApplied,
     poiseApplied,
+    streakyRating: streakyEffect.rating,
+    streakyStreak: streakyEffect.streak,
+    streakyBonus: streakyEffect.bonus,
+    streakySeasonStart: getStreakySeasonStart(dateKey),
 
     // The current player's score was affected by the opponent's intimidation.
     intimidatedByPlayerId: intimidationApplied ? opponentId : null,
@@ -10341,11 +10661,16 @@ return Number(cappedScore.toFixed(1));
     buildPersonalScoreHistoryCsv,
     roundPoints,
     computeMomentumEffects,
+    computeNpcWinLossStreak,
+    computeStreakyEffect,
+    getStreakySeasonStart,
 generateOpponentDripScheduleCore,
 softCurbNpcScore,
 simulateAiScoreForPlayerCore,
     deriveCompletionPoints,
     pointsForCompletion,
+    getHabitFreezeStatus,
+    getHabitManualFreezeEligibility,
     getAtRiskStreakRows,
     syncDerivedPoints,
     computeMatchupRecord,
