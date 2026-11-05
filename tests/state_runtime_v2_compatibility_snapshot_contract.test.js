@@ -292,8 +292,21 @@ test('backdated completion retains its canonical date through legacy replay and 
     updatedAtISO: '2026-09-12T21:40:08.329Z', completedAtISO: '2026-09-10T16:00:00.000Z' };
   const coreSource = fs.readFileSync(path.join(__dirname, '..', 'scoring_core.js'), 'utf8');
   const replaySource = coreSource.slice(coreSource.indexOf('  function applyPendingHabitDeltas('), coreSource.indexOf('  function verifyPersistedHabitDeltas('));
-  const context = { Date, console, global: {}, habitCompletionId: (id, day) => `habit:${id}:${day}` };
-  vm.runInNewContext(replaySource, context);
+  // Main's backdated-day fix added a core helper to journal replay.
+  // Exercise that real function body rather than silently omitting its
+  // dependency from this isolated V2 compatibility fixture.
+  const daySource = coreSource.slice(
+    coreSource.indexOf('  function selectedHabitDayCompletedAtISO('),
+    coreSource.indexOf('  // V2-only, per-event durable keys')
+  );
+  assert.match(daySource, /function selectedHabitDayCompletedAtISO/);
+  const context = {
+    Date, Number, console, global: {},
+    habitCompletionId: (id, day) => `habit:${id}:${day}`,
+    fromKey: day => new Date(`${day}T00:00:00.000Z`),
+    dateKey: date => date.toISOString().slice(0, 10)
+  };
+  vm.runInNewContext(daySource + replaySource, context);
   const legacy = structuredClone(initial);
   context.applyPendingHabitDeltas(legacy, [delta]);
   localStorage.setItem(LEGACY_KEY, JSON.stringify(legacy));
@@ -304,7 +317,8 @@ test('backdated completion retains its canonical date through legacy replay and 
   const fallback = structuredClone(initial);
   const oldDelta = { ...delta }; delete oldDelta.completedAtISO;
   context.applyPendingHabitDeltas(fallback, [oldDelta]);
-  assert.equal(fallback.completions[0].completedAtISO, delta.updatedAtISO);
+  assert.equal(fallback.completions[0].completedAtISO, '2026-09-10T12:00:00.000Z');
+  assert.notEqual(fallback.completions[0].completedAtISO, delta.updatedAtISO);
 });
 
 test('V2-compat snapshot refuses a V2 revision change during its asynchronous collection read', async () => {
