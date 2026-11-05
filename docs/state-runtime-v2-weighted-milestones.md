@@ -1423,3 +1423,51 @@ These adjustments address asynchronous multi-tab propagation in
 WebKit and real Notes autosave races. The actual browser workflows,
 not only focused unit tests, must pass before these gates are marked
 green. V1 remains authoritative and the weighted estimate stays 67%.
+
+
+## Whole-backup restoration coverage audit (preview only)
+
+The new explicit \`inspectPreviewWholeBackupRestoreCoverage(archiveBytes)\`
+builds on the existing authenticated Game ZIP/image preflight, then independently
+compares **all** raw V1 snapshot fields against the archived state. It covers
+Tasks, completions, Habits, Notes, unknown future fields and field presence
+rather than limiting verification to Game history and player records.
+It also invokes the same Settings full-import normalizer with **detached
+in-memory objects** to report two distinct failure types:
+
+- the imported snapshot differs after Settings-style normalization;
+- both sides normalize identically, but the normalizer would drop or
+  replace raw original fields. Normalized parity is not raw preservation.
+
+An explicit, bounded list of independently persisted keys is then inspected:
+Notes cache and dirty/authority markers, Projects raw data, Today view, and
+three Game gallery/sort/grouping preferences. The report counts source keys
+missing or mismatched in the archive's auxiliary payload, *without returning
+any names, values, Notes text, image IDs or other private content*.
+Even if every one is supplied in a custom ZIP, the actual Settings importer
+does not replay all these keys and writes ZIP photos **before** the later
+confirmation to replace application state. It is not an atomic import.
+
+The API is preview-host-only and dark-mode-only. It rechecks the entire
+origin inventory, generation, host and mode around verification; malformed
+ZIPs, missing live photos, old-tab races, absent Settings normalizer,
+normalizer loss and unrelated snapshot field changes all fail closed. It
+does not mutate V1, V2, photos or backup artifacts, and makes no claim
+about an authenticated off-device recovery copy, interrupted production
+restore or successful device-level replay.
+
+The focused tests use the real production stored-ZIP builder to verify
+whole-snapshot parity, missing unknown/Task fields, Notes omission,
+destructive normalizers, complete-but-**unrestorable** sidecars,
+missing photo bytes, an old-tab origin edit during SHA hashing, and
+production-host/dark-mode denial.
+
+**Gate state unchanged: 67/100.** This is partial diagnostic evidence within
+the uncredited recovery and nonpilot-migration milestones. In particular
+\`independentOriginSidecarsRestorable:false\`,
+\`fullAppRestoreVerified:false\`, \`offDeviceBackupVerified:false\`,
+\`canApply:false\` and \`canPromote:false\` remain mandatory. A safe
+production importer would require separately approved writer fencing,
+image staging/rollback, complete sidecar replay, independent authenticated
+backups, interrupted physical-iOS restore testing, and actual durable
+post-restart verification. No Main sync or authority promotion occurred.
