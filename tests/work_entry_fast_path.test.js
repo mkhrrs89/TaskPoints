@@ -419,7 +419,7 @@ test('an unchanged Work edit with a detached row cannot bypass full-save confirm
   assert.equal(h.calls.journal.length, 0);
   assert.equal(h.calls.fullSaves, 1);
   assert.equal(h.calls.lastSavePath, 'work-entry-fast-path-fallback');
-
+});
 
 test('two Work completion edits use the atomic batch journal once when available',()=>{
   const h=makeHarness({batchEnabled:true,twoRowWorkSave:true});
