@@ -392,6 +392,79 @@ try {
       newerSchemaUntouched:true,v1Retained:true};
   });
 
+  await run('real V6 Gold preview preserves appended history on reload and rejects an old-tab edit',async context=>{
+    const page=await open(context);
+    const current=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const fullToken=()=>JSON.stringify(Array.from(
+        {length:localStorage.length},(_,i)=>localStorage.key(i))
+        .sort().map(k=>[k,localStorage.getItem(k)]));
+      const baseline=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      baseline.goldLedger=[{id:'gold:browser:opening',type:'opening_balance',
+        playerId:'YOU',amount:12,balanceAfter:12,
+        dateKey:'2026-11-05',custom:{doNotDrop:true}}];
+      baseline.goldEconomy={version:1,launchDateKey:'2026-11-05',
+        settledMatchupKeys:[],settledChampionKeys:[],
+        browserMetadata:{keep:'exact'}};
+      localStorage.setItem('taskpoints_v1',JSON.stringify(baseline));
+      const first=await api.rehearsePreviewGoldLedgerSeed(
+        fullToken(),'browser-v6-first');
+      const updated=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      updated.goldLedger.push({id:'gold:browser:margin',type:'matchup_margin',
+        playerId:'YOU',opponentId:'NPC',amount:4,balanceAfter:16,
+        metadata:{retained:'completely'}});
+      updated.goldEconomy.browserMetadata.keep='updated';
+      localStorage.setItem('taskpoints_v1',JSON.stringify(updated));
+      const reconcile=await api.rehearsePreviewGoldLedgerReconcile(
+        fullToken(),'browser-v6-second');
+      const parity=await api.inspectPreviewGoldLedgerParity();
+      const db=await api.open();
+      const rows=await new Promise((resolve,reject)=>{
+        const req=db.transaction('goldLedger','readonly')
+          .objectStore('goldLedger').getAll();
+        req.onsuccess=()=>resolve(req.result);
+        req.onerror=()=>reject(req.error);
+      });
+      const stored=localStorage.getItem('taskpoints_v1');
+      return {first,reconcile,parity,rows,version:db.version,
+        sourceExact:stored===JSON.stringify(updated),
+        readAuthority:api.getStatus().readAuthority};
+    });
+    assert.equal(current.version,6);
+    assert.equal(current.first.collectionParityVerified,true,
+      JSON.stringify(current.first));
+    assert.equal(current.reconcile.collectionParityVerified,true,
+      JSON.stringify(current.reconcile));
+    assert.equal(current.reconcile.changedRows,1);
+    assert.equal(current.reconcile.addedRows,1);
+    assert.equal(current.parity.match,true,JSON.stringify(current.parity));
+    assert.deepEqual(current.rows.map(r=>r.value.id),[
+      'gold:browser:opening','gold:browser:margin']);
+    assert.equal(current.rows[1].value.metadata.retained,'completely');
+    assert.equal(current.sourceExact,true);
+    assert.equal(current.readAuthority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.evaluate(()=>window.V2BrowserFixture.start());
+    const reloaded=await page.evaluate(async()=>window.TaskPointsStateRuntimeV2
+      .inspectPreviewGoldLedgerParity());
+    assert.equal(reloaded.match,true,JSON.stringify(reloaded));
+    const other=await open(context);
+    const changed=await other.evaluate(()=>{
+      const next=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      next.goldLedger[0].amount=13;
+      localStorage.setItem('taskpoints_v1',JSON.stringify(next));
+      return localStorage.getItem('taskpoints_v1');
+    });
+    await requireCrossTabStorageValue(page,'taskpoints_v1',changed);
+    const stale=await page.evaluate(async()=>window.TaskPointsStateRuntimeV2
+      .inspectPreviewGoldLedgerParity());
+    assert.equal(stale.match,false);
+    assert.equal(stale.reason,'gold_preview_source_stale',JSON.stringify(stale));
+    return {seedVerified:true,appendVerified:true,reloadVerified:true,
+      staleOldTabRefused:true,readAuthority:'legacy_only'};
+  });
+
   await run('real IndexedDB v1-to-v6 upgrade preserves cross-Habit index, Tasks and Projects without a live cutover', async context => {
     const page=await context.newPage();
     page.on('pageerror',err=>console.warn('Upgrade fixture error: '+err.message));
