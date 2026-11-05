@@ -1448,16 +1448,30 @@ try {
       const imageId='v2-preview-game-photo-test';
       // The legacy image helper stores this in its OWN V1 image DB.
       // Test origin is disposable, and the V2 coverage inspector stays read-only.
-      await TaskPointsCore.saveImageBlob(imageId,
-        new Blob(['image-test-original'],{type:'image/png'}));
+      let writeDenied=false;
+      try {
+        await TaskPointsCore.saveImageBlob(imageId,
+          new Blob(['image-test-original'],{type:'image/png'}));
+      } catch(error) {
+        // WebKit's Linux runner can reject Blob structured cloning before
+        // an object-store write. Never reinterpret that as photo integrity.
+        const detail=String(error?.message||'');
+        if(error?.name!=='UnknownError'
+          || !detail.includes('Error preparing Blob/File data'))
+          throw error;
+        writeDenied=true;
+      }
       const seed=await api.rehearsePreviewGameCollectionSeed(token(),'photo-proof');
       const source=token();
       const covered=await api.inspectPreviewGameImageCoverage();
-      return {seed,covered,originUnchanged:source===token(),
+      return {seed,covered,writeDenied,originUnchanged:source===token(),
         supportsEnumeration:typeof indexedDB.databases==='function'};
     });
     assert.equal(result.seed.collectionParityVerified,true,JSON.stringify(result.seed));
-    if(result.supportsEnumeration){
+    if(result.writeDenied){
+      assert.equal(result.covered.imageBytesVerified,false,JSON.stringify(result.covered));
+      assert.equal(result.covered.canPromote,false);
+    }else if(result.supportsEnumeration){
       assert.equal(result.covered.reason,
         'game_preview_image_coverage_verified',JSON.stringify(result.covered));
       assert.equal(result.covered.referencedImageCount,1);
@@ -1470,8 +1484,10 @@ try {
     }
     assert.equal(result.originUnchanged,true);
     const legacy=await open(context);
-    await legacy.evaluate(()=>TaskPointsCore.deleteImageBlob(
-      'v2-preview-game-photo-test'));
+    if(!result.writeDenied) {
+      await legacy.evaluate(()=>TaskPointsCore.deleteImageBlob(
+        'v2-preview-game-photo-test'));
+    }
     const after=await page.evaluate(async()=>{
       const api=window.TaskPointsStateRuntimeV2;
       const report=await api.inspectPreviewGameImageCoverage();
@@ -1480,17 +1496,96 @@ try {
           .players.some(p=>p.imageId==='v2-preview-game-photo-test'),
         authority:api.getStatus().readAuthority};
     });
-    if(result.supportsEnumeration){
+    if(result.supportsEnumeration && !result.writeDenied){
       assert.equal(after.report.reason,'game_image_references_missing',JSON.stringify(after.report));
       assert.equal(after.report.missingImageCount,1);
+    }else if(result.writeDenied){
+      assert.equal(after.report.imageBytesVerified,false);
     }else assert.equal(after.report.reason,'game_image_database_enumeration_unavailable');
     assert.equal(after.report.canPromote,false);
     assert.equal(after.idStillReferenced,true);
     assert.equal(after.authority,'legacy_only');
-    return {realLegacyBlobObserved:result.supportsEnumeration,
-      missingBlobDetected:result.supportsEnumeration,
+    return {realLegacyBlobObserved:result.supportsEnumeration&&!result.writeDenied,
+      missingBlobDetected:result.supportsEnumeration&&!result.writeDenied,
       unsupportedEnumerationFailsClosed:!result.supportsEnumeration,
+      blobPersistenceDeniedSafely:result.writeDenied,
       legacyReferencePreserved:true};
+  });
+
+
+  await run('Game ZIP snapshot checks actual exporter archive and fails closed on old-tab changes',async context=>{
+    const page=await open(context);
+    await page.addScriptTag({
+      url:new URL('/home_export_responsiveness.js',page.url()).href
+    });
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const state=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      state.players=[{id:'p1',name:'ZIP Player',season:'S4',unknown:{a:3}}];
+      state.youImageId='';
+      state.seasonHistory=[{id:'S3',winner:'p1',retained:true}];
+      state.currentSeason={id:'S4',wins:2};
+      localStorage.setItem('taskpoints_v1',JSON.stringify(state));
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const seed=await api.rehearsePreviewGameCollectionSeed(token(),'zip-image-free');
+      const files=[{path:'manifest.json',
+        data:new TextEncoder().encode(JSON.stringify({
+          exportType:'taskpoints_full_backup',version:2,
+          exportedAtISO:'2026-11-04T23:00:00.000Z',state,aux:{}
+        }))}];
+      const archive=await TaskPointsResponsiveExport.buildZipBlob(files);
+      const bytes=new Uint8Array(await archive.arrayBuffer());
+      const inspected=await api.inspectPreviewGameBackupZip(bytes);
+      const corrupted=Uint8Array.from(bytes);
+      corrupted[40]^=0x40;
+      const bad=await api.inspectPreviewGameBackupZip(corrupted);
+      window.__v2ExportArchiveBytes=bytes;
+      return {seed,inspected,bad,hasPhotos:!!state.youImageId,
+        sourceStillUnchanged:token()===token()};
+    });
+    assert.equal(result.seed.collectionParityVerified,true,JSON.stringify(result.seed));
+    assert.equal(result.inspected.reason,
+      'game_backup_missing_independent_preferences',JSON.stringify(result.inspected));
+    assert.equal(result.inspected.archiveGameFieldsVerified,true);
+    assert.equal(result.inspected.archiveReferencedImagesVerified,true);
+    assert.equal(result.inspected.completeGameBackupVerified,false);
+    assert.equal(result.inspected.offDeviceBackupVerified,false);
+    assert.equal(result.inspected.canApply,false);
+    assert.equal(result.bad.archiveStructureVerified,false);
+    assert.equal(result.bad.canPromote,false);
+    const older=await open(context);
+    await older.evaluate(()=>{
+      const state=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      state.players[0].name='Edited by legacy tab';
+      state.currentSeason.wins=3;
+      localStorage.setItem('taskpoints_v1',JSON.stringify(state));
+    });
+    await page.waitForFunction(()=>JSON.parse(localStorage.getItem('taskpoints_v1'))
+      .players?.[0]?.name==='Edited by legacy tab');
+    const after=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const stale=await api.inspectPreviewGameBackupZip(
+        window.__v2ExportArchiveBytes);
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const reconcile=await api.rehearsePreviewGameCollectionReconcile(
+        token(),'zip-source-newer');
+      const mismatched=await api.inspectPreviewGameBackupZip(
+        window.__v2ExportArchiveBytes);
+      return {stale,reconcile,mismatched,
+        readAuthority:api.getStatus().readAuthority};
+    });
+    assert.equal(after.stale.archiveGameFieldsVerified,false);
+    assert.equal(after.stale.canApply,false);
+    assert.equal(after.reconcile.collectionParityVerified,true,JSON.stringify(after.reconcile));
+    assert.equal(after.mismatched.reason,
+      'game_backup_game_fields_mismatch',JSON.stringify(after.mismatched));
+    assert.equal(after.readAuthority,'legacy_only');
+    return {realZipBuilderUsed:true,wholeZipContentsParsed:true,
+      independentPrefsUnbacked:true,corruptZipRefused:true,
+      oldTabChangesDetected:true,oldBackupNotPromoted:true};
   });
 
   await run('Today V5 preview retains sparse day maps, survives reload and rejects stale V1',async context=>{

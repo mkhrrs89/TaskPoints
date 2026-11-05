@@ -1284,3 +1284,65 @@ This audit closes one *observation* gap but does not authenticate an
 independent off-device backup, guarantee atomicity between the Game
 snapshot and separate photo database, or fence uncooperative legacy tabs.
 No weighted migration milestone is yet completed: **67/100**.
+
+
+## Full Game Backup + Images ZIP compatibility preflight (V2 only)
+
+Added explicit, preview-host-only, non-mutating
+inspectPreviewGameBackupZip(archiveBytes) for the actual stored ZIP format
+from home_export_responsiveness.js, which settings.html can import.
+The caller supplies a bounded Uint8Array/ArrayBuffer; V2 takes a private
+immutable byte copy, never uses a file picker, never performs an import,
+never creates a recovery archive, and never opens writable image storage.
+
+Safety assertions:
+- The entire stored ZIP layout is validated: uncompressed entries,
+  bounded size/count, unique safe paths, CRC32 per file, matching central
+  directory offsets and metadata, exact footer and no truncated entries.
+- The manifest must be TaskPoints full-backup version 2 with Tasks and
+  Completions arrays. Every owned Game/player/season field is checked
+  against the currently sealed Game preview, including field absence,
+  roster order, every unknown nested field and current season metadata.
+- Every imageId reference in Game players, season and nested fields must
+  resolve to an archived image file. Duplicate image IDs, malformed paths,
+  missing images and unknown binary MIME types fail closed.
+- Archived image bytes are SHA-256 compared to the independent read-only
+  live legacy image audit. The Game preview, full-origin inventory,
+  reset generation and preview-host gate must still match afterward.
+- No raw photo/image identifiers, contents or player names are returned.
+  No result may enable cutover, import, restore, production writes or
+  promotion. An archive checked in memory is NOT an authenticated
+  independent off-device recovery backup.
+
+**Important discovered export gaps:** As currently implemented,
+imageIdsFromState in home_export_responsiveness.js exports the current
+youImageId and each current player.imageId, but not arbitrary historical
+nested Game/season imageId references. Separately stored Game gallery,
+sort and grouping preferences do not appear in the current ZIP manifest
+or its aux object. The V2 audit therefore rejects archives missing an
+actual historical referenced photo; otherwise it reports a matching Game
+snapshot and image bytes as a *partial* success while explicitly recording
+independentPreferencesIncluded:false and completeGameBackupVerified:false.
+Even if manually added aux preferences are byte-identical, Settings currently
+does not replay those three keys on ZIP import, so
+independentPreferencesRestorable:false and completeGameBackupVerified:false
+remain the only defensible outcomes. This audit does NOT claim that an
+actual import/restore round-trip has occurred or will preserve every field.
+It does not modify the production exporter or quietly infer coverage of
+missing files or preference values.
+
+The focused tests use the **real production ZIP writer** to generate
+archives, check valid CRC/central-directory output, corrupted/truncated
+or duplicated/unsafe entries, changed Game/season fields, omitted photos,
+mismatched same-size photo bytes, missing independent preferences,
+unexpected binary types, concurrent source changes, and no-image cases.
+The real-browser fixture independently verifies the actual ZIP builder,
+a failed corruption probe and old-tab Game edit detection without authority
+migration. A separate browser fallback accounts for Linux WebKit refusing
+Blob structured-clone writes to the synthetic legacy image store:
+that path must return an unverified image audit, never false success.
+Chromium exercises actual persisted Blob comparison.
+
+As with all other V2 probes, no gate is credited until its **entire**
+acceptance criteria are satisfied. The original milestones remain 67/100,
+and V1 remains the only production authority.

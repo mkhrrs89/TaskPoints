@@ -5,7 +5,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
 const {webcrypto}=require('node:crypto');
-const {TextEncoder}=require('node:util');
+const {TextEncoder,TextDecoder}=require('node:util');
 const {FakeIndexedDB,FakeStorage}=require('./helpers/fake_indexeddb_v2');
 const script=fs.readFileSync(path.join(__dirname,'..','state_runtime_v2.js'),'utf8');
 const V1='taskpoints_v1',DARK='taskpoints_state_v2_dark_mode_v1';
@@ -48,7 +48,7 @@ async function boot(opts={}){
     writePendingHabitDelta(row){return {...row}},
     habitCompletionId(a,b){return 'habit:'+a+':'+b}
   };
-  const ctx={indexedDB,localStorage,structuredClone,TextEncoder,
+  const ctx={indexedDB,localStorage,structuredClone,TextEncoder,TextDecoder,
     crypto:opts.crypto||{subtle:webcrypto.subtle,
       randomUUID(){return 'game-'+(++count)}},
     location:{hostname:opts.hostname||'localhost'},
@@ -788,4 +788,298 @@ test('Game image coverage never runs on production hosts or with dark mode off',
   app.localStorage.removeItem(DARK);
   assert.equal((await app.api.inspectPreviewGameImageCoverage()).reason,
     'dark_disabled');
+});
+
+
+const exportScript=fs.readFileSync(
+  path.join(__dirname,'..','home_export_responsiveness.js'),'utf8');
+function installRealZipExporter(overrides={}) {
+  const ctx={
+    TextEncoder,Uint8Array,Uint32Array,Blob,Promise,
+    console,Date,JSON,Math,Map,Set,Object,Array,Number,String,Error,
+    document:{readyState:'loading',addEventListener(){}},
+    ...overrides
+  };
+  ctx.window=ctx;ctx.globalThis=ctx;
+  vm.runInNewContext(exportScript,ctx,{
+    filename:'home_export_responsiveness.js'
+  });
+  assert.ok(ctx.TaskPointsResponsiveExport?.buildZipBlob);
+  return ctx.TaskPointsResponsiveExport;
+}
+const exporter=installRealZipExporter();
+function actualManifest(state,aux={}){
+  return {exportType:'taskpoints_full_backup',version:2,
+    exportedAtISO:'2026-11-04T19:00:00.000Z',state,aux};
+}
+async function archiveBytes(state=legacy(),images={'image-1':'photo'},aux={},extras=[]){
+  const files=[
+    {path:'manifest.json',
+      data:new TextEncoder().encode(JSON.stringify(actualManifest(state,aux)))},
+    ...Object.entries(images).map(([id,data])=>({
+      path:'images/'+id+'.png',data:new TextEncoder().encode(data)
+    })),
+    ...extras
+  ];
+  const result=await exporter.buildZipBlob(files);
+  return new Uint8Array(await result.arrayBuffer());
+}
+
+test('Real production ZIP writer round-trips current Game records and verifies archived photo bytes',async()=>{
+  const app=await boot();
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  const before=app.token();
+  const archive=await archiveBytes();
+  const result=await app.api.inspectPreviewGameBackupZip(archive);
+  assert.equal(result.reason,'game_backup_missing_independent_preferences',JSON.stringify(result));
+  assert.equal(result.archiveStructureVerified,true);
+  assert.equal(result.archiveGameFieldsVerified,true);
+  assert.equal(result.archiveReferencedImagesVerified,true);
+  assert.equal(result.referencedImageCount,1);
+  assert.equal(result.archivedImageFileCount,1);
+  assert.equal(result.independentPreferencesIncluded,false);
+  assert.equal(result.completeGameBackupVerified,false);
+  assert.equal(result.offDeviceBackupVerified,false);
+  assert.equal(result.canApply,false);
+  assert.equal(result.canPromote,false);
+  assert.equal(result.readAuthority,'legacy_only');
+  assert.match(result.imageFingerprint,/^sha256:[a-f0-9]{64}:\d+$/);
+  assert.equal(JSON.stringify(result).includes('image-1'),false);
+  assert.equal(app.token(),before);
+});
+
+test('An archive with all three separately persisted Game preferences is acknowledged but not called an external backup',async()=>{
+  const app=await boot();
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  const prefs={
+    [COLS]:app.localStorage.getItem(COLS),
+    [SORT]:app.localStorage.getItem(SORT),
+    [GROUP]:app.localStorage.getItem(GROUP)
+  };
+  const good=await archiveBytes(legacy(),{'image-1':'photo'},prefs);
+  const report=await app.api.inspectPreviewGameBackupZip(good);
+  assert.equal(report.reason,'game_backup_preferences_restore_unverified',JSON.stringify(report));
+  assert.equal(report.independentPreferencesIncluded,true);
+  assert.equal(report.independentPreferencesRestorable,false);
+  assert.equal(report.completeGameBackupVerified,false);
+  assert.equal(report.gameImportRoundTripVerified,false);
+  assert.equal(report.offDeviceBackupVerified,false);
+  assert.equal(report.canApply,false);
+});
+
+test('ZIP missing a referenced live photo fails closed without changing source or photos',async()=>{
+  const app=await boot();
+  const storage=await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  const before=app.token();
+  const archive=await archiveBytes(legacy(),{});
+  const report=await app.api.inspectPreviewGameBackupZip(archive);
+  assert.equal(report.reason,'game_backup_referenced_images_missing',JSON.stringify(report));
+  assert.equal(report.archiveGameFieldsVerified,true);
+  assert.equal(report.missingImageCount,1);
+  assert.equal(report.canPromote,false);
+  assert.equal(app.token(),before);
+  assert.equal(await storage.get('image-1').text(),'photo');
+});
+
+test('ZIP with a different photo of identical length fails against actual live image SHA-256',async()=>{
+  const app=await boot();
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  const archive=await archiveBytes(legacy(),{'image-1':'phoxo'});
+  const report=await app.api.inspectPreviewGameBackupZip(archive);
+  assert.equal(report.reason,'game_backup_image_bytes_mismatch',JSON.stringify(report));
+  assert.equal(report.archiveStructureVerified,true);
+  assert.equal(report.archiveReferencedImagesVerified,false);
+  assert.equal(report.canPromote,false);
+});
+
+test('ZIP Game season mismatch and missing players field refuse a deceptive backup',async()=>{
+  const app=await boot();await seed(app);
+  const edited=legacy();edited.currentSeason={id:'season4',newRecord:'untrusted'};
+  const changed=await app.api.inspectPreviewGameBackupZip(
+    await archiveBytes(edited));
+  assert.equal(changed.reason,'game_backup_game_fields_mismatch',JSON.stringify(changed));
+  const absent=legacy();delete absent.players;
+  const missing=await app.api.inspectPreviewGameBackupZip(
+    await archiveBytes(absent));
+  assert.equal(missing.reason,'game_backup_field_presence_mismatch',JSON.stringify(missing));
+});
+
+test('ZIP corruption in payload and central-directory header fails CRC and structure without writes',async()=>{
+  const app=await boot();await seed(app);
+  const intact=await archiveBytes();
+  const tampered=Uint8Array.from(intact);
+  const marker=new TextEncoder().encode('"taskpoints_full_backup"');
+  const offset=Buffer.from(tampered).indexOf(Buffer.from(marker));
+  assert.ok(offset>=0);
+  tampered[offset+7]^=0x11;
+  const bad=await app.api.inspectPreviewGameBackupZip(tampered);
+  assert.equal(bad.reason,'game_backup_zip_crc_mismatch',JSON.stringify(bad));
+  const invalid=Uint8Array.from(intact);
+  const central=Buffer.from(invalid).indexOf(Buffer.from([0x50,0x4b,0x01,0x02]));
+  assert.ok(central>=0);
+  invalid[central+16]^=0x20;
+  const report=await app.api.inspectPreviewGameBackupZip(invalid);
+  assert.equal(report.reason,'game_backup_zip_central_mismatch',JSON.stringify(report));
+});
+
+test('ZIP truncated/footer-tampered, unsafe filenames and duplicate paths fail closed',async()=>{
+  const app=await boot();await seed(app);
+  const source=await archiveBytes();
+  const truncated=await app.api.inspectPreviewGameBackupZip(source.slice(0,-1));
+  assert.equal(truncated.reason,'game_backup_zip_footer_invalid',JSON.stringify(truncated));
+  const unsafe=await exporter.buildZipBlob([
+    {path:'manifest.json',data:new TextEncoder().encode(
+      JSON.stringify(actualManifest(legacy())))},
+    {path:'images/../evil.png',data:new Uint8Array([7])}
+  ]);
+  const report=await app.api.inspectPreviewGameBackupZip(
+    new Uint8Array(await unsafe.arrayBuffer()));
+  assert.equal(report.reason,'game_backup_zip_unsafe_or_duplicate_name',JSON.stringify(report));
+  const duplicate=await exporter.buildZipBlob([
+    {path:'manifest.json',data:new TextEncoder().encode(
+      JSON.stringify(actualManifest(legacy())))},
+    {path:'manifest.json',data:new Uint8Array([5])}
+  ]);
+  const bad=await app.api.inspectPreviewGameBackupZip(
+    new Uint8Array(await duplicate.arrayBuffer()));
+  assert.equal(bad.reason,'game_backup_zip_unsafe_or_duplicate_name',JSON.stringify(bad));
+});
+
+test('ZIP proves nested Game/season photo references are absent from normal Backup + Images',async()=>{
+  const state=legacy();
+  state.seasonHistory[0].historicalImageId='retired-champ-photo';
+  const app=await boot({state});
+  await installSyntheticLegacyImageDatabase(app,{
+    'image-1':'photo','retired-champ-photo':'historical-photo'
+  });
+  await seed(app);
+  // The actual export builder includes only youImageId and current
+  // players' imageId, so this Game archive is incomplete.
+  const regular=await archiveBytes(state,{'image-1':'photo'});
+  const result=await app.api.inspectPreviewGameBackupZip(regular);
+  assert.equal(result.reason,'game_backup_referenced_images_missing',JSON.stringify(result));
+  assert.equal(result.missingImageCount,1);
+  const complete=await archiveBytes(state,{
+    'image-1':'photo','retired-champ-photo':'historical-photo'
+  });
+  const proof=await app.api.inspectPreviewGameBackupZip(complete);
+  assert.equal(proof.archiveReferencedImagesVerified,true,JSON.stringify(proof));
+  assert.equal(proof.completeGameBackupVerified,false);
+});
+
+
+test('Actual Backup + Images artifact omits nested season photos despite valid source blobs',async()=>{
+  const state=legacy();
+  state.players[0].imageId='npc-photo';
+  state.seasonHistory[0].historicalImageId='championship-photo';
+  const app=await boot({state});
+  await installSyntheticLegacyImageDatabase(app,{
+    'image-1':'user','npc-photo':'npc',
+    'championship-photo':'historical'
+  });
+  await seed(app);
+  const exporter=installRealZipExporter({
+    getTaskPointsExportSnapshot(){return actualManifest(state)},
+    TaskPointsCore:{
+      async getImageBlob(id){
+        const data={'image-1':'user','npc-photo':'npc',
+          'championship-photo':'historical'}[id];
+        return data===undefined?null:
+          new Blob([data],{type:'image/png'});
+      }
+    }
+  });
+  const artifact=await exporter.createExportArtifact();
+  assert.equal(artifact.imageCount,2,
+    'real exporter currently collects only current player and user imageId');
+  const archive=new Uint8Array(await artifact.blob.arrayBuffer());
+  const check=await app.api.inspectPreviewGameBackupZip(archive);
+  assert.equal(check.reason,'game_backup_referenced_images_missing',JSON.stringify(check));
+  assert.equal(check.missingImageCount,1);
+  assert.equal(check.completeGameBackupVerified,false);
+  assert.equal(check.offDeviceBackupVerified,false);
+});
+
+test('ZIP with zero referenced Game images never creates or opens the legacy image database',async()=>{
+  const state=legacy();state.youImageId='';
+  const app=await boot({state});
+  await seed(app);
+  const before=app.indexedDB.databaseNames();
+  const archive=await archiveBytes(state,{});
+  const result=await app.api.inspectPreviewGameBackupZip(archive);
+  assert.equal(result.reason,'game_backup_missing_independent_preferences',JSON.stringify(result));
+  assert.equal(result.archiveReferencedImagesVerified,true);
+  assert.equal(result.referencedImageCount,0);
+  assert.deepEqual(app.indexedDB.databaseNames(),before);
+});
+
+test('ZIP refuses binary image metadata it cannot compare to the original Blob MIME type',async()=>{
+  const app=await boot();
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  const bad=await exporter.buildZipBlob([
+    {path:'manifest.json',data:new TextEncoder().encode(
+      JSON.stringify(actualManifest(legacy())))},
+    {path:'images/image-1.bin',data:new TextEncoder().encode('photo')}
+  ]);
+  const report=await app.api.inspectPreviewGameBackupZip(
+    new Uint8Array(await bad.arrayBuffer()));
+  assert.equal(report.reason,'game_backup_image_type_unverifiable',JSON.stringify(report));
+});
+
+test('ZIP refuses stale backup after an older tab changes season or player fields',async()=>{
+  const app=await boot();
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  const oldZip=await archiveBytes();
+  const state=JSON.parse(app.localStorage.getItem(V1));
+  state.players[0].name='newer';
+  app.localStorage.setItem(V1,JSON.stringify(state));
+  const stale=await app.api.inspectPreviewGameBackupZip(oldZip);
+  assert.equal(stale.reason,'game_preview_parity_required',JSON.stringify(stale));
+  assert.equal(stale.canApply,false);
+  assert.equal((await reconcile(app,'newer-game')).collectionParityVerified,true);
+  const mismatched=await app.api.inspectPreviewGameBackupZip(oldZip);
+  assert.equal(mismatched.reason,'game_backup_game_fields_mismatch',JSON.stringify(mismatched));
+  const currentZip=await archiveBytes(state,{'image-1':'photo'});
+  const after=await app.api.inspectPreviewGameBackupZip(currentZip);
+  assert.equal(after.archiveReferencedImagesVerified,true,JSON.stringify(after));
+});
+
+test('ZIP source change during asynchronous SHA-256 image verification fails closed',async()=>{
+  let app,armed=false;
+  const crypto={randomUUID(){return 'zip-race'},subtle:{
+    digest:async(...args)=>{
+      const hash=await webcrypto.subtle.digest(...args);
+      if(armed&&Buffer.from(args[1]).toString()==='photo'){
+        armed=false;
+        app.localStorage.setItem(SORT,'name-desc');
+      }
+      return hash;
+    }
+  }};
+  app=await boot({crypto});
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  armed=true;
+  const archive=await archiveBytes();
+  const report=await app.api.inspectPreviewGameBackupZip(archive);
+  assert.equal(report.archiveReferencedImagesVerified,false,JSON.stringify(report));
+  assert.equal(report.canPromote,false);
+  assert.equal(armed,false);
+});
+
+test('ZIP backup inspector is never available outside preview host or with dark mode off',async()=>{
+  const app=await boot();await seed(app);
+  const archive=await archiveBytes();
+  app.ctx.location.hostname='taskpoints.pages.dev';
+  const blocked=await app.api.inspectPreviewGameBackupZip(archive);
+  assert.equal(blocked.reason,'preview_host_required');
+  app.ctx.location.hostname='localhost';app.localStorage.removeItem(DARK);
+  const off=await app.api.inspectPreviewGameBackupZip(archive);
+  assert.equal(off.reason,'dark_disabled');
 });

@@ -6418,6 +6418,287 @@
     }
   }
 
+
+  // Parse precisely the stored/CRC-protected ZIP layout emitted by
+  // home_export_responsiveness.js and accepted by Settings. The existing
+  // Settings importer does not independently authenticate ZIP contents;
+  // this V2 preflight is read-only and does not change that importer.
+  function parsePreviewGameBackupZip(input) {
+    const fail=reason=>({reason});
+    let bytes;
+    try {
+      if(input instanceof ArrayBuffer)bytes=new Uint8Array(input);
+      else if(ArrayBuffer.isView(input)&&input.BYTES_PER_ELEMENT===1)
+        bytes=new Uint8Array(input.buffer,input.byteOffset,input.byteLength);
+      else return fail('game_backup_zip_bytes_required');
+    }catch(_){return fail('game_backup_zip_bytes_required');}
+    if(bytes.byteLength<52||bytes.byteLength>67108864)
+      return fail('game_backup_zip_size_invalid');
+    // Freeze caller-supplied bytes before any async verification. Otherwise a
+    // caller could mutate a Uint8Array after CRC succeeds but before SHA.
+    bytes=Uint8Array.from(bytes);
+    if(typeof global.TextDecoder!=='function')
+      return fail('game_backup_zip_decoder_unavailable');
+    const decode=new global.TextDecoder('utf-8',{fatal:true});
+    const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+    const u16=i=>view.getUint16(i,true),u32=i=>view.getUint32(i,true);
+    const validName=name=>name==='manifest.json'
+      ||(/^images\/[A-Za-z0-9_.:-]{1,256}\.(png|webp|gif|jpg|bin)$/
+        .test(name)&&!name.includes('..'));
+    const crcTable=new Uint32Array(256);
+    for(let i=0;i<256;i++){
+      let c=i;
+      for(let j=0;j<8;j++)c=c&1?(0xEDB88320^(c>>>1)):(c>>>1);
+      crcTable[i]=c>>>0;
+    }
+    const checksum=data=>{
+      let crc=0xFFFFFFFF;
+      for(const b of data)
+        crc=crcTable[(crc^b)&255]^(crc>>>8);
+      return (crc^0xFFFFFFFF)>>>0;
+    };
+    const entries=new Map(),rows=[];
+    let offset=0;
+    try {
+      while(offset+4<=bytes.length&&u32(offset)===0x04034b50){
+        if(rows.length>=300||offset+30>bytes.length)
+          return fail('game_backup_zip_entry_limit');
+        const flags=u16(offset+6),method=u16(offset+8);
+        const crc=u32(offset+14),compressed=u32(offset+18);
+        const uncompressed=u32(offset+22),nameLength=u16(offset+26);
+        const extraLength=u16(offset+28);
+        if(flags!==0||method!==0||compressed!==uncompressed
+          ||extraLength!==0||!nameLength)
+          return fail('game_backup_zip_unsupported_entry');
+        const nameStart=offset+30;
+        const dataStart=nameStart+nameLength;
+        const end=dataStart+compressed;
+        if(end>bytes.length)return fail('game_backup_zip_truncated_entry');
+        const name=decode.decode(bytes.subarray(nameStart,dataStart));
+        if(!validName(name)||entries.has(name))
+          return fail('game_backup_zip_unsafe_or_duplicate_name');
+        const data=bytes.subarray(dataStart,end);
+        if(checksum(data)!==crc)
+          return fail('game_backup_zip_crc_mismatch');
+        rows.push({name,crc,size:compressed,offset});
+        entries.set(name,data);
+        offset=end;
+      }
+      const centralStart=offset;
+      for(const row of rows){
+        if(offset+46>bytes.length||u32(offset)!==0x02014b50)
+          return fail('game_backup_zip_central_missing');
+        const nameLength=u16(offset+28);
+        const extraLength=u16(offset+30),commentLength=u16(offset+32);
+        const end=offset+46+nameLength+extraLength+commentLength;
+        if(end>bytes.length||u16(offset+8)!==0
+          ||u16(offset+10)!==0||u16(offset+34)!==0
+          ||extraLength!==0||commentLength!==0
+          ||u32(offset+16)!==row.crc
+          ||u32(offset+20)!==row.size
+          ||u32(offset+24)!==row.size
+          ||u32(offset+42)!==row.offset)
+          return fail('game_backup_zip_central_mismatch');
+        const name=decode.decode(bytes.subarray(offset+46,offset+46+nameLength));
+        if(name!==row.name)return fail('game_backup_zip_central_mismatch');
+        offset=end;
+      }
+      if(offset+22!==bytes.length||u32(offset)!==0x06054b50
+        ||u16(offset+4)!==0||u16(offset+6)!==0
+        ||u16(offset+8)!==rows.length
+        ||u16(offset+10)!==rows.length
+        ||u32(offset+12)!==offset-centralStart
+        ||u32(offset+16)!==centralStart
+        ||u16(offset+20)!==0)
+        return fail('game_backup_zip_footer_invalid');
+      if(!entries.has('manifest.json'))
+        return fail('game_backup_zip_manifest_missing');
+      return {entries};
+    }catch(_){return fail('game_backup_zip_invalid');}
+  }
+
+  // Verify actual archived ZIP entry bytes against a sealed Game preview and
+  // actual live V1 image bytes; NEVER import, restore, create or amend backups.
+  // Separate Game preferences are not in the existing backup ZIP manifest,
+  // so even a positive photo comparison does NOT authorize whole-app cutover.
+  async function inspectPreviewGameBackupZip(archiveInput) {
+    const refuse=(reason,details={})=>({
+      checked:true,previewOnly:true,archiveStructureVerified:false,
+      archiveGameFieldsVerified:false,archiveReferencedImagesVerified:false,
+      independentPreferencesIncluded:false,independentPreferencesRestorable:false,
+      completeGameBackupVerified:false,gameImportRoundTripVerified:false,
+      offDeviceBackupVerified:false,canApply:false,canPromote:false,
+      gameMigrated:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...details
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    const generation=currentGeneration({create:false});
+    if(!generation)return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    let db;
+    try {
+      const token=captureReadOnlyFullStorageInventory();
+      const captured=await capturePreviewGameSource(token,generation,epoch);
+      if(captured.reason)return refuse(captured.reason,{
+        prerequisiteReason:captured.prerequisiteReason
+      });
+      db=await openGamePreviewDb(generation,epoch);
+      const proof=await proveGamePreviewParity(db,captured);
+      if(!proof.verified)return refuse('game_preview_parity_required',{
+        prerequisiteReason:proof.reason
+      });
+      // Legacy V2 previews did not seal absent-vs-empty roster presence:
+      // explicit preview reconciliation is required before ZIP verification.
+      const existingPreview=await readGamePreviewRows(db);
+      if(typeof existingPreview.bundle?.playersPresent!=='boolean')
+        return refuse('game_preview_player_presence_unsealed');
+      const parsed=parsePreviewGameBackupZip(archiveInput);
+      if(parsed.reason)return refuse(parsed.reason);
+      let manifest;
+      try{
+        manifest=JSON.parse(
+          new global.TextDecoder('utf-8',{fatal:true})
+            .decode(parsed.entries.get('manifest.json')));
+      }catch(_){return refuse('game_backup_manifest_invalid');}
+      if(!manifest||manifest.exportType!=='taskpoints_full_backup'
+        ||manifest.version!==2||!manifest.state
+        ||typeof manifest.state!=='object'||Array.isArray(manifest.state)
+        ||!Array.isArray(manifest.state.tasks)
+        ||!Array.isArray(manifest.state.completions))
+        return refuse('game_backup_manifest_unsupported');
+      for(const key of GAME_ARRAY_FIELDS.concat(GAME_SCALAR_FIELDS)){
+        const sourceHas=key==='players'?captured.bundle.playersPresent
+          :Object.prototype.hasOwnProperty.call(captured.bundle.fields,key);
+        const archiveHas=Object.prototype.hasOwnProperty.call(manifest.state,key);
+        if(sourceHas!==archiveHas)
+          return refuse('game_backup_field_presence_mismatch',{
+            archiveStructureVerified:true
+          });
+        if(!sourceHas)continue;
+        const canonical=key==='players'
+          ?captured.rows.map(row=>row.value):captured.bundle.fields[key];
+        if(stableJson(canonical)!==stableJson(manifest.state[key]))
+          return refuse('game_backup_game_fields_mismatch',{
+            archiveStructureVerified:true
+          });
+      }
+      if(!captured.current())return refuse('game_backup_source_changed');
+      const references=new Set();
+      let invalid=false,visited=0;
+      const collect=(value,key='')=>{
+        if(++visited>75000){invalid=true;return;}
+        if(/imageId$/i.test(key)){
+          if(value==null||value==='')return;
+          if(typeof value!=='string'||value!==value.trim()
+            ||value.length>256){invalid=true;return;}
+          references.add(value);
+        }
+        if(Array.isArray(value)){
+          for(const item of value)collect(item);
+        }else if(value&&typeof value==='object'){
+          for(const [k,v] of Object.entries(value))collect(v,k);
+        }
+      };
+      captured.rows.forEach(row=>collect(row.value));
+      collect(captured.bundle.fields);
+      if(invalid||references.size>256)
+        return refuse('game_backup_image_reference_invalid',{
+          archiveStructureVerified:true,archiveGameFieldsVerified:true
+        });
+      const assetFiles=new Map();
+      for(const [path,data] of parsed.entries){
+        if(path==='manifest.json')continue;
+        const hit=/^images\/(.+)\.(png|webp|gif|jpg|bin)$/.exec(path);
+        if(!hit)return refuse('game_backup_zip_unsafe_or_duplicate_name');
+        const [,id,ext]=hit;
+        if(assetFiles.has(id))
+          return refuse('game_backup_duplicate_image_id');
+        assetFiles.set(id,{data,ext});
+      }
+      const ids=[...references].sort();
+      const missing=ids.filter(id=>!assetFiles.has(id));
+      if(missing.length)return refuse('game_backup_referenced_images_missing',{
+        archiveStructureVerified:true,archiveGameFieldsVerified:true,
+        referencedImageCount:ids.length,missingImageCount:missing.length
+      });
+      if(!captured.current())return refuse('game_backup_source_changed');
+      const imageTypes={
+        png:'image/png',webp:'image/webp',gif:'image/gif',
+        jpg:'image/jpeg'
+      };
+      const archivedAssets=[];
+      for(const id of ids){
+        const file=assetFiles.get(id);
+        if(!Object.prototype.hasOwnProperty.call(imageTypes,file.ext))
+          return refuse('game_backup_image_type_unverifiable',{
+            archiveStructureVerified:true,archiveGameFieldsVerified:true
+          });
+        const digest=await global.crypto.subtle.digest('SHA-256',file.data);
+        const hex=Array.from(new Uint8Array(digest),
+          n=>n.toString(16).padStart(2,'0')).join('');
+        archivedAssets.push([id,file.data.byteLength,imageTypes[file.ext],hex]);
+      }
+      const sealedArchiveFingerprint=await previewRecoveryFingerprint(archivedAssets);
+      if(!captured.current())return refuse('game_backup_source_changed');
+      // An in-memory ZIP is not an off-device backup. Compare its binary
+      // bytes with the actual live image DB using the separate double-read
+      // audit; never claim the external archive was saved or is recoverable.
+      const live=await inspectPreviewGameImageCoverage();
+      if(!live.gameImageReferencesVerified)
+        return refuse('game_backup_live_images_unverifiable',{
+          archiveStructureVerified:true,archiveGameFieldsVerified:true,
+          prerequisiteReason:live.reason
+        });
+      if(ids.length && live.imageFingerprint!==sealedArchiveFingerprint)
+        return refuse('game_backup_image_bytes_mismatch',{
+          archiveStructureVerified:true,archiveGameFieldsVerified:true,
+          referencedImageCount:ids.length
+        });
+      if(!captured.current())
+        return refuse('game_backup_source_changed_after_image_comparison');
+      const final=await proveGamePreviewParity(db,captured);
+      if(!final.verified)
+        return refuse('game_preview_changed_during_backup_audit',{
+          prerequisiteReason:final.reason
+        });
+      // The legacy "Backup + Images" exporter archives only player.imageId
+      // and youImageId. It does NOT include the independent Game preference
+      // keys, so no archive can currently prove a complete Game restore.
+      const aux=manifest.aux&&typeof manifest.aux==='object'
+        ?manifest.aux:{};
+      const independentPreferencesIncluded=GAME_PREFERENCE_KEYS.every(
+        key=>Object.prototype.hasOwnProperty.call(aux,key)
+          &&aux[key]===global.localStorage.getItem(key));
+      if(!captured.current())
+        return refuse('game_backup_source_changed_after_validation');
+      return {
+        checked:true,previewOnly:true,archiveStructureVerified:true,
+        archiveGameFieldsVerified:true,
+        archiveReferencedImagesVerified:true,
+        referencedImageCount:ids.length,
+        archivedImageFileCount:assetFiles.size,
+        imageFingerprint:ids.length?sealedArchiveFingerprint:null,
+        independentPreferencesIncluded,
+        // The current Settings import ZIP path does NOT replay these three
+        // auxiliary preferences even if they are present in a custom ZIP.
+        // Contents verified is not the same as restoration verified.
+        independentPreferencesRestorable:false,
+        completeGameBackupVerified:false,
+        gameImportRoundTripVerified:false,
+        // An in-memory ZIP is not a separately durable device-loss backup.
+        offDeviceBackupVerified:false,canApply:false,canPromote:false,
+        gameMigrated:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+        reason:independentPreferencesIncluded
+          ?'game_backup_preferences_restore_unverified'
+          :'game_backup_missing_independent_preferences'
+      };
+    }catch(_){return refuse('game_backup_zip_audit_unavailable');}
+    finally{try{db?.close();}catch(_){}}
+  }
+
   async function rehearsePreviewGameCollectionAction(sourceToken,actionId,reconcile) {
     const refuse=(reason,extra={})=>({
       checked:true,previewOnly:true,committed:false,confirmedDurable:false,
@@ -11766,6 +12047,7 @@
     inspectPreviewGameCompatibilityProjection,
     inspectPreviewGameCheckpointCoverage,
     inspectPreviewGameImageCoverage,
+    inspectPreviewGameBackupZip,
     inspectPreviewTodaySource,
     rehearsePreviewTodayCollectionSeed,
     inspectPreviewTodayCollectionParity,
