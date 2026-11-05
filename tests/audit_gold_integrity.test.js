@@ -69,3 +69,18 @@ test('Audit page wires four Gold checks without replacing existing checks',()=>{
  assert.match(audit,/buildHabitViceScoringDateAudit/);
  assert.match(audit,/daily-total-parity/);
 });
+
+test('gameHistory row uses matchupId rather than its per-player history-row ID',()=>{
+ const s=fixture();
+ s.gameHistory=[{id:'history-row-123',matchupId:'today',dateKey:'2026-11-05',
+   goldOutcome:{settled:true,winnerId:'D',loserId:'B',theftGoldStolen:.2,marginGoldAwarded:1.3}}];
+ assert.equal(run(s)[2].status,'PASS');
+});
+test('invalid economy metadata does not downgrade a real duplicate-ledger failure',()=>{
+ const s=fixture();delete s.goldEconomy;
+ s.goldLedger.push({...s.goldLedger[4]});
+ const results=buildGoldIntegrityChecks(s);
+ assert.equal(results[0].status,'FAIL');
+ assert.equal(results[1].status,'FAIL');
+ assert.equal(results[3].status,'FAIL');
+});

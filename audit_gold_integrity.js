@@ -85,7 +85,7 @@
         }
       });
     }
-    const balanceStatus = !hasEconomy ? 'WARN' : balanceIssues.length ? 'FAIL' : balanceWarnings.length ? 'WARN' : 'PASS';
+    const balanceStatus = balanceIssues.length ? 'FAIL' : !hasEconomy || balanceWarnings.length ? 'WARN' : 'PASS';
     const balanceCheck = make('gold-ledger-balance-integrity', 'Gold balances and ledger entries reconcile',
       balanceStatus, 'All player balances equal the signed ledger sum; transaction IDs are unique; saved running balances agree; no negative wallets',
       ledger.length + ' transactions • ' + ids.size + ' ledger players • ' + balanceIssues.length +
@@ -135,7 +135,7 @@
       }
     });
     const theftCheck = make('gold-theft-pair-integrity', 'Gold theft transfers are paired and unique',
-      !hasEconomy ? 'WARN' : transferIssues.length ? 'FAIL' : transferWarnings.length ? 'WARN' : 'PASS',
+      transferIssues.length ? 'FAIL' : !hasEconomy || transferWarnings.length ? 'WARN' : 'PASS',
       'Every theft has one positive and one matching negative transaction, opposite players and matching matchup IDs',
       transfers.size + ' transfers checked • ' + transferIssues.length + ' error(s) • ' +
       transferWarnings.length + ' warning(s)',
@@ -158,14 +158,16 @@
       if (row.type === 'matchup_theft') theftIndex.add(match + '|' + player);
     });
     const ignored = new Set(entries(economy?.ignoredSameDayMatchupKeys).map(asId));
-    const walk = rows => entries(rows).forEach(row => {
+    const walk = (rows, kind = 'matchups') => entries(rows).forEach(row => {
       const outcome = row?.goldOutcome;
       if (outcome?.settled !== true) return;
       const theft = Number(outcome.theftGoldStolen || 0);
       const margin = Number(outcome.marginGoldAwarded || 0);
       if (!(theft > 0 || margin > 0)) return;
       const winner = asId(outcome.winnerId);
-      const match = asId(row?.id || row?.matchupId);
+      const match = asId(kind === 'gameHistory'
+        ? (row?.matchupId || row?.id)
+        : (row?.id || row?.matchupId));
       const when = day(row);
       if (!winner || !match || !when) {
         issue(coverageWarnings, 'Settled Gold outcome has missing winner, matchup ID, or date; cannot check matching transactions.');
@@ -189,7 +191,7 @@
       }
     });
     walk(state.matchups);
-    walk(state.gameHistory);
+    walk(state.gameHistory, 'gameHistory');
     walk(state.currentSeason?.tournamentMatchupResults);
     entries(state.seasonHistory).forEach(season => walk(season?.tournamentMatchupResults));
     entries(state.schedule).forEach(slate => walk(slate?.matchups));
