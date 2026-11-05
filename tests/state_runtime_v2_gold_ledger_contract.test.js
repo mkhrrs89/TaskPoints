@@ -232,3 +232,34 @@ test('V5 mirror upgrades add Gold store without deleting any preexisting pilot o
     assert.deepEqual(after[key],before[key],key);
   assert.equal(after.goldLedger.length,0);
 });
+
+
+test('Gold preview refuses mismatched ledger/economy presence and recorded settlements without rows',async()=>{
+  const missingEconomy=state();delete missingEconomy.goldEconomy;
+  const missingLedger=state();delete missingLedger.goldLedger;
+  const lostHistory=state();lostHistory.goldLedger=[];
+  for(const [candidate,expected] of [
+    [missingEconomy,'gold_ledger_economy_presence_mismatch'],
+    [missingLedger,'gold_ledger_economy_presence_mismatch'],
+    [lostHistory,'gold_settlements_without_ledger_rows']
+  ]){
+    const app=await boot(candidate),before=app.indexedDB.dump(DB);
+    const result=await seed(app);
+    assert.equal(result.reason,'gold_source_preflight_required',JSON.stringify(result));
+    assert.equal(result.prerequisiteReason,expected);
+    assert.deepEqual(app.indexedDB.dump(DB),before);
+  }
+});
+
+test('orphaned Gold receipt without any rows is never silently replaced with a fresh seed',async()=>{
+  const app=await boot();
+  const db=app.indexedDB._databases.get(DB);
+  db._stores.get('mutations').set('gold-preview-seed:old-tab',{
+    id:'gold-preview-seed:old-tab',type:'gold-preview-seed',
+    sourceFingerprint:'orphaned-snapshot'
+  });
+  const before=app.indexedDB.dump(DB);
+  const result=await seed(app);
+  assert.equal(result.reason,'gold_preview_existing_evidence_preserved',JSON.stringify(result));
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
