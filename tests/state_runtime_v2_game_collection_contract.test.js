@@ -1452,3 +1452,60 @@ test('Whole-backup coverage stays closed outside preview host or with dark mode 
   assert.equal((await app.api.inspectPreviewWholeBackupRestoreCoverage(zip)).reason,
     'dark_disabled');
 });
+
+
+
+test('Game in-memory ZIP rehearsal ignores caller-mutated ZIP bytes after its first await',async()=>{
+  let app,armed=false,zip;
+  const crypto={randomUUID(){return 'game-zip-frozen'},subtle:{
+    digest:async(...args)=>{
+      const hash=await webcrypto.subtle.digest(...args);
+      if(armed&&Buffer.from(args[1]).toString()==='photo'){
+        armed=false;
+        zip[0]=0; // mutate original ZIP signature, not runtime's private copy
+      }
+      return hash;
+    }
+  }};
+  app=await boot({crypto,normalizer:root=>JSON.parse(JSON.stringify(root))});
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  zip=await archiveBytes();
+  const before=app.token();
+  armed=true;
+  const report=await app.api.rehearsePreviewGameZipRestoreInMemory(zip);
+  assert.equal(armed,false);
+  assert.equal(zip[0],0);
+  assert.equal(report.restoredInMemory,true,JSON.stringify(report));
+  assert.equal(report.gameNormalizationParityVerified,true);
+  assert.equal(report.canApply,false);
+  assert.equal(app.token(),before);
+});
+
+test('Whole-backup auditor freezes caller-mutated ZIP bytes for all asynchronous stages',async()=>{
+  let app,armed=false,zip;
+  const crypto={randomUUID(){return 'whole-zip-frozen'},subtle:{
+    digest:async(...args)=>{
+      const hash=await webcrypto.subtle.digest(...args);
+      if(armed&&Buffer.from(args[1]).toString()==='photo'){
+        armed=false;
+        zip[0]=0; // caller's header is corrupted mid-audit
+      }
+      return hash;
+    }
+  }};
+  app=await boot({crypto,normalizer:root=>JSON.parse(JSON.stringify(root))});
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  zip=await archiveBytes();
+  const before=app.token();
+  armed=true;
+  const report=await app.api.inspectPreviewWholeBackupRestoreCoverage(zip);
+  assert.equal(armed,false);
+  assert.equal(zip[0],0);
+  assert.equal(report.reason,'whole_backup_independent_sidecars_missing',JSON.stringify(report));
+  assert.equal(report.rawSnapshotFieldsPreserved,true);
+  assert.equal(report.settingsNormalizationParityVerified,true);
+  assert.equal(report.canApply,false);
+  assert.equal(app.token(),before);
+});
