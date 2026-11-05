@@ -79,6 +79,7 @@ jobs:
           tests/state_runtime_v2_task_collection_parity_contract.test.js
           tests/state_runtime_v2_projects_source_contract.test.js
           tests/state_runtime_v2_projects_seed_contract.test.js
+          tests/state_runtime_v2_gold_ledger_contract.test.js
           tests/state_runtime_v2_today_collection_contract.test.js
           tests/state_runtime_v2_notes_source_contract.test.js
           tests/state_runtime_v2_notes_bundle_contract.test.js
