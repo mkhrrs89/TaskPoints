@@ -67,7 +67,7 @@ test('V2 core retains historical repair, taper, prepared serialization, and jour
     'HABIT_STREAK_TAPER_START_DATE_KEY',
     'prepared ? prepared.packedState',
     'buildOptimizedTaskPointsStorageRaw(candidateWithSticky, { packedState, packedRawJson })',
-    'completedAtISO: delta.completedAtISO || delta.updatedAtISO'
+    'completedAtISO: delta.completedAtISO || selectedHabitDayCompletedAtISO(delta.dayKey) || delta.updatedAtISO'
   ]) assert.ok(core.includes(feature), `Core integration missing: ${feature}`);
 });
 
