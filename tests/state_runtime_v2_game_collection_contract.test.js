@@ -41,6 +41,7 @@ async function boot(opts={}){
   const core={
     STORAGE_KEY:V1,
     parseTaskPointsStorageJson(raw){return JSON.parse(raw)},
+    normalizeImportedFullBackupState:opts.normalizer,
     readPendingHabitDeltas(){return []},applyPendingHabitDeltas(){},
     readPendingTaskMutations(){return {malformed:false,record:{
       tasks:[],completionUpserts:[],completionDeletes:[]}}},
@@ -1082,4 +1083,203 @@ test('ZIP backup inspector is never available outside preview host or with dark 
   app.ctx.location.hostname='localhost';app.localStorage.removeItem(DARK);
   const off=await app.api.inspectPreviewGameBackupZip(archive);
   assert.equal(off.reason,'dark_disabled');
+});
+
+
+test('Game ZIP in-memory rehearsal refuses to invent a missing production normalizer',async()=>{
+  const app=await boot();
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  const before=app.token(),database=app.indexedDB.dump(DB);
+  const zip=await archiveBytes();
+  const result=await app.api.rehearsePreviewGameZipRestoreInMemory(zip);
+  assert.equal(result.reason,'settings_import_normalizer_unavailable',JSON.stringify(result));
+  assert.equal(result.restoredInMemory,false);
+  assert.equal(result.gameNormalizationParityVerified,false);
+  assert.equal(result.canApply,false);
+  assert.equal(app.token(),before);
+  assert.deepEqual(app.indexedDB.dump(DB),database);
+});
+
+test('Game ZIP in-memory rehearsal stages archive images and Game fields without any V1/V2 writes',async()=>{
+  let calls=0;
+  const pureNormalizer=(root)=>{calls++;return JSON.parse(JSON.stringify(root));};
+  const app=await boot({normalizer:pureNormalizer});
+  const store=await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  const origin=app.token(),before=app.indexedDB.dump(DB);
+  const zip=await archiveBytes();
+  const result=await app.api.rehearsePreviewGameZipRestoreInMemory(zip);
+  assert.equal(result.reason,'game_zip_in_memory_restore_rehearsed',JSON.stringify(result));
+  assert.equal(result.restoredInMemory,true);
+  assert.equal(result.settingsNormalizationVerified,true);
+  assert.equal(result.gameNormalizationParityVerified,true);
+  assert.equal(result.rawGameFieldPreservationVerified,true);
+  assert.equal(result.rawGameFieldDifferenceCount,0);
+  assert.equal(result.imageReconstructionVerified,true);
+  assert.equal(result.reconstructedReferencedImages,1);
+  assert.equal(result.reconstructedImageBytes,5);
+  assert.equal(calls,2);
+  assert.match(result.inMemoryImageFingerprint,/^sha256:[a-f0-9]{64}:\d+$/);
+  assert.equal(result.independentPreferencesRestorable,false);
+  assert.equal(result.completeGameRestoreVerified,false);
+  assert.equal(result.offDeviceBackupVerified,false);
+  assert.equal(result.canApply,false);
+  assert.equal(result.canPromote,false);
+  assert.equal(app.token(),origin);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+  assert.equal(await store.get('image-1').text(),'photo');
+  assert.equal(JSON.stringify(result).includes('image-1'),false);
+});
+
+test('Game ZIP rehearsal identifies Settings-style defaults changing original raw property presence',async()=>{
+  const state=legacy();delete state.players;
+  delete state.youName;
+  state.youImageId='';
+  const normalizer=root=>({
+    ...root,players:Array.isArray(root.players)?root.players:[],
+    youName:typeof root.youName==='string'?root.youName:'',
+    reservedPlayerPids:Array.isArray(root.reservedPlayerPids)
+      ?root.reservedPlayerPids:[]
+  });
+  const app=await boot({state,normalizer});
+  await seed(app);
+  const report=await app.api.rehearsePreviewGameZipRestoreInMemory(
+    await archiveBytes(state,{}));
+  assert.equal(report.reason,'game_zip_normalized_restore_only',JSON.stringify(report));
+  assert.equal(report.gameNormalizationParityVerified,true);
+  assert.equal(report.rawGameFieldPreservationVerified,false);
+  assert.ok(report.rawGameFieldDifferenceCount>=2);
+  assert.equal(report.imageReconstructionVerified,true);
+  assert.equal(report.completeGameRestoreVerified,false);
+});
+
+test('Game ZIP rehearsal detects destructive normalizer that would silently drop Game data',async()=>{
+  const normalizer=root=>({...JSON.parse(JSON.stringify(root)),
+    players:[],seasonHistory:[]});
+  const app=await boot({normalizer});
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  const report=await app.api.rehearsePreviewGameZipRestoreInMemory(
+    await archiveBytes());
+  assert.equal(report.reason,'game_zip_normalized_restore_only',JSON.stringify(report));
+  assert.equal(report.gameNormalizationParityVerified,true);
+  assert.equal(report.rawGameFieldPreservationVerified,false);
+  assert.ok(report.rawGameFieldDifferenceCount>=2);
+  assert.equal(report.canApply,false);
+});
+
+test('Game ZIP rehearsal refuses a divergent normalized archive even if raw snapshot preflight passed',async()=>{
+  let calls=0;
+  const normalizer=root=>{
+    calls++;
+    const candidate=JSON.parse(JSON.stringify(root));
+    if(calls===2)candidate.currentSeason={id:'wrong',custom:'lost'};
+    return candidate;
+  };
+  const app=await boot({normalizer});
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  const before=app.token();
+  const report=await app.api.rehearsePreviewGameZipRestoreInMemory(
+    await archiveBytes());
+  assert.equal(report.reason,'game_import_normalization_parity_mismatch',JSON.stringify(report));
+  assert.equal(report.settingsNormalizationVerified,true);
+  assert.equal(report.gameNormalizationParityVerified,false);
+  assert.ok(report.normalizedDifferences>=1);
+  assert.equal(app.token(),before);
+  assert.equal(report.canPromote,false);
+});
+
+test('Game ZIP rehearsal detects unbacked player PID and badge sidecars',async()=>{
+  const state=legacy();
+  state.reservedPlayerPids=['P019','P020'];
+  state.playerBadges={'p1':['gold']};
+  const app=await boot({state,normalizer:root=>JSON.parse(JSON.stringify(root))});
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  const incomplete=legacy();
+  const denied=await app.api.rehearsePreviewGameZipRestoreInMemory(
+    await archiveBytes(incomplete));
+  assert.equal(denied.reason,'game_backup_additional_player_state_mismatch',JSON.stringify(denied));
+  assert.equal(denied.canApply,false);
+  const complete=await app.api.rehearsePreviewGameZipRestoreInMemory(
+    await archiveBytes(state));
+  assert.equal(complete.gameNormalizationParityVerified,true,JSON.stringify(complete));
+  assert.equal(complete.rawGameFieldPreservationVerified,true);
+  assert.equal(complete.completeGameRestoreVerified,false);
+});
+
+test('Game ZIP rehearsal fails closed on tampered ZIP or missing referenced image without V1 writes',async()=>{
+  const app=await boot({normalizer:root=>JSON.parse(JSON.stringify(root))});
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  const original=app.token();
+  const missing=await app.api.rehearsePreviewGameZipRestoreInMemory(
+    await archiveBytes(legacy(),{}));
+  assert.equal(missing.reason,'game_backup_zip_preflight_required',JSON.stringify(missing));
+  assert.equal(missing.prerequisiteReason,'game_backup_referenced_images_missing');
+  const bad=new Uint8Array([1,2,3,4]);
+  const invalid=await app.api.rehearsePreviewGameZipRestoreInMemory(bad);
+  assert.equal(invalid.reason,'game_backup_zip_preflight_required',JSON.stringify(invalid));
+  assert.equal(invalid.restoredInMemory,false);
+  assert.equal(app.token(),original);
+});
+
+test('Game ZIP rehearsal returns stale after old-tab edit until V2 preview reconciles',async()=>{
+  const app=await boot({normalizer:root=>JSON.parse(JSON.stringify(root))});
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  const zip=await archiveBytes();
+  const before=await app.api.rehearsePreviewGameZipRestoreInMemory(zip);
+  assert.equal(before.restoredInMemory,true);
+  const state=JSON.parse(app.localStorage.getItem(V1));
+  state.players[0].name='newer name';
+  app.localStorage.setItem(V1,JSON.stringify(state));
+  const stale=await app.api.rehearsePreviewGameZipRestoreInMemory(zip);
+  assert.equal(stale.reason,'game_preview_parity_required',JSON.stringify(stale));
+  assert.equal(stale.canApply,false);
+  assert.equal((await reconcile(app,'restore-rehearsal-new')).collectionParityVerified,true);
+  const old=await app.api.rehearsePreviewGameZipRestoreInMemory(zip);
+  assert.equal(old.reason,'game_backup_zip_preflight_required',JSON.stringify(old));
+  assert.equal(old.prerequisiteReason,'game_backup_game_fields_mismatch');
+  const fresh=await app.api.rehearsePreviewGameZipRestoreInMemory(
+    await archiveBytes(state));
+  assert.equal(fresh.restoredInMemory,true,JSON.stringify(fresh));
+  assert.equal(fresh.canApply,false);
+});
+
+test('Game ZIP restore rehearsal catches asynchronous V1 changes during its detached image hashing',async()=>{
+  let app,armed=false;
+  const crypto={randomUUID(){return 'in-memory-race'},subtle:{
+    digest:async(...args)=>{
+      const fingerprint=await webcrypto.subtle.digest(...args);
+      if(armed&&Buffer.from(args[1]).toString()==='photo'){
+        armed=false;
+        app.localStorage.setItem(SORT,'name-asc');
+      }
+      return fingerprint;
+    }
+  }};
+  app=await boot({crypto,normalizer:root=>JSON.parse(JSON.stringify(root))});
+  await installSyntheticLegacyImageDatabase(app,{'image-1':'photo'});
+  await seed(app);
+  armed=true;
+  const report=await app.api.rehearsePreviewGameZipRestoreInMemory(
+    await archiveBytes());
+  assert.equal(report.restoredInMemory,false,JSON.stringify(report));
+  assert.equal(report.canApply,false);
+  assert.equal(armed,false);
+});
+
+test('Game ZIP restore rehearsal never runs with dark mode off or outside localhost fixture',async()=>{
+  const app=await boot({normalizer:root=>JSON.parse(JSON.stringify(root))});
+  const zip=await archiveBytes();
+  app.ctx.location.hostname='taskpoints.pages.dev';
+  assert.equal((await app.api.rehearsePreviewGameZipRestoreInMemory(zip)).reason,
+    'preview_host_required');
+  app.ctx.location.hostname='localhost';
+  app.localStorage.removeItem(DARK);
+  assert.equal((await app.api.rehearsePreviewGameZipRestoreInMemory(zip)).reason,
+    'dark_disabled');
 });

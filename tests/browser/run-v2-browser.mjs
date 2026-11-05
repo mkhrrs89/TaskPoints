@@ -1538,11 +1538,12 @@ try {
       const archive=await TaskPointsResponsiveExport.buildZipBlob(files);
       const bytes=new Uint8Array(await archive.arrayBuffer());
       const inspected=await api.inspectPreviewGameBackupZip(bytes);
+      const replay=await api.rehearsePreviewGameZipRestoreInMemory(bytes);
       const corrupted=Uint8Array.from(bytes);
       corrupted[40]^=0x40;
       const bad=await api.inspectPreviewGameBackupZip(corrupted);
       window.__v2ExportArchiveBytes=bytes;
-      return {seed,inspected,bad,hasPhotos:!!state.youImageId,
+      return {seed,inspected,replay,bad,hasPhotos:!!state.youImageId,
         sourceStillUnchanged:token()===token()};
     });
     assert.equal(result.seed.collectionParityVerified,true,JSON.stringify(result.seed));
@@ -1553,6 +1554,13 @@ try {
     assert.equal(result.inspected.completeGameBackupVerified,false);
     assert.equal(result.inspected.offDeviceBackupVerified,false);
     assert.equal(result.inspected.canApply,false);
+    assert.equal(result.replay.restoredInMemory,true,JSON.stringify(result.replay));
+    assert.equal(result.replay.settingsNormalizationVerified,true);
+    assert.equal(result.replay.gameNormalizationParityVerified,true);
+    assert.equal(result.replay.imageReconstructionVerified,true);
+    assert.equal(result.replay.completeGameRestoreVerified,false);
+    assert.equal(result.replay.offDeviceBackupVerified,false);
+    assert.equal(result.replay.canApply,false);
     assert.equal(result.bad.archiveStructureVerified,false);
     assert.equal(result.bad.canPromote,false);
     const older=await open(context);
@@ -1568,22 +1576,27 @@ try {
       const api=window.TaskPointsStateRuntimeV2;
       const stale=await api.inspectPreviewGameBackupZip(
         window.__v2ExportArchiveBytes);
+      const staleReplay=await api.rehearsePreviewGameZipRestoreInMemory(
+        window.__v2ExportArchiveBytes);
       const token=()=>JSON.stringify(Array.from({length:localStorage.length},
         (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
       const reconcile=await api.rehearsePreviewGameCollectionReconcile(
         token(),'zip-source-newer');
       const mismatched=await api.inspectPreviewGameBackupZip(
         window.__v2ExportArchiveBytes);
-      return {stale,reconcile,mismatched,
+      return {stale,staleReplay,reconcile,mismatched,
         readAuthority:api.getStatus().readAuthority};
     });
     assert.equal(after.stale.archiveGameFieldsVerified,false);
     assert.equal(after.stale.canApply,false);
+    assert.equal(after.staleReplay.restoredInMemory,false);
+    assert.equal(after.staleReplay.canApply,false);
     assert.equal(after.reconcile.collectionParityVerified,true,JSON.stringify(after.reconcile));
     assert.equal(after.mismatched.reason,
       'game_backup_game_fields_mismatch',JSON.stringify(after.mismatched));
     assert.equal(after.readAuthority,'legacy_only');
     return {realZipBuilderUsed:true,wholeZipContentsParsed:true,
+      settingsNormalizerRehearsedInMemory:true,
       independentPrefsUnbacked:true,corruptZipRefused:true,
       oldTabChangesDetected:true,oldBackupNotPromoted:true};
   });

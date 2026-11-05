@@ -1346,3 +1346,57 @@ Chromium exercises actual persisted Blob comparison.
 As with all other V2 probes, no gate is credited until its **entire**
 acceptance criteria are satisfied. The original milestones remain 67/100,
 and V1 remains the only production authority.
+
+
+## Isolated ZIP import reconstruction rehearsal (V2 preview only)
+
+The new explicit rehearsePreviewGameZipRestoreInMemory(archiveBytes)
+takes a ZIP already provided by the caller, requires the existing
+Game preview and live-image/archive integrity checks, and then invokes
+TaskPointsCore.normalizeImportedFullBackupState with detached JSON clones
+and the same preserveMissingReminders/Projects:false options used by the
+Settings import page. No actual Settings import is triggered.
+
+Two independent checks are made:
+1. The import normalizer's projected Game, Player, Season,
+   playerBadges, and reservedPlayerPids outputs must match the same
+   normalized V1 baseline. The original *raw* V1 field presence and
+   values are compared separately, catching defaults added and fields
+   dropped even when both sides normalize to identical output.
+2. Each referenced archived image is staged in an ephemeral Map of
+   copied Uint8Arrays, rehashed with SHA-256, and compared with the
+   earlier, independently authenticated ZIP/live-image fingerprint.
+   This does not save actual Blobs or open an image writer.
+
+The rehearsal verifies additional player metadata fields not previously
+included in the Game preview bundle; an omitted or altered reserved PID
+or badge payload refuses the reconstruction. Old tabs, changed
+full-origin keys, changed Game preview evidence, malformed ZIPs and
+missing or changing image bytes all fail closed without repairing
+anything. The API returns only safe counts and digests, no user
+player/notes/photo contents or identifiers.
+
+Production Settings uses other logic not emulated here: optional
+confirmation prompts, notes/project sidecars, final save/quarantine
+behavior, importing photos into IndexedDB, persistence after reload,
+and independent Game preferences. Because Settings currently does not
+restore those preferences and no durable full-app or off-device restore
+occurs, the audit always reports
+completeGameRestoreVerified:false, fullAppRestoreVerified:false,
+offDeviceBackupVerified:false, canApply:false and canPromote:false.
+A positive in-memory check is NOT evidence of successful production
+import or a safe V2 cutover.
+
+The added focused contracts cover the missing-normalizer guard,
+detached image+Game reconstruction without writes, raw field presence,
+destructive normalization, altered normalized outputs, unbacked
+player PIDs/badges, corrupted/missing archive files, old-tab staleness,
+source changes during hashes and disabled production guards. A
+Chromium/WebKit browser check runs the actual TaskPointsCore normalizer
+against the ZIP created by the production builder and rejects stale
+archives after an uncooperative Game tab edit.
+
+Weighted score remains **67/100**: full production writer fencing,
+verified import/export including all sidecars/images, independent
+off-device rollback, and physical iOS interruption tests are still
+open gates. No Main merge or sync was requested.

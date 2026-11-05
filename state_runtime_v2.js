@@ -6699,6 +6699,208 @@
     finally{try{db?.close();}catch(_){}}
   }
 
+
+  // Nonmutating import round-trip preflight. Reconstruct a hypothetical
+  // Settings ZIP import entirely in detached JavaScript objects and RAM.
+  // No writes to V1, V2, the image DB, storage, or actual download paths.
+  // It inspects the *existing* Settings normalizer, not a fabricated
+  // replacement, and never calls any Settings save/import method.
+  async function rehearsePreviewGameZipRestoreInMemory(archiveInput) {
+    const refuse=(reason,detail={})=>({
+      checked:true,previewOnly:true,restoredInMemory:false,
+      settingsNormalizationVerified:false,
+      gameNormalizationParityVerified:false,
+      rawGameFieldPreservationVerified:false,
+      imageReconstructionVerified:false,
+      independentPreferencesRestorable:false,
+      completeGameRestoreVerified:false,fullAppRestoreVerified:false,
+      offDeviceBackupVerified:false,canApply:false,canPromote:false,
+      gameMigrated:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...detail
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    const generation=currentGeneration({create:false});
+    if(!generation)return refuse('generation_unavailable');
+    if(typeof core.normalizeImportedFullBackupState!=='function')
+      return refuse('settings_import_normalizer_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    const input=archiveInput;
+    let db;
+    try {
+      const origin=captureReadOnlyFullStorageInventory();
+      const source=await capturePreviewGameSource(origin,generation,epoch);
+      if(source.reason)return refuse(source.reason);
+      db=await openGamePreviewDb(generation,epoch);
+      const before=await proveGamePreviewParity(db,source);
+      if(!before.verified)return refuse('game_preview_parity_required',{
+        prerequisiteReason:before.reason
+      });
+      // Never treat a structurally correct but incomplete ZIP as
+      // restorable: first check the real ZIP, all referenced binary photos,
+      // the original V1 snapshot and the Game preview provenance.
+      const archive=await inspectPreviewGameBackupZip(input);
+      if(!archive.archiveStructureVerified
+        ||!archive.archiveGameFieldsVerified
+        ||!archive.archiveReferencedImagesVerified)
+        return refuse('game_backup_zip_preflight_required',{
+          prerequisiteReason:archive.reason
+        });
+      if(!source.current())return refuse('source_changed_before_restore_rehearsal');
+      const parsed=parsePreviewGameBackupZip(input);
+      if(parsed.reason)return refuse(parsed.reason);
+      const manifest=JSON.parse(
+        new global.TextDecoder('utf-8',{fatal:true})
+          .decode(parsed.entries.get('manifest.json')));
+      const raw=global.localStorage.getItem(core.STORAGE_KEY||'taskpoints_v1');
+      const original=core.parseTaskPointsStorageJson(raw);
+      if(!original||typeof original!=='object'||Array.isArray(original)
+        ||!manifest?.state||typeof manifest.state!=='object')
+        return refuse('game_restore_source_invalid');
+      // Core normalizeImportedFullBackupState is the same pure
+      // normalization entry point currently called by settings.html.
+      // Separate Notes/Projects, warning prompts and the final durable
+      // save are intentionally NOT impersonated by this rehearsal.
+      const cloneValue=value=>JSON.parse(JSON.stringify(value));
+      const options={preserveMissingReminders:false,
+        preserveMissingProjects:false};
+      const inputOriginal=cloneValue(original);
+      const inputArchive=cloneValue(manifest.state);
+      const baseline=core.normalizeImportedFullBackupState(
+        inputOriginal,cloneValue(original),options);
+      const reconstructed=core.normalizeImportedFullBackupState(
+        inputArchive,cloneValue(original),options);
+      if(!baseline||typeof baseline!=='object'
+        ||!reconstructed||typeof reconstructed!=='object'
+        ||Array.isArray(baseline)||Array.isArray(reconstructed))
+        return refuse('settings_import_normalization_invalid');
+      const tracked=GAME_ARRAY_FIELDS.concat(GAME_SCALAR_FIELDS,
+        ['reservedPlayerPids','playerBadges']);
+      // These extra player resources live in V1 but were not in the
+      // original Game preview bundle. They must not silently disappear
+      // from a future backup even when the normalizer would fill defaults.
+      for(const field of ['reservedPlayerPids','playerBadges']){
+        const has=Object.prototype.hasOwnProperty.call(original,field);
+        if(has!==Object.prototype.hasOwnProperty.call(manifest.state,field)
+          ||has&&stableJson(original[field])!==
+            stableJson(manifest.state[field]))
+          return refuse('game_backup_additional_player_state_mismatch');
+      }
+      let normalizedDifferences=0,rawDifferences=0;
+      for(const field of tracked){
+        const inBaseline=Object.prototype.hasOwnProperty.call(baseline,field);
+        const inRestored=Object.prototype.hasOwnProperty.call(
+          reconstructed,field);
+        if(inBaseline!==inRestored
+          ||inBaseline&&stableJson(baseline[field])!==
+            stableJson(reconstructed[field]))
+          normalizedDifferences++;
+        const inRaw=Object.prototype.hasOwnProperty.call(original,field);
+        const inResult=Object.prototype.hasOwnProperty.call(
+          reconstructed,field);
+        if(inRaw!==inResult
+          ||inRaw&&stableJson(original[field])!==
+            stableJson(reconstructed[field]))
+          rawDifferences++;
+      }
+      if(normalizedDifferences)
+        return refuse('game_import_normalization_parity_mismatch',{
+          settingsNormalizationVerified:true,normalizedDifferences
+        });
+      if(!source.current()||raw!==global.localStorage.getItem(
+        core.STORAGE_KEY||'taskpoints_v1'))
+        return refuse('source_changed_after_import_normalization');
+      // Recreate the Settings ZIP importer image stage in an ephemeral
+      // Map of exact byte copies. Never instantiate a real legacy Blob
+      // store or call saveImageBlob. SHA the copies and compare against
+      // the already independently verified live-image archive proof.
+      const imageMimes={png:'image/png',webp:'image/webp',
+        gif:'image/gif',jpg:'image/jpeg'};
+      const referenced=new Set();
+      let scanned=0;
+      const visit=(value,key='')=>{
+        if(++scanned>75000)throw Error('image_reference_scope_exceeded');
+        if(/imageId$/i.test(key)&&typeof value==='string'&&value)
+          referenced.add(value);
+        if(Array.isArray(value))
+          value.forEach(item=>visit(item));
+        else if(value&&typeof value==='object')
+          Object.entries(value).forEach(([k,v])=>visit(v,k));
+      };
+      visit(manifest.state.players||[]);
+      for(const field of GAME_ARRAY_FIELDS.concat(GAME_SCALAR_FIELDS)){
+        if(field==='players')continue;
+        if(Object.prototype.hasOwnProperty.call(manifest.state,field))
+          visit(manifest.state[field],field);
+      }
+      if(referenced.size>256)
+        return refuse('game_restore_image_reference_limit');
+      const staged=new Map();
+      for(const [file,data] of parsed.entries){
+        if(file==='manifest.json')continue;
+        const match=/^images\/(.+)\.(png|webp|gif|jpg|bin)$/.exec(file);
+        if(!match)return refuse('game_restore_image_file_invalid');
+        if(staged.has(match[1]))return refuse('game_restore_duplicate_image_id');
+        staged.set(match[1],{bytes:Uint8Array.from(data),ext:match[2]});
+      }
+      const identities=[...referenced].sort();
+      let verifiedBytes=0;
+      const checks=[];
+      for(const id of identities){
+        const item=staged.get(id);
+        if(!item||!imageMimes[item.ext])
+          return refuse('game_restore_referenced_image_unavailable');
+        verifiedBytes+=item.bytes.byteLength;
+        if(verifiedBytes>67108864)
+          return refuse('game_restore_image_memory_budget_exceeded');
+        const digest=await global.crypto.subtle.digest(
+          'SHA-256',item.bytes);
+        const hex=Array.from(new Uint8Array(digest),
+          n=>n.toString(16).padStart(2,'0')).join('');
+        checks.push([id,item.bytes.byteLength,imageMimes[item.ext],hex]);
+      }
+      const fingerprint=identities.length
+        ?await previewRecoveryFingerprint(checks):null;
+      if(fingerprint!==archive.imageFingerprint)
+        return refuse('game_restore_image_digest_mismatch');
+      if(!source.current())
+        return refuse('source_changed_after_image_staging');
+      const after=await proveGamePreviewParity(db,source);
+      if(!after.verified)
+        return refuse('game_preview_changed_during_restore_rehearsal',{
+          prerequisiteReason:after.reason
+        });
+      // Re-read V1 and sidecars after async digest to prevent a stale
+      // normalizer or old-tab import from receiving a positive verdict.
+      if(!source.current())
+        return refuse('source_changed_after_restore_rehearsal');
+      return {
+        checked:true,previewOnly:true,restoredInMemory:true,
+        settingsNormalizationVerified:true,
+        gameNormalizationParityVerified:true,
+        rawGameFieldPreservationVerified:rawDifferences===0,
+        rawGameFieldDifferenceCount:rawDifferences,
+        comparedGameFieldCount:tracked.length,
+        imageReconstructionVerified:true,
+        reconstructedReferencedImages:identities.length,
+        reconstructedImageBytes:verifiedBytes,
+        inMemoryImageFingerprint:fingerprint,
+        // Game preferences are stored separately and the actual Settings
+        // import DOES NOT restore them, even from an enriched manifest.
+        independentPreferencesRestorable:false,
+        completeGameRestoreVerified:false,fullAppRestoreVerified:false,
+        offDeviceBackupVerified:false,canApply:false,canPromote:false,
+        gameMigrated:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+        reason:rawDifferences
+          ?'game_zip_normalized_restore_only'
+          :'game_zip_in_memory_restore_rehearsed'
+      };
+    }catch(_){return refuse('game_zip_restore_rehearsal_unavailable');}
+    finally{try{db?.close();}catch(_){}}
+  }
+
   async function rehearsePreviewGameCollectionAction(sourceToken,actionId,reconcile) {
     const refuse=(reason,extra={})=>({
       checked:true,previewOnly:true,committed:false,confirmedDurable:false,
@@ -12048,6 +12250,7 @@
     inspectPreviewGameCheckpointCoverage,
     inspectPreviewGameImageCoverage,
     inspectPreviewGameBackupZip,
+    rehearsePreviewGameZipRestoreInMemory,
     inspectPreviewTodaySource,
     rehearsePreviewTodayCollectionSeed,
     inspectPreviewTodayCollectionParity,
