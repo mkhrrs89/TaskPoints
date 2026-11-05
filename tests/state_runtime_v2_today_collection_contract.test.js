@@ -100,7 +100,7 @@ test('V5 Today seed writes one root and three records, with exact sparse map pro
   assert.equal(result.recordCount,4);
   assert.equal(result.canPromote,false);
   const db=await app.api.open();
-  assert.equal(db.version,5);
+  assert.equal(db.version,6);
   assert.equal(db.objectStoreNames.contains('todayDays'),true);
   const after=app.indexedDB.dump(DB);
   assert.deepEqual(after.habits,before.habits);
@@ -317,7 +317,7 @@ test('V4 to V5 upgrade adds Today store and retains Task, Project and Habit rows
   const later=await boot(undefined,{
     indexedDB:app.indexedDB,localStorage:app.localStorage
   });
-  assert.equal((await later.api.open()).version,5);
+  assert.equal((await later.api.open()).version,6);
   const after=later.indexedDB.dump(DB);
   assert.deepEqual(after.habits,before.habits);
   assert.deepEqual(after.completions,before.completions);
