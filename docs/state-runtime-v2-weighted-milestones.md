@@ -1540,3 +1540,57 @@ production cutover. Every new API returns goldMigrated:false, canPromote:false
 and readAuthority:'legacy_only'. The weighted readiness score remains
 **67/100** because no entire remaining gate has been completed. This is a
 V2-only change; no Main sync or Main write was performed in this pass.
+
+
+## Gold ledger incremental reconciliation — V2 only
+
+The isolated V6 Gold preview now has the second explicit API
+**rehearsePreviewGoldLedgerReconcile(fullOriginToken, actionId, options)**.
+It is a non-authoritative rehearsal, not a production Gold writer or an
+automatic mirror. V1 remains the only source of balances and transaction
+history. It neither invokes the Gold engine nor modifies any legacy storage.
+
+The operation accepts **append-only history**, full Gold economy metadata
+changes, and in-place historical payload corrections only when the caller
+explicitly supplies **options.allowHistoricalCorrections = true**. It refuses
+shrinking ledgers, missing source keys after earlier presence, transaction-ID
+swaps or reordering, and implicit history rewrites. These situations require
+separate investigation rather than a convenience overwrite: no old Gold
+history is silently discarded.
+
+Before writing, it validates:
+
+- Current complete V1 origin inventory and unchanged reset generation,
+  preview host and dark-mode epoch across awaited calls.
+- All existing V2 row positions and their original transaction IDs.
+- SHA-256 of **all prior transaction rows and complete prior economy metadata**
+  against the sealed earlier preview digest, not merely the newly captured
+  V1 snapshot.
+- The entire seed/reconciliation receipt ancestry, including origin
+  fingerprints, row counts and generation at every link. Missing ancestors,
+  cycles, orphan receipts and mismatched IDs fail closed. This is local
+  integrity evidence, not an authenticated external recovery copy.
+- A maximum of 64 changed rows and 256 KiB of changed-row/metadata payload
+  per action. No personal transaction details are returned.
+
+Changed rows, provenance metadata and a fresh linked receipt commit in one
+**goldLedger/meta/mutations** IndexedDB transaction. A concurrent V2 write,
+old-tab V1 write, quota failure, changed generation or duplicate action ID
+cannot silently rebase data. After commit, independent readback and full
+source-vs-preview parity must succeed. A source change following a durable
+commit yields an explicitly uncertain result, never promotion. Identical
+repeated checks report a verified no-op without modifying any receipts.
+
+The focused tests cover appends across multiple generations, reload,
+metadata-only changes, explicit corrections, refused deletion/reordering,
+tampered old rows, lost and orphaned receipts, repeated action IDs,
+quota rollback in every transaction store, simultaneous preview writes,
+asynchronous old-tab source races and production/preview guards.
+
+**Still unproven:** production writer admission/fencing, a reviewed historical
+deletion workflow, independent off-device Gold+image backups and restoration,
+all-sidecar recovery, full nonpilot migration, physical Safari/iOS interruption
+testing, and an explicitly authorized reversible cutover. The entire 12-point
+nonpilot milestone is not complete. **V2 remains at 67/100**; Gold is
+non-authoritative with goldMigrated:false, canPromote:false and
+readAuthority:legacy_only. No Main sync or Main modifications were made.
