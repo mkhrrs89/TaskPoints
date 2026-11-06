@@ -543,13 +543,33 @@
     if (!state || typeof state !== 'object') return { state, changed: initialized.changed, initialized: initialized.initialized };
     if (initialized.blocked) return { state, changed: false, initialized: false, blocked: true };
     let changed = initialized.changed;
-    const rows = collectCompleteMatchups(state).slice().sort((a, b) => {
-      const dateCompare = rowDateKey(a).localeCompare(rowDateKey(b));
-      if (dateCompare) return dateCompare;
-      const timeCompare = transactionTimestamp(a).localeCompare(transactionTimestamp(b));
-      return timeCompare || matchupIdentity(a).localeCompare(matchupIdentity(b));
+    // A settled matchup is immutable Gold history. Skip already-accounted
+    // games before settlement rather than cloning the entire settled-key
+    // collection once per historical game on every Home load/NPC simulation.
+    const settledKeys = new Set(Array.isArray(state.goldEconomy?.settledMatchupKeys)
+      ? state.goldEconomy.settledMatchupKeys : []);
+    const launchDateKey = String(state.goldEconomy?.launchDateKey || '');
+    const rows = collectCompleteMatchups(state)
+      .filter((row) => {
+        const identity = matchupIdentity(row);
+        if (!identity || settledKeys.has(identity)) return false;
+        const date = rowDateKey(row);
+        return Boolean(date && (!launchDateKey || date >= launchDateKey));
+      })
+      .sort((a, b) => {
+        const dateCompare = rowDateKey(a).localeCompare(rowDateKey(b));
+        if (dateCompare) return dateCompare;
+        const timeCompare = transactionTimestamp(a).localeCompare(transactionTimestamp(b));
+        return timeCompare || matchupIdentity(a).localeCompare(matchupIdentity(b));
+      });
+    rows.forEach((row) => {
+      const identity = matchupIdentity(row);
+      if (settledKeys.has(identity)) return;
+      if (settleOneMatchup(state, row)) {
+        settledKeys.add(identity);
+        changed = true;
+      }
     });
-    rows.forEach((row) => { if (settleOneMatchup(state, row)) changed = true; });
     if (reconcileChampionBonuses(state)) changed = true;
     return { state, changed, initialized: initialized.initialized };
   }

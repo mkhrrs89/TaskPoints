@@ -441,3 +441,58 @@ test('both missing Gold ledger AND metadata cannot reset a previously settled Go
  assert.equal(result.blocked,true);
  assert.deepEqual(state,before,'neither a new economy nor a new ledger may be synthesized');
 });
+
+test('Gold reconciliation skips long settled history without recopying settled keys per game', () => {
+  const { api, context } = install();
+  const oldRows = Array.from({ length: 1200 }, (_, index) => ({
+    id: 'old-' + index,
+    dateKey: '2026-10-11',
+    playerAId: 'A',
+    playerBId: 'B',
+    scoreA: 70,
+    scoreB: 50
+  }));
+  const state = ledgerState([
+    { id: 'A', greed: 50, active: true },
+    { id: 'B', greed: 50, active: true }
+  ], { A: 1000, B: 1000 });
+  state.goldEconomy.settledMatchupKeys = oldRows.map(row => 'id:' + row.id);
+  state.matchups = oldRows.concat([{
+    id: 'new-gold-result',
+    dateKey: '2026-11-06',
+    playerAId: 'A',
+    playerBId: 'B',
+    scoreA: 70,
+    scoreB: 50
+  }]);
+
+  // Count expensive Set snapshots rather than using a flaky wall-clock limit.
+  // A large historical Set may be built for the one genuinely new match,
+  // but not once for every one of the 1,200 already-settled matches.
+  const OriginalSet = context.Set;
+  let fullHistorySnapshots = 0;
+  context.Set = class ObservedSet extends OriginalSet {
+    constructor(values) {
+      super(values);
+      if (Array.isArray(values) && values.length >= 1200
+        && String(values[0]) === 'id:old-0') fullHistorySnapshots += 1;
+    }
+  };
+  try {
+    const result = api.reconcileGoldEconomy(state);
+    assert.equal(result.changed, true);
+    assert.equal(state.goldEconomy.settledMatchupKeys.length, 1201);
+    assert.equal(state.goldLedger.filter(row => row.type === 'matchup_margin').length, 1);
+    assert.equal(state.goldLedger.filter(row => row.type === 'matchup_theft').length, 2);
+    assert.equal(state.goldLedger.filter(row => row.type === 'opening_balance').length, 2);
+
+    const afterFirst = clone(state);
+    const again = api.reconcileGoldEconomy(state);
+    assert.equal(again.changed, false, 'settled matches must not be replayed');
+    assert.deepEqual(state, afterFirst, 'repeat reconciliation must not mutate balances or history');
+    assert.ok(fullHistorySnapshots <= 2,
+      'already settled history must not trigger quadratic reprocessing');
+  } finally {
+    context.Set = OriginalSet;
+  }
+});
