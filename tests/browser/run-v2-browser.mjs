@@ -2969,6 +2969,60 @@ try {
       exactCopiesStillRejected:true,legacyAuthorityPreserved:true};
   });
 
+  await run('Habit order sidecar is mirrored byte-for-byte and refuses stale old-tab edits',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const overlayKey='taskpoints_habit_order_overlay_v1';
+      const overlay=JSON.stringify({version:1,
+        updatedAtISO:'2026-11-06T12:00:00Z',
+        orders:{h1:2,h2:1},
+        habitUpdatedAtISO:{h1:'2026-11-06T12:00:00Z'},
+        unknownFutureField:{preserve:true}});
+      localStorage.setItem(overlayKey,overlay);
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const before=localStorage.getItem('taskpoints_v1');
+      const initial=await api.rehearsePreviewHabitOrderSidecarSeed(token(),'first');
+      const parity=await api.inspectPreviewHabitOrderSidecarParity();
+      const db=await new Promise((resolve,reject)=>{
+        const req=indexedDB.open('taskpoints_v2_habit_order_preview',1);
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      const storedRoot=await new Promise((resolve,reject)=>{
+        const req=db.transaction('records','readonly').objectStore('records').get('root');
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      db.close();
+      const staleToken=token();
+      const changed=JSON.stringify({version:1,
+        updatedAtISO:'2026-11-06T13:00:00Z',
+        orders:{h1:1,h2:2,h3:3}});
+      localStorage.setItem(overlayKey,changed);
+      const stale=await api.rehearsePreviewHabitOrderSidecarReconcile(staleToken,'stale');
+      const oldParity=await api.inspectPreviewHabitOrderSidecarParity();
+      const updated=await api.rehearsePreviewHabitOrderSidecarReconcile(token(),'second');
+      const final=await api.inspectPreviewHabitOrderSidecarParity();
+      return {initial,parity,storedRoot,stale,oldParity,updated,final,
+        sourcePreserved:localStorage.getItem(overlayKey)===changed,
+        snapshotPreserved:localStorage.getItem('taskpoints_v1')===before,
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(result.initial.confirmedDurable,true,JSON.stringify(result.initial));
+    assert.equal(result.parity.match,true);
+    assert.equal(result.storedRoot.raw.includes('unknownFutureField'),true);
+    assert.equal(result.stale.committed,false);
+    assert.equal(result.stale.reason,'full_origin_changed');
+    assert.equal(result.oldParity.match,false);
+    assert.equal(result.updated.confirmedDurable,true,JSON.stringify(result.updated));
+    assert.equal(result.final.match,true,JSON.stringify(result.final));
+    assert.equal(result.sourcePreserved,true);
+    assert.equal(result.snapshotPreserved,true);
+    assert.equal(result.authority,'legacy_only');
+    return {exactSidecarRecoveryCopy:true,oldTabWriteRejected:true,
+      incrementalReconcile:true,legacyAuthorityPreserved:true};
+  });
+
   await run('V2 compatibility export includes V1 Task journal and preserves interleaved Habit/Task chronology', async context=>{
     const page=await open(context);
     const baseline=await page.evaluate(async()=>{

@@ -1623,3 +1623,33 @@ tabs, replace production V1 writes, make WAL replay authoritative, prove
 all other writer families or satisfy the full production writer-admission
 gate. **Readiness remains 67/100**, with V1 primary and V2 unpromoted.
 Main was not synced or modified.
+
+
+## Record-level preservation of the independent Habit-order sidecar — November 6
+
+The preview-only Habit order source overlay now has an **independent,
+record-level IndexedDB copy**, `taskpoints_v2_habit_order_preview`. This is
+in addition to the existing effective Habit mirror, not a replacement.
+`rehearsePreviewHabitOrderSidecarSeed(fullOriginToken,actionId)`,
+`rehearsePreviewHabitOrderSidecarReconcile(fullOriginToken,actionId)`
+and `inspectPreviewHabitOrderSidecarParity()` explicitly store the raw
+`taskpoints_habit_order_overlay_v1` bytes as a root row alongside
+individually addressable Habit order/timestamp rows.
+
+A complete source inventory, reset generation and source SHA-256 must remain
+stable across awaits. Missing overlays and explicit empty overlays stay
+distinct. Unknown future JSON fields, literal formatting, string-vs-number
+values, and absent timestamp properties are retained exactly in the raw row.
+A change updates only changed rows, deletes removed rows, and appends an
+immutable prior-linked receipt and a new seal in one IndexedDB transaction.
+Tampered or orphaned evidence, stale other-tab changes, malformed source,
+quota failures, action replay and oversized batches refuse rather than
+repair or drop pending data. Readback and independent parity are required.
+
+Focused Node and Chromium/WebKit tests prove byte-preserving seed, edits,
+deletions, addition, reload, stale source refusal and transaction rollback.
+The V1 Habit reorder writer remains synchronous and authoritative. The
+existing V2 Habit pilot, WAL, Settings, recovery, and Main are unchanged.
+This is a concrete piece of the uncredited auxiliary/sidecar migration work,
+**not** production-wide writer fencing, complete backup/restore, or a
+milestone acceptance. Readiness remains **67/100**.

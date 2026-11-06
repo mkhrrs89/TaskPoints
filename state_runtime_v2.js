@@ -5842,6 +5842,340 @@
   }
 
 
+  // The V1 Habit order overlay is its own synchronous, authoritative
+  // localStorage sidecar. The existing dark Habit mirror can represent its
+  // *effective* order, but cannot restore its exact raw bytes or unknown
+  // fields. Keep a separate, explicit record-level PREVIEW copy; never
+  // install a production writer, take read authority, or auto-restore it.
+  const HABIT_ORDER_SIDECAR_KEY='taskpoints_habit_order_overlay_v1';
+  const HABIT_ORDER_PREVIEW_DB='taskpoints_v2_habit_order_preview';
+
+  function openHabitOrderPreviewDb(generation,epoch) {
+    return new Promise((resolve,reject)=>{
+      if(!isWalTestPreviewHost()||!isDarkEnabled()
+        ||currentGeneration({create:false})!==generation
+        ||darkMirrorModeEpoch!==epoch)
+        return reject(Error('habit_order_preview_context_changed'));
+      if(typeof global.indexedDB?.open!=='function')
+        return reject(Error('habit_order_preview_indexeddb_unavailable'));
+      let req,failed=false;
+      try{req=global.indexedDB.open(HABIT_ORDER_PREVIEW_DB,1);}
+      catch(error){reject(error);return;}
+      req.onupgradeneeded=()=>{
+        if(failed||!isWalTestPreviewHost()||!isDarkEnabled()
+          ||darkMirrorModeEpoch!==epoch
+          ||currentGeneration({create:false})!==generation){
+          try{req.transaction?.abort();}catch(_){}
+          return;
+        }
+        try{
+          for(const name of ['records','receipts','meta'])
+            if(!req.result.objectStoreNames.contains(name))
+              req.result.createObjectStore(name,{keyPath:'id'});
+        }catch(_){try{req.transaction?.abort();}catch(_){}}
+      };
+      req.onsuccess=()=>{
+        if(failed)try{req.result.close();}catch(_){}
+        else resolve(req.result);
+      };
+      req.onerror=()=>{failed=true;reject(req.error||Error('habit_order_preview_open_failed'));};
+      req.onblocked=()=>{failed=true;reject(Error('habit_order_preview_open_blocked'));};
+    });
+  }
+
+  async function capturePreviewHabitOrderSidecar(token,generation,epoch) {
+    const current=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&currentGeneration({create:false})===generation
+      &&darkMirrorModeEpoch===epoch
+      &&captureReadOnlyFullStorageInventory()===token;
+    try{if(!current())return {reason:'full_origin_changed'};}
+    catch(_){return {reason:'full_origin_unreadable'};}
+    let raw,rows;
+    try{
+      raw=global.localStorage.getItem(HABIT_ORDER_SIDECAR_KEY);
+      if(raw!==null&&(typeof raw!=='string'||!raw.length
+        ||raw.length>524288))return {reason:'habit_order_source_size_invalid'};
+      let orders={},timestamps={};
+      if(raw!==null){
+        const parsed=JSON.parse(raw);
+        if(!parsed||typeof parsed!=='object'||Array.isArray(parsed)
+          ||!parsed.orders||typeof parsed.orders!=='object'
+          ||Array.isArray(parsed.orders)
+          ||(parsed.version!=null&&parsed.version!==1))
+          return {reason:'habit_order_source_schema_invalid'};
+        orders=parsed.orders;
+        if(parsed.habitUpdatedAtISO!==undefined){
+          if(!parsed.habitUpdatedAtISO
+            ||typeof parsed.habitUpdatedAtISO!=='object'
+            ||Array.isArray(parsed.habitUpdatedAtISO))
+            return {reason:'habit_order_timestamps_invalid'};
+          timestamps=parsed.habitUpdatedAtISO;
+        }
+      }
+      const ids=[...new Set([...Object.keys(orders),...Object.keys(timestamps)])].sort();
+      if(ids.length>1024||ids.some(id=>!id||id.length>256))
+        return {reason:'habit_order_record_limit'};
+      for(const id of Object.keys(orders)){
+        const value=orders[id];
+        if((typeof value!=='number'&&typeof value!=='string')
+          ||value===''||!Number.isFinite(Number(value)))
+          return {reason:'habit_order_value_invalid'};
+      }
+      for(const id of Object.keys(timestamps))
+        if(typeof timestamps[id]!=='string')
+          return {reason:'habit_order_timestamp_invalid'};
+      rows=[{id:'root',raw},...ids.map(id=>({
+        id:'habit:'+id,habitId:id,
+        orderPresent:Object.prototype.hasOwnProperty.call(orders,id),
+        ...(Object.prototype.hasOwnProperty.call(orders,id)
+          ?{order:orders[id]}:{}),
+        timestampPresent:Object.prototype.hasOwnProperty.call(timestamps,id),
+        ...(Object.prototype.hasOwnProperty.call(timestamps,id)
+          ?{updatedAtISO:timestamps[id]}:{})
+      }))];
+      if(!current()||global.localStorage.getItem(HABIT_ORDER_SIDECAR_KEY)!==raw)
+        return {reason:'habit_order_source_changed_during_capture'};
+    }catch(_){return {reason:'habit_order_source_unreadable'};}
+    let fingerprint;
+    try{fingerprint=await previewRecoveryFingerprint(rows);}
+    catch(_){return {reason:'habit_order_digest_unavailable'};}
+    try{
+      if(!current()||global.localStorage.getItem(HABIT_ORDER_SIDECAR_KEY)!==raw)
+        return {reason:'habit_order_source_changed_after_digest'};
+    }catch(_){return {reason:'habit_order_source_unreadable'};}
+    return {rows,fingerprint,current,present:raw!==null};
+  }
+
+  async function readHabitOrderPreview(db) {
+    const tx=db.transaction(['records','receipts','meta'],'readonly');
+    const [rows,receipts,seal]=await Promise.all([
+      requestPromise(tx.objectStore('records').getAll()),
+      requestPromise(tx.objectStore('receipts').getAll()),
+      requestPromise(tx.objectStore('meta').get('habit-order-preview'))
+    ]);
+    return {rows,receipts,seal};
+  }
+
+  async function verifyHabitOrderPreviewEvidence(previous,generation) {
+    const {rows,receipts,seal}=previous;
+    if(!seal)
+      return {ok:rows.length===0&&receipts.length===0,
+        empty:true,reason:'habit_order_preview_orphaned_evidence'};
+    if(seal.schemaVersion!==1||seal.resetGeneration!==generation
+      ||typeof seal.fingerprint!=='string'
+      ||typeof seal.receiptId!=='string'||!rows.some(r=>r.id==='root')
+      ||new Set(rows.map(r=>r.id)).size!==rows.length)
+      return {ok:false,reason:'habit_order_preview_seal_invalid'};
+    const calculated=await previewRecoveryFingerprint(rows.slice().sort(
+      (a,b)=>a.id==='root'?-1:b.id==='root'?1:a.id.localeCompare(b.id)));
+    if(calculated!==seal.fingerprint)
+      return {ok:false,reason:'habit_order_preview_rows_tampered'};
+    const byId=new Map(receipts.map(r=>[r?.id,r]));
+    if(byId.size!==receipts.length||receipts.length>128)
+      return {ok:false,reason:'habit_order_preview_receipts_invalid'};
+    let id=seal.receiptId,expected=seal.fingerprint;
+    const visited=new Set();
+    while(id){
+      if(visited.has(id))return {ok:false,reason:'habit_order_preview_receipt_cycle'};
+      visited.add(id);
+      const receipt=byId.get(id);
+      if(!receipt||receipt.resetGeneration!==generation
+        ||receipt.fingerprint!==expected)
+        return {ok:false,reason:'habit_order_preview_receipt_invalid'};
+      if(receipt.type==='habit-order-preview-seed'){
+        if(receipt.priorReceiptId!=null||receipt.priorFingerprint!=null
+          ||visited.size!==receipts.length)
+          return {ok:false,reason:'habit_order_preview_orphan_receipts'};
+        return {ok:true,empty:false};
+      }
+      if(receipt.type!=='habit-order-preview-reconcile'
+        ||typeof receipt.priorReceiptId!=='string'
+        ||typeof receipt.priorFingerprint!=='string')
+        return {ok:false,reason:'habit_order_preview_receipt_invalid'};
+      id=receipt.priorReceiptId;
+      expected=receipt.priorFingerprint;
+    }
+    return {ok:false,reason:'habit_order_preview_receipt_root_missing'};
+  }
+
+  const refuseHabitOrderPreview=(reason,detail={})=>({
+    checked:true,previewOnly:true,committed:false,confirmedDurable:false,
+    collectionParityVerified:false,habitOrderSidecarMigrated:false,
+    readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+    productionWritersFenced:false,canPromote:false,reason,...detail
+  });
+
+  async function inspectPreviewHabitOrderSidecarParity() {
+    const fail=(reason,detail={})=>({
+      ...refuseHabitOrderPreview(reason),match:false,...detail
+    });
+    if(!isWalTestPreviewHost())return fail('preview_host_required');
+    if(!isDarkEnabled())return fail('dark_disabled');
+    const generation=currentGeneration({create:false}),epoch=darkMirrorModeEpoch;
+    if(!generation)return fail('generation_unavailable');
+    let token,source,db;
+    try{
+      token=captureReadOnlyFullStorageInventory();
+      source=await capturePreviewHabitOrderSidecar(token,generation,epoch);
+      if(source.reason)return fail(source.reason);
+      db=await openHabitOrderPreviewDb(generation,epoch);
+      const previous=await readHabitOrderPreview(db);
+      const proof=await verifyHabitOrderPreviewEvidence(previous,generation);
+      if(!proof.ok||proof.empty)
+        return fail(proof.reason||'habit_order_preview_seed_required');
+      if(stableJson(previous.rows.slice().sort((a,b)=>a.id==='root'?-1:b.id==='root'?1:a.id.localeCompare(b.id)))
+        !==stableJson(source.rows))
+        return fail('habit_order_preview_source_mismatch');
+      if(!source.current())return fail('habit_order_source_changed_after_parity');
+      return {checked:true,previewOnly:true,match:true,
+        collectionParityVerified:true,rowCount:source.rows.length,
+        sourcePresent:source.present,habitOrderSidecarMigrated:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+        productionWritersFenced:false,canPromote:false,
+        reason:'habit_order_preview_parity_verified'};
+    }catch(_){return fail('habit_order_preview_parity_unreadable');}
+    finally{try{db?.close();}catch(_){}}
+  }
+
+  async function rehearsePreviewHabitOrderSidecarAction(sourceToken,actionId,allowReconcile) {
+    const fail=refuseHabitOrderPreview;
+    if(!isWalTestPreviewHost())return fail('preview_host_required');
+    if(!isDarkEnabled())return fail('dark_disabled');
+    if(typeof sourceToken!=='string'||!sourceToken)
+      return fail('full_origin_token_required');
+    if(typeof actionId!=='string'||!actionId||actionId.length>128)
+      return fail('habit_order_action_id_required');
+    const generation=currentGeneration({create:false}),epoch=darkMirrorModeEpoch;
+    if(!generation)return fail('generation_unavailable');
+    let source,db;
+    try{
+      source=await capturePreviewHabitOrderSidecar(sourceToken,generation,epoch);
+      if(source.reason)return fail(source.reason);
+      db=await openHabitOrderPreviewDb(generation,epoch);
+      const previous=await readHabitOrderPreview(db);
+      const proof=await verifyHabitOrderPreviewEvidence(previous,generation);
+      if(!proof.ok)return fail(proof.reason);
+      if(proof.empty&&allowReconcile)
+        return fail('habit_order_preview_seed_required');
+      if(!proof.empty&&!allowReconcile){
+        if(previous.seal.fingerprint!==source.fingerprint)
+          return fail('habit_order_preview_source_changed_requires_reconcile');
+        const parity=await inspectPreviewHabitOrderSidecarParity();
+        return parity.match
+          ?{...parity,committed:false,confirmedDurable:true}
+          :fail('habit_order_preview_existing_evidence_unverified',{
+            prerequisiteReason:parity.reason
+          });
+      }
+      const same=!proof.empty&&previous.seal.fingerprint===source.fingerprint;
+      if(same){
+        const parity=await inspectPreviewHabitOrderSidecarParity();
+        return parity.match
+          ?{...parity,committed:false,confirmedDurable:true,
+            reason:'habit_order_preview_already_current'}
+          :fail('habit_order_preview_noop_unverified',{
+            prerequisiteReason:parity.reason
+          });
+      }
+      const before=new Map(previous.rows.map(r=>[r.id,r]));
+      const desired=new Map(source.rows.map(r=>[r.id,r]));
+      const changed=source.rows.filter(r=>stableJson(before.get(r.id))!==stableJson(r));
+      const removed=previous.rows.filter(r=>!desired.has(r.id));
+      if(!proof.empty&&(changed.length+removed.length>64
+        ||JSON.stringify({changed,removed}).length>262144))
+        return fail('habit_order_preview_batch_limit');
+      if(previous.receipts.length>=128)
+        return fail('habit_order_preview_receipt_limit');
+      const receiptId='habit-order-preview:'+actionId;
+      if(previous.receipts.some(r=>r.id===receiptId))
+        return fail('habit_order_preview_action_id_reused');
+      const receipt={
+        id:receiptId,type:proof.empty
+          ?'habit-order-preview-seed':'habit-order-preview-reconcile',
+        resetGeneration:generation,fingerprint:source.fingerprint,
+        priorReceiptId:proof.empty?null:previous.seal.receiptId,
+        priorFingerprint:proof.empty?null:previous.seal.fingerprint,
+        changeCount:changed.length,deleteCount:removed.length
+      };
+      const seal={id:'habit-order-preview',schemaVersion:1,
+        resetGeneration:generation,fingerprint:source.fingerprint,
+        receiptId,recordCount:source.rows.length,
+        sourcePresent:source.present};
+      if(!source.current())
+        return fail('habit_order_source_changed_before_write');
+      let failure=null;
+      const abort=(tx,reason)=>{
+        failure=reason;try{tx.abort();}catch(_){}
+      };
+      try{
+        const tx=db.transaction(['records','receipts','meta'],'readwrite');
+        const recordStore=tx.objectStore('records');
+        const receiptStore=tx.objectStore('receipts');
+        const metaStore=tx.objectStore('meta');
+        const requests=[recordStore.getAll(),receiptStore.getAll(),
+          metaStore.get('habit-order-preview')];
+        const values=new Array(requests.length);
+        let pending=requests.length;
+        requests.forEach((req,i)=>{req.onsuccess=()=>{
+          values[i]=req.result;
+          if(--pending)return;
+          try{
+            if(!source.current())
+              return abort(tx,'habit_order_source_changed_under_transaction');
+            if(stableJson(values[0])!==stableJson(previous.rows)
+              ||stableJson(values[1])!==stableJson(previous.receipts)
+              ||stableJson(values[2])!==stableJson(previous.seal))
+              return abort(tx,'habit_order_preview_concurrent_change');
+            for(const row of removed)recordStore.delete(row.id);
+            for(const row of changed)recordStore.put(row);
+            receiptStore.add(receipt);
+            metaStore.put(seal);
+          }catch(_){abort(tx,'habit_order_preview_atomic_write_failed');}
+        };});
+        await transactionPromise(tx);
+      }catch(_){return fail(failure||'habit_order_preview_atomic_write_failed');}
+      try{
+        const saved=await readHabitOrderPreview(db);
+        const sorted=saved.rows.slice().sort(
+          (a,b)=>a.id==='root'?-1:b.id==='root'?1:a.id.localeCompare(b.id));
+        if(stableJson(sorted)!==stableJson(source.rows)
+          ||stableJson(saved.seal)!==stableJson(seal)
+          ||stableJson(saved.receipts.find(r=>r.id===receiptId))!==stableJson(receipt))
+          return fail('habit_order_preview_readback_unverified',{
+            committed:true,writeOutcomeUncertain:true});
+        if(!source.current())
+          return fail('habit_order_source_changed_after_write',{
+            committed:true,confirmedDurable:true,writeOutcomeUncertain:true});
+        const parity=await inspectPreviewHabitOrderSidecarParity();
+        if(!parity.match)
+          return fail('habit_order_preview_postwrite_parity_unverified',{
+            committed:true,confirmedDurable:true,writeOutcomeUncertain:true,
+            prerequisiteReason:parity.reason});
+        if(!source.current())
+          return fail('habit_order_source_changed_after_parity',{
+            committed:true,confirmedDurable:true,writeOutcomeUncertain:true});
+        return {
+          ...parity,committed:true,confirmedDurable:true,
+          changedRows:changed.length,removedRows:removed.length,
+          reason:proof.empty?'habit_order_preview_seed_verified'
+            :'habit_order_preview_reconcile_verified'
+        };
+      }catch(_){
+        return fail('habit_order_preview_readback_unavailable',{
+          committed:true,writeOutcomeUncertain:true});
+      }
+    }catch(_){return fail('habit_order_preview_unavailable');}
+    finally{try{db?.close();}catch(_){}}
+  }
+
+  async function rehearsePreviewHabitOrderSidecarSeed(sourceToken,actionId) {
+    return rehearsePreviewHabitOrderSidecarAction(sourceToken,actionId,false);
+  }
+
+  async function rehearsePreviewHabitOrderSidecarReconcile(sourceToken,actionId) {
+    return rehearsePreviewHabitOrderSidecarAction(sourceToken,actionId,true);
+  }
+
   // GAME SOURCE BOUNDARY. These are the Game/Players/Season snapshot-owned
   // fields that the current Game page uses. Preserve unknown fields inside
   // every record, row order, missing-property distinctions and raw independent
@@ -13318,6 +13652,9 @@
     inspectPreviewNotesBundleParity,
     inspectPreviewNotesCheckpointCoverage,
     inspectPreviewGamePreferencesSource,
+    rehearsePreviewHabitOrderSidecarSeed,
+    rehearsePreviewHabitOrderSidecarReconcile,
+    inspectPreviewHabitOrderSidecarParity,
     rehearsePreviewGameCollectionSeed,
     rehearsePreviewGameCollectionReconcile,
     inspectPreviewGameCollectionParity,
