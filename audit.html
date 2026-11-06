@@ -9,6 +9,13 @@
 
 <link rel="stylesheet" href="styles.css">
   <style>
+    /* Audit-only mobile status-bar clearance. Safari's reported safe-area
+       inset can be zero even when the iPhone status bar overlays the page. */
+    @media (max-width: 767px) {
+      .audit-page-frame {
+        padding-top: max(64px, calc(env(safe-area-inset-top, 0px) + 14px));
+      }
+    }
     #auditProgressWrap {
       border: 1px solid rgba(63, 63, 70, 0.65);
       background: rgba(15, 23, 42, 0.35);
@@ -58,7 +65,7 @@
   
 </head>
 <body class="min-h-screen">
-  <div class="mx-auto max-w-6xl p-4 sm:p-6 pb-20 md:pb-10">
+  <div class="audit-page-frame mx-auto max-w-6xl p-4 sm:p-6 pb-20 md:pb-10">
 
     <div class="flex items-center justify-between gap-3 mb-3 md:hidden">
       <a href="index.html" class="flex items-center gap-3">
@@ -109,7 +116,6 @@
             </div>
           </div>
 
-          <a href="projects.html" class="btn btn-teal btn-toolbar nav-btn">Projects</a>
           <a href="season.html" class="btn btn-teal btn-toolbar nav-btn">Season</a>
         <a href="settings.html" class="btn btn-teal btn-toolbar nav-btn">Settings</a>
         </div>
