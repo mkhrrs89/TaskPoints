@@ -9159,6 +9159,104 @@
     }catch(_){return fail('gold_preview_parity_unreadable');}
   }
 
+
+  // Independent, read-only inspection of an existing same-device V2 Gold
+  // snapshot. This does not prove transaction completeness or restore Gold.
+  async function inspectPreviewGoldRecoveryEvidence(){
+    const deny=reason=>({
+      checked:true,previewOnly:true,evidenceVerified:false,
+      sourceCompared:false,safeToRestore:false,goldMigrated:false,
+      transactionIntegrityVerified:false,settledOutcomesVerified:false,
+      offDeviceBackupVerified:false,canApply:false,canPromote:false,
+      productionWritersFenced:false,readAuthority:'legacy_only',
+      mutationAuthority:'legacy_only',reason
+    });
+    if(!isWalTestPreviewHost())return deny('preview_host_required');
+    if(!isDarkEnabled())return deny('dark_disabled');
+    const generation=currentGeneration({create:false}),epoch=darkMirrorModeEpoch;
+    if(!generation)return deny('generation_unavailable');
+    const sha=x=>typeof x==='string'&&/^sha256:[a-f0-9]{64}:\d+$/.test(x);
+    const sig=x=>typeof x==='string'&&/^[a-f0-9]{8}:\d+$/.test(x);
+    const contextValid=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&darkMirrorModeEpoch===epoch
+      &&currentGeneration({create:false})===generation;
+    const read=async db=>{
+      const tx=db.transaction(['goldLedger','mutations','meta'],'readonly');
+      const [rows,evidence,meta,mutations]=await Promise.all([
+        requestPromise(tx.objectStore('goldLedger').getAll()),
+        requestPromise(tx.objectStore('meta').get('gold-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
+        requestPromise(tx.objectStore('mutations').getAll())
+      ]);
+      return {rows,evidence,meta,receipts:mutations.filter(r=>
+        typeof r?.id==='string'&&r.id.startsWith('gold-preview-'))};
+    };
+    try{
+      const db=await open();
+      if(!db)return deny('v2_unavailable');
+      const stored=await read(db);
+      const {rows,evidence,meta,receipts}=stored;
+      if(!meta||meta.schemaVersion!==SCHEMA_VERSION
+        ||meta.resetGeneration!==generation||meta.legacyMissing===true)
+        return deny('pilot_meta_not_ready');
+      if(!evidence||evidence.id!=='gold-preview'
+        ||evidence.schemaVersion!==1
+        ||evidence.resetGeneration!==generation
+        ||!sha(evidence.sourceFingerprint)||!sig(evidence.sourceInventory)
+        ||typeof evidence.present!=='boolean'
+        ||typeof evidence.metaPresent!=='boolean'
+        ||evidence.present!==evidence.metaPresent
+        ||!Number.isSafeInteger(evidence.rowCount)
+        ||evidence.rowCount<0||evidence.rowCount>8192
+        ||evidence.rowCount!==rows.length
+        ||typeof evidence.receiptId!=='string'
+        ||(!evidence.present&&rows.length!==0)
+        ||(!evidence.metaPresent&&evidence.metadata!==null))
+        return deny('gold_preview_evidence_invalid');
+      if(evidence.metaPresent&&(!evidence.metadata
+        ||typeof evidence.metadata!=='object'
+        ||Array.isArray(evidence.metadata)
+        ||!Number.isSafeInteger(Number(evidence.metadata.version))
+        ||Number(evidence.metadata.version)<1))
+        return deny('gold_preview_economy_invalid');
+      if(evidence.metaPresent&&!rows.length
+        &&[evidence.metadata.settledMatchupKeys,
+          evidence.metadata.settledChampionKeys]
+          .some(list=>Array.isArray(list)&&list.length))
+        return deny('gold_preview_settlements_without_rows');
+      const ordered=orderedGoldPreviewRows(rows);
+      if(!ordered||JSON.stringify(ordered).length>2300000)
+        return deny('gold_preview_rows_invalid');
+      const ids=new Set();
+      for(const r of ordered){
+        const id=r.value.id;
+        if(typeof id!=='string'||!id||id.length>256||ids.has(id))
+          return deny('gold_preview_transaction_ids_invalid');
+        ids.add(id);
+      }
+      const digest=await previewRecoveryFingerprint({
+        ledgerPresent:evidence.present,economyPresent:evidence.metaPresent,
+        ledger:ordered.map(x=>x.value),economy:evidence.metadata
+      });
+      if(digest!==evidence.sourceFingerprint)
+        return deny('gold_preview_saved_digest_mismatch');
+      if(!receipts.length||receipts.length>8192
+        ||receipts.some(r=>!r||typeof r.id!=='string'
+          ||!['gold-preview-seed','gold-preview-reconcile'].includes(r.type)
+          ||!r.id.startsWith(r.type+':')
+          ||!sha(r.sourceFingerprint)||!sig(r.sourceInventory)))
+        return deny('gold_preview_receipts_invalid');
+      const problem=verifyGoldPreviewReceiptChain(evidence,receipts,generation);
+      if(problem)return deny(problem);
+      if(!contextValid()||stableJson(await read(db))!==stableJson(stored)
+        ||!contextValid())
+        return deny('gold_preview_evidence_changed_during_inspection');
+      return {...deny('gold_preview_recovery_evidence_verified'),
+        evidenceVerified:true,rowCount:ordered.length,receiptCount:receipts.length,
+        ledgerPresent:evidence.present,economyPresent:evidence.metaPresent};
+    }catch(_){return deny('gold_preview_recovery_unavailable');}
+  }
+
   // Read-only, preview-host-only semantic check of the Gold ledger that
   // has ALREADY passed exact source/record/receipt parity. Equality alone
   // cannot tell us whether theft transfers were lost or balances drifted.
@@ -14172,6 +14270,7 @@
     rehearsePreviewGoldLedgerSeed,
     rehearsePreviewGoldLedgerReconcile,
     inspectPreviewGoldLedgerParity,
+    inspectPreviewGoldRecoveryEvidence,
     inspectPreviewGoldTransactionIntegrity,
     rehearsePreviewTaskCollectionSeed,
     rehearsePreviewTaskCollectionReconcile,

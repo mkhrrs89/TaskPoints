@@ -1762,3 +1762,23 @@ and images remain in their own V1 database. It does not independently
 restore photos, synchronize V1, fence old tabs, verify an off-device backup
 or authorize cutover. V1 remains primary and overall milestone credit
 is still **67/100**.
+
+## Independent Gold preview recovery proof — November 6
+
+The \`inspectPreviewGoldRecoveryEvidence()\` preflight verifies only the
+sealed V2 Gold ledger and economy metadata, without consulting the live
+V1 localStorage snapshot. It checks contiguous ledger rows and unique
+transaction IDs, Gold-economy presence flags, SHA-256 of all ordered
+ledger values and metadata, the complete seed/reconcile receipt ancestry,
+runtime generation, and stability during asynchronous hashing.
+
+Node and Chromium/WebKit tests cover malformed V1, multiple V2 appended
+transaction receipts, tampered amounts, duplicated IDs, corrupt economy
+metadata, middle-receipt corruption, orphan receipts and absent-versus-empty
+Gold sources. The inspector cannot restore anything or show private data.
+
+**Limitation:** a Gold loss present in both V1 and V2 is not detectable
+by independent equality alone. Existing live Game-outcome and theft-pair
+semantic audits remain separate. Neither audit supplies off-device
+backup, performs recovery, fences production writers, or authorizes V2.
+Overall readiness remains **67/100**.

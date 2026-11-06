@@ -419,6 +419,7 @@ try {
       const reconcile=await api.rehearsePreviewGoldLedgerReconcile(
         fullToken(),'browser-v6-second');
       const parity=await api.inspectPreviewGoldLedgerParity();
+      const recovery=await api.inspectPreviewGoldRecoveryEvidence();
       const db=await api.open();
       const rows=await new Promise((resolve,reject)=>{
         const req=db.transaction('goldLedger','readonly')
@@ -427,7 +428,7 @@ try {
         req.onerror=()=>reject(req.error);
       });
       const stored=localStorage.getItem('taskpoints_v1');
-      return {first,reconcile,parity,rows,version:db.version,
+      return {first,reconcile,parity,recovery,rows,version:db.version,
         sourceExact:stored===JSON.stringify(updated),
         readAuthority:api.getStatus().readAuthority};
     });
@@ -439,6 +440,9 @@ try {
     assert.equal(current.reconcile.changedRows,1);
     assert.equal(current.reconcile.addedRows,1);
     assert.equal(current.parity.match,true,JSON.stringify(current.parity));
+    assert.equal(current.recovery.evidenceVerified,true,JSON.stringify(current.recovery));
+    assert.equal(current.recovery.transactionIntegrityVerified,false);
+    assert.equal(current.recovery.receiptCount,2);
     assert.deepEqual(current.rows.map(r=>r.value.id),[
       'gold:browser:opening','gold:browser:margin']);
     assert.equal(current.rows[1].value.metadata.retained,'completely');
@@ -461,6 +465,11 @@ try {
       .inspectPreviewGoldLedgerParity());
     assert.equal(stale.match,false);
     assert.equal(stale.reason,'gold_preview_source_stale',JSON.stringify(stale));
+    const recovery=await page.evaluate(async()=>window.TaskPointsStateRuntimeV2
+      .inspectPreviewGoldRecoveryEvidence());
+    assert.equal(recovery.evidenceVerified,true,JSON.stringify(recovery));
+    assert.equal(recovery.safeToRestore,false);
+    assert.equal(recovery.sourceCompared,false);
     return {seedVerified:true,appendVerified:true,reloadVerified:true,
       staleOldTabRefused:true,readAuthority:'legacy_only'};
   });

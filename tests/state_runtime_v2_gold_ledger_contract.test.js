@@ -717,3 +717,103 @@ test('Gold outcome audit detects missing margins, contradictory copies and bad c
   assert.equal(bad.issues.invalidTheftTransfer,1);
   assert.equal(bad.issues.settledTheftLedgerMismatch,1);
 });
+
+test('Independent Gold evidence survives malformed original without restoring a transaction',async()=>{
+  const app=await boot();
+  assert.equal((await seed(app)).confirmedDurable,true);
+  const db=app.indexedDB.dump(DB);
+  const first=await app.api.inspectPreviewGoldRecoveryEvidence();
+  assert.equal(first.evidenceVerified,true,JSON.stringify(first));
+  assert.equal(first.rowCount,2);
+  assert.equal(first.receiptCount,1);
+  app.localStorage.setItem(KEY,'{broken snapshot');
+  const proof=await app.api.inspectPreviewGoldRecoveryEvidence();
+  assert.equal(proof.evidenceVerified,true,JSON.stringify(proof));
+  assert.equal(proof.sourceCompared,false);
+  assert.equal(proof.safeToRestore,false);
+  assert.equal(proof.transactionIntegrityVerified,false);
+  assert.equal(proof.offDeviceBackupVerified,false);
+  assert.equal(proof.canPromote,false);
+  assert.equal((await app.api.inspectPreviewGoldLedgerParity()).match,false);
+  assert.deepEqual(app.indexedDB.dump(DB),db);
+  assert.equal(app.localStorage.getItem(KEY),'{broken snapshot');
+});
+
+test('Independent Gold evidence audits receipt ancestry across repeated appended transactions',async()=>{
+  const app=await boot();
+  await seed(app);
+  for(const i of [1,2,3]){
+    const next=JSON.parse(app.snapshot());
+    next.goldLedger.push({id:'appended:'+i,type:'award',
+      playerId:'A',amount:i,balanceAfter:50+i});
+    next.goldEconomy.customMetadata={version:i};
+    app.put(next);
+    const result=await app.api.rehearsePreviewGoldLedgerReconcile(
+      app.token(),'step-'+i);
+    assert.equal(result.confirmedDurable,true,JSON.stringify(result));
+  }
+  const proof=await app.api.inspectPreviewGoldRecoveryEvidence();
+  assert.equal(proof.evidenceVerified,true,JSON.stringify(proof));
+  assert.equal(proof.receiptCount,4);
+  app.localStorage.setItem(KEY,'{corrupt');
+  assert.equal((await app.api.inspectPreviewGoldRecoveryEvidence()).evidenceVerified,true);
+  const store=app.indexedDB._databases.get(DB)._stores.get('mutations');
+  const old=store.get('gold-preview-reconcile:step-1');
+  store.set(old.id,{...old,priorSourceFingerprint:'tampered'});
+  assert.equal((await app.api.inspectPreviewGoldRecoveryEvidence()).evidenceVerified,false);
+  store.set(old.id,old);
+  store.set('gold-preview-reconcile:orphan',{
+    ...old,id:'gold-preview-reconcile:orphan'
+  });
+  assert.equal((await app.api.inspectPreviewGoldRecoveryEvidence()).reason,
+    'gold_preview_orphan_receipts_preserved');
+  store.delete('gold-preview-reconcile:orphan');
+  assert.equal((await app.api.inspectPreviewGoldRecoveryEvidence()).evidenceVerified,true);
+});
+
+test('Independent Gold recovery refuses altered money, repeated IDs and economy corruption',async()=>{
+  const app=await boot();await seed(app);
+  const stores=app.indexedDB._databases.get(DB)._stores;
+  const gold=stores.get('goldLedger'),row=gold.get('gold-row:1');
+  gold.set(row.id,{...row,value:{...row.value,amount:999}});
+  assert.equal((await app.api.inspectPreviewGoldRecoveryEvidence()).reason,
+    'gold_preview_saved_digest_mismatch');
+  gold.set(row.id,{...row,value:{...row.value,id:rows()[0].id}});
+  assert.equal((await app.api.inspectPreviewGoldRecoveryEvidence()).reason,
+    'gold_preview_transaction_ids_invalid');
+  gold.set(row.id,row);
+  const meta=stores.get('meta'),ev=meta.get('gold-preview');
+  meta.set(ev.id,{...ev,metadata:{...ev.metadata,version:'invalid'}});
+  assert.equal((await app.api.inspectPreviewGoldRecoveryEvidence()).reason,
+    'gold_preview_economy_invalid');
+  meta.set(ev.id,ev);
+  assert.equal((await app.api.inspectPreviewGoldRecoveryEvidence()).evidenceVerified,true);
+});
+
+test('Gold independent recovery tracks missing versus explicit empty Gold data',async()=>{
+  const missing=await boot({habits:[],completions:[]});
+  assert.equal((await seed(missing)).confirmedDurable,true);
+  const a=await missing.api.inspectPreviewGoldRecoveryEvidence();
+  assert.equal(a.evidenceVerified,true,JSON.stringify(a));
+  assert.equal(a.ledgerPresent,false);
+  const empty=await boot({habits:[],completions:[],goldLedger:[],
+    goldEconomy:{version:1,settledMatchupKeys:[]}});
+  assert.equal((await seed(empty)).confirmedDurable,true);
+  const b=await empty.api.inspectPreviewGoldRecoveryEvidence();
+  assert.equal(b.evidenceVerified,true,JSON.stringify(b));
+  assert.equal(b.ledgerPresent,true);
+  assert.equal(b.rowCount,0);
+});
+
+test('Gold independent recovery cannot run on live host or disabled dark mode',async()=>{
+  const app=await boot();await seed(app);
+  const before=app.indexedDB.dump(DB);
+  app.ctx.location.hostname='taskpoints.pages.dev';
+  assert.equal((await app.api.inspectPreviewGoldRecoveryEvidence()).reason,
+    'preview_host_required');
+  app.ctx.location.hostname='localhost';
+  app.localStorage.removeItem(DARK);
+  assert.equal((await app.api.inspectPreviewGoldRecoveryEvidence()).reason,
+    'dark_disabled');
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
