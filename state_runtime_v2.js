@@ -5883,16 +5883,12 @@
     });
   }
 
-  async function capturePreviewHabitOrderSidecar(token,generation,epoch) {
-    const current=()=>isWalTestPreviewHost()&&isDarkEnabled()
-      &&currentGeneration({create:false})===generation
-      &&darkMirrorModeEpoch===epoch
-      &&captureReadOnlyFullStorageInventory()===token;
-    try{if(!current())return {reason:'full_origin_changed'};}
-    catch(_){return {reason:'full_origin_unreadable'};}
-    let raw,rows;
-    try{
-      raw=global.localStorage.getItem(HABIT_ORDER_SIDECAR_KEY);
+
+  // The same lossless projection serves source mirroring and independent
+  // read-only recovery evidence; never normalize raw source bytes.
+  function projectHabitOrderPreviewRows(raw) {
+    let rows;
+    try {
       if(raw!==null&&(typeof raw!=='string'||!raw.length
         ||raw.length>524288))return {reason:'habit_order_source_size_invalid'};
       let orders={},timestamps={};
@@ -5933,6 +5929,33 @@
         ...(Object.prototype.hasOwnProperty.call(timestamps,id)
           ?{updatedAtISO:timestamps[id]}:{})
       }))];
+      return {rows,present:raw!==null};
+    }catch(_){return {reason:'habit_order_source_unreadable'};}
+  }
+
+  // Match JavaScript's code-unit ordering used when forming source rows,
+  // independent of the browser's locale/collation rules.
+  function sortHabitOrderPreviewRows(rows) {
+    return rows.slice().sort((a,b)=>{
+      if(a.id==='root')return -1;
+      if(b.id==='root')return 1;
+      return a.id<b.id?-1:a.id>b.id?1:0;
+    });
+  }
+
+  async function capturePreviewHabitOrderSidecar(token,generation,epoch) {
+    const current=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&currentGeneration({create:false})===generation
+      &&darkMirrorModeEpoch===epoch
+      &&captureReadOnlyFullStorageInventory()===token;
+    try{if(!current())return {reason:'full_origin_changed'};}
+    catch(_){return {reason:'full_origin_unreadable'};}
+    let raw,rows;
+    try{
+      raw=global.localStorage.getItem(HABIT_ORDER_SIDECAR_KEY);
+      const projected=projectHabitOrderPreviewRows(raw);
+      if(projected.reason)return projected;
+      rows=projected.rows;
       if(!current()||global.localStorage.getItem(HABIT_ORDER_SIDECAR_KEY)!==raw)
         return {reason:'habit_order_source_changed_during_capture'};
     }catch(_){return {reason:'habit_order_source_unreadable'};}
@@ -5971,10 +5994,14 @@
       ||typeof seal.sourcePresent!=='boolean'
       ||seal.sourcePresent!==(root.raw!==null))
       return {ok:false,reason:'habit_order_preview_seal_invalid'};
-    const calculated=await previewRecoveryFingerprint(rows.slice().sort(
-      (a,b)=>a.id==='root'?-1:b.id==='root'?1:a.id.localeCompare(b.id)));
+    const sorted=sortHabitOrderPreviewRows(rows);
+    const calculated=await previewRecoveryFingerprint(sorted);
     if(calculated!==seal.fingerprint)
       return {ok:false,reason:'habit_order_preview_rows_tampered'};
+    // The digest must match rows that independently reproduce the raw overlay.
+    const projected=projectHabitOrderPreviewRows(root.raw);
+    if(projected.reason||stableJson(sorted)!==stableJson(projected.rows))
+      return {ok:false,reason:'habit_order_preview_row_projection_invalid'};
     const byId=new Map(receipts.map(r=>[r?.id,r]));
     if(byId.size!==receipts.length||receipts.length>128)
       return {ok:false,reason:'habit_order_preview_receipts_invalid'};
@@ -6032,7 +6059,7 @@
       const proof=await verifyHabitOrderPreviewEvidence(previous,generation);
       if(!proof.ok||proof.empty)
         return fail(proof.reason||'habit_order_preview_seed_required');
-      if(stableJson(previous.rows.slice().sort((a,b)=>a.id==='root'?-1:b.id==='root'?1:a.id.localeCompare(b.id)))
+      if(stableJson(sortHabitOrderPreviewRows(previous.rows))
         !==stableJson(source.rows))
         return fail('habit_order_preview_source_mismatch');
       if(!source.current())return fail('habit_order_source_changed_after_parity');
@@ -6043,6 +6070,36 @@
         productionWritersFenced:false,canPromote:false,
         reason:'habit_order_preview_parity_verified'};
     }catch(_){return fail('habit_order_preview_parity_unreadable');}
+    finally{try{db?.close();}catch(_){}}
+  }
+
+
+  // Inspect independent V2 evidence WITHOUT reading the current V1 overlay.
+  // This is not authorization to restore, switch read authority or promote V2.
+  async function inspectPreviewHabitOrderSidecarRecoveryEvidence() {
+    const fail=(reason)=>({
+      ...refuseHabitOrderPreview(reason),evidenceVerified:false,
+      sourceCompared:false,safeToRestore:false
+    });
+    if(!isWalTestPreviewHost())return fail('preview_host_required');
+    if(!isDarkEnabled())return fail('dark_disabled');
+    const generation=currentGeneration({create:false}),epoch=darkMirrorModeEpoch;
+    if(!generation)return fail('generation_unavailable');
+    let db;
+    try{
+      db=await openHabitOrderPreviewDb(generation,epoch);
+      const previous=await readHabitOrderPreview(db);
+      const proof=await verifyHabitOrderPreviewEvidence(previous,generation);
+      if(!proof.ok||proof.empty)
+        return fail(proof.reason||'habit_order_preview_seed_required');
+      if(!isWalTestPreviewHost()||!isDarkEnabled()
+        ||darkMirrorModeEpoch!==epoch
+        ||currentGeneration({create:false})!==generation)
+        return fail('habit_order_preview_context_changed');
+      return {...refuseHabitOrderPreview('habit_order_preview_recovery_evidence_verified'),
+        evidenceVerified:true,sourceCompared:false,safeToRestore:false,
+        recordCount:previous.rows.length,sourcePresent:previous.seal.sourcePresent};
+    }catch(_){return fail('habit_order_preview_recovery_unreadable');}
     finally{try{db?.close();}catch(_){}}
   }
 
@@ -6145,8 +6202,7 @@
       }catch(_){return fail(failure||'habit_order_preview_atomic_write_failed');}
       try{
         const saved=await readHabitOrderPreview(db);
-        const sorted=saved.rows.slice().sort(
-          (a,b)=>a.id==='root'?-1:b.id==='root'?1:a.id.localeCompare(b.id));
+        const sorted=sortHabitOrderPreviewRows(saved.rows);
         if(stableJson(sorted)!==stableJson(source.rows)
           ||stableJson(saved.seal)!==stableJson(seal)
           ||stableJson(saved.receipts.find(r=>r.id===receiptId))!==stableJson(receipt))
@@ -13664,6 +13720,7 @@
     rehearsePreviewHabitOrderSidecarSeed,
     rehearsePreviewHabitOrderSidecarReconcile,
     inspectPreviewHabitOrderSidecarParity,
+    inspectPreviewHabitOrderSidecarRecoveryEvidence,
     rehearsePreviewGameCollectionSeed,
     rehearsePreviewGameCollectionReconcile,
     inspectPreviewGameCollectionParity,

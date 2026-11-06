@@ -2985,6 +2985,7 @@ try {
       const before=localStorage.getItem('taskpoints_v1');
       const initial=await api.rehearsePreviewHabitOrderSidecarSeed(token(),'first');
       const parity=await api.inspectPreviewHabitOrderSidecarParity();
+      const independent=await api.inspectPreviewHabitOrderSidecarRecoveryEvidence();
       const db=await new Promise((resolve,reject)=>{
         const req=indexedDB.open('taskpoints_v2_habit_order_preview',1);
         req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
@@ -3001,19 +3002,24 @@ try {
       localStorage.setItem(overlayKey,changed);
       const stale=await api.rehearsePreviewHabitOrderSidecarReconcile(staleToken,'stale');
       const oldParity=await api.inspectPreviewHabitOrderSidecarParity();
+      const preserved=await api.inspectPreviewHabitOrderSidecarRecoveryEvidence();
       const updated=await api.rehearsePreviewHabitOrderSidecarReconcile(token(),'second');
       const final=await api.inspectPreviewHabitOrderSidecarParity();
-      return {initial,parity,storedRoot,stale,oldParity,updated,final,
+      return {initial,parity,independent,storedRoot,stale,oldParity,preserved,updated,final,
         sourcePreserved:localStorage.getItem(overlayKey)===changed,
         snapshotPreserved:localStorage.getItem('taskpoints_v1')===before,
         authority:api.getStatus().readAuthority};
     });
     assert.equal(result.initial.confirmedDurable,true,JSON.stringify(result.initial));
     assert.equal(result.parity.match,true);
+    assert.equal(result.independent.evidenceVerified,true);
+    assert.equal(result.independent.safeToRestore,false);
     assert.equal(result.storedRoot.raw.includes('unknownFutureField'),true);
     assert.equal(result.stale.committed,false);
     assert.equal(result.stale.reason,'full_origin_changed');
     assert.equal(result.oldParity.match,false);
+    assert.equal(result.preserved.evidenceVerified,true);
+    assert.equal(result.preserved.sourceCompared,false);
     assert.equal(result.updated.confirmedDurable,true,JSON.stringify(result.updated));
     assert.equal(result.final.match,true,JSON.stringify(result.final));
     assert.equal(result.sourcePreserved,true);

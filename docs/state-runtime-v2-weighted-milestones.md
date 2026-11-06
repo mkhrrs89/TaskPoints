@@ -1665,3 +1665,18 @@ the stored rows, receipts or seals. Restoring valid evidence restores
 parity. This is preview-only validation: V1 stays authoritative and
 the production writer-fencing and real-device cutover gates remain
 open. **Overall readiness stays at 67/100.**
+
+## Independent Habit-order recovery evidence — November 6
+
+The new preview-only `inspectPreviewHabitOrderSidecarRecoveryEvidence()`
+verifies the independent IndexedDB Habit-order copy without reading the
+current V1 Habit-order overlay. It checks generation, sealed SHA-256
+inventory, linked receipts, and recomputes individual Habit rows from the
+original raw overlay bytes stored in V2. Mixed-case Habit IDs use the same
+deterministic code-unit sort as source capture, avoiding locale mismatches.
+
+Node and Chromium/WebKit cases cover saved evidence even when the legacy
+overlay is stale or missing, source parity rejecting stale copies, and
+tampering detection. This **never restores V1**, copies data into production,
+or grants V2 authority. It is not an off-device recovery proof, and it does
+not complete writer fencing or any weighted cutover gate. **67/100.**

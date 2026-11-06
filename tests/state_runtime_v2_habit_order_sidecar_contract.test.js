@@ -205,3 +205,44 @@ test('Sidecar rejects tampered seal inventory and receipt counts without rewriti
   }
   assert.equal((await app.api.inspectPreviewHabitOrderSidecarParity()).match,true);
 });
+
+test('Mixed-case Habit IDs use deterministic independent preview order',async()=>{
+  const overlay=JSON.stringify({version:1,
+    orders:{Zebra:1,alpha:2,'A-10':'3',omega:4},
+    habitUpdatedAtISO:{Zebra:'2026-11-06T00:00:00Z'}});
+  const app=await boot({overlay});
+  const result=await seed(app);
+  assert.equal(result.confirmedDurable,true,JSON.stringify(result));
+  assert.equal((await app.api.inspectPreviewHabitOrderSidecarParity()).match,true);
+  const recovery=await app.api.inspectPreviewHabitOrderSidecarRecoveryEvidence();
+  assert.equal(recovery.evidenceVerified,true,JSON.stringify(recovery));
+  assert.equal(recovery.canPromote,false);
+  assert.equal(recovery.safeToRestore,false);
+});
+
+test('Sidecar recovery proof survives absent V1 source without applying it',async()=>{
+  const app=await boot({overlay:original()});
+  assert.equal((await seed(app)).confirmedDurable,true);
+  const before=app.indexedDB.dump(DB);
+  app.localStorage.removeItem(KEY);
+  app.localStorage.setItem('taskpoints_v1','{malformed');
+  const proof=await app.api.inspectPreviewHabitOrderSidecarRecoveryEvidence();
+  assert.equal(proof.evidenceVerified,true,JSON.stringify(proof));
+  assert.equal(proof.sourceCompared,false);
+  assert.equal(proof.safeToRestore,false);
+  assert.equal(proof.canPromote,false);
+  assert.equal(proof.sourcePresent,true);
+  assert.equal((await app.api.inspectPreviewHabitOrderSidecarParity()).match,false);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+  assert.equal(app.localStorage.getItem(KEY),null);
+  assert.equal(app.localStorage.getItem('taskpoints_v1'),'{malformed');
+  const rows=app.indexedDB._databases.get(DB)._stores.get('records');
+  const saved=rows.get('habit:h1');
+  rows.set('habit:h1',{...saved,order:99});
+  const denied=await app.api.inspectPreviewHabitOrderSidecarRecoveryEvidence();
+  assert.equal(denied.evidenceVerified,false);
+  assert.equal(denied.reason,'habit_order_preview_rows_tampered');
+  assert.equal(denied.canPromote,false);
+  rows.set('habit:h1',saved);
+  assert.equal((await app.api.inspectPreviewHabitOrderSidecarRecoveryEvidence()).evidenceVerified,true);
+});
