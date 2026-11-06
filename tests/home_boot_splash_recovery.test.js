@@ -46,3 +46,11 @@ test('tap-to-skip remains available after title finishes',()=>{
  assert.equal(h.window.__tpBootViewFinished,true);
  assert.equal(h.root.style.visibility,'visible');
 });
+
+test('slow HTML parse exposes recovery link when appRoot is unavailable',()=>{
+ const source=fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8');
+ assert.match(source,/id = 'tp-boot-wait-notice'/);
+ assert.match(source,/Startup is taking longer than expected/);
+ assert.match(source,/link\.href = 'emergency_recovery\.html'/);
+ assert.match(source,/bootRecoveryTimer = setTimeout\(releaseStalledSplash, 1000\)/);
+});

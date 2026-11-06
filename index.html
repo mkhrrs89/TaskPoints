@@ -660,7 +660,22 @@ Nothing visible on the page is built here. === -->
     settleMatrixTitle();
     finish();
     if (!completeBootView({ skipped: true })) {
-      // The HTML may still be streaming and appRoot hasn't arrived yet.
+      // The HTML may still be streaming or a required script may have
+      // stalled before appRoot exists. Never make this a silent dead end.
+      if (splash && !document.getElementById('tp-boot-wait-notice')) {
+        const notice = document.createElement('div');
+        notice.id = 'tp-boot-wait-notice';
+        notice.setAttribute('role', 'status');
+        notice.style.cssText = 'padding:12px 18px;color:#ffe3d6;background:#241817;border:1px solid #b86b45;border-radius:10px;font:13px/1.45 system-ui,sans-serif;max-width:320px;margin:18px auto 0';
+        const text = document.createElement('span');
+        text.textContent = 'Startup is taking longer than expected. Your saved data has not been cleared.';
+        const link = document.createElement('a');
+        link.href = 'emergency_recovery.html';
+        link.textContent = ' Open Recovery';
+        link.style.cssText = 'color:#ffca9f;text-decoration:underline;display:block;margin-top:8px';
+        notice.append(text, link);
+        (splash.querySelector('.bootSplashContent') || splash).appendChild(notice);
+      }
       bootRecoveryTimer = setTimeout(releaseStalledSplash, 1000);
       return;
     }
