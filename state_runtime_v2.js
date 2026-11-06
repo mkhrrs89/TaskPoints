@@ -8304,6 +8304,170 @@
     }); }
   }
 
+
+  // Inspect ONLY V2's saved Today data, without reading the legacy Today key.
+  // Evidence verification does not authorize restores or production reads.
+  async function inspectPreviewTodayRecoveryEvidence(){
+    const refuse=reason=>({
+      checked:true,previewOnly:true,evidenceVerified:false,
+      sourceCompared:false,safeToRestore:false,todayMigrated:false,
+      canPromote:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',reason
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    const generation=currentGeneration({create:false}),epoch=darkMirrorModeEpoch;
+    if(!generation)return refuse('generation_unavailable');
+    const stillCurrent=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&darkMirrorModeEpoch===epoch
+      &&currentGeneration({create:false})===generation;
+    const sha=x=>typeof x==='string'&&/^sha256:[0-9a-f]{64}:\d+$/.test(x);
+    const inventory=x=>typeof x==='string'&&/^[0-9a-f]{8}:\d+$/.test(x);
+    const count=(x,max)=>Number.isSafeInteger(x)&&x>=0&&x<=max;
+    const fields=['tasksByDay','notesByDay','selectedHabitIdsByDay','orderByDay'];
+    const read=async db=>{
+      const tx=db.transaction(['todayDays','mutations','meta'],'readonly');
+      const [rows,evidence,meta,all]=await Promise.all([
+        requestPromise(tx.objectStore('todayDays').getAll()),
+        requestPromise(tx.objectStore('meta').get('today-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
+        requestPromise(tx.objectStore('mutations').getAll())
+      ]);
+      return {rows,evidence,meta,receipts:all.filter(r=>
+        typeof r?.id==='string'&&r.id.startsWith('today-preview-'))};
+    };
+    try{
+      const db=await open();
+      if(!db)return refuse('v2_unavailable');
+      const saved=await read(db),{rows,evidence,meta,receipts}=saved;
+      if(!meta||meta.schemaVersion!==SCHEMA_VERSION
+        ||meta.resetGeneration!==generation||meta.legacyMissing===true)
+        return refuse('pilot_meta_not_ready');
+      if(!evidence||evidence.id!=='today-preview'
+        ||evidence.schemaVersion!==1||evidence.resetGeneration!==generation
+        ||!inventory(evidence.sourceInventory)||!sha(evidence.sourceFingerprint)
+        ||typeof evidence.sourcePresent!=='boolean'
+        ||!count(evidence.dayCount,4096)
+        ||evidence.recordCount!==evidence.dayCount+1
+        ||evidence.recordCount!==rows.length
+        ||typeof evidence.receiptId!=='string')
+        return refuse('today_preview_evidence_invalid');
+      // Old unsealed V5 data is preserved, but cannot be independently proved.
+      if(!sha(evidence.recordsFingerprint))
+        return refuse('today_preview_row_seal_required');
+      const root=rows.find(r=>r?.id==='root');
+      if(!root||!root.value||typeof root.value!=='object'
+        ||Array.isArray(root.value)||!Array.isArray(root.presentMaps)
+        ||root.presentMaps.length!==new Set(root.presentMaps).size
+        ||root.presentMaps.some(x=>!fields.includes(x))
+        ||stableJson(root.presentMaps)!==stableJson(fields.filter(x=>
+          root.presentMaps.includes(x)))
+        ||Object.keys(root.value).some(x=>fields.includes(x)))
+        return refuse('today_preview_root_invalid');
+      if(!evidence.sourcePresent&&(rows.length!==1
+        ||root.presentMaps.length||Object.keys(root.value).length))
+        return refuse('today_preview_absent_source_invalid');
+      const ordered=rows.slice().sort((a,b)=>
+        String(a?.id).localeCompare(String(b?.id)));
+      const ids=new Set(),days=new Set();
+      for(const row of ordered){
+        if(!row||typeof row.id!=='string'||ids.has(row.id)
+          ||!row.value||typeof row.value!=='object'
+          ||Array.isArray(row.value))
+          return refuse('today_preview_rows_invalid');
+        ids.add(row.id);
+        if(row.id==='root')continue;
+        if(!/^day:\d{4}-\d{2}-\d{2}$/.test(row.id)
+          ||row.dayKey!==row.id.slice(4)||days.has(row.dayKey)
+          ||Object.keys(row.value).length===0)
+          return refuse('today_preview_rows_invalid');
+        days.add(row.dayKey);
+        for(const field of Object.keys(row.value))
+          if(!root.presentMaps.includes(field)||!Array.isArray(row.value[field]))
+            return refuse('today_preview_day_map_invalid');
+      }
+      if(ids.size!==evidence.recordCount||days.size!==evidence.dayCount)
+        return refuse('today_preview_row_count_invalid');
+      const fingerprint=await previewRecoveryFingerprint(ordered);
+      if(fingerprint!==evidence.recordsFingerprint)
+        return refuse('today_preview_rows_fingerprint_invalid');
+      if(!receipts.length||receipts.length>2048)
+        return refuse('today_preview_receipts_invalid');
+      const byId=new Map();
+      for(const receipt of receipts){
+        if(!receipt||typeof receipt.id!=='string'||byId.has(receipt.id)
+          ||!['today-preview-seed','today-preview-seal',
+            'today-preview-reconcile'].includes(receipt.type)
+          ||!receipt.id.startsWith(receipt.type+':')
+          ||receipt.resetGeneration!==generation
+          ||!inventory(receipt.sourceInventory)||!sha(receipt.sourceFingerprint)
+          ||typeof receipt.sourcePresent!=='boolean'
+          ||!count(receipt.dayCount,4096)
+          ||receipt.recordCount!==receipt.dayCount+1)
+          return refuse('today_preview_receipt_invalid');
+        byId.set(receipt.id,receipt);
+      }
+      let receipt=byId.get(evidence.receiptId);
+      if(!receipt||receipt.sourceInventory!==evidence.sourceInventory
+        ||receipt.sourceFingerprint!==evidence.sourceFingerprint
+        ||receipt.sourcePresent!==evidence.sourcePresent
+        ||receipt.dayCount!==evidence.dayCount
+        ||receipt.recordCount!==evidence.recordCount
+        ||receipt.recordsFingerprint!==evidence.recordsFingerprint)
+        return refuse('today_preview_head_receipt_invalid');
+      const seen=new Set();
+      while(receipt){
+        if(seen.has(receipt.id))return refuse('today_preview_receipt_cycle');
+        seen.add(receipt.id);
+        if(receipt.type==='today-preview-seed'){
+          if(receipt.priorReceiptId!==undefined
+            ||receipt.priorFingerprint!==undefined
+            ||receipt.priorRecordsFingerprint!==undefined)
+            return refuse('today_preview_receipt_chain_invalid');
+          break;
+        }
+        const parent=byId.get(receipt.priorReceiptId);
+        if(!parent||parent.id===receipt.id
+          ||receipt.priorFingerprint!==parent.sourceFingerprint
+          ||receipt.priorCount!==parent.recordCount
+          ||receipt.priorDayCount!==parent.dayCount)
+          return refuse('today_preview_receipt_chain_invalid');
+        if(receipt.type==='today-preview-reconcile'){
+          if(receipt.priorRecordsFingerprint!==parent.recordsFingerprint
+            ||!sha(receipt.recordsFingerprint)
+            ||!Array.isArray(receipt.changedIds)
+            ||!Array.isArray(receipt.deletedIds)
+            ||receipt.changedIds.length+receipt.deletedIds.length>64
+            ||new Set(receipt.changedIds).size!==receipt.changedIds.length
+            ||new Set(receipt.deletedIds).size!==receipt.deletedIds.length
+            ||receipt.changedIds.some(x=>typeof x!=='string'||!x)
+            ||receipt.deletedIds.some(x=>typeof x!=='string'||!x))
+            return refuse('today_preview_receipt_chain_invalid');
+        }else if(receipt.type==='today-preview-seal'){
+          if(parent.type!=='today-preview-seed'
+            ||parent.recordsFingerprint!==undefined
+            ||receipt.priorRecordsFingerprint!==undefined
+            ||!sha(receipt.recordsFingerprint)
+            ||receipt.sourceInventory!==parent.sourceInventory
+            ||receipt.sourceFingerprint!==parent.sourceFingerprint
+            ||receipt.sourcePresent!==parent.sourcePresent
+            ||receipt.dayCount!==parent.dayCount
+            ||receipt.recordCount!==parent.recordCount)
+            return refuse('today_preview_receipt_chain_invalid');
+        }
+        receipt=parent;
+      }
+      if(seen.size!==receipts.length)
+        return refuse('today_preview_orphan_receipts');
+      if(!stillCurrent()||stableJson(await read(db))!==stableJson(saved)
+        ||!stillCurrent())
+        return refuse('today_preview_evidence_changed_during_inspection');
+      return {...refuse('today_preview_recovery_evidence_verified'),
+        evidenceVerified:true,dayCount:days.size,recordCount:rows.length,
+        receiptCount:seen.size,sourcePresent:evidence.sourcePresent};
+    }catch(_){return refuse('today_preview_recovery_unavailable');}
+  }
+
   // Explicit PREVIEW ONLY: reconcile changed Today day rows after an
   // immutable seed. A whole-collection SHA proof binds existing rows to
   // the last receipt before any update or deletion is permitted.
@@ -13930,6 +14094,7 @@
     inspectPreviewTodaySource,
     rehearsePreviewTodayCollectionSeed,
     inspectPreviewTodayCollectionParity,
+    inspectPreviewTodayRecoveryEvidence,
     rehearsePreviewTodayCollectionReconcile,
     rehearsePreviewTodayRowSeal,
     inspectPreviewProjectsSource,

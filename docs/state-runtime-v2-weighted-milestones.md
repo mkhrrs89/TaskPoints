@@ -1720,3 +1720,22 @@ it neither creates an off-device backup nor restores data, fences writers,
 or activates V2. No existing protection is removed. Both the full
 collection-migration and complete-recovery gates remain uncredited:
 **67/100 overall readiness**.
+
+## Independent Today V2 recovery evidence — November 6
+
+The preview-only `inspectPreviewTodayRecoveryEvidence()` now verifies
+V2's saved Today rows **without consulting the current V1 Today source**.
+It validates all four sparse day maps, unknown root fields, row uniqueness,
+the exact SHA-256 row seal, reset generation and the complete seed/seal/
+reconciliation receipt ancestry. Malformed day values, orphan receipts,
+intermediate receipt tampering and altered rows fail closed. A second
+atomic read refuses evidence replaced during async hashing.
+
+Older unsealed V5 source copies remain preserved but cannot pass this
+independent proof until the existing explicit, V1-parity-verified row seal
+has been applied. New Node and Chromium/WebKit regressions cover stale or
+missing V1 Today, bad rows, broken receipt chains and sealed upgrades.
+
+The check is read-only. It neither recreates exact V1 JSON bytes, repairs
+V1 Today, backs data up off-device, fences all writers nor authorizes V2
+read/write cutover. **Overall readiness remains 67/100**.

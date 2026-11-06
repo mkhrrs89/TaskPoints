@@ -1704,6 +1704,7 @@ try {
       const first=await api.rehearsePreviewTodayCollectionSeed(inventory(),'browser-today');
       const repeat=await api.rehearsePreviewTodayCollectionSeed(inventory(),'repeat');
       const parity=await api.inspectPreviewTodayCollectionParity();
+      const recovery=await api.inspectPreviewTodayRecoveryEvidence();
       const db=await api.open();
       const read=req=>new Promise((resolve,reject)=>{
         req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
@@ -1714,7 +1715,7 @@ try {
         read(tx.objectStore('mutations').get('today-preview-seed:browser-today')),
         read(tx.objectStore('meta').get('today-preview'))
       ]);
-      return {first,repeat,parity,version:db.version,rows,receipt,evidence,
+      return {first,repeat,parity,recovery,version:db.version,rows,receipt,evidence,
         unchanged:localStorage.getItem('taskpoints_today_view_v1')===raw
           && localStorage.getItem('taskpoints_v1')===v1,
         authority:api.getStatus().readAuthority};
@@ -1723,6 +1724,8 @@ try {
     assert.equal(initial.first.collectionParityVerified,true);
     assert.equal(initial.repeat.committed,false);
     assert.equal(initial.parity.match,true,JSON.stringify(initial.parity));
+    assert.equal(initial.recovery.evidenceVerified,true,JSON.stringify(initial.recovery));
+    assert.equal(initial.recovery.safeToRestore,false);
     assert.equal(initial.version,6);
     assert.equal(initial.rows.length,3);
     assert.deepEqual(initial.rows.find(r=>r.id==='root').presentMaps,
@@ -1742,6 +1745,7 @@ try {
       payload.notesByDay['2026-11-04'][0].done=true;
       localStorage.setItem('taskpoints_today_view_v1',JSON.stringify(payload));
       const stale=await api.inspectPreviewTodayCollectionParity();
+      const staleRecovery=await api.inspectPreviewTodayRecoveryEvidence();
       const token=JSON.stringify(Array.from({length:localStorage.length},
         (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
       const reseed=await api.rehearsePreviewTodayCollectionSeed(token,'unsafe-reseed');
@@ -1754,12 +1758,15 @@ try {
       const reconciled=await api.rehearsePreviewTodayCollectionReconcile(
         token,'browser-today-reconcile');
       const repaired=await api.inspectPreviewTodayCollectionParity();
-      return {parity,stale,reseed,previousDone:row.value.notesByDay[0].done,
-        reconciled,repaired,authority:api.getStatus().readAuthority};
+      const newerRecovery=await api.inspectPreviewTodayRecoveryEvidence();
+      return {parity,stale,staleRecovery,reseed,previousDone:row.value.notesByDay[0].done,
+        reconciled,repaired,newerRecovery,authority:api.getStatus().readAuthority};
     });
     assert.equal(after.parity.match,true,JSON.stringify(after.parity));
     assert.equal(after.stale.match,false);
     assert.equal(after.stale.reason,'today_preview_source_stale');
+    assert.equal(after.staleRecovery.evidenceVerified,true);
+    assert.equal(after.staleRecovery.sourceCompared,false);
     assert.equal(after.reseed.reason,'today_preview_existing_evidence_preserved');
     assert.equal(after.reseed.committed,false);
     assert.equal(after.previousDone,false);
@@ -1767,6 +1774,8 @@ try {
     assert.equal(after.reconciled.changedRows,1);
     assert.equal(after.reconciled.collectionParityVerified,true);
     assert.equal(after.repaired.match,true,JSON.stringify(after.repaired));
+    assert.equal(after.newerRecovery.evidenceVerified,true,JSON.stringify(after.newerRecovery));
+    assert.equal(after.newerRecovery.receiptCount,2);
     assert.equal(after.authority,'legacy_only');
     await page.reload({waitUntil:'load'});
     const final=await page.evaluate(async()=>{

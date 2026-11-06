@@ -774,3 +774,89 @@ test('Today preview retains own __proto__ extension key without prototype pollut
   assert.equal(app.localStorage.getItem(TODAY),before);
   assert.equal((await app.api.inspectPreviewTodayCollectionParity()).match,true);
 });
+
+test('Independent Today evidence remains intact when V1 Today disappears',async()=>{
+  const app=await seeded(),before=app.indexedDB.dump(DB);
+  const first=await app.api.inspectPreviewTodayRecoveryEvidence();
+  assert.equal(first.evidenceVerified,true,JSON.stringify(first));
+  assert.equal(first.dayCount,3);
+  app.localStorage.removeItem(TODAY);
+  app.localStorage.setItem(V1,'{invalid legacy');
+  const proof=await app.api.inspectPreviewTodayRecoveryEvidence();
+  assert.equal(proof.evidenceVerified,true,JSON.stringify(proof));
+  assert.equal(proof.safeToRestore,false);
+  assert.equal(proof.sourceCompared,false);
+  assert.equal(proof.canPromote,false);
+  assert.equal(JSON.stringify(proof).includes('private retained note'),false);
+  assert.equal((await app.api.inspectPreviewTodayCollectionParity()).match,false);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+  assert.equal(app.localStorage.getItem(TODAY),null);
+});
+
+test('Independent Today recovery rejects changed rows and corrupted older receipts',async()=>{
+  const app=await seeded();
+  for(const [i,done] of [true,false].entries()){
+    const x=sample();x.notesByDay['2026-11-04'][0].done=done;
+    x.futureSettings={...x.futureSettings,revision:i};
+    app.localStorage.setItem(TODAY,JSON.stringify(x));
+    const saved=await app.api.rehearsePreviewTodayCollectionReconcile(
+      app.token(),'revision-'+i);
+    assert.equal(saved.confirmedDurable,true,JSON.stringify(saved));
+  }
+  const healthy=await app.api.inspectPreviewTodayRecoveryEvidence();
+  assert.equal(healthy.evidenceVerified,true,JSON.stringify(healthy));
+  assert.equal(healthy.receiptCount,3);
+  const stores=app.indexedDB._databases.get(DB)._stores;
+  const days=stores.get('todayDays'),row=days.get('day:2026-11-04');
+  days.set(row.id,{...row,value:{...row.value,notesByDay:[]}});
+  assert.equal((await app.api.inspectPreviewTodayRecoveryEvidence()).reason,
+    'today_preview_rows_fingerprint_invalid');
+  days.set(row.id,row);
+  const receipts=stores.get('mutations'),receipt=receipts.get(
+    'today-preview-reconcile:revision-0');
+  receipts.set(receipt.id,{...receipt,priorFingerprint:'bad'});
+  assert.equal((await app.api.inspectPreviewTodayRecoveryEvidence()).reason,
+    'today_preview_receipt_chain_invalid');
+  receipts.set(receipt.id,receipt);
+  receipts.set('today-preview-reconcile:orphan',{
+    ...receipt,id:'today-preview-reconcile:orphan'
+  });
+  assert.equal((await app.api.inspectPreviewTodayRecoveryEvidence()).reason,
+    'today_preview_orphan_receipts');
+  receipts.delete('today-preview-reconcile:orphan');
+  assert.equal((await app.api.inspectPreviewTodayRecoveryEvidence()).evidenceVerified,true);
+});
+
+test('Unsealed V5 Today copy is preserved but fails independent recovery proof',async()=>{
+  const app=await seeded(),stores=app.indexedDB._databases.get(DB)._stores;
+  const meta=stores.get('meta'),receipts=stores.get('mutations');
+  const ev={...meta.get('today-preview')};
+  const old={...receipts.get('today-preview-seed:first')};
+  delete ev.recordsFingerprint;delete old.recordsFingerprint;
+  meta.set(ev.id,ev);receipts.set(old.id,old);
+  const before=app.indexedDB.dump(DB);
+  const denied=await app.api.inspectPreviewTodayRecoveryEvidence();
+  assert.equal(denied.evidenceVerified,false);
+  assert.equal(denied.reason,'today_preview_row_seal_required');
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+  const sealed=await app.api.rehearsePreviewTodayRowSeal(app.token(),'seal-old');
+  assert.equal(sealed.confirmedDurable,true,JSON.stringify(sealed));
+  const checked=await app.api.inspectPreviewTodayRecoveryEvidence();
+  assert.equal(checked.evidenceVerified,true,JSON.stringify(checked));
+  assert.equal(checked.receiptCount,2);
+});
+
+test('Independent Today recovery proof refuses production and reset-generation drift',async()=>{
+  const app=await seeded(),before=app.indexedDB.dump(DB);
+  app.ctx.location.hostname='taskpoints.pages.dev';
+  assert.equal((await app.api.inspectPreviewTodayRecoveryEvidence()).reason,
+    'preview_host_required');
+  app.ctx.location.hostname='localhost';
+  app.localStorage.removeItem(DARK);
+  assert.equal((await app.api.inspectPreviewTodayRecoveryEvidence()).reason,
+    'dark_disabled');
+  app.localStorage.setItem(DARK,'1');
+  app.localStorage.setItem('taskpoints_state_v2_generation_v1','rotated');
+  assert.equal((await app.api.inspectPreviewTodayRecoveryEvidence()).evidenceVerified,false);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
