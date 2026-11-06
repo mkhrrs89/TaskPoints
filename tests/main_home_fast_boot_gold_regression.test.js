@@ -76,7 +76,7 @@ test('batch Gold reconciliation matches individual settlement, including duplica
 
   const first = api.reconcileGoldEconomy(actual);
   assert.equal(first.changed, true);
-  assert.deepEqual(clone(actual), expected, 'settlement, ledger order, Gold values and linked game results must match');
+  assert.deepEqual(clone(actual), clone(expected), 'settlement, ledger order, Gold values and linked game results must match');
   for (const id of ['YOU', 'A', 'B']) {
     assert.equal(api.goldBalance(actual, id), api.goldBalance(expected, id));
   }
