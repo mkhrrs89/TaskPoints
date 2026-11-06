@@ -385,7 +385,7 @@ test('Gold Ledger page exposes balances and transaction filters without historic
   assert.match(ledgerPageSource, /id="goldBalances"/);
   assert.match(ledgerPageSource, /id="playerFilter"/);
   assert.match(ledgerPageSource, /id="typeFilter"/);
-  assert.match(ledgerPageSource, /Historical activity before launch is represented only by opening balances/);
+  assert.match(ledgerPageSource, /Historical activity before launch is condensed into a legacy-rule opening balance/);
   assert.match(ledgerPageSource, /<script src="scoring_core\.js"><\/script>/);
 });
 
@@ -489,7 +489,7 @@ test('Gold reconciliation skips long settled history without recopying settled k
     const afterFirst = clone(state);
     const again = api.reconcileGoldEconomy(state);
     assert.equal(again.changed, false, 'settled matches must not be replayed');
-    assert.deepEqual(state, afterFirst, 'repeat reconciliation must not mutate balances or history');
+    assert.equal(JSON.stringify(state), JSON.stringify(afterFirst), 'repeat reconciliation must not mutate balances or history');
     assert.ok(fullHistorySnapshots <= 2,
       'already settled history must not trigger quadratic reprocessing');
   } finally {

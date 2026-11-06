@@ -62,7 +62,7 @@ test('ratings table exposes editable, sortable, and CSV-exported Greed', () => {
   assert.match(ratingsSource, /<th data-sort="greed">Greed<\/th>/);
   assert.match(ratingsSource, /makeEditableCell\(p, "greed"/);
   assert.match(ratingsSource, /case "greed":\s+return Number\(p\.greed\) \|\| 0/);
-  assert.match(ratingsSource, /"Poise", "Greed", "Style"/);
+  assert.match(ratingsSource, /"Poise", "Greed", "Streaky", "Style"/);
 });
 
 test('Greed remains excluded from player OVR calculations', () => {
