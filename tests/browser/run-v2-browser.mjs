@@ -1222,10 +1222,13 @@ try {
       const source=token();
       const seed=await api.rehearsePreviewNotesBundleSeed(source,'browser-seed');
       const parity=await api.inspectPreviewNotesBundleParity();
-      return {seed,parity,unchanged:source===token()};
+      const evidence=await api.inspectPreviewNotesRecoveryEvidence();
+      return {seed,parity,evidence,unchanged:source===token()};
     });
     assert.equal(begin.seed.collectionParityVerified,true,JSON.stringify(begin.seed));
     assert.equal(begin.parity.match,true);
+    assert.equal(begin.evidence.evidenceVerified,true,JSON.stringify(begin.evidence));
+    assert.equal(begin.evidence.safeToRestore,false);
     assert.equal(begin.unchanged,true);
     const older=await open(context);
     await older.evaluate(()=>localStorage.setItem('taskpoints_notes_v1',''));
@@ -1233,22 +1236,28 @@ try {
     const after=await writer.evaluate(async()=>{
       const api=window.TaskPointsStateRuntimeV2;
       const stale=await api.inspectPreviewNotesBundleParity();
+      const oldEvidence=await api.inspectPreviewNotesRecoveryEvidence();
       const token=()=>JSON.stringify(Array.from({length:localStorage.length},
         (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
       const before=token();
       const updated=await api.rehearsePreviewNotesBundleReconcile(before,'cross-tab-edit');
       const parity=await api.inspectPreviewNotesBundleParity();
+      const newEvidence=await api.inspectPreviewNotesRecoveryEvidence();
       const noop=await api.rehearsePreviewNotesBundleReconcile(token(),'no-change');
-      return {stale,updated,parity,noop,unchanged:before===token(),
+      return {stale,oldEvidence,updated,parity,newEvidence,noop,unchanged:before===token(),
         cache:localStorage.getItem('taskpoints_notes_v1'),
         state:window.TaskPointsCore.parseTaskPointsStorageJson(
           localStorage.getItem('taskpoints_v1')).notes,
         authority:api.getStatus().readAuthority};
     });
     assert.equal(after.stale.match,false,JSON.stringify(after.stale));
+    assert.equal(after.oldEvidence.evidenceVerified,true,JSON.stringify(after.oldEvidence));
+    assert.equal(after.oldEvidence.sourceCompared,false);
     assert.equal(after.updated.collectionParityVerified,true,JSON.stringify(after.updated));
     assert.equal(after.updated.receiptCount,2);
     assert.equal(after.parity.match,true,JSON.stringify(after.parity));
+    assert.equal(after.newEvidence.evidenceVerified,true,JSON.stringify(after.newEvidence));
+    assert.equal(after.newEvidence.canPromote,false);
     assert.equal(after.noop.reason,'notes_preview_reconcile_no_change');
     assert.equal(after.unchanged,true);
     assert.equal(after.cache,'');

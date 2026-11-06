@@ -5660,6 +5660,75 @@
   }
 
 
+
+  // Inspect only the isolated V2 Notes evidence. Neither a live V1 reader
+  // nor an authorization to repair/recover/restore from this same-device copy.
+  async function inspectPreviewNotesRecoveryEvidence(){
+    const refuse=reason=>({
+      checked:true,previewOnly:true,evidenceVerified:false,
+      sourceCompared:false,safeToRestore:false,notesMigrated:false,
+      canPromote:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',reason
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    const generation=currentGeneration({create:false}),epoch=darkMirrorModeEpoch;
+    if(!generation)return refuse('generation_unavailable');
+    const current=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&currentGeneration({create:false})===generation
+      &&darkMirrorModeEpoch===epoch;
+    let db;
+    try{
+      db=await openNotesPreviewDb(generation,epoch);
+      const saved=await readNotesPreviewRows(db);
+      const proof=await validateNotesPreviewLineage(saved,generation);
+      if(!proof.verified)return refuse(proof.reason);
+      const v=saved.bundle;
+      if(typeof v.snapshotPresent!=='boolean'||typeof v.cachePresent!=='boolean'
+        ||typeof v.stateNotes!=='string'||typeof v.cacheNotes!=='string'
+        ||v.stateNotes.length>1048576||v.cacheNotes.length>1048576
+        ||(!v.snapshotPresent&&v.stateNotes!=='')
+        ||(!v.cachePresent&&v.cacheNotes!=='')
+        ||![null,'0','1'].includes(v.dirtyRaw)
+        ||![null,'0','1'].includes(v.authorityRaw)
+        ||(!v.cachePresent&&(v.dirtyRaw==='1'||v.authorityRaw==='1'))
+        ||(v.snapshotPresent
+          ?typeof v.snapshotFingerprint!=='string'
+            ||!/^sha256:[a-f0-9]{64}:\d+$/.test(v.snapshotFingerprint)
+          :v.snapshotFingerprint!==null))
+        return refuse('notes_preview_saved_source_invalid');
+      let selected,chosen;
+      if(v.cachePresent&&(v.dirtyRaw==='1'||v.authorityRaw==='1')){
+        selected='marked_cache';chosen=v.cacheNotes;
+      }else if(v.cacheNotes.trim()&&!v.stateNotes.trim()){
+        selected='unmarked_cache_only';chosen=v.cacheNotes;
+      }else if(v.stateNotes.trim()&&!v.cacheNotes.trim()){
+        selected='unmarked_snapshot_only';chosen=v.stateNotes;
+      }else if(v.cacheNotes===v.stateNotes){
+        selected='unmarked_equal';chosen=v.cacheNotes;
+      }else if(v.cacheNotes.length>=v.stateNotes.length){
+        selected='unmarked_cache_longer';chosen=v.cacheNotes;
+      }else{selected='unmarked_snapshot_longer';chosen=v.stateNotes;}
+      if(v.selectedSource!==selected)
+        return refuse('notes_preview_saved_source_selection_invalid');
+      const fingerprint=await previewRecoveryFingerprint({
+        statePresent:v.snapshotPresent,cachePresent:v.cachePresent,
+        stateNotes:v.stateNotes,cacheNotes:v.cacheNotes,
+        dirtyRaw:v.dirtyRaw,authorityRaw:v.authorityRaw,
+        effectiveNotes:chosen,effectiveSource:selected
+      });
+      if(fingerprint!==v.sourceFingerprint)
+        return refuse('notes_preview_saved_source_digest_mismatch');
+      const again=await readNotesPreviewRows(db);
+      if(!current()||stableJson(again)!==stableJson(saved))
+        return refuse('notes_preview_evidence_changed_during_inspection');
+      return {...refuse('notes_preview_recovery_evidence_verified'),
+        evidenceVerified:true,receiptCount:proof.receiptCount,
+        snapshotPresent:v.snapshotPresent,cachePresent:v.cachePresent};
+    }catch(_){return refuse('notes_preview_recovery_unavailable');}
+    finally{try{db?.close();}catch(_){}}
+  }
+
   // Read-only recovery coverage audit for a particular Notes preview
   // generation. An intact localStorage checkpoint can still be stale or
   // partial; it is NOT an off-device backup and never grants restore rights.
@@ -13715,6 +13784,7 @@
     rehearsePreviewNotesBundleSeed,
     rehearsePreviewNotesBundleReconcile,
     inspectPreviewNotesBundleParity,
+    inspectPreviewNotesRecoveryEvidence,
     inspectPreviewNotesCheckpointCoverage,
     inspectPreviewGamePreferencesSource,
     rehearsePreviewHabitOrderSidecarSeed,

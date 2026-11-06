@@ -546,3 +546,52 @@ test('Notes checkpoint proof is unavailable on production hosts or with dark mod
   assert.equal((await app.api.inspectPreviewNotesCheckpointCoverage(cp)).reason,
     'dark_disabled');
 });
+
+test('Independent Notes preview proof survives lost source but never restores it',async()=>{
+  const app=await boot({cache:'My edited Notes text',dirty:'1',authority:'1'});
+  const seeded=await app.api.rehearsePreviewNotesBundleSeed(app.token(),'seed');
+  assert.equal(seeded.confirmedDurable,true,JSON.stringify(seeded));
+  const saved=app.indexedDB.dump(DB);
+  assert.equal((await app.api.inspectPreviewNotesRecoveryEvidence()).evidenceVerified,true);
+  app.localStorage.removeItem(CACHE);
+  app.localStorage.setItem(V1,'{broken snapshot');
+  const result=await app.api.inspectPreviewNotesRecoveryEvidence();
+  assert.equal(result.evidenceVerified,true,JSON.stringify(result));
+  assert.equal(result.sourceCompared,false);
+  assert.equal(result.safeToRestore,false);
+  assert.equal(result.canPromote,false);
+  assert.equal(JSON.stringify(result).includes('My edited Notes'),false);
+  assert.equal((await app.api.inspectPreviewNotesBundleParity()).match,false);
+  assert.deepEqual(app.indexedDB.dump(DB),saved);
+  assert.equal(app.localStorage.getItem(CACHE),null);
+  assert.equal(app.localStorage.getItem(V1),'{broken snapshot');
+});
+
+test('Independent Notes preview proof fails closed for altered saved evidence',async()=>{
+  const app=await boot({cache:'Hello',authority:'1'});
+  await app.api.rehearsePreviewNotesBundleSeed(app.token(),'seed');
+  const db=app.indexedDB._databases.get(DB);
+  const store=db._stores.get('bundles'),record=store.get('notes-source');
+  store.set('notes-source',{...record,selectedSource:'unmarked_snapshot_longer'});
+  const denied=await app.api.inspectPreviewNotesRecoveryEvidence();
+  assert.equal(denied.evidenceVerified,false);
+  assert.equal(denied.canPromote,false);
+  assert.equal(store.get('notes-source').selectedSource,'unmarked_snapshot_longer');
+  store.set('notes-source',record);
+  assert.equal((await app.api.inspectPreviewNotesRecoveryEvidence()).evidenceVerified,true);
+});
+
+test('Independent Notes preview proof respects production and generation fences',async()=>{
+  const app=await boot({cache:'My text',authority:'1'});
+  await app.api.rehearsePreviewNotesBundleSeed(app.token(),'seed');
+  const saved=app.indexedDB.dump(DB);
+  app.ctx.location.hostname='taskpoints.pages.dev';
+  assert.equal((await app.api.inspectPreviewNotesRecoveryEvidence()).reason,'preview_host_required');
+  app.ctx.location.hostname='localhost';
+  app.localStorage.removeItem(DARK);
+  assert.equal((await app.api.inspectPreviewNotesRecoveryEvidence()).reason,'dark_disabled');
+  app.localStorage.setItem(DARK,'1');
+  app.localStorage.setItem('taskpoints_state_v2_generation_v1','another-generation');
+  assert.equal((await app.api.inspectPreviewNotesRecoveryEvidence()).evidenceVerified,false);
+  assert.deepEqual(app.indexedDB.dump(DB),saved);
+});

@@ -1680,3 +1680,22 @@ overlay is stale or missing, source parity rejecting stale copies, and
 tampering detection. This **never restores V1**, copies data into production,
 or grants V2 authority. It is not an off-device recovery proof, and it does
 not complete writer fencing or any weighted cutover gate. **67/100.**
+
+## Independent Notes evidence preflight — November 6
+
+The preview-only `inspectPreviewNotesRecoveryEvidence()` verifies Notes
+dual-source copies stored in isolated V2 IndexedDB **without consulting V1**.
+It checks the linked immutable receipts, bundle digest, saved source presence,
+authority/dirty markers, the Notes winner-selection rules, and a freshly
+recomputed source fingerprint. A second IndexedDB read rejects evidence
+replaced during asynchronous hashing. It never returns Notes contents.
+
+Node tests cover disappearance of the V1 Notes cache and malformed V1
+snapshot, tampered evidence, preview-disabled/production hosts and changed
+generation. Chromium/WebKit browser coverage checks that stored evidence
+survives stale cross-tab Notes writes and verified reconciliation.
+
+This is a read-only, same-device partial backup check: the complete original
+V1 snapshot is not stored here, no recovery is performed, and no live writer
+is fenced. V1 remains primary and no weighted cutover gate is complete.
+**Overall readiness stays 67/100.**
