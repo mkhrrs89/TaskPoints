@@ -3,6 +3,7 @@ name: Greed Gold Economy
 on:
   push:
     branches:
+      - main
       - feature/greed-gold-ledger
   pull_request:
     paths:
