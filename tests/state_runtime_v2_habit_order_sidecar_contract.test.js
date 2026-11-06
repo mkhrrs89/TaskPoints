@@ -115,7 +115,8 @@ test('Sidecar preserves absent vs present empty overlay and fails closed on malf
   assert.equal(absent.indexedDB.dump(DB).records[0].raw,present);
   for(const raw of ['{invalid',JSON.stringify({version:1,orders:{h1:'oops'}}),
     JSON.stringify({version:2,orders:{h1:1}})]){
-    const app=await boot({overlay:raw});
+    const app=await boot();
+    app.localStorage.setItem(KEY,raw);
     const before=app.indexedDB.dump('taskpoints_state_v2');
     const result=await seed(app);
     assert.equal(result.committed,false,JSON.stringify(result));
@@ -151,6 +152,7 @@ test('Sidecar denies stale caller, production host, and tampered row or receipt'
 
 test('Sidecar quota denial rolls back rows and receipt, with safe explicit retry',async()=>{
   const app=await boot({overlay:original()});
+  await app.api.inspectPreviewHabitOrderSidecarParity();
   const before=app.indexedDB.dump(DB);
   app.indexedDB.failNext({store:'receipts',operation:'add',
     error:new Error('QuotaExceededError')});
