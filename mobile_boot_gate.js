@@ -161,13 +161,26 @@ const COORDINATOR_SCRIPT = `<script id="tp-mobile-boot-runtime-coordinator">
   function captureSkip(event) {
     if (event.type === "keydown" && !["Enter", " ", "Escape"].includes(event.key)) return;
     if (event.cancelable) event.preventDefault();
-    event.stopImmediatePropagation();
+    // Do not swallow this event: the installed sequential-animation handler
+    // must also receive it, otherwise it keeps animating after the tap.
     if (skipRequested || revealed) return;
 
     skipRequested = true;
     revealOptions = { skipped: true };
     finalAt = performance.now();
-    window.__tpForceMatrixCompletion?.();
+    if (typeof window.__tpSkipSequentialMatrix === 'function') {
+      window.__tpSkipSequentialMatrix();
+    } else {
+      window.__tpForceMatrixCompletion?.();
+    }
+    // Skip the title immediately, even if the saved data is still loading.
+    // Do not expose empty Home placeholders until the runtime is ready.
+    if (titleEl) titleEl.style.display = 'none';
+    const hint = splash?.querySelector('.bootSkipHint');
+    if (hint) {
+      hint.textContent = 'Loading your saved data…';
+      hint.setAttribute('aria-hidden', 'false');
+    }
     startRuntime();
     performReveal();
   }

@@ -45,3 +45,4 @@ jobs:
           tests/inbox_gold_theft_delivery_race.test.js
           tests/records_gold_theft_history_fix.test.js
           tests/retroactive_gold_score_adjustments.test.js
+          tests/main_home_fast_boot_gold_regression.test.js

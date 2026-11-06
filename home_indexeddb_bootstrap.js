@@ -108,6 +108,14 @@
     }
   }
 
+  // The worker's boot coordinator may intercept a tap before the original
+  // splash listener. Expose an idempotent explicit stop for that exact case.
+  global.__tpSkipSequentialMatrix = () => {
+    if (stopped) return;
+    started = true;
+    finishSequence({ skipped: true });
+  };
+
   function bindSkipControls(splash) {
     const requestSkip = (event) => {
       if (stopped) return;
