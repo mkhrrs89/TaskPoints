@@ -9697,6 +9697,133 @@
   // Projects after an intact V4 seed. The last durable V2 source proof must
   // match EVERY existing row before any overwrite or deletion is attempted.
   // Unrecognized V2-only rows/metadata, malformed V1 or lost receipts refuse.
+
+  // Preview-only independent Projects evidence; no V1 reads, writes or restore.
+  async function inspectPreviewProjectsRecoveryEvidence(){
+    const deny=reason=>({
+      checked:true,previewOnly:true,evidenceVerified:false,
+      sourceCompared:false,safeToRestore:false,projectsMigrated:false,
+      canPromote:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',reason
+    });
+    if(!isWalTestPreviewHost())return deny('preview_host_required');
+    if(!isDarkEnabled())return deny('dark_disabled');
+    const generation=currentGeneration({create:false}),epoch=darkMirrorModeEpoch;
+    if(!generation)return deny('generation_unavailable');
+    const stable=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&darkMirrorModeEpoch===epoch
+      &&currentGeneration({create:false})===generation;
+    const sha=s=>typeof s==='string'&&/^sha256:[a-f0-9]{64}:\d+$/.test(s);
+    const origin=s=>typeof s==='string'&&/^[a-f0-9]{8}:\d+$/.test(s);
+    const count=n=>Number.isSafeInteger(n)&&n>=0&&n<=2048;
+    const read=async db=>{
+      const tx=db.transaction(['projects','mutations','meta'],'readonly');
+      const [rows,evidence,meta,mutations]=await Promise.all([
+        requestPromise(tx.objectStore('projects').getAll()),
+        requestPromise(tx.objectStore('meta').get('projects-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
+        requestPromise(tx.objectStore('mutations').getAll())
+      ]);
+      return {rows,evidence,meta,receipts:mutations.filter(r=>
+        typeof r?.id==='string'&&r.id.startsWith('projects-preview-'))};
+    };
+    try{
+      const db=await open();
+      if(!db)return deny('v2_unavailable');
+      const saved=await read(db),{rows,evidence,meta,receipts}=saved;
+      if(!meta||meta.schemaVersion!==SCHEMA_VERSION
+        ||meta.resetGeneration!==generation||meta.legacyMissing===true)
+        return deny('pilot_meta_not_ready');
+      if(!evidence||evidence.id!=='projects-preview'
+        ||evidence.schemaVersion!==1||evidence.resetGeneration!==generation
+        ||!origin(evidence.sourceInventory)||!sha(evidence.sourceFingerprint)
+        ||typeof evidence.sourcePresent!=='boolean'
+        ||!count(evidence.projectCount)||evidence.projectCount!==rows.length
+        ||(!evidence.sourcePresent&&evidence.projectCount!==0)
+        ||typeof evidence.receiptId!=='string')
+        return deny('projects_preview_evidence_invalid');
+      const ordered=rows.slice().sort((a,b)=>a.legacyIndex-b.legacyIndex);
+      const ids=new Set();
+      for(let i=0;i<ordered.length;i++){
+        const row=ordered[i],value=row?.value;
+        if(!row||typeof row.id!=='string'||!row.id||row.id.length>128
+          ||ids.has(row.id)||row.legacyIndex!==i||!value
+          ||typeof value!=='object'||Array.isArray(value)
+          ||row.id!==value.id)
+          return deny('projects_preview_records_invalid');
+        ids.add(row.id);
+        if(value.subtasks!=null){
+          if(!Array.isArray(value.subtasks))
+            return deny('projects_preview_subtasks_invalid');
+          const subids=new Set();
+          for(const x of value.subtasks){
+            if(!x||typeof x!=='object'||Array.isArray(x)
+              ||typeof x.id!=='string'||!x.id||x.id.length>128
+              ||subids.has(x.id))
+              return deny('projects_preview_subtasks_invalid');
+            subids.add(x.id);
+          }
+        }
+      }
+      const digest=await previewRecoveryFingerprint(ordered.map(x=>x.value));
+      if(digest!==evidence.sourceFingerprint)
+        return deny('projects_preview_records_digest_mismatch');
+      if(!receipts.length||receipts.length>2048)
+        return deny('projects_preview_receipts_invalid');
+      const byId=new Map();
+      for(const r of receipts){
+        if(!r||typeof r.id!=='string'||byId.has(r.id)
+          ||!['projects-preview-seed','projects-preview-reconcile'].includes(r.type)
+          ||!r.id.startsWith(r.type+':')||r.resetGeneration!==generation
+          ||!origin(r.sourceInventory)||!sha(r.sourceFingerprint)
+          ||typeof r.sourcePresent!=='boolean'||!count(r.projectCount)
+          ||(!r.sourcePresent&&r.projectCount!==0))
+          return deny('projects_preview_receipt_invalid');
+        byId.set(r.id,r);
+      }
+      let step=byId.get(evidence.receiptId);
+      if(!step||step.sourceInventory!==evidence.sourceInventory
+        ||step.sourceFingerprint!==evidence.sourceFingerprint
+        ||step.sourcePresent!==evidence.sourcePresent
+        ||step.projectCount!==evidence.projectCount)
+        return deny('projects_preview_head_receipt_invalid');
+      const visited=new Set();
+      while(step){
+        if(visited.has(step.id))return deny('projects_preview_receipt_cycle');
+        visited.add(step.id);
+        if(step.type==='projects-preview-seed'){
+          if(step.priorReceiptId!==undefined||step.priorFingerprint!==undefined
+            ||step.priorCount!==undefined||step.nextFingerprint!==undefined
+            ||step.nextCount!==undefined)
+            return deny('projects_preview_receipt_chain_invalid');
+          break;
+        }
+        const parent=byId.get(step.priorReceiptId);
+        if(!parent||parent.id===step.id||!sha(step.priorFingerprint)
+          ||step.priorFingerprint!==parent.sourceFingerprint
+          ||step.priorCount!==parent.projectCount
+          ||step.nextFingerprint!==step.sourceFingerprint
+          ||step.nextCount!==step.projectCount
+          ||!Array.isArray(step.changedIds)||!Array.isArray(step.deletedIds)
+          ||step.changedIds.length+step.deletedIds.length>64
+          ||new Set(step.changedIds).size!==step.changedIds.length
+          ||new Set(step.deletedIds).size!==step.deletedIds.length
+          ||step.changedIds.some(id=>typeof id!=='string'||!id)
+          ||step.deletedIds.some(id=>typeof id!=='string'||!id))
+          return deny('projects_preview_receipt_chain_invalid');
+        step=parent;
+      }
+      if(visited.size!==receipts.length)
+        return deny('projects_preview_orphan_receipts');
+      const again=await read(db);
+      if(!stable()||stableJson(again)!==stableJson(saved))
+        return deny('projects_preview_evidence_changed_during_inspection');
+      return {...deny('projects_preview_recovery_evidence_verified'),
+        evidenceVerified:true,projectCount:rows.length,
+        sourcePresent:evidence.sourcePresent,receiptCount:visited.size};
+    }catch(_){return deny('projects_preview_recovery_unavailable');}
+  }
+
   async function rehearsePreviewProjectsCollectionReconcile(sourceToken,actionId) {
     const refuse=(reason,detail={})=>({
       checked:true,previewOnly:true,committed:false,confirmedDurable:false,
@@ -13835,6 +13962,7 @@
     rehearsePreviewTaskCompletionHistoryReconcile,
     rehearsePreviewProjectsCollectionSeed,
     inspectPreviewProjectsCollectionParity,
+    inspectPreviewProjectsRecoveryEvidence,
     rehearsePreviewProjectsCollectionReconcile,
     getStatus
   };

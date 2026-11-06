@@ -1807,6 +1807,7 @@ try {
       const first=await api.rehearsePreviewProjectsCollectionSeed(token,'browser-projects');
       const repeat=await api.rehearsePreviewProjectsCollectionSeed(token,'browser-repeat');
       const parity=await api.inspectPreviewProjectsCollectionParity();
+      const recovery=await api.inspectPreviewProjectsRecoveryEvidence();
       const db=await api.open();
       const tx=db.transaction(['projects','mutations','meta'],'readonly');
       const read=req=>new Promise((resolve,reject)=>{
@@ -1817,7 +1818,7 @@ try {
         read(tx.objectStore('mutations').get('projects-preview-seed:browser-projects')),
         read(tx.objectStore('meta').get('projects-preview'))
       ]);
-      return {first,repeat,parity,version:db.version,
+      return {first,repeat,parity,recovery,version:db.version,
         values:records.sort((a,b)=>a.legacyIndex-b.legacyIndex).map(r=>r.value),
         receipt,evidence,rawStillExact:localStorage.getItem('tp_projects_v1')===raw,
         v1Unchanged:localStorage.getItem('taskpoints_v1')===originalSnapshot,
@@ -1827,6 +1828,8 @@ try {
     assert.equal(result.first.collectionParityVerified,true);
     assert.equal(result.repeat.committed,false);
     assert.equal(result.parity.match,true,JSON.stringify(result.parity));
+    assert.equal(result.recovery.evidenceVerified,true,JSON.stringify(result.recovery));
+    assert.equal(result.recovery.canPromote,false);
     assert.equal(result.version,6);
     assert.equal(result.values.length,2);
     assert.equal(result.values[0].id,'proj-b');
@@ -1847,24 +1850,30 @@ try {
       changed[0].notes='newer authoritative change';
       localStorage.setItem('tp_projects_v1',JSON.stringify(changed));
       const stale=await api.inspectPreviewProjectsCollectionParity();
+      const staleEvidence=await api.inspectPreviewProjectsRecoveryEvidence();
       const token=JSON.stringify(Array.from({length:localStorage.length},
         (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
       const reseed=await api.rehearsePreviewProjectsCollectionSeed(token,'unsafe-reseed');
       const reconciled=await api.rehearsePreviewProjectsCollectionReconcile(
         token,'browser-reconcile');
       const repaired=await api.inspectPreviewProjectsCollectionParity();
-      return {reloaded,stale,reseed,reconciled,repaired,
+      const recovered=await api.inspectPreviewProjectsRecoveryEvidence();
+      return {reloaded,stale,staleEvidence,reseed,reconciled,repaired,recovered,
         authority:api.getStatus().readAuthority};
     });
     assert.equal(after.reloaded.match,true,JSON.stringify(after.reloaded));
     assert.equal(after.stale.match,false);
     assert.equal(after.stale.reason,'projects_preview_source_stale');
+    assert.equal(after.staleEvidence.evidenceVerified,true);
+    assert.equal(after.staleEvidence.sourceCompared,false);
     assert.equal(after.reseed.committed,false);
     assert.equal(after.reseed.reason,'projects_preview_existing_evidence_preserved');
     assert.equal(after.reconciled.committed,true,JSON.stringify(after.reconciled));
     assert.equal(after.reconciled.changedRows,1);
     assert.equal(after.reconciled.collectionParityVerified,true);
     assert.equal(after.repaired.match,true,JSON.stringify(after.repaired));
+    assert.equal(after.recovered.evidenceVerified,true,JSON.stringify(after.recovered));
+    assert.equal(after.recovered.receiptCount,2);
     assert.equal(after.authority,'legacy_only');
     await page.reload({waitUntil:'load'});
     const last=await page.evaluate(async()=>{

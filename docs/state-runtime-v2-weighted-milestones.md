@@ -1699,3 +1699,24 @@ This is a read-only, same-device partial backup check: the complete original
 V1 snapshot is not stored here, no recovery is performed, and no live writer
 is fenced. V1 remains primary and no weighted cutover gate is complete.
 **Overall readiness stays 67/100.**
+
+## Independent Projects recovery proof — November 6
+
+The preview-only `inspectPreviewProjectsRecoveryEvidence()` now inspects
+Project records already stored in V2 without reading `tp_projects_v1`.
+It checks ordered records, unique Project and subtask IDs, SHA-256 source
+fingerprint, runtime generation, the complete linked Project receipt chain,
+and unlinked/altered receipts. An independent second read catches stored
+evidence changing during asynchronous verification. No notes or other
+Project content are returned.
+
+Node tests cover missing/broken V1 data, several source revisions, orphan
+and altered intermediate receipts, damaged V2 rows and forbidden production
+hosts. Chromium/WebKit browser cases check independent V2 evidence before
+and after a newer V1 edit and a verified reconciliation.
+
+This preserves semantic Project objects, not the original V1 raw JSON bytes;
+it neither creates an off-device backup nor restores data, fences writers,
+or activates V2. No existing protection is removed. Both the full
+collection-migration and complete-recovery gates remain uncredited:
+**67/100 overall readiness**.

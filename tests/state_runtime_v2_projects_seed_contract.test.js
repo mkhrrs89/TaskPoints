@@ -542,3 +542,71 @@ test('Projects no-op reconciliation notices a V2-only write after its initial di
     'interleaved edit');
 });
 
+test('Independent Projects evidence survives missing original source without restoring',async()=>{
+  const app=await seeded(),backup=app.indexedDB.dump(DB);
+  const first=await app.api.inspectPreviewProjectsRecoveryEvidence();
+  assert.equal(first.evidenceVerified,true,JSON.stringify(first));
+  assert.equal(first.receiptCount,1);
+  app.localStorage.removeItem(PROJECTS);
+  app.localStorage.setItem(KEY,'{broken snapshot');
+  const proof=await app.api.inspectPreviewProjectsRecoveryEvidence();
+  assert.equal(proof.evidenceVerified,true,JSON.stringify(proof));
+  assert.equal(proof.sourceCompared,false);
+  assert.equal(proof.safeToRestore,false);
+  assert.equal(proof.canPromote,false);
+  assert.equal(proof.readAuthority,'legacy_only');
+  assert.equal(JSON.stringify(proof).includes('long preserved note'),false);
+  assert.equal((await app.api.inspectPreviewProjectsCollectionParity()).match,false);
+  assert.deepEqual(app.indexedDB.dump(DB),backup);
+  assert.equal(app.localStorage.getItem(PROJECTS),null);
+  assert.equal(app.localStorage.getItem(KEY),'{broken snapshot');
+});
+
+test('Independent Projects evidence verifies full receipt history after edits',async()=>{
+  const app=await seeded();
+  for(const [i,note] of ['one','two','three'].entries()){
+    app.localStorage.setItem(PROJECTS,JSON.stringify([
+      {...projects()[0],notes:note},projects()[1]
+    ]));
+    const r=await app.api.rehearsePreviewProjectsCollectionReconcile(
+      app.token(),'rec-'+i);
+    assert.equal(r.confirmedDurable,true,JSON.stringify(r));
+  }
+  const healthy=await app.api.inspectPreviewProjectsRecoveryEvidence();
+  assert.equal(healthy.evidenceVerified,true,JSON.stringify(healthy));
+  assert.equal(healthy.receiptCount,4);
+  app.localStorage.setItem(PROJECTS,'{invalid');
+  assert.equal((await app.api.inspectPreviewProjectsRecoveryEvidence()).evidenceVerified,true);
+  const records=app.indexedDB._databases.get(DB)._stores.get('mutations');
+  const prior=records.get('projects-preview-reconcile:rec-0');
+  records.set(prior.id,{...prior,priorFingerprint:'bad'});
+  const denied=await app.api.inspectPreviewProjectsRecoveryEvidence();
+  assert.equal(denied.evidenceVerified,false);
+  assert.equal(denied.reason,'projects_preview_receipt_chain_invalid');
+  records.set(prior.id,prior);
+  records.set('projects-preview-reconcile:orphan',{
+    ...prior,id:'projects-preview-reconcile:orphan'
+  });
+  assert.equal((await app.api.inspectPreviewProjectsRecoveryEvidence()).reason,
+    'projects_preview_orphan_receipts');
+  records.delete('projects-preview-reconcile:orphan');
+  assert.equal((await app.api.inspectPreviewProjectsRecoveryEvidence()).evidenceVerified,true);
+});
+
+test('Independent Projects evidence rejects tampering and old generation, never writing',async()=>{
+  const app=await seeded(),db=app.indexedDB._databases.get(DB);
+  const records=db._stores.get('projects'),row=records.get('p2');
+  records.set('p2',{...row,legacyIndex:42});
+  const damaged=app.indexedDB.dump(DB);
+  const proof=await app.api.inspectPreviewProjectsRecoveryEvidence();
+  assert.equal(proof.evidenceVerified,false);
+  assert.equal(proof.reason,'projects_preview_records_invalid');
+  assert.deepEqual(app.indexedDB.dump(DB),damaged);
+  records.set('p2',row);
+  app.ctx.location.hostname='taskpoints.pages.dev';
+  assert.equal((await app.api.inspectPreviewProjectsRecoveryEvidence()).reason,
+    'preview_host_required');
+  app.ctx.location.hostname='localhost';
+  app.localStorage.setItem('taskpoints_state_v2_generation_v1','other-generation');
+  assert.equal((await app.api.inspectPreviewProjectsRecoveryEvidence()).evidenceVerified,false);
+});
