@@ -86,6 +86,38 @@ test('Rapid updates coalesce; reloading another JS context replays the same dura
   assert.equal(state.tasks.length, 1);
 });
 
+test('Profile edit followed by ratings edit preserves both unsaved field sets across reload', () => {
+  const h = install();
+  h.core.saveStateSnapshot(base(h.core), { immediateWrite: true });
+  const playerState = h.core.loadAppState({ syncDerived: false, persistSync: false }).state;
+  const player = playerState.players.find(row => row.id === 'A');
+
+  player.name = 'Renamed Athlete';
+  player.notes = 'New profile notes';
+  player.primaryColor = '#aabbcc';
+  assert.equal(h.core.stagePlayerEdit(playerState, 'A', { profile: true }).saved, true);
+
+  player.greed = 96;
+  player.poise = 73;
+  assert.equal(h.core.stagePlayerEdit(playerState, 'A').saved, true);
+
+  const journal = h.core.readPendingPlayerEdits();
+  assert.equal(journal.length, 1, 'two changes should coalesce to one durable entry');
+  assert.equal(journal[0].patch.name, 'Renamed Athlete');
+  assert.equal(journal[0].patch.notes, 'New profile notes');
+  assert.equal(journal[0].patch.greed, 96);
+  const restarted = install(h.map);
+  const restored = restarted.core.loadAppState({ syncDerived: false, persistSync: false }).state;
+  const loaded = restored.players.find(row => row.id === 'A');
+  assert.equal(loaded.name, 'Renamed Athlete');
+  assert.equal(loaded.notes, 'New profile notes');
+  assert.equal(loaded.primaryColor, '#aabbcc');
+  assert.equal(loaded.greed, 96);
+  assert.equal(loaded.poise, 73);
+  assert.equal(restored.gameHistory.length, 1);
+  assert.equal(restored.matchups.length, 1);
+});
+
 test('An unrelated full save merges the journal and clears it only after readback validation', () => {
   const h = install();
   h.core.saveStateSnapshot(base(h.core), { immediateWrite: true });

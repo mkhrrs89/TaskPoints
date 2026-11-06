@@ -122,8 +122,16 @@
       const patch = {};
       for (const key of fields) if (Object.prototype.hasOwnProperty.call(player, key)) patch[key] = player[key];
       if (!Object.keys(patch).length) return { saved: false, reason: 'no-player-fields' };
-      const other = readPendingPlayerEdits().filter(entry => entry.playerId !== id);
-      const entry = { playerId: id, patch: JSON.parse(JSON.stringify(patch)), updatedAtISO: new Date().toISOString() };
+      const existingEdits = readPendingPlayerEdits();
+      // A ratings-only edit must not discard a still-pending profile edit
+      // (name, notes, colors, rival). Merge by field before coalescing by ID.
+      const previous = existingEdits.find(entry => entry.playerId === id);
+      const other = existingEdits.filter(entry => entry.playerId !== id);
+      const entry = {
+        playerId: id,
+        patch: JSON.parse(JSON.stringify({ ...(previous?.patch || {}), ...patch })),
+        updatedAtISO: new Date().toISOString()
+      };
       const raw = JSON.stringify({ version: 1, edits: [...other, entry] });
       localStorage.setItem(PENDING_PLAYER_EDITS_KEY, raw);
       if (localStorage.getItem(PENDING_PLAYER_EDITS_KEY) !== raw) throw new Error('Journal readback mismatch');
