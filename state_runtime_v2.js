@@ -5961,10 +5961,15 @@
     if(!seal)
       return {ok:rows.length===0&&receipts.length===0,
         empty:true,reason:'habit_order_preview_orphaned_evidence'};
+    const root=rows.find(r=>r.id==='root');
     if(seal.schemaVersion!==1||seal.resetGeneration!==generation
       ||typeof seal.fingerprint!=='string'
-      ||typeof seal.receiptId!=='string'||!rows.some(r=>r.id==='root')
-      ||new Set(rows.map(r=>r.id)).size!==rows.length)
+      ||typeof seal.receiptId!=='string'||!root
+      ||new Set(rows.map(r=>r.id)).size!==rows.length
+      ||(root.raw!==null&&typeof root.raw!=='string')
+      ||seal.recordCount!==rows.length
+      ||typeof seal.sourcePresent!=='boolean'
+      ||seal.sourcePresent!==(root.raw!==null))
       return {ok:false,reason:'habit_order_preview_seal_invalid'};
     const calculated=await previewRecoveryFingerprint(rows.slice().sort(
       (a,b)=>a.id==='root'?-1:b.id==='root'?1:a.id.localeCompare(b.id)));
@@ -5980,7 +5985,11 @@
       visited.add(id);
       const receipt=byId.get(id);
       if(!receipt||receipt.resetGeneration!==generation
-        ||receipt.fingerprint!==expected)
+        ||receipt.fingerprint!==expected
+        ||!Number.isSafeInteger(receipt.changeCount)
+        ||receipt.changeCount<0||receipt.changeCount>1025
+        ||!Number.isSafeInteger(receipt.deleteCount)
+        ||receipt.deleteCount<0||receipt.deleteCount>1025)
         return {ok:false,reason:'habit_order_preview_receipt_invalid'};
       if(receipt.type==='habit-order-preview-seed'){
         if(receipt.priorReceiptId!=null||receipt.priorFingerprint!=null

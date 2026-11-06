@@ -1653,3 +1653,15 @@ existing V2 Habit pilot, WAL, Settings, recovery, and Main are unchanged.
 This is a concrete piece of the uncredited auxiliary/sidecar migration work,
 **not** production-wide writer fencing, complete backup/restore, or a
 milestone acceptance. Readiness remains **67/100**.
+
+## Habit-order preview evidence inventory hardening — November 6
+
+The independent Habit-order sidecar now rejects mismatched seal
+`recordCount`/`sourcePresent` metadata and malformed receipt
+change/delete counts before returning verified parity or accepting
+another write. Focused regression tests tamper with each field and
+check that inspection and reconciliation fail closed without editing
+the stored rows, receipts or seals. Restoring valid evidence restores
+parity. This is preview-only validation: V1 stays authoritative and
+the production writer-fencing and real-device cutover gates remain
+open. **Overall readiness stays at 67/100.**

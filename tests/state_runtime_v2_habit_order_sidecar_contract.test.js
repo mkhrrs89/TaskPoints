@@ -167,3 +167,41 @@ test('Sidecar quota denial rolls back rows and receipt, with safe explicit retry
   const retry=await seed(app);
   assert.equal(retry.confirmedDurable,true,JSON.stringify(retry));
 });
+
+test('Sidecar rejects tampered seal inventory and receipt counts without rewriting evidence',async()=>{
+  const app=await boot({overlay:original()});
+  assert.equal((await seed(app)).confirmedDurable,true);
+  const internal=app.indexedDB._databases.get(DB);
+  const meta=internal._stores.get('meta');
+  const originalSeal=meta.get('habit-order-preview');
+  for(const patch of [
+    {recordCount:originalSeal.recordCount+1},
+    {sourcePresent:!originalSeal.sourcePresent}
+  ]){
+    meta.set('habit-order-preview',{...originalSeal,...patch});
+    const corrupted=app.indexedDB.dump(DB);
+    const parity=await app.api.inspectPreviewHabitOrderSidecarParity();
+    assert.equal(parity.match,false);
+    assert.equal(parity.reason,'habit_order_preview_seal_invalid');
+    const denied=await reconcile(app,'corrupt-seal');
+    assert.equal(denied.committed,false);
+    assert.equal(denied.confirmedDurable,false);
+    assert.deepEqual(app.indexedDB.dump(DB),corrupted);
+    meta.set('habit-order-preview',originalSeal);
+  }
+  const receipts=internal._stores.get('receipts');
+  const originalReceipt=receipts.get('habit-order-preview:initial');
+  for(const patch of [{changeCount:-1},{deleteCount:0.5}]){
+    receipts.set(originalReceipt.id,{...originalReceipt,...patch});
+    const corrupted=app.indexedDB.dump(DB);
+    const parity=await app.api.inspectPreviewHabitOrderSidecarParity();
+    assert.equal(parity.match,false);
+    assert.equal(parity.reason,'habit_order_preview_receipt_invalid');
+    const denied=await reconcile(app,'corrupt-receipt');
+    assert.equal(denied.committed,false);
+    assert.equal(denied.confirmedDurable,false);
+    assert.deepEqual(app.indexedDB.dump(DB),corrupted);
+    receipts.set(originalReceipt.id,originalReceipt);
+  }
+  assert.equal((await app.api.inspectPreviewHabitOrderSidecarParity()).match,true);
+});
