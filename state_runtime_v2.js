@@ -7727,7 +7727,7 @@
     const current=()=>isWalTestPreviewHost()&&isDarkEnabled()
       &&darkMirrorModeEpoch===epoch
       &&currentGeneration({create:false})===generation;
-    const sha=x=>typeof x==='string'&&/^sha256:[a-f0-9]{64}:\\d+$/.test(x);
+    const sha=x=>typeof x==='string'&&/^sha256:[a-f0-9]{64}:\d+$/.test(x);
     let db;
     try{
       db=await openGamePreviewDb(generation,epoch);
