@@ -20,8 +20,10 @@
   let sourcePackageMissCount = 0;
 
   function pendingJournalCount() {
-    try { return Number(core.readPendingHabitDeltas?.().length) || 0; }
-    catch (_) { return 1; }
+    try {
+      return (Number(core.readPendingHabitDeltas?.().length) || 0)
+        + (Number(core.readPendingPlayerEdits?.().length) || 0);
+    } catch (_) { return 1; }
   }
 
   function verifiedCacheForRaw(raw) {

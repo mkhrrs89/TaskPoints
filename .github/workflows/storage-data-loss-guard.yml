@@ -5,6 +5,12 @@ on:
     branches: [main]
     paths:
       - 'scoring_core.js'
+      - 'game.html'
+      - 'player_profile.js'
+      - 'state_hot_cache.js'
+      - 'save_pipeline_shared_work.js'
+      - 'storage_maintenance_idle.js'
+      - 'tests/player_editor_journal_perf.test.js'
       - 'settings.html'
       - 'phase2_reset_hook.js'
       - 'phase5b_deferred_mirror.js'
@@ -38,6 +44,7 @@ jobs:
       - name: Run focused storage-loss protection contracts
         run: >-
           node --test
+          tests/player_editor_journal_perf.test.js
           tests/storage_atomic_replace_contract.test.js
           tests/storage_data_loss_fail_closed.test.js
           tests/phase5b_deferred_mirror_contract.test.js

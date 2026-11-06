@@ -1318,8 +1318,8 @@ textarea{
     </div>
   </div>
 
-<script src="scoring_core.js?v=20261104-backdated-vice-correction-1"></script>
-<script src="player_profile.js?v=20261102-1"></script>
+<script src="/scoring_core.js"></script>
+<script src="player_profile.js?v=20261106-player-journal-1"></script>
 <script>
 const STORAGE_KEY = "taskpoints_v1";
 const DEFAULT_PRIMARY_COLOR = "#FFFFFF";
@@ -1515,6 +1515,20 @@ function normalizeState(s) {
 
 function saveState(nextState, options = {}) {
   try {
+    // Only existing-player field edits can use the small durable journal.
+    // New/deleted players, activity changes, photos, schedules and every
+    // other feature retain their ordinary verified full save.
+    const playerEditId = options.playerRatingJournalId || options.playerProfileJournalId;
+    if (playerEditId && window.TaskPointsCore?.stagePlayerEdit) {
+      const journaled = TaskPointsCore.stagePlayerEdit(nextState, playerEditId, {
+        profile: Boolean(options.playerProfileJournalId)
+      });
+      if (journaled.saved) {
+        pageStateCache = nextState;
+        pageStateCacheDirty = false;
+        return nextState;
+      }
+    }
     const saveFn = window.TaskPointsCore?.saveAppState || window.TaskPointsCore?.mergeAndSaveState;
 
     if (saveFn) {
@@ -3968,7 +3982,8 @@ player.rivalId = rivalId && rivalId !== player.id ? rivalId : "";
     if (wasActive !== nextActive) {
       refreshScheduleAfterRosterChange();
     }
-    state = saveState(state);
+    state = saveState(state, (!imageData && wasActive === nextActive)
+      ? { playerProfileJournalId: id } : {});
     if (id !== "YOU") {
       closePlayerEditor({ keepEditingState: true });
     }
