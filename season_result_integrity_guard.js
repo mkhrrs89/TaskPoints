@@ -72,17 +72,26 @@
     return set.size === new Set(b).size && b.every((id) => set.has(id));
   };
   function duplicateDates(rows) {
+    // The duplicate-slate check still examines every date and verifies both
+    // complete player pools. Group only the two categories it actually uses,
+    // avoiding a second full-array filter for every historical date.
     const days = new Map();
     (Array.isArray(rows) ? rows : []).forEach((row) => {
       const key = rowDate(row);
       if (!key) return;
-      if (!days.has(key)) days.set(key, []);
-      days.get(key).push(row);
+      const typed = isTyped(row);
+      const legacy = isLegacy(row);
+      if (!typed && !legacy) return;
+      let group = days.get(key);
+      if (!group) {
+        group = { canonical: [], legacy: [] };
+        days.set(key, group);
+      }
+      if (typed) group.canonical.push(row);
+      if (legacy) group.legacy.push(row);
     });
     const result = new Set();
-    days.forEach((dayRows, key) => {
-      const canonical = dayRows.filter(isTyped);
-      const legacy = dayRows.filter(isLegacy);
+    days.forEach(({ canonical, legacy }, key) => {
       if (canonical.length >= 4 && canonical.length === legacy.length
         && completeSlate(canonical) && completeSlate(legacy) && samePlayers(canonical, legacy)) result.add(key);
     });
@@ -91,11 +100,13 @@
   function removeDuplicateSlates(state) {
     const dates = duplicateDates(state?.matchups);
     let removed = 0;
-    const matchups = (state?.matchups || []).filter((row) => {
+    // On normal days no duplicate dates exist. Keep the original array
+    // instead of cloning the entire historical matchup list pointlessly.
+    const matchups = dates.size ? (state?.matchups || []).filter((row) => {
       const drop = dates.has(rowDate(row)) && isLegacy(row);
       if (drop) removed += 1;
       return !drop;
-    });
+    }) : (state?.matchups || []);
     let scheduleRemoved = 0;
     const schedule = (state?.schedule || []).map((day) => {
       const datesInDay = duplicateDates(day?.matchups);
@@ -340,25 +351,62 @@
     g.TaskPointsHomeYesterdayResultConsistency?.applySavedYesterdayResult?.();
     return true;
   }
-  function repairStored() {
+  // A clean, exact-byte storage snapshot cannot acquire season errors
+  // merely because the user navigates back to this page. Only automatic
+  // checks reuse a clean result; manual repairs always perform a fresh scan.
+  let lastCleanStoredRaw = null;
+  let lastCleanStoredDate = '';
+  let skippedIdenticalStoredChecks = 0;
+  function repairStored(options = {}) {
     if (!g.localStorage || saving) return false;
     try {
       const key = c.STORAGE_KEY || 'taskpoints_v1';
       const raw = g.localStorage.getItem(key);
       if (!raw) return false;
+      const day = today();
+      const hasPendingJournal = (() => {
+        try {
+          return (Number(c.readPendingHabitDeltas?.().length) || 0) > 0
+            || (Number(c.readPendingPlayerEdits?.().length) || 0) > 0;
+        } catch (_) { return true; }
+      })();
+      if (options.reuseCheckedRaw === true && !hasPendingJournal
+        && raw === lastCleanStoredRaw && day === lastCleanStoredDate) {
+        skippedIdenticalStoredChecks += 1;
+        g.TaskPointsPerf?.mark?.('seasonIntegrity.unchangedSnapshotReused');
+        return false;
+      }
       const state = c.parseTaskPointsStorageJson?.(raw, null) || JSON.parse(raw);
       const fixed = repair(state, {});
-      if (!fixed.changed) return false;
+      if (!fixed.changed) {
+        if (!hasPendingJournal) {
+          lastCleanStoredRaw = raw;
+          lastCleanStoredDate = day;
+        }
+        return false;
+      }
+      // A successful repair must still go through the existing protected
+      // full-save/readback path. Never mark it clean before persisting.
+      lastCleanStoredRaw = null;
+      lastCleanStoredDate = '';
       return persist(fixed.state, fixed.diagnostics, {});
     } catch (_) { return false; }
   }
 
   const api = { installed: true, version: 1, rowDateKey: rowDate, hasExplicitFinalEvidence: isFinal, findDuplicateSlateDateKeys: duplicateDates, removeDuplicateLegacySlates: removeDuplicateSlates, repairCurrentSeasonResults: repairSeason, repairState: repair, chooseCanonicalCompletedMatchup: choose, dedupeCompletedMatchupsByDate: onePerDay, sanitizeStateForScheduling: safeScheduleState, repairAuthoritativeStoredState: repairStored, installCompletedStatsDedupe: installStats };
+  api.getReadOnlyCheckReuseStatus = () => ({
+    skippedIdenticalStoredChecks,
+    cleanSnapshotCached: lastCleanStoredRaw !== null,
+    cleanSnapshotDate: lastCleanStoredDate
+  });
   c.SeasonResultIntegrity = api;
   g.TaskPointsSeasonResultIntegrity = api;
   installStats();
-  repairStored();
-  g.setTimeout?.(repairStored, 0);
-  g.addEventListener?.('pageshow', () => { installStats(); repairStored(); });
+  repairStored({ reuseCheckedRaw: true });
+  g.setTimeout?.(() => repairStored({ reuseCheckedRaw: true }), 0);
+  g.addEventListener?.('pageshow', () => {
+    installStats();
+    repairStored({ reuseCheckedRaw: true });
+  });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -6157,7 +6157,14 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
       } else {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
-          parsed = parseTaskPointsStorageJson(raw, {}) || {};
+          // Reuse the exact-byte verified/shared parser when available.
+          // That layer always returns a detached snapshot and rejects stale
+          // snapshots when journals or pending writes are present. The base
+          // parser remains the fallback before its wrapper is installed.
+          const sharedParser = global.TaskPointsCore?.parseTaskPointsStorageJson;
+          parsed = (typeof sharedParser === 'function' && sharedParser !== parseTaskPointsStorageJson
+            ? sharedParser.call(global.TaskPointsCore, raw, {})
+            : parseTaskPointsStorageJson(raw, {})) || {};
           storageKeysFound.push(STORAGE_KEY);
         }
       }

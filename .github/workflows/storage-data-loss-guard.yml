@@ -12,6 +12,9 @@ on:
       - 'storage_maintenance_idle.js'
       - 'tests/player_editor_journal_perf.test.js'
       - 'tests/player_edit_cache_guards.test.js'
+      - 'season_result_integrity_guard.js'
+      - 'inbox_count_badge.js'
+      - 'tests/unchanged_state_read_reuse_contract.test.js'
       - 'phase3_read_path.js'
       - 'phase3_navigation_cache.js'
       - 'phase4_storage_coordinator.js'
@@ -54,6 +57,9 @@ jobs:
           node --test
           tests/player_editor_journal_perf.test.js
           tests/player_edit_cache_guards.test.js
+          tests/unchanged_state_read_reuse_contract.test.js
+          tests/season_result_integrity_guard.test.js
+          tests/save_pipeline_shared_work_contract.test.js
           tests/storage_atomic_replace_contract.test.js
           tests/storage_data_loss_fail_closed.test.js
           tests/phase5b_deferred_mirror_contract.test.js
