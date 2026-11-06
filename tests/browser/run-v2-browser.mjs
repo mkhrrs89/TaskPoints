@@ -3276,6 +3276,102 @@ try {
       originalV1Authoritative:true};
   });
 
+  await run('preview Task batch admission rejects JSON-lossy inputs without writing anything',async context=>{
+    const page=await open(context);
+    if(!await page.evaluate(()=>typeof navigator.locks?.request==='function'))
+      return {unsupportedFailClosed:true};
+    const evidence=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const key='taskpoints_pending_task_mutations_v1';
+      const originalJournal=localStorage.getItem(key);
+      const originalState=localStorage.getItem('taskpoints_v1');
+      const keys=[];
+      for(let i=0;i<localStorage.length;i++)keys.push(localStorage.key(i));
+      const token=JSON.stringify(keys.sort().map(k=>[k,localStorage.getItem(k)]));
+      const row=(suffix)=>({id:'json-lossy-'+suffix,taskId:'synthetic',points:4});
+      const getter=row('getter');
+      let getterCalls=0;
+      Object.defineProperty(getter,'unknown',{enumerable:true,
+        get(){ getterCalls++; return 'unexpected'; }});
+      const cyclic=row('cycle'); cyclic.extra=cyclic;
+      const sparse=row('sparse'); sparse.extra=[,'value'];
+      const withToJson=row('tojson');
+      withToJson.toJSON=()=>({id:withToJson.id,taskId:'synthetic',points:999});
+      const malformed=[
+        {...row('nonfinite'),points:Infinity},
+        {...row('nan'),points:NaN},
+        {...row('undefined'),metadata:{unknown:undefined}},
+        {...row('function'),metadata:{unknown:()=>4}},
+        {...row('bigint'),metadata:{count:1n}},
+        {...row('symbol'),metadata:{flag:Symbol('lost')}},
+        {...row('date'),metadata:{when:new Date('2026-11-05T00:00:00Z')}},
+        cyclic,sparse,getter,withToJson
+      ];
+      const results=[];
+      for(const candidate of malformed){
+        const result=await api.rehearsePreviewAdmittedTaskCompletionBatch([candidate],token);
+        results.push({reason:result.reason,committed:result.committed,
+          confirmedDurable:result.confirmedDurable});
+      }
+      return {results,getterCalls,
+        originalJournal,afterJournal:localStorage.getItem(key),
+        originalState,afterState:localStorage.getItem('taskpoints_v1'),
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(evidence.results.length,11);
+    for(const result of evidence.results){
+      assert.equal(result.reason,'invalid_completion_batch',JSON.stringify(result));
+      assert.equal(result.committed,false);
+      assert.equal(result.confirmedDurable,false);
+    }
+    assert.equal(evidence.getterCalls,0,'validation must not invoke input getters');
+    assert.equal(evidence.afterJournal,evidence.originalJournal);
+    assert.equal(evidence.afterState,evidence.originalState);
+    assert.equal(evidence.authority,'legacy_only');
+    return {lossyInputsDenied:11,sourceBytesUnchanged:true,getterNotInvoked:true};
+  });
+
+  await run('preview Task batch admission freezes JSON-safe input before an independent caller edit',async context=>{
+    const page=await open(context);
+    if(!await page.evaluate(()=>typeof navigator.locks?.request==='function'))
+      return {unsupportedFailClosed:true};
+    const evidence=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const core=window.TaskPointsCore;
+      const originalState=localStorage.getItem('taskpoints_v1');
+      const keys=[];
+      for(let i=0;i<localStorage.length;i++)keys.push(localStorage.key(i));
+      const token=JSON.stringify(keys.sort().map(k=>[k,localStorage.getItem(k)]));
+      const row={id:'frozen-safe-row',taskId:'synthetic',points:4,
+        metadata:{custom:{retain:'original'}}};
+      const originalCheck=core.assertTaskMutationJournalWritable;
+      let mutated=false;
+      core.assertTaskMutationJournalWritable=function(){
+        row.points=999;
+        row.metadata.custom.retain='changed-by-caller';
+        mutated=true;
+        return originalCheck.apply(this,arguments);
+      };
+      let verdict;
+      try{
+        verdict=await api.rehearsePreviewAdmittedTaskCompletionBatch([row],token);
+      }finally{core.assertTaskMutationJournalWritable=originalCheck;}
+      const stored=core.readPendingTaskMutations().record.completionUpserts
+        .find(item=>item.id==='frozen-safe-row');
+      return {verdict,mutated,stored,caller:row,
+        stateUnchanged:localStorage.getItem('taskpoints_v1')===originalState,
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(evidence.verdict.confirmedDurable,true,JSON.stringify(evidence));
+    assert.equal(evidence.mutated,true);
+    assert.equal(evidence.caller.points,999);
+    assert.equal(evidence.stored.points,4);
+    assert.equal(evidence.stored.metadata.custom.retain,'original');
+    assert.equal(evidence.stateUnchanged,true);
+    assert.equal(evidence.authority,'legacy_only');
+    return {frozenPayloadPreserved:true,noLiveSourceMutation:true};
+  });
+
   await run('mandatory preview Task admission preserves prior journal on quota denial',async context=>{
     const page=await open(context);
     if(!await page.evaluate(()=>typeof navigator.locks?.request==='function'))

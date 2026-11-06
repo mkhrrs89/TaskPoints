@@ -1015,6 +1015,11 @@ test('mandatory preview-only Task batch admission validates source and generatio
   for(const evidence of [
     'if (!isWalTestPreviewHost())',
     'if (!isDarkEnabled())',
+    'function isLosslessJsonData(root)',
+    'Reflect.ownKeys(value)',
+    'Object.getOwnPropertyDescriptor(value, key)',
+    "'toJSON' in value",
+    '!isLosslessJsonData(rowsInput)',
     'const originalEpoch = darkMirrorModeEpoch',
     'currentGeneration({ create: false })',
     'typeof core.journalTaskCompletionBatch',
@@ -1042,6 +1047,9 @@ test('mandatory preview-only Task batch admission validates source and generatio
     "writeOutcomeUncertain: true",
     "'generation_changed_after_write'"
   ]) assert.ok(method.includes(evidence),'Missing safety invariant: '+evidence);
+  assert.ok(method.indexOf('!isLosslessJsonData(rowsInput)') <
+    method.indexOf('await locks.request('),
+    'lossless input validation must happen before asynchronous lock acquisition');
   assert.ok(method.indexOf('currentInventory !== expectedInventoryToken')
     < method.indexOf('core.journalTaskCompletionBatch(rows)'),
     'freshness admission must precede the durable V1 journal write');

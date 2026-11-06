@@ -11622,11 +11622,48 @@
     if (typeof core.journalTaskCompletionBatch !== 'function'
       || typeof core.assertTaskMutationJournalWritable !== 'function')
       return refuse('atomic_task_journal_unavailable');
+    // A JSON round-trip alone can SILENTLY change caller data (Infinity to
+    // null, undefined/function fields omitted, sparse array holes to null,
+    // Date/toJSON transformed). Before freezing, reject any lossy input.
+    // Read property DESCRIPTORS so getters never run during validation.
+    function isLosslessJsonData(root) {
+      const active = new WeakSet();
+      let visited = 0;
+      function check(value, depth) {
+        if (++visited > 32768 || depth > 48) return false;
+        if (value === null || typeof value === 'string'
+          || typeof value === 'boolean') return true;
+        if (typeof value === 'number') return Number.isFinite(value);
+        if (typeof value !== 'object' || active.has(value)) return false;
+        const array = Array.isArray(value);
+        const prototype = Object.getPrototypeOf(value);
+        if (array ? prototype !== Array.prototype
+          : prototype !== Object.prototype && prototype !== null) return false;
+        if ('toJSON' in value) return false;
+        const keys = Reflect.ownKeys(value);
+        if (array) {
+          if (value.length > 32768 || keys.length !== value.length + 1
+            || Object.keys(value).length !== value.length) return false;
+        }
+        active.add(value);
+        for (const key of keys) {
+          if (array && key === 'length') continue;
+          if (typeof key !== 'string') return false;
+          const descriptor = Object.getOwnPropertyDescriptor(value, key);
+          if (!descriptor || !descriptor.enumerable || !('value' in descriptor)
+            || !check(descriptor.value, depth + 1)) return false;
+        }
+        active.delete(value);
+        return true;
+      }
+      return check(root, 0);
+    }
     // Freeze the logical action *before* acquiring an asynchronous lock:
     // changed caller objects cannot silently substitute a different write.
     let rows;
     try {
-      if (!Array.isArray(rowsInput) || !rowsInput.length || rowsInput.length > 64)
+      if (!Array.isArray(rowsInput) || !rowsInput.length || rowsInput.length > 64
+        || !isLosslessJsonData(rowsInput))
         return refuse('invalid_completion_batch');
       const json = JSON.stringify(rowsInput);
       if (typeof json !== 'string' || json.length > 262144)

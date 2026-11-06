@@ -861,3 +861,24 @@ A further browser case injects **two rows sharing the new completion ID**
 one row with that ID**, not merely one matching row among duplicates.
 The adapter refuses clean success and keeps V1 authoritative. This is
 still preview-only; no production writer has been moved or removed.
+
+
+### Lossless JSON payload admission — November 6
+
+The explicitly invoked, preview-only Task completion batch adapter now rejects
+inputs that JSON serialization would silently change **before acquiring a lock
+or saving**. This includes undefined/function/symbol/BigInt fields, nonfinite
+numbers, sparse arrays, cycles, accessor properties, Date/toJSON transforms,
+non-plain object prototypes, and excessive nesting. It only accepts ordinary,
+bounded JSON data, then freezes that verified data before asynchronous work.
+
+Chromium/WebKit regressions try 11 malformed payloads and confirm no mutation
+of either the V1 journal or primary state, including no invocation of a caller
+getter. A second browser regression mutates a valid caller object during
+prewrite preparation and verifies the original immutable nested payload is
+what gets durably appended. Unrecognized but JSON-safe fields remain intact.
+
+This is additional safety within **one experimental adapter**, not universal
+production writer admission, an authorized cutover, or a claim of physical
+iOS durability. No original V1 save/recovery feature or Main file changed.
+**Weighted readiness remains 67/100.**
