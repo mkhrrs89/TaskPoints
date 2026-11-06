@@ -2942,6 +2942,138 @@ try {
       HabitJournalPreserved:true,readOnlyInspector:true,V1Unchanged:true};
   });
 
+  await run('Main calorie skip stays zero-point in V2 batch, export, and reload',async context=>{
+    const page=await open(context);
+    const before=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2,core=window.TaskPointsCore;
+      const skip={id:'main-cal-skip',taskId:'synthetic-task',source:'metric',
+        title:'Calories (Not tracked)',points:0,calories:null,
+        caloriesNotTracked:true,calLogBonusEnabled:false,
+        calLogBonusDisabled:true,completedAtISO:'2026-11-06T11:00:00.000Z'};
+      const normal={id:'main-cal-normal',taskId:'synthetic-task',source:'metric',
+        title:'Calories (1800)',points:8,calories:1800,
+        caloriesNotTracked:false,calLogBonusEnabled:true,
+        calLogBonusDisabled:false,completedAtISO:'2026-11-05T11:00:00.000Z'};
+      core.journalTaskCompletionBatch([skip,normal]);
+      const originalV1=localStorage.getItem('taskpoints_v1');
+      const originalJournal=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const seed=await api.rehearsePreviewTaskCollectionSeed();
+      const keys=[];
+      for(let i=0;i<localStorage.length;i++)keys.push(localStorage.key(i));
+      const token=JSON.stringify(keys.sort().map(key=>[key,localStorage.getItem(key)]));
+      const imported=await api.rehearsePreviewTaskLinkedCompletionBatch(
+        [skip.id,normal.id],token,'main-cal-skips');
+      const snapshot=await api.buildCompatibilitySnapshot();
+      const whole=await api.inspectPreviewWholeCompatibilityProjection();
+      const mixed=await api.inspectPreviewMixedCompletionExport();
+      const db=await api.open();
+      const read=id=>new Promise((resolve,reject)=>{
+        const request=db.transaction('completions','readonly').objectStore('completions').get(id);
+        request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);
+      });
+      return {seed,imported,whole,mixed,
+        skip,normal,
+        projected:[snapshot.completions.find(row=>row.id===skip.id),
+          snapshot.completions.find(row=>row.id===normal.id)],
+        inDb:[await read(skip.id),await read(normal.id)],
+        v1Same:localStorage.getItem('taskpoints_v1')===originalV1,
+        journalSame:localStorage.getItem('taskpoints_pending_task_mutations_v1')===originalJournal,
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(before.seed.verified,true,JSON.stringify(before.seed));
+    assert.equal(before.imported.confirmedDurable,true,JSON.stringify(before.imported));
+    assert.equal(before.imported.canPromote,false);
+    assert.deepEqual(before.projected,[before.skip,before.normal]);
+    assert.deepEqual(before.inDb.map(row=>row.entries[0].value),[before.skip,before.normal]);
+    assert.equal(before.projected[0].points,0);
+    assert.equal(before.projected[0].calories,null);
+    assert.equal(before.projected[0].caloriesNotTracked,true);
+    assert.equal(before.projected[0].calLogBonusDisabled,true);
+    assert.equal(before.whole.match,true,JSON.stringify(before.whole));
+    assert.equal(before.mixed.match,true,JSON.stringify(before.mixed));
+    assert.equal(before.whole.caloriesNotTrackedCount,1);
+    assert.equal(before.mixed.caloriesNotTrackedCount,1);
+    assert.equal(before.v1Same,true);
+    assert.equal(before.journalSame,true);
+    assert.equal(before.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>window.V2BrowserFixture?.status()?.runtime?.installed);
+    const after=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const snapshot=await api.buildCompatibilitySnapshot();
+      const db=await api.open();
+      const read=id=>new Promise((resolve,reject)=>{
+        const req=db.transaction('completions','readonly').objectStore('completions').get(id);
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      return {skip:snapshot.completions.find(c=>c.id==='main-cal-skip'),
+        normal:snapshot.completions.find(c=>c.id==='main-cal-normal'),
+        savedSkip:await read('main-cal-skip'),
+        whole:await api.inspectPreviewWholeCompatibilityProjection(),
+        authority:api.getStatus().readAuthority};
+    });
+    assert.deepEqual(after.skip,before.skip);
+    assert.deepEqual(after.normal,before.normal);
+    assert.deepEqual(after.savedSkip.entries[0].value,before.skip);
+    assert.equal(after.whole.match,true,JSON.stringify(after.whole));
+    assert.equal(after.whole.caloriesNotTrackedCount,1);
+    assert.equal(after.authority,'legacy_only');
+    return {skipFieldPreserved:true,zeroPointsPreserved:true,
+      noLoggingBonus:true,explicitBatchDurable:true,
+      compatibilityAfterReload:true,legacyAuthorityUnchanged:true};
+  });
+
+  await run('Main calorie skip correction remains authoritative over stale V2 preview evidence',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2,core=window.TaskPointsCore;
+      const skipped={id:'main-cal-correction',taskId:'synthetic-task',source:'metric',
+        title:'Calories (Not tracked)',points:0,calories:null,
+        caloriesNotTracked:true,calLogBonusDisabled:true};
+      core.journalTaskCompletionBatch([skipped]);
+      const seed=await api.rehearsePreviewTaskCollectionSeed();
+      const capture=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(key=>[key,localStorage.getItem(key)]));
+      const prior=await api.rehearsePreviewTaskLinkedCompletionBatch(
+        [skipped.id],capture(),'main-cal-original');
+      const corrected={id:skipped.id,taskId:skipped.taskId,source:'metric',
+        title:'Calories (1800)',points:8,calories:1800,
+        caloriesNotTracked:false,calLogBonusDisabled:false};
+      core.journalTaskCompletionBatch([corrected]);
+      const originalV1=localStorage.getItem('taskpoints_v1');
+      const originalJournal=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const exported=await api.buildCompatibilitySnapshot();
+      const projected=exported.completions.find(row=>row.id===corrected.id);
+      const order=await api.inspectPreviewTaskCompletionOrderParity();
+      const whole=await api.inspectPreviewWholeCompatibilityProjection();
+      const db=await api.open();
+      const inDb=await new Promise((resolve,reject)=>{
+        const req=db.transaction('completions','readonly').objectStore('completions').get(corrected.id);
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      return {seed,prior,projected,corrected,order,whole,
+        v2Old:inDb?.entries?.[0]?.value,
+        primarySame:localStorage.getItem('taskpoints_v1')===originalV1,
+        journalSame:localStorage.getItem('taskpoints_pending_task_mutations_v1')===originalJournal,
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(result.seed.verified,true);
+    assert.equal(result.prior.confirmedDurable,true,JSON.stringify(result.prior));
+    assert.deepEqual(result.projected,result.corrected,
+      'compatibility export must take the corrected V1 row, not the stale V2 row');
+    assert.equal(result.v2Old.caloriesNotTracked,true);
+    assert.equal(result.v2Old.points,0);
+    assert.equal(result.order.match,false,
+      'independent preview parity must detect the stale old completion');
+    assert.equal(result.whole.match,true,JSON.stringify(result.whole));
+    assert.equal(result.whole.caloriesNotTrackedCount,0);
+    assert.equal(result.primarySame,true);
+    assert.equal(result.journalSame,true);
+    assert.equal(result.authority,'legacy_only');
+    return {correctedV1Wins:true,staleV2Detected:true,
+      noSilentPreviewOverwrite:true,backupProjectionCurrent:true};
+  });
+
   await run('V2 compatibility snapshot fails closed on malformed Task journal without clearing evidence',async context=>{
     const page=await open(context);
     const result=await page.evaluate(async()=>{

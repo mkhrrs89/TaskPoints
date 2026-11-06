@@ -75,3 +75,19 @@ test('Main audit and Today-page persistence fix are present on V2', () => {
   assert.match(source('audit.html'), /Habit weekly completion targets/);
   assert.match(source('today.html'), /const parsed = JSON\.parse\(raw\)/);
 });
+
+
+test('Main calorie tracking opt-out remains represented through V2 compatibility and Task row retention', () => {
+  const main = source('index.html');
+  const core = source('scoring_core.js');
+  const v2 = source('state_runtime_v2.js');
+  const browser = source('tests/browser/run-v2-browser.mjs');
+  assert.match(main, /caloriesNotTrackedToggle/);
+  assert.match(main, /caloriesNotTrackedForEntry\(entry\)/);
+  assert.match(core, /caloriesNotTracked/);
+  assert.match(v2, /caloriesNotTrackedCount: original\.filter/);
+  assert.match(v2, /caloriesNotTrackedCount: effective\.completions\.filter/);
+  assert.match(v2, /mergeCompatibilityCompletions\(effective\.completions, completions\)/);
+  assert.match(browser, /Main calorie skip stays zero-point in V2 batch, export, and reload/);
+  assert.match(browser, /Main calorie skip correction remains authoritative over stale V2 preview evidence/);
+});

@@ -11440,6 +11440,11 @@
         completionCount: original.length,
         habitCompletionCount: original.filter(isPilotCompletion).length,
         legacyNonpilotCompletionCount: original.filter(row=>!isPilotCompletion(row)).length,
+        // Main's intentional zero-point Calories skip must survive the
+        // exact V1-to-V2 compatibility projection, not become a scored day.
+        caloriesNotTrackedCount: original.filter(row =>
+          row?.caloriesNotTracked === true
+          && /^Calories\b/i.test(String(row?.title || ''))).length,
         // Extra V2 nonpilot rows are NOT promoted into compatibility snapshots.
         v2NonpilotPreviewRowCount: completions.filter(row=>!isPilotCompletion(row)).length,
         reason: 'mixed_completion_export_order_verified',
@@ -11584,6 +11589,9 @@
         nonpilotCompletionCount: effective.completions.filter(
           row=>!isPilotCompletion(row)
         ).length,
+        caloriesNotTrackedCount: effective.completions.filter(row =>
+          row?.caloriesNotTracked === true
+          && /^Calories\b/i.test(String(row?.title || ''))).length,
         // The preview store can contain divergent Task rows; those are
         // deliberately NOT promoted into the compatibility projection.
         v2NonpilotPreviewCompletionCount: completions.filter(

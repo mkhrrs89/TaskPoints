@@ -906,3 +906,22 @@ continue through the previous full-origin and postwrite checks.
 This remains an opt-in, preview-host-only safety proof. It does not imply
 universal writer admission, external backup verification or a V2 cutover.
 Main remains untouched. Weighted readiness stays **67/100**.
+
+
+### Main calorie skip parity after November 6 Main-to-V2 sync
+
+Main added an intentional **Calories (Not tracked)** status. V2's
+explicit, preview-only mixed completion audit and whole compatibility
+audit now report `caloriesNotTrackedCount` for exact V1 records whose
+`caloriesNotTracked` flag is true. This is a diagnostic field, NOT a
+change to score calculation or V2 authority.
+
+Two new Chromium/WebKit regression scenarios exercise the actual V1 Task
+journal, V2 atomic batch receipt, IndexedDB readback, V1-compatible
+export projection, reload, and a same-ID correction from skipped to
+tracked. The tests require the skip's null calorie value, zero points,
+and disabled logging bonus to survive exactly; a newer V1 correction
+must appear in compatibility exports, while a stale V2 completion
+must fail the independent ordering-parity check rather than silently
+overwriting the source. Legacy writes, imports, Gold and backups remain
+unchanged. This is not a completed writer-fencing gate. **67/100**.
