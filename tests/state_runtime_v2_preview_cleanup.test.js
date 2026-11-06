@@ -73,6 +73,11 @@ test('preview cleanup removes only V2 keys and all isolated V2 preview databases
   assert.deepEqual(app.deleteCalls, ['taskpoints_state_v2','taskpoints_v2_notes_preview','taskpoints_v2_game_preview']);
   assert.notEqual(app.status.className, 'ok');
   app.deleteRequests[2].onsuccess();
+  assert.deepEqual(app.deleteCalls, ['taskpoints_state_v2',
+    'taskpoints_v2_notes_preview','taskpoints_v2_game_preview',
+    'taskpoints_v2_habit_order_preview']);
+  assert.notEqual(app.status.className,'ok');
+  app.deleteRequests[3].onsuccess();
   assert.equal(app.status.className, 'ok');
   assert.match(app.status.textContent, /Production TaskPoints state and images were not touched/);
 });
@@ -98,6 +103,7 @@ test('cleanup source never targets the legacy state, image database, or verified
   assert.match(source, /const V2_DATABASE = 'taskpoints_state_v2'/);
   assert.match(source, /const NOTES_PREVIEW_DATABASE = 'taskpoints_v2_notes_preview'/);
   assert.match(source, /const GAME_PREVIEW_DATABASE = 'taskpoints_v2_game_preview'/);
+  assert.match(source, /const HABIT_ORDER_PREVIEW_DATABASE = 'taskpoints_v2_habit_order_preview'/);
 });
 
 test('cleanup refuses false success when isolated Notes DB deletion fails', () => {
@@ -116,4 +122,16 @@ test('cleanup refuses false success when isolated Game DB deletion fails',()=>{
   app.deleteRequests[2].onerror();
   assert.equal(app.status.className,'bad');
   assert.match(app.status.textContent,/taskpoints_v2_game_preview deletion failed/);
+});
+
+
+test('cleanup refuses false success if isolated Habit order preview DB is still blocked',()=>{
+  const app=runCleanup('localhost');
+  app.deleteRequests[0].onsuccess();
+  app.deleteRequests[1].onsuccess();
+  app.deleteRequests[2].onsuccess();
+  app.deleteRequests[3].onblocked();
+  assert.equal(app.status.className,'bad');
+  assert.match(app.status.textContent,/taskpoints_v2_habit_order_preview/);
+  assert.equal(app.localStorage.getItem('taskpoints_v1'),'PRODUCTION_STATE_SENTINEL');
 });
