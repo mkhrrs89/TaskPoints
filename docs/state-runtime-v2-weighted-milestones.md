@@ -1739,3 +1739,26 @@ missing V1 Today, bad rows, broken receipt chains and sealed upgrades.
 The check is read-only. It neither recreates exact V1 JSON bytes, repairs
 V1 Today, backs data up off-device, fences all writers nor authorizes V2
 read/write cutover. **Overall readiness remains 67/100**.
+
+## Independent Game and season recovery evidence — November 6
+
+The preview-only `inspectPreviewGameRecoveryEvidence()` now checks the
+isolated V2 Game, Players and Season bundle without reading V1 Game state
+or preference keys. It verifies all saved player rows and complete receipt
+history, then independently reconstructs the SHA-256 fingerprint of the
+stored roster, season/matchup/history fields and all three preference values.
+It refuses unsealed historical player-property presence, malformed Game
+array fields or preference shapes, missing receipts and changed generations.
+A second snapshot detects preview evidence replaced during hashing.
+
+Node and real Chromium/WebKit browser tests cover intact data after V1
+becomes unreadable, old-tab edits, exact roster/season/preferences changes,
+tampered Game records and safe refusal outside the preview host.
+No private player notes or content are returned in results.
+
+This proves **only** the consistency of same-device preview evidence.
+The V2 Game source intentionally does not hold the entire raw V1 snapshot,
+and images remain in their own V1 database. It does not independently
+restore photos, synchronize V1, fence old tabs, verify an off-device backup
+or authorize cutover. V1 remains primary and overall milestone credit
+is still **67/100**.

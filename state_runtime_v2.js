@@ -7709,6 +7709,76 @@
     finally{try{db?.close();}catch(_){}}
   }
 
+
+  // Read-only, same-device recovery preflight for isolated Game preview rows.
+  // Never read V1 Game, images or preference keys here, and never restore them.
+  async function inspectPreviewGameRecoveryEvidence(){
+    const refuse=reason=>({
+      checked:true,previewOnly:true,evidenceVerified:false,
+      sourceCompared:false,safeToRestore:false,gameMigrated:false,
+      coversImages:false,fullExportVerified:false,
+      canPromote:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',reason
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    const generation=currentGeneration({create:false}),epoch=darkMirrorModeEpoch;
+    if(!generation)return refuse('generation_unavailable');
+    const current=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&darkMirrorModeEpoch===epoch
+      &&currentGeneration({create:false})===generation;
+    const sha=x=>typeof x==='string'&&/^sha256:[a-f0-9]{64}:\\d+$/.test(x);
+    let db;
+    try{
+      db=await openGamePreviewDb(generation,epoch);
+      const saved=await readGamePreviewRows(db);
+      const lineage=await verifyGamePreviewLineage(saved,generation);
+      if(!lineage.verified)return refuse(lineage.reason);
+      const {bundle,rows,receipts}=saved;
+      // The earliest preview did not encode whether players was missing
+      // versus an explicit empty array. Do not claim independent proof.
+      if(typeof bundle.playersPresent!=='boolean')
+        return refuse('game_preview_player_presence_unsealed');
+      if(!sha(bundle.originFingerprint)||!sha(bundle.sourceFingerprint)
+        ||!sha(bundle.snapshotFingerprint)||rows.length>1024
+        ||(!bundle.playersPresent&&rows.length!==0))
+        return refuse('game_preview_saved_provenance_invalid');
+      if(Object.keys(bundle.fields).some(key=>
+        !GAME_ARRAY_FIELDS.includes(key)&&!GAME_SCALAR_FIELDS.includes(key))
+        ||Object.prototype.hasOwnProperty.call(bundle.fields,'players'))
+        return refuse('game_preview_field_boundary_invalid');
+      for(const key of GAME_ARRAY_FIELDS.filter(x=>x!=='players'))
+        if(Object.prototype.hasOwnProperty.call(bundle.fields,key)
+          &&!Array.isArray(bundle.fields[key]))
+          return refuse('game_preview_field_shape_invalid');
+      if(bundle.preferences.some(x=>x!==null&&typeof x!=='string'))
+        return refuse('game_preview_preferences_invalid');
+      const sorted=rows.slice().sort((a,b)=>a.id-b.id);
+      const projection=await previewRecoveryFingerprint({
+        fields:bundle.fields,players:sorted.map(x=>x.value),
+        preferences:bundle.preferences
+      });
+      if(projection!==bundle.sourceFingerprint)
+        return refuse('game_preview_source_projection_invalid');
+      // Lineage needs an intact entire history, not only the head record.
+      for(const receipt of receipts){
+        if(!receipt.id.startsWith(receipt.type+':')
+          ||!sha(receipt.bundleFingerprint)
+          ||!sha(receipt.sourceFingerprint)
+          ||!sha(receipt.originFingerprint))
+          return refuse('game_preview_receipt_metadata_invalid');
+      }
+      const again=await readGamePreviewRows(db);
+      if(!current()||stableJson(again)!==stableJson(saved))
+        return refuse('game_preview_evidence_changed_during_inspection');
+      return {...refuse('game_preview_recovery_evidence_verified'),
+        evidenceVerified:true,playerCount:sorted.length,
+        playersPresent:bundle.playersPresent,
+        receiptCount:lineage.receiptCount};
+    }catch(_){return refuse('game_preview_recovery_unavailable');}
+    finally{try{db?.close();}catch(_){}}
+  }
+
   // Today is a separate, independently writable V1 authority. Its four
   // per-day maps do not live in the main TaskPoints snapshot. This preview
   // capture never invokes Today page's forgiving fallback, which can erase
@@ -14085,6 +14155,7 @@
     rehearsePreviewGameCollectionSeed,
     rehearsePreviewGameCollectionReconcile,
     inspectPreviewGameCollectionParity,
+    inspectPreviewGameRecoveryEvidence,
     inspectPreviewGameCompatibilityProjection,
     inspectPreviewGameCheckpointCoverage,
     inspectPreviewGameImageCoverage,

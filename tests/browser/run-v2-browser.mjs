@@ -1392,10 +1392,13 @@ try {
       const before=token();
       const seed=await api.rehearsePreviewGameCollectionSeed(before,'browser-game-seed');
       const parity=await api.inspectPreviewGameCollectionParity();
-      return {seed,parity,unchanged:before===token()};
+      const recovery=await api.inspectPreviewGameRecoveryEvidence();
+      return {seed,parity,recovery,unchanged:before===token()};
     });
     assert.equal(first.seed.collectionParityVerified,true,JSON.stringify(first.seed));
     assert.equal(first.parity.match,true,JSON.stringify(first.parity));
+    assert.equal(first.recovery.evidenceVerified,true,JSON.stringify(first.recovery));
+    assert.equal(first.recovery.safeToRestore,false);
     assert.equal(first.unchanged,true);
     const older=await open(context);
     await older.evaluate(()=>{
@@ -1410,22 +1413,28 @@ try {
     const updated=await page.evaluate(async()=>{
       const api=window.TaskPointsStateRuntimeV2;
       const stale=await api.inspectPreviewGameCollectionParity();
+      const olderEvidence=await api.inspectPreviewGameRecoveryEvidence();
       const token=()=>JSON.stringify(Array.from({length:localStorage.length},
         (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
       const before=token();
       const reconciled=await api.rehearsePreviewGameCollectionReconcile(
         before,'browser-game-edited');
       const parity=await api.inspectPreviewGameCollectionParity();
+      const newerEvidence=await api.inspectPreviewGameRecoveryEvidence();
       const noOp=await api.rehearsePreviewGameCollectionReconcile(
         token(),'browser-game-noop');
-      return {stale,reconciled,parity,noOp,unchanged:before===token(),
+      return {stale,olderEvidence,reconciled,parity,newerEvidence,noOp,unchanged:before===token(),
         origin:JSON.parse(localStorage.getItem('taskpoints_v1')),
         readAuthority:api.getStatus().readAuthority};
     });
     assert.equal(updated.stale.match,false,JSON.stringify(updated.stale));
+    assert.equal(updated.olderEvidence.evidenceVerified,true);
+    assert.equal(updated.olderEvidence.sourceCompared,false);
     assert.equal(updated.reconciled.collectionParityVerified,true,JSON.stringify(updated.reconciled));
     assert.equal(updated.reconciled.receiptCount,2);
     assert.equal(updated.parity.match,true,JSON.stringify(updated.parity));
+    assert.equal(updated.newerEvidence.evidenceVerified,true);
+    assert.equal(updated.newerEvidence.receiptCount,2);
     assert.equal(updated.noOp.reason,'game_preview_reconcile_no_change',JSON.stringify(updated.noOp));
     assert.equal(updated.unchanged,true);
     assert.equal(updated.origin.players.length,3);

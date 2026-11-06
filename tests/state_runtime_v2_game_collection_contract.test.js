@@ -1509,3 +1509,78 @@ test('Whole-backup auditor freezes caller-mutated ZIP bytes for all asynchronous
   assert.equal(report.canApply,false);
   assert.equal(app.token(),before);
 });
+
+test('Game evidence verifies saved roster and seasons without consulting corrupted V1',async()=>{
+  const app=await boot();
+  assert.equal((await seed(app)).confirmedDurable,true);
+  const saved=app.indexedDB.dump(DB);
+  const initial=await app.api.inspectPreviewGameRecoveryEvidence();
+  assert.equal(initial.evidenceVerified,true,JSON.stringify(initial));
+  assert.equal(initial.playerCount,2);
+  assert.equal(initial.playersPresent,true);
+  app.localStorage.setItem(V1,'{bad source');
+  app.localStorage.removeItem(SORT);
+  const independent=await app.api.inspectPreviewGameRecoveryEvidence();
+  assert.equal(independent.evidenceVerified,true,JSON.stringify(independent));
+  assert.equal(independent.sourceCompared,false);
+  assert.equal(independent.safeToRestore,false);
+  assert.equal(independent.canPromote,false);
+  assert.equal(independent.coversImages,false);
+  assert.equal(independent.fullExportVerified,false);
+  assert.equal(independent.readAuthority,'legacy_only');
+  assert.equal(JSON.stringify(independent).includes('preserve private note'),false);
+  assert.equal((await app.api.inspectPreviewGameCollectionParity()).match,false);
+  assert.deepEqual(app.indexedDB.dump(DB),saved);
+  assert.equal(app.localStorage.getItem(V1),'{bad source');
+  assert.equal(app.localStorage.getItem(SORT),null);
+});
+
+test('Game evidence remains independently valid after roster, season and preference reconcile',async()=>{
+  const app=await boot();
+  assert.equal((await seed(app)).confirmedDurable,true);
+  const next=legacy();
+  next.players.reverse();
+  next.seasonHistory.push({id:'future-season',custom:'untouched'});
+  app.localStorage.setItem(V1,JSON.stringify(next));
+  app.localStorage.setItem(SORT,'overall-desc');
+  const update=await reconcile(app,'game-update');
+  assert.equal(update.confirmedDurable,true,JSON.stringify(update));
+  app.localStorage.setItem(V1,'{invalid');
+  const proof=await app.api.inspectPreviewGameRecoveryEvidence();
+  assert.equal(proof.evidenceVerified,true,JSON.stringify(proof));
+  assert.equal(proof.receiptCount,2);
+  assert.equal(proof.playerCount,2);
+  assert.equal(proof.safeToRestore,false);
+});
+
+test('Game recovery proof catches saved Game source inconsistency and tampering',async()=>{
+  const app=await boot();
+  await seed(app);
+  const db=app.indexedDB._databases.get(DB);
+  const bundleStore=db._stores.get('bundles');
+  const old=bundleStore.get('game-source');
+  bundleStore.set('game-source',{...old,sourceFingerprint:'sha256:'+'0'.repeat(64)+':8'});
+  const rejected=await app.api.inspectPreviewGameRecoveryEvidence();
+  assert.equal(rejected.evidenceVerified,false);
+  assert.notEqual(rejected.reason,'game_preview_recovery_evidence_verified');
+  bundleStore.set('game-source',old);
+  assert.equal((await app.api.inspectPreviewGameRecoveryEvidence()).evidenceVerified,true);
+});
+
+test('Game recovery refuses legacy player-presence uncertainty and production host',async()=>{
+  const app=await boot();
+  await seed(app);
+  const store=app.indexedDB._databases.get(DB)._stores.get('bundles');
+  const old=store.get('game-source');
+  store.set('game-source',{...old,playersPresent:undefined});
+  const denied=await app.api.inspectPreviewGameRecoveryEvidence();
+  assert.equal(denied.evidenceVerified,false);
+  store.set('game-source',old);
+  app.ctx.location.hostname='taskpoints.pages.dev';
+  assert.equal((await app.api.inspectPreviewGameRecoveryEvidence()).reason,
+    'preview_host_required');
+  app.ctx.location.hostname='localhost';
+  app.localStorage.removeItem(DARK);
+  assert.equal((await app.api.inspectPreviewGameRecoveryEvidence()).reason,
+    'dark_disabled');
+});
