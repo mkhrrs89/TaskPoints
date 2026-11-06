@@ -622,3 +622,98 @@ test('Gold semantic audit refuses stale or tampered V2 evidence and never certif
   assert.equal(healthy.match,true,JSON.stringify(healthy));
 });
 
+
+test('Gold audit catches theft whose BOTH ledger legs vanished despite perfect V1/V2 parity',async()=>{
+  const data=state();
+  data.goldLedger=[
+    {id:'opening-A',type:'opening_balance',playerId:'A',amount:10,balanceAfter:10},
+    {id:'opening-B',type:'opening_balance',playerId:'B',amount:30,balanceAfter:30}
+  ];
+  data.matchups=[{id:'recorded-gold-theft',playerAId:'A',playerBId:'B',
+    goldOutcome:{settled:true,winnerId:'A',loserId:'B',
+      theftGoldStolen:3,marginGoldAwarded:0}}];
+  const app=await boot(data),v1=app.snapshot();
+  assert.equal((await seed(app)).confirmedDurable,true);
+  assert.equal((await app.api.inspectPreviewGoldLedgerParity()).match,true);
+  const before=app.indexedDB.dump(DB);
+  const result=await app.api.inspectPreviewGoldTransactionIntegrity();
+  assert.equal(result.match,false,JSON.stringify(result));
+  assert.equal(result.reason,'gold_transaction_integrity_anomalies');
+  assert.equal(result.issues.settledTheftLedgerMissing,1);
+  assert.equal(result.settledOutcomeClaimsChecked,1);
+  assert.equal(result.issues.runningBalanceMismatch,0);
+  assert.equal(result.canPromote,false);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+  assert.equal(app.snapshot(),v1);
+});
+
+test('Gold outcome cross-check accepts real paired theft and margin, detects independent mismatches',async()=>{
+  const data=state();
+  data.goldLedger=[
+    {id:'opening-A',type:'opening_balance',playerId:'A',amount:10,balanceAfter:10},
+    {id:'opening-B',type:'opening_balance',playerId:'B',amount:30,balanceAfter:30},
+    {id:'margin-A',type:'matchup_margin',matchupId:'m1',
+      playerId:'A',opponentId:'B',amount:5,balanceAfter:15},
+    {id:'loss-B',type:'matchup_theft',matchupId:'m1',transferId:'transfer:m1',
+      playerId:'B',opponentId:'A',amount:-3,balanceAfter:27,
+      meta:{direction:'lost'}},
+    {id:'gain-A',type:'matchup_theft',matchupId:'m1',transferId:'transfer:m1',
+      playerId:'A',opponentId:'B',amount:3,balanceAfter:18,
+      meta:{direction:'stolen'}}
+  ];
+  data.matchups=[{id:'m1',goldOutcome:{
+    settled:true,winnerId:'A',loserId:'B',
+    marginGoldAwarded:5,theftGoldStolen:3
+  }}];
+  const app=await boot(data);
+  assert.equal((await seed(app)).confirmedDurable,true);
+  const healthy=await app.api.inspectPreviewGoldTransactionIntegrity();
+  assert.equal(healthy.match,true,JSON.stringify(healthy));
+  assert.equal(healthy.settledOutcomeClaimsChecked,1);
+  const altered=structuredClone(data);
+  altered.matchups[0].goldOutcome.theftGoldStolen=4;
+  app.put(altered);
+  const token=app.token();
+  const sync=await app.api.rehearsePreviewGoldLedgerReconcile(
+    token,'outcome-mismatch');
+  // The Gold ledger has NOT changed. A new V1 outcome claim does not
+  // silently invalidate the prior signed Gold record; the audit catches it.
+  assert.equal(sync.confirmedDurable,true,JSON.stringify(sync));
+  const mismatch=await app.api.inspectPreviewGoldTransactionIntegrity();
+  assert.equal(mismatch.match,false);
+  assert.equal(mismatch.issues.settledTheftLedgerMismatch,1);
+});
+
+test('Gold outcome audit detects missing margins, contradictory copies and bad counterparties',async()=>{
+  const base=state();
+  base.goldLedger=[
+    {id:'opening-A',playerId:'A',amount:10,balanceAfter:10},
+    {id:'opening-B',playerId:'B',amount:10,balanceAfter:10},
+    {id:'lost-B',type:'matchup_theft',matchupId:'m1',transferId:'transfer:m1',
+      playerId:'B',opponentId:'A',amount:-2,balanceAfter:8},
+    {id:'stolen-A',type:'matchup_theft',matchupId:'m1',transferId:'transfer:m1',
+      playerId:'A',opponentId:'B',amount:2,balanceAfter:12}
+  ];
+  base.matchups=[{id:'m1',goldOutcome:{settled:true,winnerId:'A',loserId:'B',
+    theftGoldStolen:2,marginGoldAwarded:1}}];
+  const app=await boot(base);
+  assert.equal((await seed(app)).confirmedDurable,true);
+  const missing=await app.api.inspectPreviewGoldTransactionIntegrity();
+  assert.equal(missing.issues.settledMarginLedgerMissing,1);
+  const conflicting=structuredClone(base);
+  conflicting.schedule=[{matchups:[{id:'m1',goldOutcome:{settled:true,
+    winnerId:'A',loserId:'B',theftGoldStolen:4,marginGoldAwarded:1}}]}];
+  app.put(conflicting);
+  const stale=await app.api.inspectPreviewGoldTransactionIntegrity();
+  assert.equal(stale.reason,'gold_preview_parity_required');
+  await app.api.rehearsePreviewGoldLedgerReconcile(app.token(),'same-ledger-new-claim');
+  const contradiction=await app.api.inspectPreviewGoldTransactionIntegrity();
+  assert.equal(contradiction.issues.contradictorySettledOutcome,1);
+  const flipped=structuredClone(base);
+  flipped.goldLedger[3].opponentId='C';
+  const broken=await boot(flipped);
+  assert.equal((await seed(broken)).confirmedDurable,true);
+  const bad=await broken.api.inspectPreviewGoldTransactionIntegrity();
+  assert.equal(bad.issues.invalidTheftTransfer,1);
+  assert.equal(bad.issues.settledTheftLedgerMismatch,1);
+});

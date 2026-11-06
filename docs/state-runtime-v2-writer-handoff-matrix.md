@@ -950,3 +950,27 @@ injects an incomplete transfer into synthetic V1 data and verifies the
 audit finds it while both V1 and V2 are left untouched. This does NOT
 grant Gold or V2 read/write authority, change the production economy, or
 complete any uncredited migration gate. **67/100.**
+
+
+### Detecting theft claims absent from both ledgers — November 6
+
+The preview-only Gold integrity audit now cross-checks **recorded,
+explicit-ID settled matchup outcomes** against verified Gold transactions.
+It detects missing BOTH sides of a theft (which a running-balance test
+alone cannot see), wrong transferred Gold amounts/recipient IDs, missing
+match margin awards, contradictory repeated settled outcomes, and
+inconsistent theft counterparties/direction metadata.
+
+It searches only existing recorded outcome claims in the V1 snapshot;
+claims without a stable matchup ID or valid winner/loser/amount are
+flagged as unverifiable rather than silently counted healthy. The
+scan is capped at 50,000 candidates. It cannot establish the
+existence of an event that is missing from both the ledger AND all
+recorded outcome sources. It never re-creates Gold, edits player totals,
+changes V1, or promotes V2 authority.
+
+Dedicated unit regressions exercise missing both legs, expected theft
+and margin, wrong claimed amount, contradictory copies, and broken
+counterparty IDs; a new Chromium/WebKit test confirms equal V1/V2
+ledgers still fail the semantic integrity check when a settled
+matchup records a missing theft. Readiness **67/100**.

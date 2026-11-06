@@ -8507,7 +8507,10 @@
       const counts={
         invalidPlayer:0,invalidAmount:0,invalidBalanceAfter:0,
         runningBalanceMismatch:0,missingTheftTransferId:0,
-        incompleteTheftTransfer:0,invalidTheftTransfer:0
+        incompleteTheftTransfer:0,invalidTheftTransfer:0,
+        contradictorySettledOutcome:0,unverifiableSettledOutcome:0,
+        settledTheftLedgerMissing:0,settledTheftLedgerMismatch:0,
+        settledMarginLedgerMissing:0,settledMarginLedgerMismatch:0
       };
       const samples=[];
       const markIssue=(type,entry,index)=>{
@@ -8562,8 +8565,95 @@
           &&a.playerId!==b.playerId
           &&typeof a.playerId==='string'&&Boolean(a.playerId.trim())
           &&typeof b.playerId==='string'&&Boolean(b.playerId.trim())
-          &&a.matchupId===b.matchupId;
+          &&typeof a.matchupId==='string'&&Boolean(a.matchupId.trim())
+          &&a.matchupId===b.matchupId
+          &&(!a.opponentId&&!b.opponentId
+            ||a.opponentId===b.playerId&&b.opponentId===a.playerId)
+          &&(a.meta?.direction==null
+            ||a.meta.direction===(a.amount<0?'lost':'stolen'))
+          &&(b.meta?.direction==null
+            ||b.meta.direction===(b.amount<0?'lost':'stolen'));
         if(!valid)markIssue('invalidTheftTransfer',group[0].entry,group[0].index);
+      }
+      // A balanced ledger can still lose BOTH theft legs, so compare
+      // explicit, already-settled matchup outcomes with their transactions.
+      // Inspect only recorded outcome claims with an explicit matchup ID.
+      // This does not infer anything about unrecorded historical games.
+      const sourceState=typeof core.parseTaskPointsStorageJson==='function'
+        ?core.parseTaskPointsStorageJson(source.raw,{})
+        :JSON.parse(source.raw);
+      if(!sourceState||typeof sourceState!=='object'
+        ||Array.isArray(sourceState))
+        return fail('gold_outcome_source_unreadable');
+      const claimGroups=[
+        sourceState.matchups,sourceState.currentSeason?.tournamentMatchupResults,
+        ...((Array.isArray(sourceState.seasonHistory)
+          ?sourceState.seasonHistory:[]).map(s=>s?.tournamentMatchupResults)),
+        ...((Array.isArray(sourceState.schedule)
+          ?sourceState.schedule:[]).map(day=>day?.matchups))
+      ];
+      const outcomeClaims=new Map();
+      let examined=0;
+      for(const group of claimGroups){
+        if(!Array.isArray(group))continue;
+        for(const game of group){
+          if(++examined>50000)return fail('gold_outcome_scan_limit');
+          const outcome=game?.goldOutcome;
+          if(outcome?.settled!==true)continue;
+          const theft=outcome.theftGoldStolen??0;
+          const margin=outcome.marginGoldAwarded??0;
+          if(!theft&&!margin)continue;
+          const gameId=String(game?.id||game?.matchupId||'').trim();
+          const winner=String(outcome.winnerId||'').trim();
+          const loser=String(outcome.loserId||'').trim();
+          if(!gameId||!winner||!loser||winner===loser
+            ||typeof theft!=='number'||!Number.isFinite(theft)||theft<0
+            ||typeof margin!=='number'||!Number.isFinite(margin)||margin<0){
+            markIssue('unverifiableSettledOutcome',game,-1);
+            continue;
+          }
+          const claim={id:gameId,winner,loser,theft,margin};
+          const prior=outcomeClaims.get(gameId);
+          if(prior){
+            if(stableJson(prior)!==stableJson(claim))
+              markIssue('contradictorySettledOutcome',game,-1);
+          }else outcomeClaims.set(gameId,claim);
+        }
+      }
+      const ledgerByMatchup=new Map();
+      for(const row of ordered){
+        const entry=row.value;
+        if(entry.type!=='matchup_theft'&&entry.type!=='matchup_margin')
+          continue;
+        const id=String(entry.matchupId||'').trim();
+        if(!id)continue;
+        const group=ledgerByMatchup.get(id)||[];
+        group.push(entry);
+        ledgerByMatchup.set(id,group);
+      }
+      for(const claim of outcomeClaims.values()){
+        const ledger=ledgerByMatchup.get(claim.id)||[];
+        if(claim.theft>0){
+          const legs=ledger.filter(row=>row.type==='matchup_theft');
+          if(legs.length!==2)
+            markIssue('settledTheftLedgerMissing',claim,-1);
+          else {
+            const won=legs.filter(row=>row.playerId===claim.winner
+              &&row.opponentId===claim.loser&&row.amount===claim.theft);
+            const lost=legs.filter(row=>row.playerId===claim.loser
+              &&row.opponentId===claim.winner&&row.amount===-claim.theft);
+            if(won.length!==1||lost.length!==1)
+              markIssue('settledTheftLedgerMismatch',claim,-1);
+          }
+        }
+        if(claim.margin>0){
+          const margins=ledger.filter(row=>row.type==='matchup_margin');
+          if(margins.length!==1)
+            markIssue('settledMarginLedgerMissing',claim,-1);
+          else if(margins[0].playerId!==claim.winner
+            ||margins[0].amount!==claim.margin)
+            markIssue('settledMarginLedgerMismatch',claim,-1);
+        }
       }
       if(!current())return fail('gold_source_changed_after_integrity_check');
       const issueCount=Object.values(counts).reduce((sum,n)=>sum+n,0);
@@ -8574,6 +8664,7 @@
         issueCount,issues:counts,samples,
         rowCount:ordered.length,transferCount:transfers.size,
         playerCount:balances.size,
+        settledOutcomeClaimsChecked:outcomeClaims.size,
         reason:issueCount?'gold_transaction_integrity_anomalies'
           :'gold_transaction_integrity_verified',
         goldMigrated:false,canApply:false,canPromote:false,

@@ -2934,6 +2934,41 @@ try {
       sourceAndPreviewPreserved:true,noFalseAuthority:true};
   });
 
+  await run('Gold outcome claims detect a whole missing theft pair despite matching V1 and V2 ledgers',async context=>{
+    const page=await open(context);
+    const info=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const v1=window.V2BrowserFixture.rawLegacy();
+      v1.goldEconomy={version:1,launchDateKey:'2026-09-03',
+        settledMatchupKeys:['id:missing-pair'],settledChampionKeys:[]};
+      v1.goldLedger=[
+        {id:'opening-a',type:'opening_balance',playerId:'A',amount:10,balanceAfter:10},
+        {id:'opening-b',type:'opening_balance',playerId:'B',amount:30,balanceAfter:30}
+      ];
+      v1.matchups=[{id:'missing-pair',goldOutcome:{
+        settled:true,winnerId:'A',loserId:'B',theftGoldStolen:3,
+        marginGoldAwarded:0}}];
+      localStorage.setItem('taskpoints_v1',JSON.stringify(v1));
+      const original=localStorage.getItem('taskpoints_v1');
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const seed=await api.rehearsePreviewGoldLedgerSeed(token,'entire-pair-lost');
+      const parity=await api.inspectPreviewGoldLedgerParity();
+      const integrity=await api.inspectPreviewGoldTransactionIntegrity();
+      return {seed,parity,integrity,sourceUnchanged:localStorage.getItem('taskpoints_v1')===original,
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(info.seed.confirmedDurable,true,JSON.stringify(info.seed));
+    assert.equal(info.parity.match,true,JSON.stringify(info.parity));
+    assert.equal(info.integrity.match,false);
+    assert.equal(info.integrity.issues.settledTheftLedgerMissing,1);
+    assert.equal(info.integrity.settledOutcomeClaimsChecked,1);
+    assert.equal(info.sourceUnchanged,true);
+    assert.equal(info.authority,'legacy_only');
+    return {missingBothTheftLegsDetected:true,
+      exactCopiesStillRejected:true,legacyAuthorityPreserved:true};
+  });
+
   await run('V2 compatibility export includes V1 Task journal and preserves interleaved Habit/Task chronology', async context=>{
     const page=await open(context);
     const baseline=await page.evaluate(async()=>{
