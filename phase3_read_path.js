@@ -439,7 +439,7 @@
     const pendingJournalRaw = safeStorageGet(core.PENDING_HABIT_DELTAS_KEY);
     const pendingWrites = Number(core.getPendingShadowDualWriteCount?.()) || 0;
     let pendingHabitDeltas = 0;
-    try { pendingHabitDeltas = Number(core.readPendingHabitDeltas?.().length) || 0; } catch (_) { pendingHabitDeltas = 1; }
+    try { pendingHabitDeltas = (Number(core.readPendingHabitDeltas?.().length) || 0) + (Number(core.readPendingPlayerEdits?.().length) || 0); } catch (_) { pendingHabitDeltas = 1; }
     const canServe = mode === 'verified_indexeddb'
       && verifiedCache
       && authoritativeRaw !== null

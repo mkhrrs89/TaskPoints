@@ -60,7 +60,7 @@
   function handleRelevantStorageEvent(event) {
     if (event?.storageArea && event.storageArea !== global.localStorage) return;
     const key = event?.key;
-    const authoritativeChanged = key === core.STORAGE_KEY || key === core.PENDING_HABIT_DELTAS_KEY;
+    const authoritativeChanged = key === core.STORAGE_KEY || key === core.PENDING_HABIT_DELTAS_KEY || key === 'taskpoints_pending_player_edits_v1';
     if (key === null || authoritativeChanged) {
       clearAllReadCaches();
       sessionRestoreMismatchPending = false;
@@ -119,7 +119,7 @@
   }
 
   function pendingHabitCount() {
-    try { return Number(core.readPendingHabitDeltas?.().length) || 0; } catch (_) { return 1; }
+    try { return (Number(core.readPendingHabitDeltas?.().length) || 0) + (Number(core.readPendingPlayerEdits?.().length) || 0); } catch (_) { return 1; }
   }
 
   function validateRecord(record, authoritativeRaw) {

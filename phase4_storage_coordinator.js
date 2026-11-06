@@ -466,7 +466,7 @@
   }
 
   function journalCount() {
-    try { return Number(core.readPendingHabitDeltas?.().length) || 0; } catch (_) { return 1; }
+    try { return (Number(core.readPendingHabitDeltas?.().length) || 0) + (Number(core.readPendingPlayerEdits?.().length) || 0); } catch (_) { return 1; }
   }
 
   function nextSequence() {
@@ -763,7 +763,7 @@
           const normalizedKey = String(key);
           if (normalizedKey === core.STORAGE_KEY && getMode() !== 'off') {
             scheduleBackgroundWrite({ reason: 'authoritative_storage_set' });
-          } else if (normalizedKey === core.PENDING_HABIT_DELTAS_KEY) {
+          } else if ((normalizedKey === core.PENDING_HABIT_DELTAS_KEY || normalizedKey === 'taskpoints_pending_player_edits_v1')) {
             queueAfterJournalCleared();
           }
           return result;
@@ -773,7 +773,7 @@
           const normalizedKey = String(key);
           if (normalizedKey === core.STORAGE_KEY && getMode() !== 'off') {
             scheduleBackgroundWrite({ reason: 'authoritative_storage_remove' });
-          } else if (normalizedKey === core.PENDING_HABIT_DELTAS_KEY) {
+          } else if ((normalizedKey === core.PENDING_HABIT_DELTAS_KEY || normalizedKey === 'taskpoints_pending_player_edits_v1')) {
             queueAfterJournalCleared();
           }
           return result;
@@ -799,7 +799,7 @@
           const normalizedKey = String(key);
           if (normalizedKey === core.STORAGE_KEY && getMode() !== 'off') {
             scheduleBackgroundWrite({ reason: 'authoritative_storage_set' });
-          } else if (normalizedKey === core.PENDING_HABIT_DELTAS_KEY) {
+          } else if ((normalizedKey === core.PENDING_HABIT_DELTAS_KEY || normalizedKey === 'taskpoints_pending_player_edits_v1')) {
             queueAfterJournalCleared();
           }
         }
@@ -815,7 +815,7 @@
           const normalizedKey = String(key);
           if (normalizedKey === core.STORAGE_KEY && getMode() !== 'off') {
             scheduleBackgroundWrite({ reason: 'authoritative_storage_remove' });
-          } else if (normalizedKey === core.PENDING_HABIT_DELTAS_KEY) {
+          } else if ((normalizedKey === core.PENDING_HABIT_DELTAS_KEY || normalizedKey === 'taskpoints_pending_player_edits_v1')) {
             queueAfterJournalCleared();
           }
         }

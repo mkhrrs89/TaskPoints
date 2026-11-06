@@ -22,7 +22,7 @@
   }
 
   function getJournalCount() {
-    try { return Number(core.readPendingHabitDeltas?.().length) || 0; } catch (_) { return 1; }
+    try { return (Number(core.readPendingHabitDeltas?.().length) || 0) + (Number(core.readPendingPlayerEdits?.().length) || 0); } catch (_) { return 1; }
   }
 
   function getStatus() {
@@ -37,6 +37,7 @@
   function requestJournalCompaction() {
     if (compactionRequested || getJournalCount() <= 0) return;
     if (typeof core.schedulePendingHabitDeltaCompaction !== 'function') return;
+    if (!(Number(core.readPendingHabitDeltas?.().length) || 0)) return; // Player edits compact separately.
     let raw = null;
     try { raw = global.localStorage?.getItem?.(core.STORAGE_KEY) ?? null; } catch (_) { raw = null; }
     if (raw == null) return;
@@ -96,7 +97,7 @@
 
   global.addEventListener?.('storage', (event) => {
     if (event?.storageArea && event.storageArea !== global.localStorage) return;
-    if ([core.STORAGE_KEY, core.PENDING_HABIT_DELTAS_KEY, core.PHASE4_STORAGE_MODE_KEY].includes(event?.key)) {
+    if ([core.STORAGE_KEY, core.PENDING_HABIT_DELTAS_KEY, 'taskpoints_pending_player_edits_v1', core.PHASE4_STORAGE_MODE_KEY].includes(event?.key)) {
       invalidate(event?.newValue == null ? 'storage_removed' : 'storage_changed');
       scheduleRecovery();
     }
@@ -126,6 +127,7 @@
   const ATTEMPT_LOCK_KEY = 'taskpoints_recovery_attempt_lock_v1';
   const HABIT_JOURNAL_KEY = core.PENDING_HABIT_DELTAS_KEY || 'taskpoints_pending_habit_deltas_v1';
   const LEGACY_JOURNAL_KEY = 'taskpoints_phase5b_pending_changes_v1';
+  const PLAYER_JOURNAL_KEY = 'taskpoints_pending_player_edits_v1';
   const originalSetMode = core.setPhase4StorageMode.bind(core);
 
   const get = (key) => { try { return storage.getItem(key); } catch (_) { return null; } };
@@ -140,12 +142,15 @@
     return `${(value >>> 0).toString(16).padStart(8, '0')}:${text.length}`;
   };
   const journalCount = () => {
-    const raw = get(HABIT_JOURNAL_KEY);
-    if (!raw) return 0;
-    const value = parse(raw, null);
-    if (Array.isArray(value)) return value.length;
-    if (Array.isArray(value?.operations)) return value.operations.length;
-    return value && typeof value === 'object' ? Object.keys(value).length : 1;
+    const habitRaw = get(HABIT_JOURNAL_KEY);
+    const habit = parse(habitRaw, null);
+    const habitCount = !habitRaw ? 0 : Array.isArray(habit) ? habit.length
+      : Array.isArray(habit?.operations) ? habit.operations.length
+      : habit && typeof habit === 'object' ? Object.keys(habit).length : 1;
+    const playerRaw = get(PLAYER_JOURNAL_KEY);
+    const player = parse(playerRaw, null);
+    const playerCount = !playerRaw ? 0 : Array.isArray(player?.edits) ? player.edits.length : 1;
+    return habitCount + playerCount;
   };
   const writeDiagnostic = (patch) => {
     const previous = parse(get(DIAG_KEY), {}) || {};
@@ -243,6 +248,7 @@
   const PAGE_LOCK_NAME = 'taskpoints_active_page_v1';
   const HABIT_JOURNAL_KEY = core.PENDING_HABIT_DELTAS_KEY || 'taskpoints_pending_habit_deltas_v1';
   const LEGACY_JOURNAL_KEY = 'taskpoints_phase5b_pending_changes_v1';
+  const PLAYER_JOURNAL_KEY = 'taskpoints_pending_player_edits_v1';
   const EXCLUDED_PAGES = new Set([
     'indexeddb_requalification.html',
     'phase4_storage_status.html',
@@ -264,6 +270,7 @@
     const value = parse(raw, null);
     if (Array.isArray(value)) return value.length;
     if (Array.isArray(value?.operations)) return value.operations.length;
+    if (Array.isArray(value?.edits)) return value.edits.length;
     return value && typeof value === 'object' ? Object.keys(value).length : 1;
   };
   const hash = (raw) => {
@@ -330,7 +337,7 @@
       || !gate.preparedBrowserSessionId
       || gate.preparedBrowserSessionId === sessionId
       || (get(MODE_KEY) || 'off') !== 'verify_primary_writes'
-      || journalCount(HABIT_JOURNAL_KEY) > 0
+      || (journalCount(HABIT_JOURNAL_KEY) > 0 || journalCount(PLAYER_JOURNAL_KEY) > 0)
       || get(LEGACY_JOURNAL_KEY)
       || !get(STORAGE_KEY)) {
       holdSharedPageLock();
@@ -347,7 +354,7 @@
         || lockedGate.preparedBrowserSessionId === sessionId
         || lockedGate.freshAppSessionId
         || (get(MODE_KEY) || 'off') !== 'verify_primary_writes'
-        || journalCount(HABIT_JOURNAL_KEY) > 0
+        || (journalCount(HABIT_JOURNAL_KEY) > 0 || journalCount(PLAYER_JOURNAL_KEY) > 0)
         || get(LEGACY_JOURNAL_KEY)
         || !currentRaw) {
         return { exclusive: true, recorded: false };

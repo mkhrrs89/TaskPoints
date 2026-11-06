@@ -51,7 +51,7 @@
     try { return core.clearPhase4Caches?.() ?? true; } catch (_) { clearSessionCache(); return true; }
   }
   function journalCount() {
-    try { return Number(core.readPendingHabitDeltas?.().length) || 0; } catch (_) { return 1; }
+    try { return (Number(core.readPendingHabitDeltas?.().length) || 0) + (Number(core.readPendingPlayerEdits?.().length) || 0); } catch (_) { return 1; }
   }
   function verifiedCacheRecordIsUsable(primaryCache) {
     if (!primaryCache || typeof primaryCache !== 'object' || Array.isArray(primaryCache)) return false;
@@ -356,7 +356,7 @@
 
   global.addEventListener?.('storage', (event) => {
     if (event?.storageArea && event.storageArea !== global.localStorage) return;
-    if (![core.STORAGE_KEY, core.PENDING_HABIT_DELTAS_KEY, core.PHASE4_STORAGE_MODE_KEY].includes(event?.key)) return;
+    if (![core.STORAGE_KEY, core.PENDING_HABIT_DELTAS_KEY, 'taskpoints_pending_player_edits_v1', core.PHASE4_STORAGE_MODE_KEY].includes(event?.key)) return;
     clearCache();
     if ((core.getPhase4StorageMode?.() || 'off') === 'indexeddb_primary') schedulePrimaryWarmup('storage_changed');
   });

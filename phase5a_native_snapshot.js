@@ -36,7 +36,7 @@
     : JSON.parse(JSON.stringify(value));
   const get = (key) => { try { return global.localStorage?.getItem?.(key) ?? null; } catch (_) { return null; } };
   const mode = () => core.getPhase4StorageMode?.() || 'off';
-  const journalCount = () => { try { return Number(core.readPendingHabitDeltas?.().length) || 0; } catch (_) { return 1; } };
+  const journalCount = () => { try { return (Number(core.readPendingHabitDeltas?.().length) || 0) + (Number(core.readPendingPlayerEdits?.().length) || 0); } catch (_) { return 1; } };
   const summary = (state) => core.shadowSourceSummary?.(state || {}) || { counts: null, hashes: { state: hash(state || {}) } };
 
   function hash(value) {

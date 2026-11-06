@@ -357,6 +357,12 @@
         if (pendingHabitDeltas.length && typeof core?.applyPendingHabitDeltas === 'function') {
           state = core.applyPendingHabitDeltas(state, pendingHabitDeltas)?.state || state;
         }
+        // A fast Player editor save is durable in its own journal until idle
+        // compaction. Restore must replay it before verifying the snapshot.
+        if (typeof core?.readPendingPlayerEdits === 'function' && typeof core?.applyPendingPlayerEdits === 'function') {
+          const pendingPlayerEdits = core.readPendingPlayerEdits(); // Fail closed if malformed.
+          if (pendingPlayerEdits.length) state = core.applyPendingPlayerEdits(state, pendingPlayerEdits);
+        }
         state = core?.normalizeState ? core.normalizeState(state) : state;
 
         const beforeRaw = localStorage.getItem(STORAGE_KEY) || '';
