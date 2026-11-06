@@ -1,6 +1,8 @@
 {
   "version": 1,
   "include": [
+    "/",
+    "/index.html",
     "/scoring_core.js",
     "/audit_integrity.js",
     "/settings.html",

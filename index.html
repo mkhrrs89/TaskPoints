@@ -659,7 +659,14 @@ Nothing visible on the page is built here. === -->
     if (viewFinished || window.__tpBootViewFinished) return;
     settleMatrixTitle();
     finish();
-    if (!completeBootView({ skipped: true })) {
+    // The coordinator can accept a reveal request while deferred scripts
+    // are still pending. Never mistake acceptance for a visible Home page.
+    const revealAccepted = completeBootView({ skipped: true });
+    const deferredRuntimePending = Boolean(
+      window.__tpMobileBootCoordinator?.isRevealed
+      && !window.__tpMobileBootCoordinator.isRevealed()
+    );
+    if (!revealAccepted || deferredRuntimePending) {
       // The HTML may still be streaming or a required script may have
       // stalled before appRoot exists. Never make this a silent dead end.
       if (splash && !document.getElementById('tp-boot-wait-notice')) {

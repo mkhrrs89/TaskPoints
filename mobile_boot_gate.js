@@ -200,6 +200,7 @@ const COORDINATOR_SCRIPT = `<script id="tp-mobile-boot-runtime-coordinator">
     },
     requestReveal,
     isSkipRequested() { return skipRequested; },
+    isRevealed() { return revealed; },
     flushLateReadyListeners
   };
 
