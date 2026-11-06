@@ -11,6 +11,14 @@ on:
       - 'save_pipeline_shared_work.js'
       - 'storage_maintenance_idle.js'
       - 'tests/player_editor_journal_perf.test.js'
+      - 'tests/player_edit_cache_guards.test.js'
+      - 'phase3_read_path.js'
+      - 'phase3_navigation_cache.js'
+      - 'phase4_storage_coordinator.js'
+      - 'phase4_primary_read_path.js'
+      - 'phase4_cache_guard.js'
+      - 'phase5a_native_snapshot.js'
+      - 'emergency_recovery.html'
       - 'settings.html'
       - 'phase2_reset_hook.js'
       - 'phase5b_deferred_mirror.js'
@@ -45,6 +53,7 @@ jobs:
         run: >-
           node --test
           tests/player_editor_journal_perf.test.js
+          tests/player_edit_cache_guards.test.js
           tests/storage_atomic_replace_contract.test.js
           tests/storage_data_loss_fail_closed.test.js
           tests/phase5b_deferred_mirror_contract.test.js
