@@ -20,6 +20,8 @@
   let internalPersistDepth = 0;
   let displayStateCache = null;
   let displayStateCacheRevision = '';
+  // Temporary, synchronous reconciliation cache only. Never persisted.
+  let activeGoldReconciliationBatch = null;
 
   const roundGold = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 10) / 10;
   const roundScore = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 10) / 10;
@@ -237,6 +239,7 @@
     const id = String(playerId || '').trim();
     if (!id) return 0;
     if (!state?.goldEconomy || Number(state.goldEconomy.version) !== ECONOMY_VERSION) return legacyGoldForPlayer(state || {}, id);
+    if (activeGoldReconciliationBatch?.state === state) return roundGold(activeGoldReconciliationBatch.balances.get(id) || 0);
     return roundGold(ledgerRows(state || {}).reduce((sum, row) => String(row?.playerId || '') === id ? sum + (Number(row?.amount) || 0) : sum, 0));
   }
 
@@ -317,9 +320,16 @@
 
   function appendLedgerEntry(state, entry) {
     const ledger = ledgerRows(state);
-    if (ledger.some((row) => String(row?.id || '') === String(entry.id || ''))) return false;
+    const batch = activeGoldReconciliationBatch?.state === state ? activeGoldReconciliationBatch : null;
+    const entryId = String(entry.id || '');
+    if (batch ? batch.ledgerIds.has(entryId) : ledger.some((row) => String(row?.id || '') === entryId)) return false;
     const balanceBefore = goldBalance(state, entry.playerId);
     ledger.push({ ...entry, amount: roundGold(entry.amount), balanceAfter: roundGold(balanceBefore + Number(entry.amount || 0)) });
+    if (batch) {
+      batch.ledgerIds.add(entryId);
+      const id = String(entry.playerId || '');
+      batch.balances.set(id, (batch.balances.get(id) || 0) + (Number(entry.amount) || 0));
+    }
     return true;
   }
 
@@ -396,6 +406,11 @@
   }
 
   function applyGoldOutcomeToMatchingRows(state, identity, outcome) {
+    const batch = activeGoldReconciliationBatch?.state === state ? activeGoldReconciliationBatch : null;
+    if (batch?.outcomeRows) {
+      (batch.outcomeRows.get(identity) || []).forEach(row => { row.goldOutcome = { ...outcome }; });
+      return;
+    }
     const visit = (rows) => {
       (Array.isArray(rows) ? rows : []).forEach((row) => {
         if (matchupIdentity(row) === identity) row.goldOutcome = { ...outcome };
@@ -412,7 +427,8 @@
     if (!economy || Number(economy.version) !== ECONOMY_VERSION) return false;
     const identity = matchupIdentity(matchup);
     if (!identity) return false;
-    const settled = new Set(Array.isArray(economy.settledMatchupKeys) ? economy.settledMatchupKeys : []);
+    const batch = activeGoldReconciliationBatch?.state === state ? activeGoldReconciliationBatch : null;
+    const settled = batch ? batch.settledKeys : new Set(Array.isArray(economy.settledMatchupKeys) ? economy.settledMatchupKeys : []);
     if (settled.has(identity)) return false;
     const date = rowDateKey(matchup);
     if (!date || date < economy.launchDateKey) return false;
@@ -423,7 +439,12 @@
     if (scoreA === null || scoreB === null) return false;
     const result = goldWinner(matchup);
     if (!result) {
-      economy.settledMatchupKeys = [...settled, identity];
+      if (batch) {
+        settled.add(identity);
+        economy.settledMatchupKeys.push(identity);
+      } else {
+        economy.settledMatchupKeys = [...settled, identity];
+      }
       applyGoldOutcomeToMatchingRows(state, identity, {
         settled: true,
         tie: true,
@@ -501,7 +522,12 @@
       theftGoldStolen: theftGold,
       settledAtISO: stamp
     };
-    economy.settledMatchupKeys = [...settled, identity];
+    if (batch) {
+        settled.add(identity);
+        economy.settledMatchupKeys.push(identity);
+      } else {
+        economy.settledMatchupKeys = [...settled, identity];
+      }
     applyGoldOutcomeToMatchingRows(state, identity, outcome);
     return true;
   }
@@ -543,14 +569,64 @@
     if (!state || typeof state !== 'object') return { state, changed: initialized.changed, initialized: initialized.initialized };
     if (initialized.blocked) return { state, changed: false, initialized: false, blocked: true };
     let changed = initialized.changed;
-    const rows = collectCompleteMatchups(state).slice().sort((a, b) => {
-      const dateCompare = rowDateKey(a).localeCompare(rowDateKey(b));
-      if (dateCompare) return dateCompare;
-      const timeCompare = transactionTimestamp(a).localeCompare(transactionTimestamp(b));
-      return timeCompare || matchupIdentity(a).localeCompare(matchupIdentity(b));
-    });
-    rows.forEach((row) => { if (settleOneMatchup(state, row)) changed = true; });
-    if (reconcileChampionBonuses(state)) changed = true;
+    // A settled matchup is immutable Gold history. Skip already-accounted
+    // games before settlement rather than cloning the entire settled-key
+    // collection once per historical game on every Home load/NPC simulation.
+    const settledKeys = new Set(Array.isArray(state.goldEconomy?.settledMatchupKeys)
+      ? state.goldEconomy.settledMatchupKeys : []);
+    const launchDateKey = String(state.goldEconomy?.launchDateKey || '');
+    const rows = collectCompleteMatchups(state)
+      .filter((row) => {
+        const identity = matchupIdentity(row);
+        if (!identity || settledKeys.has(identity)) return false;
+        const date = rowDateKey(row);
+        return Boolean(date && (!launchDateKey || date >= launchDateKey));
+      })
+      .sort((a, b) => {
+        const dateCompare = rowDateKey(a).localeCompare(rowDateKey(b));
+        if (dateCompare) return dateCompare;
+        const timeCompare = transactionTimestamp(a).localeCompare(transactionTimestamp(b));
+        return timeCompare || matchupIdentity(a).localeCompare(matchupIdentity(b));
+      });
+    // Build one ledger + settled-game index instead of rescanning every old
+    // transaction and matchup for each newly completed game. A private batch
+    // never outlives this function or changes any stored Gold schema.
+    const previousBatch = activeGoldReconciliationBatch;
+    if (rows.length) {
+      if (!Array.isArray(state.goldEconomy.settledMatchupKeys)) state.goldEconomy.settledMatchupKeys = [];
+      const ledgerIds = new Set(), balances = new Map(), outcomeRows = new Map();
+      (Array.isArray(state.goldLedger) ? state.goldLedger : []).forEach((entry) => {
+        ledgerIds.add(String(entry?.id || ''));
+        const id = String(entry?.playerId || '');
+        balances.set(id, (balances.get(id) || 0) + (Number(entry?.amount) || 0));
+      });
+      const register = (items) => {
+        (Array.isArray(items) ? items : []).forEach((item) => {
+          const identity = matchupIdentity(item);
+          if (!identity) return;
+          if (!outcomeRows.has(identity)) outcomeRows.set(identity, []);
+          outcomeRows.get(identity).push(item);
+        });
+      };
+      register(state.matchups);
+      register(state.currentSeason?.tournamentMatchupResults);
+      (Array.isArray(state.seasonHistory) ? state.seasonHistory : []).forEach((season) => register(season?.tournamentMatchupResults));
+      (Array.isArray(state.schedule) ? state.schedule : []).forEach((day) => register(day?.matchups));
+      activeGoldReconciliationBatch = { state, settledKeys, ledgerIds, balances, outcomeRows };
+    }
+    try {
+      rows.forEach((row) => {
+        const identity = matchupIdentity(row);
+        if (settledKeys.has(identity)) return;
+        if (settleOneMatchup(state, row)) {
+          settledKeys.add(identity);
+          changed = true;
+        }
+      });
+      if (reconcileChampionBonuses(state)) changed = true;
+    } finally {
+      activeGoldReconciliationBatch = previousBatch;
+    }
     return { state, changed, initialized: initialized.initialized };
   }
 

@@ -242,7 +242,7 @@
 
   const TASKPOINTS_PACKED_STORAGE_VERSION = 1;
   const PACKED_ARRAY_SCHEMAS = {
-    completions: ['id','taskId','habitId','viceId','flexId','projectId','title','points','completedAtISO','dateKey','source','kind','note','meta'],
+    completions: ['id','taskId','habitId','viceId','flexId','projectId','title','points','completedAtISO','dateKey','source','kind','note','meta','caloriesNotTracked'],
     matchups: ['id','matchupId','date','dateKey','playerAId','playerBId','playerAEffects','playerBEffects','scoreA','scoreB','playerAScore','playerBScore','winnerId','loserId','result','matchupType','seasonId','seriesId','seasonSeriesId','roundId','gameNumber','seriesGameNumber','bestOf','winsNeeded','completedAtISO','finalizedAtISO','source'],
     gameHistory: ['id','date','dateKey','playerId','score','effects','points','total','source','winnerId','loserId','matchupId','seasonId','seriesId','seasonSeriesId','roundId','gameNumber','completedAtISO','createdAtISO'],
     seasonHistory: []
@@ -8227,7 +8227,8 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
     if (!entry || typeof entry !== 'object') return false;
 
     const bonusEnabled =
-      entry.calLogBonusEnabled !== false
+      entry.caloriesNotTracked !== true
+      && entry.calLogBonusEnabled !== false
       && entry.calLogBonusDisabled !== true
       && entry.skipCalLogBonus !== true;
 
@@ -8270,6 +8271,9 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
 
   function classifyPersonalMetricCompletion(entry) {
     if (!entry || typeof entry !== 'object') return null;
+    if (entry.caloriesNotTracked === true && /^Calories\b/i.test(String(entry.title || ''))) {
+      return { type: 'calories', rawValue: 'Not tracked', secondaryValue: null };
+    }
     const sleep = getSleepInfo(entry);
     if (Number.isFinite(sleep.score)) {
       const explicitRested = Object.prototype.hasOwnProperty.call(entry, 'sleepRested')
@@ -8399,6 +8403,10 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
 
   function deriveCompletionPoints(entry, settings) {
     if (!entry) return null;
+    // An intentional skip is recorded coverage, never a numeric calorie score.
+    if (entry.caloriesNotTracked === true && /^Calories\b/i.test(String(entry.title || ''))) {
+      return { points: 0, formula: 'calories', inputs: { notTracked: true } };
+    }
     const flexId = entry?.flexId;
     if (flexId && Array.isArray(settings?.flexActions)) {
       const flexAction = settings.flexActions.find(f => f && f.id === flexId);

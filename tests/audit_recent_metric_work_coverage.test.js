@@ -121,3 +121,16 @@ test('existing audit remains in place and shows the same warning status/detail s
   assert.match(auditHtml, /const workHoursAudit = auditWorkHoursLast14Days\(state\)/,
     'Retain the separate 14-day Work Hours validation check');
 });
+
+test('explicit Not tracked calories suppresses missing warning but not missing mood',()=>{
+ const rows=completeWeek().filter(row=>!(row.source==='calories'&&row.dateKey==='2026-10-26'));
+ rows.push({dateKey:'2026-10-26',source:'metric',title:'Calories (Not tracked)',calories:null,
+   caloriesNotTracked:true,calLogBonusEnabled:false,points:0});
+ assert.deepEqual(issues(rows),[]);
+ const withoutMood=rows.filter(row=>!(row.source==='mood'&&row.dateKey==='2026-10-26'));
+ assert.deepEqual(issues(withoutMood),['2026-10-26: missing mood']);
+});
+test('truly unlogged calories still cause the existing audit warning',()=>{
+ const rows=completeWeek().filter(row=>!(row.source==='calories'&&row.dateKey==='2026-10-25'));
+ assert.deepEqual(issues(rows),['2026-10-25: missing calories']);
+});
