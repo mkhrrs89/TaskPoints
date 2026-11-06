@@ -8457,6 +8457,132 @@
     }catch(_){return fail('gold_preview_parity_unreadable');}
   }
 
+  // Read-only, preview-host-only semantic check of the Gold ledger that
+  // has ALREADY passed exact source/record/receipt parity. Equality alone
+  // cannot tell us whether theft transfers were lost or balances drifted.
+  // This reports anomalies; never repairs V1 or V2, grants writer admission,
+  // or makes a claim about transactions absent from BOTH histories.
+  async function inspectPreviewGoldTransactionIntegrity() {
+    const fail=(reason,details={})=>({
+      ...refuseGoldPreview(reason),match:false,
+      balanceChainVerified:false,theftPairsVerified:false,...details
+    });
+    if(!isWalTestPreviewHost())return fail('preview_host_required');
+    if(!isDarkEnabled())return fail('dark_disabled');
+    const source=await capturePreviewGoldSource();
+    if(source.reason)return fail('gold_source_preflight_required',{
+      prerequisiteReason:source.reason
+    });
+    const current=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&darkMirrorModeEpoch===source.epoch
+      &&currentGeneration({create:false})===source.generation
+      &&captureReadOnlyFullStorageInventory()===source.inventory
+      &&global.localStorage.getItem(core.STORAGE_KEY||'taskpoints_v1')
+        ===source.raw;
+    const parity=await inspectPreviewGoldLedgerParity();
+    if(!parity.match)return fail('gold_preview_parity_required',{
+      prerequisiteReason:parity.reason
+    });
+    try {if(!current())return fail('gold_source_changed_before_integrity_check');}
+    catch(_){return fail('gold_source_unreadable_before_integrity_check');}
+    let rows,seal,meta;
+    try {
+      const db=await open();
+      if(!db)return fail('v2_unavailable');
+      const tx=db.transaction(['goldLedger','meta'],'readonly');
+      [rows,seal,meta]=await Promise.all([
+        requestPromise(tx.objectStore('goldLedger').getAll()),
+        requestPromise(tx.objectStore('meta').get('gold-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID))
+      ]);
+    }catch(_){return fail('gold_integrity_read_unavailable');}
+    try {
+      if(!current())return fail('gold_source_changed_during_integrity_check');
+      const ordered=orderedGoldPreviewRows(rows);
+      if(!ordered || !seal || seal.resetGeneration!==source.generation
+        || !meta || meta.resetGeneration!==source.generation
+        || seal.sourceFingerprint!==source.fingerprint
+        || stableJson(ordered.map(row=>row.value))!==stableJson(source.ledger))
+        return fail('gold_preview_changed_during_integrity_check');
+      const counts={
+        invalidPlayer:0,invalidAmount:0,invalidBalanceAfter:0,
+        runningBalanceMismatch:0,missingTheftTransferId:0,
+        incompleteTheftTransfer:0,invalidTheftTransfer:0
+      };
+      const samples=[];
+      const markIssue=(type,entry,index)=>{
+        counts[type]+=1;
+        if(samples.length<8)samples.push({
+          type,index,transactionId:String(entry?.id||'').slice(0,256)
+        });
+      };
+      const balances=new Map(),invalidPlayers=new Set(),transfers=new Map();
+      for(let i=0;i<ordered.length;i++){
+        const entry=ordered[i].value;
+        const player=typeof entry.playerId==='string'?entry.playerId.trim():'';
+        const amount=entry.amount;
+        const balanceAfter=entry.balanceAfter;
+        if(!player)markIssue('invalidPlayer',entry,i);
+        if(typeof amount!=='number'||!Number.isFinite(amount)
+          ||Math.abs(amount-Math.round((amount+Number.EPSILON)*10)/10)>1e-6)
+          markIssue('invalidAmount',entry,i);
+        if(typeof balanceAfter!=='number'||!Number.isFinite(balanceAfter)
+          ||Math.abs(balanceAfter-Math.round((balanceAfter+Number.EPSILON)*10)/10)>1e-6)
+          markIssue('invalidBalanceAfter',entry,i);
+        if(player&&typeof amount==='number'&&Number.isFinite(amount)) {
+          const next=(balances.get(player)||0)+Math.round((amount+Number.EPSILON)*10);
+          balances.set(player,next);
+          if(!invalidPlayers.has(player)
+            &&typeof balanceAfter==='number'&&Number.isFinite(balanceAfter)
+            &&Math.abs(balanceAfter-next/10)>1e-6)
+            markIssue('runningBalanceMismatch',entry,i);
+        }else if(player)invalidPlayers.add(player);
+        if(entry.type==='matchup_theft') {
+          const id=typeof entry.transferId==='string'
+            ?entry.transferId.trim():'';
+          if(!id)markIssue('missingTheftTransferId',entry,i);
+          else {
+            const group=transfers.get(id)||[];
+            group.push({entry,index:i});
+            transfers.set(id,group);
+          }
+        }
+      }
+      for(const group of transfers.values()){
+        if(group.length!==2){
+          markIssue('incompleteTheftTransfer',group[0].entry,group[0].index);
+          continue;
+        }
+        const [a,b]=group.map(x=>x.entry);
+        const ta=Math.round((a.amount+Number.EPSILON)*10);
+        const tb=Math.round((b.amount+Number.EPSILON)*10);
+        const valid=typeof a.amount==='number'&&Number.isFinite(a.amount)
+          &&typeof b.amount==='number'&&Number.isFinite(b.amount)
+          &&ta+tb===0&&ta!==0
+          &&a.playerId!==b.playerId
+          &&typeof a.playerId==='string'&&Boolean(a.playerId.trim())
+          &&typeof b.playerId==='string'&&Boolean(b.playerId.trim())
+          &&a.matchupId===b.matchupId;
+        if(!valid)markIssue('invalidTheftTransfer',group[0].entry,group[0].index);
+      }
+      if(!current())return fail('gold_source_changed_after_integrity_check');
+      const issueCount=Object.values(counts).reduce((sum,n)=>sum+n,0);
+      return {
+        checked:true,previewOnly:true,match:issueCount===0,
+        balanceChainVerified:issueCount===0,
+        theftPairsVerified:issueCount===0,
+        issueCount,issues:counts,samples,
+        rowCount:ordered.length,transferCount:transfers.size,
+        playerCount:balances.size,
+        reason:issueCount?'gold_transaction_integrity_anomalies'
+          :'gold_transaction_integrity_verified',
+        goldMigrated:false,canApply:false,canPromote:false,
+        productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+      };
+    }catch(_){return fail('gold_integrity_check_unavailable');}
+  }
+
   // Advance one already sealed Gold history to a newer V1 authority. This
   // supports append-only transactions, economy metadata changes, and
   // explicitly opted-in in-place corrections. Deletions and transaction-ID
@@ -13119,6 +13245,7 @@
     rehearsePreviewGoldLedgerSeed,
     rehearsePreviewGoldLedgerReconcile,
     inspectPreviewGoldLedgerParity,
+    inspectPreviewGoldTransactionIntegrity,
     rehearsePreviewTaskCollectionSeed,
     rehearsePreviewTaskCollectionReconcile,
     inspectPreviewTaskCollectionParity,

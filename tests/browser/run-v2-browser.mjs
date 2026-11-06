@@ -2887,6 +2887,53 @@ try {
       unexpectedRecordRefused:true,staleJournalRefused:true};
   });
 
+  await run('Gold preview read-only audit detects missing theft leg and preserves V1 and V2',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const core=window.TaskPointsCore;
+      const state=window.V2BrowserFixture.rawLegacy();
+      state.goldEconomy={version:1,launchDateKey:'2026-09-03',
+        settledMatchupKeys:[],settledChampionKeys:[]};
+      state.goldLedger=[
+        {id:'open-a',type:'opening_balance',playerId:'A',amount:10,balanceAfter:10},
+        {id:'open-b',type:'opening_balance',playerId:'B',amount:10,balanceAfter:10},
+        {id:'theft-loss',type:'matchup_theft',playerId:'A',amount:-2,
+          balanceAfter:8,transferId:'missing-pair',matchupId:'m1'}
+      ];
+      localStorage.setItem('taskpoints_v1',JSON.stringify(state));
+      const before=localStorage.getItem('taskpoints_v1');
+      const keys=[];
+      for(let i=0;i<localStorage.length;i++)keys.push(localStorage.key(i));
+      const token=JSON.stringify(keys.sort().map(k=>[k,localStorage.getItem(k)]));
+      const seeded=await api.rehearsePreviewGoldLedgerSeed(token,'broken-transfer');
+      const afterSeed=localStorage.getItem('taskpoints_v1');
+      const db=await api.open();
+      const tx=db.transaction('goldLedger','readonly');
+      const stored=await new Promise((resolve,reject)=>{
+        const req=tx.objectStore('goldLedger').getAll();
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      const inspection=await api.inspectPreviewGoldTransactionIntegrity();
+      const verified=await api.inspectPreviewGoldLedgerParity();
+      return {seeded,inspection,verified,
+        beforeSame:before===afterSeed&&before===localStorage.getItem('taskpoints_v1'),
+        goldRowsSame:stored.length===3,
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(result.seeded.confirmedDurable,true,JSON.stringify(result));
+    assert.equal(result.verified.match,true,JSON.stringify(result.verified));
+    assert.equal(result.inspection.match,false);
+    assert.equal(result.inspection.reason,'gold_transaction_integrity_anomalies');
+    assert.equal(result.inspection.issues.incompleteTheftTransfer,1);
+    assert.equal(result.inspection.canPromote,false);
+    assert.equal(result.beforeSame,true);
+    assert.equal(result.goldRowsSame,true);
+    assert.equal(result.authority,'legacy_only');
+    return {incompleteTheftDetected:true,
+      sourceAndPreviewPreserved:true,noFalseAuthority:true};
+  });
+
   await run('V2 compatibility export includes V1 Task journal and preserves interleaved Habit/Task chronology', async context=>{
     const page=await open(context);
     const baseline=await page.evaluate(async()=>{

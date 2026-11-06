@@ -519,3 +519,106 @@ test('Gold reconciliation refuses stale full-origin tokens, production host and 
   app.localStorage.removeItem(DARK);
   assert.equal((await reconcile(app,'off')).reason,'dark_disabled');
 });
+
+test('Gold semantic audit independently verifies real theft pairs, running balances, and reload',async()=>{
+  const data=state();
+  data.goldLedger=[
+    {id:'opening-A',type:'opening_balance',playerId:'A',amount:100,balanceAfter:100},
+    {id:'opening-B',type:'opening_balance',playerId:'B',amount:30,balanceAfter:30},
+    {id:'margin-A',type:'matchup_margin',playerId:'A',amount:5,balanceAfter:105},
+    {id:'theft-loss',type:'matchup_theft',playerId:'B',opponentId:'A',
+      transferId:'gold-transfer:one',matchupId:'one',amount:-3,balanceAfter:27},
+    {id:'theft-gain',type:'matchup_theft',playerId:'A',opponentId:'B',
+      transferId:'gold-transfer:one',matchupId:'one',amount:3,balanceAfter:108}
+  ];
+  const app=await boot(data),oldSnapshot=app.snapshot(),oldStorage=app.token();
+  assert.equal((await seed(app)).confirmedDurable,true);
+  const result=await app.api.inspectPreviewGoldTransactionIntegrity();
+  assert.equal(result.match,true,JSON.stringify(result));
+  assert.equal(result.reason,'gold_transaction_integrity_verified');
+  assert.equal(result.balanceChainVerified,true);
+  assert.equal(result.theftPairsVerified,true);
+  assert.equal(result.issueCount,0);
+  assert.equal(result.rowCount,5);
+  assert.equal(result.transferCount,1);
+  assert.equal(result.playerCount,2);
+  assert.equal(result.canPromote,false);
+  assert.equal(app.snapshot(),oldSnapshot);
+  assert.equal(app.token(),oldStorage);
+  const reloaded=await boot(undefined,{indexedDB:app.indexedDB,
+    localStorage:app.localStorage});
+  const after=await reloaded.api.inspectPreviewGoldTransactionIntegrity();
+  assert.equal(after.match,true,JSON.stringify(after));
+  assert.equal(after.rowCount,5);
+});
+
+test('Gold semantic audit catches incomplete transfers and balance drift without rewriting history',async()=>{
+  const cases=[
+    {label:'missing theft gain',rows:[
+      {id:'opening-A',playerId:'A',amount:10,balanceAfter:10},
+      {id:'theft-loss',type:'matchup_theft',playerId:'A',amount:-2,
+        balanceAfter:8,transferId:'theft:one',matchupId:'m1'}
+    ],field:'incompleteTheftTransfer'},
+    {label:'unbalanced theft transfer',rows:[
+      {id:'opening-A',playerId:'A',amount:10,balanceAfter:10},
+      {id:'opening-B',playerId:'B',amount:10,balanceAfter:10},
+      {id:'loss',type:'matchup_theft',playerId:'A',amount:-2,
+        balanceAfter:8,transferId:'theft:one',matchupId:'m1'},
+      {id:'gain',type:'matchup_theft',playerId:'B',amount:1,
+        balanceAfter:11,transferId:'theft:one',matchupId:'m1'}
+    ],field:'invalidTheftTransfer'},
+    {label:'broken balance',rows:[
+      {id:'opening-A',playerId:'A',amount:10,balanceAfter:10},
+      {id:'broken',playerId:'A',amount:2,balanceAfter:999}
+    ],field:'runningBalanceMismatch'},
+    {label:'unusable numeric value',rows:[
+      {id:'broken',playerId:'A',amount:'5',balanceAfter:5}
+    ],field:'invalidAmount'}
+  ];
+  for(const {label,rows,field} of cases){
+    const data=state();data.goldLedger=rows;
+    const app=await boot(data);
+    assert.equal((await seed(app)).confirmedDurable,true,label);
+    const before=app.indexedDB.dump(DB);
+    const raw=app.snapshot();
+    const result=await app.api.inspectPreviewGoldTransactionIntegrity();
+    assert.equal(result.match,false,label+': '+JSON.stringify(result));
+    assert.equal(result.reason,'gold_transaction_integrity_anomalies',label);
+    assert.ok(result.issues[field]>0,label+': '+JSON.stringify(result.issues));
+    assert.equal(result.canPromote,false,label);
+    assert.deepEqual(app.indexedDB.dump(DB),before,label);
+    assert.equal(app.snapshot(),raw,label);
+  }
+});
+
+test('Gold semantic audit refuses stale or tampered V2 evidence and never certifies production',async()=>{
+  const data=state();
+  data.goldLedger=[
+    {id:'opening-A',playerId:'A',amount:10,balanceAfter:10}
+  ];
+  const app=await boot(data);
+  assert.equal((await seed(app)).confirmedDurable,true);
+  app.ctx.location.hostname='taskpoints.pages.dev';
+  assert.equal((await app.api.inspectPreviewGoldTransactionIntegrity()).reason,
+    'preview_host_required');
+  app.ctx.location.hostname='localhost';
+  const next=structuredClone(data);
+  next.goldLedger.push({id:'later-A',playerId:'A',amount:2,balanceAfter:12});
+  app.put(next);
+  const stale=await app.api.inspectPreviewGoldTransactionIntegrity();
+  assert.equal(stale.match,false);
+  assert.equal(stale.reason,'gold_preview_parity_required');
+  assert.equal(stale.prerequisiteReason,'gold_preview_source_stale');
+  app.put(data);
+  const db=app.indexedDB._databases.get(DB);
+  const store=db._stores.get('goldLedger');
+  const original=store.get('gold-row:0');
+  store.set('gold-row:0',{...original,value:{...original.value,amount:999}});
+  const tamper=await app.api.inspectPreviewGoldTransactionIntegrity();
+  assert.equal(tamper.reason,'gold_preview_parity_required');
+  assert.equal(tamper.prerequisiteReason,'gold_preview_record_mismatch');
+  store.set('gold-row:0',original);
+  const healthy=await app.api.inspectPreviewGoldTransactionIntegrity();
+  assert.equal(healthy.match,true,JSON.stringify(healthy));
+});
+

@@ -925,3 +925,28 @@ must appear in compatibility exports, while a stale V2 completion
 must fail the independent ordering-parity check rather than silently
 overwriting the source. Legacy writes, imports, Gold and backups remain
 unchanged. This is not a completed writer-fencing gate. **67/100**.
+
+
+### Read-only Gold transaction integrity audit — November 6
+
+The V2-only API `inspectPreviewGoldTransactionIntegrity()` independently
+checks the **semantic correctness** of already sealed Gold ledger records.
+The prior exact equality audit proves V2 has an identical copy of the V1
+ledger and receipts, but identical copies can still contain a missing theft
+transfer or an incorrect running balance.
+
+After independently proving Gold source/receipt parity, the new audit walks
+the ordered ledger, checks finite one-decimal monetary amounts, per-player
+running `balanceAfter` values, and the two opposite-signed `matchup_theft`
+legs for each transfer ID. It returns bounded issue counts and samples, with
+no automatic repair. Missing or tampered V2 receipts, a changed V1 snapshot,
+and non-preview hosts fail closed. A missing transaction absent from BOTH
+ledgers cannot be proven by this comparison.
+
+Focused tests cover correct transfer pairs and balances across reload,
+incomplete/unbalanced transfers, incorrect balance history, bad amounts,
+stale V1 snapshots and tampered preview records. A Chromium/WebKit fixture
+injects an incomplete transfer into synthetic V1 data and verifies the
+audit finds it while both V1 and V2 are left untouched. This does NOT
+grant Gold or V2 read/write authority, change the production economy, or
+complete any uncredited migration gate. **67/100.**
