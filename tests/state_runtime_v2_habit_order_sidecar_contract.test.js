@@ -93,7 +93,8 @@ test('Sidecar incremental reconciliation preserves prior receipts and only chang
   assert.equal(saved.records.find(row=>row.id==='habit:h3').order,3);
   assert.equal(saved.receipts.length,2);
   assert.equal(saved.meta[0].receiptId,'habit-order-preview:edit');
-  assert.equal(saved.receipts[1].priorReceiptId,'habit-order-preview:initial');
+  assert.equal(saved.receipts.find(row=>row.id==='habit-order-preview:edit').priorReceiptId,
+    'habit-order-preview:initial');
   const noop=await reconcile(app,'fresh-noop');
   assert.equal(noop.confirmedDurable,true);
   assert.equal(noop.committed,false);
