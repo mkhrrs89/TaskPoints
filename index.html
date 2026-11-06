@@ -589,6 +589,7 @@ Nothing visible on the page is built here. === -->
     app.style.opacity = "1";
     app.style.pointerEvents = "auto";
 
+    if (typeof skipCleanup === "function") skipCleanup();
     if (splash) {
       splash.style.pointerEvents = "none";
       splash.style.transition = skipped ? "opacity 70ms ease" : "opacity 240ms ease";
@@ -613,7 +614,10 @@ Nothing visible on the page is built here. === -->
     finished = true;
     if (finishTimer !== null) clearTimeout(finishTimer);
     if (visualFallbackTimer !== null) clearTimeout(visualFallbackTimer);
-    if (typeof skipCleanup === "function") skipCleanup();
+    // Keep the tap-to-skip listener alive until Home is actually visible.
+    // Previously it was removed as soon as the letters finished animating,
+    // so any later runtime error made the splash permanently unskippable.
+    if (viewFinished && typeof skipCleanup === "function") skipCleanup();
     window.__tpMatrixFinished = true;
     try { performance.mark("tp-matrix-finished"); } catch (e) {}
     resolveFinished?.();
@@ -639,13 +643,48 @@ Nothing visible on the page is built here. === -->
   try { performance.mark("tp-matrix-started"); } catch (e) {}
 
   const requestSkip = () => {
-    if (skipRequested || finished) return;
+    if (viewFinished || skipRequested) return;
     skipRequested = true;
     titleEl.classList.add("tp-matrix-skip");
     settleMatrixTitle();
     finish();
     completeBootView({ skipped: true });
   };
+
+  // This watchdog runs independently of the large Home initialization script.
+  // If that script throws before installing its usual boot-complete handler,
+  // never leave an iPhone trapped behind the animation indefinitely.
+  let bootRecoveryTimer = null;
+  const releaseStalledSplash = () => {
+    if (viewFinished || window.__tpBootViewFinished) return;
+    settleMatrixTitle();
+    finish();
+    if (!completeBootView({ skipped: true })) {
+      // The HTML may still be streaming and appRoot hasn't arrived yet.
+      bootRecoveryTimer = setTimeout(releaseStalledSplash, 1000);
+      return;
+    }
+    // If Home didn't initialize at all, show a recoverable, read-only notice
+    // and provide a link to existing recovery tools. Never clear local data.
+    if (!window.TaskPointsHomeLiveState) {
+      const notice = document.createElement('div');
+      notice.id = 'tp-boot-recovery-notice';
+      notice.setAttribute('role', 'alert');
+      notice.style.cssText = 'position:fixed;z-index:2147483646;left:12px;right:12px;top:max(14px,env(safe-area-inset-top));padding:14px;background:#241817;color:#ffe3d6;border:1px solid #b86b45;border-radius:12px;font:14px/1.5 system-ui,sans-serif;box-shadow:0 8px 35px #000a';
+      const title = document.createElement('strong');
+      title.textContent = 'TaskPoints startup did not finish.';
+      const note = document.createElement('div');
+      note.textContent = 'Your saved data has not been cleared. You can try reloading, or use Recovery without restoring or deleting anything.';
+      const link = document.createElement('a');
+      link.href = 'emergency_recovery.html';
+      link.textContent = 'Open Recovery';
+      link.style.cssText = 'color:#ffca9f;text-decoration:underline;display:inline-block;margin-top:8px';
+      notice.append(title, note, link);
+      document.body.appendChild(notice);
+    }
+  };
+  bootRecoveryTimer = setTimeout(releaseStalledSplash, 6500);
+
   const requestSkipFromKey = (event) => {
     if (!["Enter", " ", "Escape"].includes(event.key)) return;
     event.preventDefault();
