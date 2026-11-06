@@ -882,3 +882,27 @@ This is additional safety within **one experimental adapter**, not universal
 production writer admission, an authorized cutover, or a claim of physical
 iOS durability. No original V1 save/recovery feature or Main file changed.
 **Weighted readiness remains 67/100.**
+
+
+### Strict preview preflight for existing pending V1 Task journal — November 6
+
+The explicitly invoked V2 preview Task batch adapter now inspects the **raw,
+preexisting** V1 Task journal before passing it to the normalizing V1 batch
+writer. The V1 normalizer is deliberately permissive and may remove malformed
+rows, duplicated IDs, bad deletion markers or unknown top-level fields. A
+preview writer cannot truthfully promise lossless preservation if those rows
+are silently normalized during its own append.
+
+The new strict preflight refuses unrecognized or incomplete journal schemas,
+malformed/duplicate Task and completion records, invalid deletion markers,
+and unknown top-level metadata. It leaves all original journal bytes intact
+rather than attempting a repair or stripping them. It does not weaken or
+change the production V1 normalizer and does not block ordinary production
+Task/Work saves. A real-browser regression injects five such cases, checks
+that V2 refuses the append before writing, and verifies the source journal and
+primary V1 snapshot are unchanged. Existing valid, canonical V1 journals
+continue through the previous full-origin and postwrite checks.
+
+This remains an opt-in, preview-host-only safety proof. It does not imply
+universal writer admission, external backup verification or a V2 cutover.
+Main remains untouched. Weighted readiness stays **67/100**.

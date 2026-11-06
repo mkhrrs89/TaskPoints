@@ -3276,6 +3276,54 @@ try {
       originalV1Authoritative:true};
   });
 
+  await run('preview Task admission refuses a lossy legacy journal before writing',async context=>{
+    const page=await open(context);
+    if(!await page.evaluate(()=>typeof navigator.locks?.request==='function'))
+      return {unsupportedFailClosed:true};
+    const cases=[
+      {label:'malformed-pending-row',record:{
+        schemaVersion:1,tasks:[{id:'safe-old-task',name:'Keep'}],
+        completionUpserts:[{noId:true}],completionDeletes:[],updatedAtISO:null}},
+      {label:'future-metadata',record:{
+        schemaVersion:1,tasks:[],completionUpserts:[],completionDeletes:[],
+        updatedAtISO:null,unknownFutureMetadata:{mustNotDrop:1}}},
+      {label:'duplicate-pending-task',record:{
+        schemaVersion:1,tasks:[{id:'same'},{id:'same',notes:'Keep'}],
+        completionUpserts:[],completionDeletes:[],updatedAtISO:null}},
+      {label:'invalid-deletion-marker',record:{
+        schemaVersion:1,tasks:[],completionUpserts:[],completionDeletes:[null],
+        updatedAtISO:null}},
+      {label:'missing-required-array',record:{
+        schemaVersion:1,tasks:[],completionUpserts:[],updatedAtISO:null}}
+    ];
+    for(const testcase of cases){
+      const result=await page.evaluate(async ({record})=>{
+        const key='taskpoints_pending_task_mutations_v1';
+        const before=JSON.stringify(record);
+        localStorage.setItem(key,before);
+        const initialState=localStorage.getItem('taskpoints_v1');
+        const keys=[];
+        for(let i=0;i<localStorage.length;i++)keys.push(localStorage.key(i));
+        const token=JSON.stringify(keys.sort().map(k=>[k,localStorage.getItem(k)]));
+        const verdict=await window.TaskPointsStateRuntimeV2.rehearsePreviewAdmittedTaskCompletionBatch([
+          {id:'should-never-write',taskId:'synthetic',points:1}
+        ],token);
+        return {verdict,preserved:localStorage.getItem(key)===before,
+          statePreserved:localStorage.getItem('taskpoints_v1')===initialState,
+          authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+      },testcase);
+      assert.equal(result.verdict.reason,'task_journal_source_not_canonical',
+        testcase.label+': '+JSON.stringify(result));
+      assert.equal(result.verdict.committed,false);
+      assert.equal(result.verdict.confirmedDurable,false);
+      assert.equal(result.preserved,true,testcase.label);
+      assert.equal(result.statePreserved,true,testcase.label);
+      assert.equal(result.authority,'legacy_only',testcase.label);
+    }
+    return {noncanonicalJournalCasesRefused:cases.length,
+      originalPendingDataPreserved:true,noFalseAcknowledgement:true};
+  });
+
   await run('preview Task batch admission rejects JSON-lossy inputs without writing anything',async context=>{
     const page=await open(context);
     if(!await page.evaluate(()=>typeof navigator.locks?.request==='function'))

@@ -1031,6 +1031,10 @@ test('mandatory preview-only Task batch admission validates source and generatio
     'full_origin_unreadable_after_writability_check',
     'generation_or_preview_changed_before_write',
     'core.assertTaskMutationJournalWritable()',
+    'canonicalPriorJournal(priorJournal)',
+    'task_journal_source_not_canonical',
+    'uniqueRows(value.tasks)',
+    'uniqueRows(value.completionUpserts)',
     'core.journalTaskCompletionBatch(rows)',
     "global.localStorage.getItem('taskpoints_pending_task_mutations_v1')",
     'rows.every(row =>',
@@ -1050,6 +1054,9 @@ test('mandatory preview-only Task batch admission validates source and generatio
   assert.ok(method.indexOf('!isLosslessJsonData(rowsInput)') <
     method.indexOf('await locks.request('),
     'lossless input validation must happen before asynchronous lock acquisition');
+  assert.ok(method.indexOf('canonicalPriorJournal(priorJournal)') <
+    method.indexOf('core.journalTaskCompletionBatch(rows)'),
+    'lossy preexisting journal rows must be detected before the batch write');
   assert.ok(method.indexOf('currentInventory !== expectedInventoryToken')
     < method.indexOf('core.journalTaskCompletionBatch(rows)'),
     'freshness admission must precede the durable V1 journal write');

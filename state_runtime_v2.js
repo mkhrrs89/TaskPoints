@@ -11713,6 +11713,53 @@
             result = refuse('task_journal_unreadable');
             return;
           }
+          // Production V1's normalizer intentionally tolerates old journal
+          // shapes. That is NOT safe evidence for a preview admission:
+          // malformed/duplicate rows and unknown top-level metadata could be
+          // dropped when the batch helper serializes the normalized record.
+          // Refuse those sources BEFORE any write, leaving their raw bytes for
+          // diagnosis/recovery rather than acknowledging selective survival.
+          function canonicalPriorJournal(raw) {
+            if (raw === null) return true;
+            if (typeof raw !== 'string' || !raw.length) return false;
+            let value;
+            try { value = JSON.parse(raw); } catch (_) { return false; }
+            if (!value || typeof value !== 'object' || Array.isArray(value)
+              || value.schemaVersion !== 1
+              || !Array.isArray(value.tasks)
+              || !Array.isArray(value.completionUpserts)
+              || !Array.isArray(value.completionDeletes)
+              || !(value.updatedAtISO === null || typeof value.updatedAtISO === 'string'))
+              return false;
+            const keys = Object.keys(value).sort();
+            if (stableJson(keys) !== stableJson([
+              'completionDeletes', 'completionUpserts', 'schemaVersion',
+              'tasks', 'updatedAtISO'
+            ])) return false;
+            const uniqueRows = list => {
+              const ids = new Set();
+              return list.every(row => {
+                if (!row || typeof row !== 'object' || Array.isArray(row)
+                  || typeof row.id !== 'string' || !row.id || row.id.length > 128
+                  || ids.has(row.id)) return false;
+                ids.add(row.id);
+                return true;
+              });
+            };
+            if (!uniqueRows(value.tasks) || !uniqueRows(value.completionUpserts))
+              return false;
+            const deletes = new Set();
+            for (const id of value.completionDeletes) {
+              if (typeof id !== 'string' || !id || id.length > 128
+                || deletes.has(id)) return false;
+              deletes.add(id);
+            }
+            return true;
+          }
+          if (!canonicalPriorJournal(priorJournal)) {
+            result = refuse('task_journal_source_not_canonical');
+            return;
+          }
           // The journal-writability check above can take time or inspect
           // storage. An older, non-cooperating tab may modify a different
           // legacy key after our first full-origin preflight. Recheck the
