@@ -40,7 +40,7 @@ async function boot(options={}){
   ctx.window=ctx;ctx.globalThis=ctx;
   vm.runInNewContext(script,ctx,{filename:'state_runtime_v2.js'});
   const api=ctx.TaskPointsStateRuntimeV2;
-  await api.seedFromLegacy();
+  if(!options.skipPilotSeed)await api.seedFromLegacy();
   const token=()=>JSON.stringify(Array.from({length:localStorage.length},
     (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
   return {api,indexedDB,localStorage,ctx,token};
@@ -100,7 +100,10 @@ test('Sidecar incremental reconciliation preserves prior receipts and only chang
   assert.equal(noop.committed,false);
   assert.deepEqual(app.indexedDB.dump(DB),saved);
   assert.notDeepEqual(before.records,saved.records);
-  const reloaded=await boot({indexedDB:app.indexedDB,localStorage:app.localStorage});
+  // Reopen the independent sidecar without trying to re-seed an intentionally
+  // stale Habit pilot. The independent copy must remain verifiable by itself.
+  const reloaded=await boot({indexedDB:app.indexedDB,
+    localStorage:app.localStorage,skipPilotSeed:true});
   assert.equal((await reloaded.api.inspectPreviewHabitOrderSidecarParity()).match,true);
 });
 
