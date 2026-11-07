@@ -423,7 +423,7 @@ const RUNTIME_LOADER_SCRIPT = `<script id="tp-mobile-boot-runtime-loader">
       const source = node.getAttribute("src");
       if (source) {
         live.async = false;
-        const isRequiredCore = /(^|\\/)scoring_core\\.js(\\?|$)/.test(source);
+        const isRequiredCore = /(^|\/)scoring_core\.js(\?|$)/.test(source);
         live.addEventListener("load", () => {
           if (isRequiredCore && typeof window.TaskPointsCore?.loadAppState !== "function") {
             reject(new Error("TaskPoints core script loaded but did not initialize"));
