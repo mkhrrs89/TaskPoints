@@ -38,28 +38,31 @@ test('a skipped or stalled Home splash respects the deferred runtime reveal gate
   const end = home.indexOf('</script>', start);
   assert.ok(start >= 0 && end > start);
   const earlyBoot = home.slice(start, end);
-  assert.match(earlyBoot, /window\\.__tpCompleteBootView\\?\\.\\(\\{ skipped: true \\}\\)/);
-  assert.doesNotMatch(earlyBoot, /(^|[^.\\w])completeBootView\\(\\{ skipped: true \\}\\)/);
-  assert.match(earlyBoot, /deferredRuntimePending/);
-  assert.match(earlyBoot, /emergency_recovery\\.html/);
+  assert.ok(earlyBoot.includes('window.__tpCompleteBootView?.({ skipped: true })'));
+  assert.ok(!earlyBoot.includes('    completeBootView({ skipped: true });'));
+  assert.ok(earlyBoot.includes('deferredRuntimePending'));
+  assert.ok(earlyBoot.includes('emergency_recovery.html'));
 });
 
 test('a missing required core script or Home state fails closed before Home is revealed', () => {
-  assert.match(bootGate, /const isRequiredCore = source\\.split/);
-  assert.match(bootGate, /if \\(isRequiredCore\\) reject\\(new Error/);
-  assert.match(bootGate, /TaskPointsHomeLiveState\\?\\.getState/);
+  assert.ok(bootGate.includes("source.split('?')[0].split('/').pop() === 'scoring_core.js'"));
+  assert.ok(bootGate.includes('if (isRequiredCore) reject(new Error'));
+  assert.ok(bootGate.includes('TaskPointsHomeLiveState?.getState'));
   const starter = bootGate.split('function startRuntime()')[1].split('function markFinalTitle()')[0];
-  assert.match(starter, /\\.then\\(\\(\\) => \\{/);
-  assert.match(starter, /runtimeReady = true/);
-  assert.doesNotMatch(starter, /\\.finally\\(/);
+  assert.ok(starter.includes('.then(() => {'));
+  assert.ok(starter.includes('runtimeReady = true'));
+  assert.ok(!starter.includes('.finally('));
 });
 
 test('both generated boot scripts parse as valid JavaScript', () => {
-  const source = bootGate.replace(/export \\{ isHomePagePath, transformHomeBoot \\};\\s*$/, '');
-  const scripts = new Function(source + '\\nreturn [COORDINATOR_SCRIPT, RUNTIME_LOADER_SCRIPT];')();
+  const marker = 'export { isHomePagePath, transformHomeBoot };';
+  const index = bootGate.lastIndexOf(marker);
+  assert.ok(index >= 0);
+  const source = bootGate.slice(0, index);
+  const scripts = new Function(source + String.fromCharCode(10) + 'return [COORDINATOR_SCRIPT, RUNTIME_LOADER_SCRIPT];')();
   assert.equal(scripts.length, 2);
   for (const script of scripts) {
-    const code = script.replace(/^<script[^>]*>/, '').replace(/<\\/script>\\s*$/, '');
+    const code = script.slice(script.indexOf('>') + 1, script.lastIndexOf('</script>'));
     assert.doesNotThrow(() => new Function(code));
   }
 });
