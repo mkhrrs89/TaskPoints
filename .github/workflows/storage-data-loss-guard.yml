@@ -8,6 +8,7 @@ on:
       - 'mobile_boot_gate.js'
       - 'tests/home_worker_route_contract.test.js'
       - 'tests/shared_read_cache_clone_failure.test.js'
+      - 'tests/load_state_decode_fail_closed.test.js'
       - 'scoring_core.js'
       - 'game.html'
       - 'player_profile.js'
@@ -62,6 +63,7 @@ jobs:
           tests/player_editor_journal_perf.test.js
           tests/player_edit_cache_guards.test.js
           tests/unchanged_state_read_reuse_contract.test.js
+          tests/load_state_decode_fail_closed.test.js
           tests/season_result_integrity_guard.test.js
           tests/save_pipeline_shared_work_contract.test.js
           tests/storage_atomic_replace_contract.test.js
