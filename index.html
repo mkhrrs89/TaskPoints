@@ -648,7 +648,9 @@ Nothing visible on the page is built here. === -->
     titleEl.classList.add("tp-matrix-skip");
     settleMatrixTitle();
     finish();
-    completeBootView({ skipped: true });
+    // Use the currently installed reveal gate (which may be the deferred-runtime coordinator).
+    // Never bypass it and expose placeholder scores while saved state is loading.
+    window.__tpCompleteBootView?.({ skipped: true });
   };
 
   // This watchdog runs independently of the large Home initialization script.
@@ -661,7 +663,9 @@ Nothing visible on the page is built here. === -->
     finish();
     // The coordinator can accept a reveal request while deferred scripts
     // are still pending. Never mistake acceptance for a visible Home page.
-    const revealAccepted = completeBootView({ skipped: true });
+    // Respect the deferred runtime gate; the local closure would reveal the
+    // HTML placeholders even when the authoritative state has not loaded.
+    const revealAccepted = window.__tpCompleteBootView?.({ skipped: true }) === true;
     const deferredRuntimePending = Boolean(
       window.__tpMobileBootCoordinator?.isRevealed
       && !window.__tpMobileBootCoordinator.isRevealed()
