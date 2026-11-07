@@ -1782,3 +1782,34 @@ by independent equality alone. Existing live Game-outcome and theft-pair
 semantic audits remain separate. Neither audit supplies off-device
 backup, performs recovery, fences production writers, or authorizes V2.
 Overall readiness remains **67/100**.
+
+## Preview-only frozen-origin legacy writer witness — November 7
+
+Added two explicit developer/fixture APIs:
+\`capturePreviewFrozenOriginWitness(id)\` and
+\`inspectPreviewFrozenOriginWitness(id)\`. Only an already-frozen synthetic
+V2 writer fence can admit a capture. A SHA-256 fingerprint of the complete
+current origin-localStorage inventory is sealed into a **separate isolated
+preview IndexedDB** witness with generation, freeze epoch, timestamp and
+its own SHA integrity check. No V1 key names or values are copied.
+Identifiers are immutable, bounded and not overwritten; an existing witness
+is retained through reload. Capture checks that V1 and the synthetic fence
+remain unchanged before and after committing; an uncertain commit is never
+reported as clean evidence.
+
+The read-only inspector independently validates the sealed witness and
+recomputes the current V1 fingerprint, denying malformed or stale witness
+metadata. This demonstrates that an **uncooperative V1 tab can still write
+after a frozen synthetic fence**, including main snapshot, journal,
+Projects, Today and Notes, and that such observed drift survives reload.
+Browser regression uses an actual legacy page lacking the V2 runtime,
+while Node regression tests cover duplicate capture IDs, tampering,
+disabled preview and generation changes.
+
+**Critical limits:** a matching current fingerprint does not prove writer
+silence; a legacy tab could be asleep, write later or restore the same bytes.
+The origin witness does not cover independent IndexedDB (notably images),
+identify which tab wrote, block production writes, back up content
+off-device or authorize any promotion. Existing V1 writers and exports
+remain unchanged. The 11-point production cross-tab admission milestone
+still earns **0**, overall **67/100**.

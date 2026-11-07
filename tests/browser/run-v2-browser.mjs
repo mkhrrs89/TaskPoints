@@ -4530,6 +4530,74 @@ try {
       freezeSurvivesReload:true,oldLegacyTabStillUnfenced:true};
   });
 
+
+  await run('durable frozen-origin witness observes unfenced legacy tab after reload',async context=>{
+    const observer=await open(context);
+    const first=await observer.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const p=await api.rehearsePreviewDurableWriterFence('read');
+      const frozen=await api.rehearsePreviewDurableWriterFence('freeze',{
+        expectedEpoch:p.fence.epoch
+      });
+      const captured=await api.capturePreviewFrozenOriginWitness('browser-frozen-source');
+      const quiet=await api.inspectPreviewFrozenOriginWitness('browser-frozen-source');
+      return {frozen,captured,quiet,
+        v1:localStorage.getItem('taskpoints_v1')};
+    });
+    assert.equal(first.frozen.reason,'preview_fence_frozen',JSON.stringify(first));
+    assert.equal(first.captured.captured,true,JSON.stringify(first.captured));
+    assert.equal(first.quiet.originDriftObserved,false,JSON.stringify(first.quiet));
+    assert.equal(first.quiet.canPromote,false);
+    // The next page has no V2 runtime, so it cannot cooperate with the fence.
+    const oldTab=await context.newPage();
+    await oldTab.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const changed=await oldTab.evaluate(()=>{
+      const old=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      old.tasks.push({id:'unfenced-old-tab-after-witness',title:'Must be retained'});
+      localStorage.setItem('taskpoints_v1',JSON.stringify(old));
+      localStorage.setItem('tp_projects_v1','[{"id":"legacy-project"}]');
+      localStorage.setItem('taskpoints_today_view_v1','{"version":1,"tasksByDay":{}}');
+      return JSON.stringify(old);
+    });
+    await requireCrossTabStorageValue(observer,'taskpoints_v1',changed);
+    await requireCrossTabStorageValue(observer,'tp_projects_v1',
+      '[{"id":"legacy-project"}]');
+    const after=await observer.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      return {
+        inspection:await api.inspectPreviewFrozenOriginWitness('browser-frozen-source'),
+        fence:await api.rehearsePreviewDurableWriterFence('read'),
+        v1:localStorage.getItem('taskpoints_v1'),
+        projects:localStorage.getItem('tp_projects_v1'),
+        authority:api.getStatus().readAuthority
+      };
+    });
+    assert.equal(after.inspection.sourceCompared,true,JSON.stringify(after.inspection));
+    assert.equal(after.inspection.originDriftObserved,true);
+    assert.equal(after.inspection.writerIdentityUnknown,true);
+    assert.equal(after.inspection.silentLegacyWritersExcluded,false);
+    assert.equal(after.inspection.canPromote,false);
+    assert.equal(after.fence.fence.frozen,true);
+    assert.equal(after.v1,changed);
+    assert.equal(after.projects,'[{"id":"legacy-project"}]');
+    assert.equal(after.authority,'legacy_only');
+    await observer.reload({waitUntil:'load'});
+    const reloaded=await observer.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      return {
+        inspection:await api.inspectPreviewFrozenOriginWitness('browser-frozen-source'),
+        v1:localStorage.getItem('taskpoints_v1')
+      };
+    });
+    assert.equal(reloaded.inspection.originDriftObserved,true,
+      JSON.stringify(reloaded.inspection));
+    assert.equal(reloaded.v1,changed);
+    return {oldTabWriteDetected:true,fullOriginWitnessPersisted:true,
+      syntheticFenceStillFrozen:true,oldV1DataUntouched:true,
+      authorityRemainsLegacy:true};
+  });
+
   await run('preview IDB freeze cannot fence a nonparticipating legacy V1 snapshot writer',async context=>{
     const observer=await open(context);
     const frozen=await observer.evaluate(async()=>{

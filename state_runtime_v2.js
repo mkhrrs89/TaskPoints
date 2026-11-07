@@ -13043,6 +13043,171 @@
     return result;
   }
 
+
+  // Frozen-preview origin witness. Only the SHA-256 of a full-origin V1
+  // inventory is persisted; legacy bytes and key names stay in V1 storage.
+  // An observed difference proves source drift, NOT who wrote it. Equal
+  // fingerprints never prove old/suspended tabs are excluded.
+  const FROZEN_ORIGIN_WITNESS_DB='taskpoints_v2_frozen_origin_witness_v1';
+  async function openPreviewFrozenOriginWitnessDb(){
+    return new Promise((resolve,reject)=>{
+      if(typeof global.indexedDB?.open!=='function')
+        return reject(Error('frozen_origin_witness_indexeddb_unavailable'));
+      let request;
+      try{request=global.indexedDB.open(FROZEN_ORIGIN_WITNESS_DB,1);}
+      catch(error){reject(error);return;}
+      request.onerror=()=>reject(request.error||Error('frozen_origin_open_failed'));
+      request.onblocked=()=>reject(Error('frozen_origin_open_blocked'));
+      request.onupgradeneeded=()=>{
+        if(!isWalTestPreviewHost()||!isDarkEnabled()){
+          try{request.transaction?.abort();}catch(_){}
+          return;
+        }
+        try{
+          if(!request.result.objectStoreNames.contains('witnesses'))
+            request.result.createObjectStore('witnesses',{keyPath:'id'});
+        }catch(_){try{request.transaction?.abort();}catch(_){}}
+      };
+      request.onsuccess=()=>{
+        const db=request.result;
+        db.onversionchange=()=>{try{db.close();}catch(_){}};
+        resolve(db);
+      };
+    });
+  }
+  const previewOriginWitnessRefuse=(reason,details={})=>({
+    checked:true,previewOnly:true,captured:false,
+    sourceCompared:false,originDriftObserved:null,
+    writerIdentityUnknown:true,silentLegacyWritersExcluded:false,
+    safeToRestore:false,canPromote:false,productionWritersFenced:false,
+    readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+    reason,...details
+  });
+  function validPreviewOriginWitnessId(id){
+    return typeof id==='string'&&/^[a-zA-Z0-9._-]{1,128}$/.test(id);
+  }
+  async function readPreviewOriginWitness(db,id){
+    const tx=db.transaction('witnesses','readonly');
+    return requestPromise(tx.objectStore('witnesses').get('origin:'+id));
+  }
+  async function frozenPreviewFenceState(generation){
+    const result=await rehearsePreviewDurableWriterFence('read');
+    if(result.reason!=='fence_read_only'||!result.fence
+      ||result.fence.generation!==generation||result.fence.frozen!==true
+      ||!Number.isSafeInteger(result.fence.epoch)||result.fence.epoch<1)
+      return null;
+    return result.fence;
+  }
+  async function capturePreviewFrozenOriginWitness(witnessId){
+    const refuse=previewOriginWitnessRefuse;
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    if(!validPreviewOriginWitnessId(witnessId))
+      return refuse('witness_id_required');
+    const generation=currentGeneration({create:false}),epoch=darkMirrorModeEpoch;
+    if(!generation)return refuse('generation_unavailable');
+    const current=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&darkMirrorModeEpoch===epoch
+      &&currentGeneration({create:false})===generation;
+    let db=null;
+    try{
+      const fence=await frozenPreviewFenceState(generation);
+      if(!fence)return refuse('frozen_preview_fence_required');
+      const origin=captureReadOnlyFullStorageInventory();
+      const digest=await previewRecoveryFingerprint(origin);
+      if(!current()||captureReadOnlyFullStorageInventory()!==origin)
+        return refuse('origin_changed_before_witness');
+      const sameFence=await frozenPreviewFenceState(generation);
+      if(!sameFence||stableJson(sameFence)!==stableJson(fence))
+        return refuse('frozen_preview_fence_changed');
+      const entry={
+        id:'origin:'+witnessId,schemaVersion:1,
+        resetGeneration:generation,freezeEpoch:fence.epoch,
+        sourceFingerprint:digest,capturedAtISO:nowIso()
+      };
+      const record={...entry,integrityDigest:await previewRecoveryFingerprint(entry)};
+      if(!current()||captureReadOnlyFullStorageInventory()!==origin)
+        return refuse('origin_changed_before_witness');
+      db=await openPreviewFrozenOriginWitnessDb();
+      let status='witness_write_not_started';
+      const tx=db.transaction('witnesses','readwrite');
+      const store=tx.objectStore('witnesses');
+      const lookup=store.get(entry.id);
+      lookup.onsuccess=()=>{
+        if(lookup.result){status='witness_id_already_used';return;}
+        try{
+          if(!current()||captureReadOnlyFullStorageInventory()!==origin){
+            status='origin_changed_before_witness_write';return;
+          }
+          status='witness_write_attempted';
+          store.add(record);
+        }catch(_){status='witness_write_unavailable';try{tx.abort();}catch(_){}}
+      };
+      await transactionPromise(tx);
+      if(status!=='witness_write_attempted')
+        return refuse(status);
+      const stored=await readPreviewOriginWitness(db,witnessId);
+      if(stableJson(stored)!==stableJson(record))
+        return refuse('witness_readback_unverified',{
+          captured:true,writeOutcomeUncertain:true});
+      const finalFence=await frozenPreviewFenceState(generation);
+      let stable=false;
+      try{stable=current()&&captureReadOnlyFullStorageInventory()===origin
+        &&finalFence&&stableJson(finalFence)===stableJson(fence);}
+      catch(_){}
+      if(!stable)return refuse('origin_or_fence_changed_after_witness',{
+        captured:true,writeOutcomeUncertain:true});
+      return {...refuse('frozen_origin_witness_captured'),captured:true,
+        confirmedDurable:true,freezeEpoch:fence.epoch};
+    }catch(_){return refuse('frozen_origin_witness_unavailable');}
+    finally{try{db?.close();}catch(_){}}
+  }
+  async function inspectPreviewFrozenOriginWitness(witnessId){
+    const refuse=previewOriginWitnessRefuse;
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    if(!validPreviewOriginWitnessId(witnessId))
+      return refuse('witness_id_required');
+    const generation=currentGeneration({create:false}),epoch=darkMirrorModeEpoch;
+    if(!generation)return refuse('generation_unavailable');
+    const current=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&darkMirrorModeEpoch===epoch
+      &&currentGeneration({create:false})===generation;
+    let db=null;
+    try{
+      const fence=await frozenPreviewFenceState(generation);
+      if(!fence)return refuse('frozen_preview_fence_required');
+      db=await openPreviewFrozenOriginWitnessDb();
+      const stored=await readPreviewOriginWitness(db,witnessId);
+      if(!stored)return refuse('frozen_origin_witness_missing');
+      const {integrityDigest,...payload}=stored;
+      if(payload.id!=='origin:'+witnessId||payload.schemaVersion!==1
+        ||payload.resetGeneration!==generation
+        ||payload.freezeEpoch!==fence.epoch
+        ||typeof payload.capturedAtISO!=='string'
+        ||typeof payload.sourceFingerprint!=='string'
+        ||!/^sha256:[0-9a-f]{64}:\d+$/.test(payload.sourceFingerprint)
+        ||typeof integrityDigest!=='string'
+        ||await previewRecoveryFingerprint(payload)!==integrityDigest)
+        return refuse('frozen_origin_witness_integrity_invalid');
+      const origin=captureReadOnlyFullStorageInventory();
+      const digest=await previewRecoveryFingerprint(origin);
+      const final=await readPreviewOriginWitness(db,witnessId);
+      const afterFence=await frozenPreviewFenceState(generation);
+      if(!current()||captureReadOnlyFullStorageInventory()!==origin
+        ||!afterFence||stableJson(afterFence)!==stableJson(fence)
+        ||stableJson(final)!==stableJson(stored))
+        return refuse('frozen_origin_inspection_changed');
+      const drift=digest!==stored.sourceFingerprint;
+      return {...refuse(drift
+        ?'origin_drift_observed_after_preview_freeze'
+        :'origin_currently_matches_frozen_witness'),
+        sourceCompared:true,originDriftObserved:drift,
+        freezeEpoch:fence.epoch};
+    }catch(_){return refuse('frozen_origin_witness_inspection_unavailable');}
+    finally{try{db?.close();}catch(_){}}
+  }
+
   async function rehearsePreviewDurableWriterFence(action, options = {}) {
     const refuse = (reason, details = {}) => ({
       checked: true, reason, previewOnly: true, canPromote: false,
@@ -14285,6 +14450,8 @@
     inspectPreviewMixedCompletionExport,
     inspectPreviewWholeCompatibilityProjection,
     rehearsePreviewDurableWriterFence,
+    capturePreviewFrozenOriginWitness,
+    inspectPreviewFrozenOriginWitness,
     inspectPreservedParityMismatch,
     inspectLegacyRollbackSource,
     createPreviewRecoveryCheckpoint,
