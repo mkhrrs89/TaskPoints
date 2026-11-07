@@ -658,7 +658,9 @@ Nothing visible on the page is built here. === -->
   // never leave an iPhone trapped behind the animation indefinitely.
   let bootRecoveryTimer = null;
   const releaseStalledSplash = () => {
-    if (viewFinished || window.__tpBootViewFinished) return;
+    // The matrix animation flag can be true while deferred saved-data startup
+    // is still pending. Only the actual Home reveal ends the recovery timer.
+    if (viewFinished || window.__tpMobileBootCoordinator?.isRevealed?.()) return;
     settleMatrixTitle();
     finish();
     // The coordinator can accept a reveal request while deferred scripts
@@ -673,11 +675,11 @@ Nothing visible on the page is built here. === -->
     if (!revealAccepted || deferredRuntimePending) {
       // The HTML may still be streaming or a required script may have
       // stalled before appRoot exists. Never make this a silent dead end.
-      if (splash && !document.getElementById('tp-boot-wait-notice')) {
+      if (!document.getElementById('tp-boot-recovery-notice')) {
         const notice = document.createElement('div');
-        notice.id = 'tp-boot-wait-notice';
+        notice.id = 'tp-boot-recovery-notice';
         notice.setAttribute('role', 'status');
-        notice.style.cssText = 'padding:12px 18px;color:#ffe3d6;background:#241817;border:1px solid #b86b45;border-radius:10px;font:13px/1.45 system-ui,sans-serif;max-width:320px;margin:18px auto 0';
+        notice.style.cssText = 'position:fixed;z-index:2147483647;left:14px;right:14px;bottom:max(28px,env(safe-area-inset-bottom));margin:0 auto;max-width:460px;padding:16px;color:#ffe3d6;background:#241817;border:1px solid #b86b45;border-radius:14px;font:14px/1.5 system-ui,sans-serif;box-shadow:0 8px 35px #000a;pointer-events:auto';
         const text = document.createElement('span');
         text.textContent = 'Startup is taking longer than expected. Your saved data has not been cleared.';
         const link = document.createElement('a');
@@ -685,9 +687,9 @@ Nothing visible on the page is built here. === -->
         link.textContent = ' Open Recovery';
         link.style.cssText = 'color:#ffca9f;text-decoration:underline;display:block;margin-top:8px';
         notice.append(text, link);
-        (splash.querySelector('.bootSplashContent') || splash).appendChild(notice);
+        // Keep the link outside the splash's pointer-event interception.
+        (document.body || document.documentElement).appendChild(notice);
       }
-      bootRecoveryTimer = setTimeout(releaseStalledSplash, 1000);
       return;
     }
     // If Home didn't initialize at all, show a recoverable, read-only notice
