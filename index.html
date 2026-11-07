@@ -2585,6 +2585,33 @@ function getTodayCaloriesEntry() {
   return null;
 }
 
+// Calories edits use the existing durable task-mutation journal instead of
+// recompressing the entire history on the Save button. The core overlays this
+// journal on reads and compacts it after sustained inactivity. If the journal
+// is unavailable, locked, malformed, or the edited row is not in live state,
+// retain the fully guarded legacy save path.
+function persistCaloriesEditFast(entry) {
+  const core = window.TaskPointsCore;
+  const isLiveCaloriesRow = entry && entry.id != null && String(entry.id).trim()
+    && Array.isArray(state?.completions)
+    && state.completions.includes(entry)
+    && String(entry.title || '').startsWith('Calories')
+    && entry.source === 'metric';
+  if (isLiveCaloriesRow
+    && typeof core?.assertTaskMutationJournalWritable === 'function'
+    && typeof core?.journalTaskMutation === 'function') {
+    try {
+      core.assertTaskMutationJournalWritable();
+      core.journalTaskMutation({ completionUpsert: entry });
+      window.TaskPointsPerf?.mark?.('caloriesEdit.journalCommitted', { entryId: String(entry.id) });
+      return true;
+    } catch (error) {
+      console.warn('TaskPoints Calories edit journal failed; using the protected full save.', error);
+    }
+  }
+  return save();
+}
+
 async function editTodayCalories() {
   const entry = getTodayCaloriesEntry();
   if (!entry) return alert("You haven't entered today's calories yet.");
@@ -2627,7 +2654,7 @@ async function editTodayCalories() {
   toastPointsDeltaTodayAware(impactPts, oldPts, key);
   markCompletionsDirty();
 
-  save();
+  persistCaloriesEditFast(entry);
   scheduleRender(renderAll);
 }
 
@@ -12757,7 +12784,7 @@ block.onclick = async () => {
 
   toastPointsDeltaTodayAware(impactPts, oldPts, target);
   markCompletionsDirty();
-  save();
+  persistCaloriesEditFast(target);
   scheduleRender(renderAll);
 };
     container.appendChild(block);
@@ -14589,7 +14616,7 @@ if (key === "calories") {
 
   toastPointsDeltaTodayAware(impactPts, oldPts, dayKey);
   markCompletionsDirty();
-  save();
+  persistCaloriesEditFast(existing || state.completions[0]);
   scheduleRender(renderAll);
 
   setTimeout(() => {
@@ -14924,7 +14951,7 @@ if (cat === "calories") {
   toastPointsDeltaTodayAware(impactPts, oldPts, target);
 
   markCompletionsDirty();
-  save();
+  persistCaloriesEditFast(target);
   scheduleRender(renderAll);
 
 try { if (scoreV2RecentOpen) renderScoreV2RecentGrid(); } catch(e){}
