@@ -6170,6 +6170,13 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
       }
     } catch (e) {
       console.error("Failed to parse stored state", e);
+      // A present but unreadable authoritative snapshot is NOT a fresh account.
+      // Never normalize an empty placeholder state that a later auto-save could
+      // mistake for the user's real history. Leave storage unchanged so the
+      // existing recovery page can inspect it.
+      const failure = new Error('TaskPoints saved data could not be read; startup was stopped to protect your history.');
+      failure.cause = e;
+      throw failure;
     }
 
     endLoadParse?.({ preloaded: !!options.preloadedState });
