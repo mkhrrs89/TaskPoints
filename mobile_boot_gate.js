@@ -94,6 +94,31 @@ const COORDINATOR_SCRIPT = `<script id="tp-mobile-boot-runtime-coordinator">
     return Boolean(titleEl && titleEl.textContent.trim() === WORD);
   }
 
+  // A failed or stalled deferred runtime must not trap the user on the splash.
+  // This notice lives OUTSIDE the splash so the splash's skip-event handlers
+  // cannot intercept taps on the recovery link.
+  function showStartupRecovery(reason = "slow") {
+    if (revealed || document.getElementById("tp-boot-recovery-notice")) return;
+    const parent = document.body || document.documentElement;
+    if (!parent) return;
+    const notice = document.createElement("div");
+    notice.id = "tp-boot-recovery-notice";
+    notice.setAttribute("role", "alert");
+    notice.style.cssText = "position:fixed;z-index:2147483647;left:14px;right:14px;bottom:max(28px,env(safe-area-inset-bottom));margin:0 auto;max-width:460px;padding:16px;border:1px solid #b86b45;border-radius:14px;background:#241817;color:#ffe3d6;font:14px/1.5 system-ui,sans-serif;box-shadow:0 8px 35px #000a;pointer-events:auto";
+    const title = document.createElement("strong");
+    title.textContent = "TaskPoints could not finish opening.";
+    const explanation = document.createElement("div");
+    explanation.textContent = reason === "failed"
+      ? "The app encountered a startup error. Do not reset, import, or clear website data."
+      : "Loading is taking longer than expected. Do not reset, import, or clear website data.";
+    const link = document.createElement("a");
+    link.href = "/emergency_recovery.html";
+    link.textContent = "Open Recovery to inspect saved copies";
+    link.style.cssText = "display:block;color:#ffca9f;text-decoration:underline;margin-top:10px;padding:6px 0";
+    notice.append(title, explanation, link);
+    parent.appendChild(notice);
+  }
+
   function cleanup() {
     titleObserver?.disconnect();
     titleObserver = null;
@@ -122,6 +147,7 @@ const COORDINATOR_SCRIPT = `<script id="tp-mobile-boot-runtime-coordinator">
 
     revealed = true;
     cleanup();
+    document.getElementById("tp-boot-recovery-notice")?.remove();
     if (typeof originalCompleteBootView === "function") {
       originalCompleteBootView(revealOptions);
     }
@@ -139,6 +165,7 @@ const COORDINATOR_SCRIPT = `<script id="tp-mobile-boot-runtime-coordinator">
       })
       .catch(error => {
         console.error("TaskPoints deferred Home startup failed", error);
+        showStartupRecovery("failed");
       });
     return runtimePromise;
   }
@@ -232,6 +259,12 @@ const COORDINATOR_SCRIPT = `<script id="tp-mobile-boot-runtime-coordinator">
     if (!titleIsFinal()) window.__tpForceMatrixFinal?.();
     markFinalTitle();
   }, 4200);
+
+  // Independent of matrix animation flags and the main Home code. The old
+  // watchdog could think the animation had finished even when data had not.
+  setTimeout(() => {
+    if (!revealed) showStartupRecovery("slow");
+  }, 11000);
 })();
 </script>`;
 
