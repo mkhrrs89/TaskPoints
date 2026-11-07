@@ -7,6 +7,7 @@ on:
       - 'index.html'
       - 'mobile_boot_gate.js'
       - 'tests/home_worker_route_contract.test.js'
+      - 'tests/shared_read_cache_clone_failure.test.js'
       - 'scoring_core.js'
       - 'game.html'
       - 'player_profile.js'
@@ -73,6 +74,7 @@ jobs:
         run: |
           node --input-type=module --check < mobile_boot_gate.js
           node --test tests/home_worker_route_contract.test.js
+          node --test tests/shared_read_cache_clone_failure.test.js
 
       - name: Run full TaskPoints suite
         run: npm test
