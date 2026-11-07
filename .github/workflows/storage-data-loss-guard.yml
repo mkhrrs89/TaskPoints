@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
     paths:
+      - 'index.html'
+      - 'mobile_boot_gate.js'
+      - 'tests/home_worker_route_contract.test.js'
       - 'scoring_core.js'
       - 'game.html'
       - 'player_profile.js'
@@ -65,6 +68,11 @@ jobs:
           tests/phase5b_deferred_mirror_contract.test.js
           tests/phase2_reset_hook.test.js
           tests/phase2_authoritative_absence.test.js
+
+      - name: Validate deferred mobile startup syntax and recovery gate
+        run: |
+          node --input-type=module --check < mobile_boot_gate.js
+          node --test tests/home_worker_route_contract.test.js
 
       - name: Run full TaskPoints suite
         run: npm test
