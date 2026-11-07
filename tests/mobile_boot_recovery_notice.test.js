@@ -89,6 +89,7 @@ test('successful initialization removes an earlier slow-startup notice', async (
   coordinator.installRuntimeStarter(() => {
     coordinator.requestReveal({ skipped: true });
   });
+  coordinator.requestReveal({ skipped: true });
   for (let i = 0; i < 8; i++) await Promise.resolve();
   assert.equal(coordinator.isRevealed(), true);
   assert.equal(h.reveals(), 1);
