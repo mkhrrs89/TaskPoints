@@ -1999,3 +1999,31 @@ This does not enforce cross-store atomicity, stop suspended/old tabs,
 cover all nine production writer families, or authorize a V2 cutover.
 Main is not changed. The writer-fencing gate remains **0/11** and overall
 weighted readiness stays **67/100**.
+
+
+## Interrupted Task journal write: read-only recovery evidence — November 8
+
+The V2 preview-only API `inspectPreviewTaskBatchJournalEvidence()` accepts
+a bounded serialized JSON batch and compares it to the **raw current V1 Task
+mutation journal** without calling the V1 normalizer or writing storage.
+It independently brackets its read with full-origin localStorage inventories.
+Exact unique matches are reported as rows **currently observed** in the pending
+journal; conflicting IDs, duplicate IDs, deletion markers, missing/compacted
+rows, invalid records and interleaved old-tab source changes fail closed.
+
+Critically, even a positive current-row observation sets
+`confirmedDurable:false`, `safeToRetry:false` and `canPromote:false`.
+A completed journal may later be compacted into the V1 snapshot, so its
+absence from the *pending journal* does **not** prove an action was lost.
+A matching journal row also does not prove who wrote it or that other pending
+work survived. A failed or interrupted write is never automatically retried,
+replayed, repaired, compacted or removed by this diagnostic.
+
+Node regressions check restart after a real preview-admitted Task batch,
+a concurrent freeze causing an uncertain write acknowledgment, conflicting
+and tombstoned rows, old-tab source races and invalid inputs. The browser
+regression injects a post-commit exception in the **actual V1 journal append**,
+reloads, verifies the surviving raw row without changing V1, and then checks
+that an old-version tab's conflicting edit is noticed. No production save
+paths, main branch, backups or authority gates are changed. Weighted
+readiness stays **67/100**; production writer fencing remains unproven.
