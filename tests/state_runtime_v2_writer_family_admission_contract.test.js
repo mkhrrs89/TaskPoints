@@ -89,6 +89,56 @@ test('source token is mandatory; stale journal and sidecar writes block admissio
   const current=await writer(a,FAMILIES[0],'fresh');
   assert.equal(current.reason,'preview_writer_recorded',JSON.stringify(current));
 });
+test('read-only audit detects older-tab source changes without rewriting V1',async()=>{
+  const a=await boot();
+  const source=a.localStorage.getItem(V1);
+  for(const [i,family] of FAMILIES.entries())
+    assert.equal((await writer(a,family,'audit-origin-'+i)).reason,
+      'preview_writer_recorded');
+  const matching=await a.api.rehearsePreviewDurableWriterFence('audit');
+  assert.equal(matching.syntheticFamilyInventoryComplete,true);
+  assert.equal(matching.syntheticFamilyOriginConsistent,true);
+  assert.equal(matching.syntheticFamilyOriginMatchesCurrent,true);
+  a.localStorage.setItem(V1,JSON.stringify({
+    habits:[],completions:[],tasks:[{id:'unfenced-older-tab-save'}]
+  }));
+  const changed=a.localStorage.getItem(V1);
+  const drift=await a.api.rehearsePreviewDurableWriterFence('audit');
+  assert.equal(drift.reason,'preview_writer_inventory_consistent');
+  assert.equal(drift.syntheticFamilyOriginConsistent,true);
+  assert.equal(drift.syntheticFamilyOriginMatchesCurrent,false);
+  assert.equal(drift.syntheticFamilyInventoryComplete,true);
+  assert.equal(drift.productionWritersFenced,false);
+  assert.equal(drift.canPromote,false);
+  assert.equal(a.localStorage.getItem(V1),changed);
+  assert.notEqual(changed,source);
+  assert.equal((await a.api.rehearsePreviewDurableWriterFence('read'))
+    .fence.frozen,false);
+});
+
+test('audit does not claim current source after an old tab races its fingerprint',async()=>{
+  const a=await boot();
+  assert.equal((await writer(a,FAMILIES[0],'race-baseline')).reason,
+    'preview_writer_recorded');
+  const db=a.indexedDB._databases.get(DB),original=db.transaction.bind(db);
+  let injected=false;
+  db.transaction=(stores,mode)=>{
+    if(!injected&&mode==='readonly'){
+      injected=true;
+      a.localStorage.setItem('taskpoints_notes_v1','old-tab-saved-after-hash');
+    }
+    return original(stores,mode);
+  };
+  const audit=await a.api.rehearsePreviewDurableWriterFence('audit');
+  assert.equal(injected,true);
+  assert.equal(audit.reason,'preview_writer_inventory_consistent');
+  assert.equal(audit.syntheticFamilyOriginConsistent,true);
+  assert.equal(audit.syntheticFamilyOriginMatchesCurrent,false);
+  assert.equal(audit.productionWritersFenced,false);
+  assert.equal(a.localStorage.getItem('taskpoints_notes_v1'),
+    'old-tab-saved-after-hash');
+});
+
 test('different family replays cannot claim another family marker',async()=>{
   const a=await boot();
   assert.equal((await writer(a,FAMILIES[0],'shared')).reason,'preview_writer_recorded');
