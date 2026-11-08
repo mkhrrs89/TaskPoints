@@ -2027,3 +2027,35 @@ reloads, verifies the surviving raw row without changing V1, and then checks
 that an old-version tab's conflicting edit is noticed. No production save
 paths, main branch, backups or authority gates are changed. Weighted
 readiness stays **67/100**; production writer fencing remains unproven.
+
+
+## Effective Task recovery evidence across journal compaction — November 8
+
+An interrupted Task write cannot be diagnosed from the pending V1 Task
+journal alone: the existing V1 compactor may have merged the row into
+`taskpoints_v1` and then removed its journal entry. The additive,
+preview-host-only `inspectPreviewTaskBatchEffectiveEvidence()` performs
+an entirely **read-only** comparison of bounded expected completion rows
+against BOTH the current V1 snapshot and pending Task journal.
+
+The pending V1 upsert takes precedence over a potentially older snapshot
+value; an explicit pending deletion marker takes precedence over both.
+The inspector distinguishes rows currently visible in the snapshot, journal
+or a mixture of both, and refuses conflicting values, duplicate IDs,
+malformed journals/snapshots and detectable old-tab edits during the
+full-origin inventory window. It never replays, repairs, compacts or deletes
+data; it reports `safeToRetry:false`, `confirmedDurable:false`,
+`productionWritersFenced:false`, `canPromote:false` even when exact
+current-source rows are observed.
+
+Node regressions cover fully compacted, mixed, corrected and tombstoned
+Task completions, malformed sources and old-tab races. The real browser
+regression simulates ordinary journal compaction in an isolated fixture,
+reloads, then checks that a conflicting newer V1 journal write from an old
+tab cannot be hidden by the matching stale snapshot.
+
+This improves **diagnosis**, not independent backup proof or writer
+exclusion: exact visible rows do not reveal who wrote them, prove all
+unrelated data survived, protect from a dormant old tab or guarantee physical
+iPhone durability. Neither Main nor production V1 save paths are changed.
+Overall credited milestone readiness remains **67/100**.
