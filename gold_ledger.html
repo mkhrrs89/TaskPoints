@@ -67,6 +67,29 @@
     @media (max-width:767px) {
       .gold-shell {
         padding-top: max(76px, calc(env(safe-area-inset-top, 0px) + 16px));
+        padding-bottom: max(150px, calc(var(--tp-toolbar-height) + var(--tp-safe-bottom) + 24px));
+      }
+      /* The shared toolbar is normally mounted in a document-flow spacer.
+         On long Gold Ledger pages, iOS can leave the composited fixed child
+         at an old scroll/viewport position. Anchor the *mount* to the viewport
+         and position its existing swipe-expandable nav inside it instead.
+         This is scoped to Gold Ledger only; shared toolbar code is unchanged. */
+      body.gold-ledger-page #bottomToolbarMount {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: calc(var(--tp-toolbar-height) + var(--tp-safe-bottom));
+        min-height: 0;
+        z-index: var(--tp-z-toolbar-popup-layer);
+        pointer-events: none;
+      }
+      body.gold-ledger-page #bottomToolbarMount > #mobileBottomNav {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: -10px;
+        pointer-events: auto;
       }
       /* The shared bottom toolbar keeps Projects accessible on mobile. Hide
          only the out-of-place extra button in this page's upper header. */
@@ -86,7 +109,7 @@
     }
   </style>
 </head>
-<body class="min-h-screen">
+<body class="min-h-screen gold-ledger-page">
   <div class="gold-shell">
     <div class="flex items-center justify-between gap-3 mb-3 md:hidden">
       <a href="index.html" class="flex items-center gap-3">
