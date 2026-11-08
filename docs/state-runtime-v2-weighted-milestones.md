@@ -1913,3 +1913,31 @@ fake-IDB commit boundary and prove the persisted fence and newer V1 data
 remain intact. A successful point-in-time check still cannot stop an older
 uncooperative V1 tab from writing afterward. Production writers are still
 unfenced, V1 remains primary, and weighted readiness remains **67/100**.
+
+
+## Durable strict preview freeze source seal — November 8
+
+The isolated nine-family **strict preview** freeze now writes the exact
+SHA-256 + byte-length fingerprint of its V1 full-origin inventory into the
+same IndexedDB transaction as the frozen writer-fence control. This is a
+fingerprint only, not a duplicate snapshot or a backup. Subsequent read-only
+writer inventory audits compare this durable freeze-time fingerprint against
+(1) all nine origin-bound synthetic family markers and (2) a fresh stable
+full-origin V1 inventory. A mismatched or malformed control record fails
+closed; a changed old-tab source reports
+`strictFreezeSourceMatchesCurrent:false` rather than a clean result.
+
+Older **non-strict** frozen fences remain readable with
+`strictFreezeSourceSealed:false` and an unknown (null) current-source
+verdict; no historical evidence is silently fabricated. Node tests cover
+reload, drift, deliberate control-record tampering and non-strict backward
+compatibility. Chromium/WebKit browser safety tests check that an old V1 tab
+can still write after the strict preview freeze and that the evidence
+survives a reload. Existing V1 state, backups, images, and all production
+save paths remain untouched.
+
+**Limits:** These are still synthetic markers, not live writer exclusion.
+A matching fingerprint proves only a sampled point in time and cannot detect
+an undetected intermediate ABA write, a dormant old tab, or independently
+stored IndexedDB images. V1 remains primary, the production writer-exclusion
+gate remains 0/11, and weighted overall V2 readiness remains **67/100**.
