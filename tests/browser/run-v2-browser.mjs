@@ -4599,6 +4599,49 @@ try {
   });
 
 
+  await run('fence-audited real Task journal blocks frozen preview without changing normal V1 saves',async context=>{
+    const page=await open(context);
+    const proof=await page.evaluate(async()=>{
+      const runtime=window.TaskPointsStateRuntimeV2;
+      await runtime.seedFromLegacy();
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const first=await runtime.rehearsePreviewFenceCheckedTaskCompletionBatch([{
+        id:'fenced-real-task-before-freeze',taskId:'task-preview',
+        title:'Preview journal admission',points:2,
+        completedAtISO:'2026-11-08T12:00:00.000Z'
+      }],token());
+      const rawBeforeFreeze=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const freeze=await runtime.rehearsePreviewDurableWriterFence('freeze',{
+        expectedEpoch:0
+      });
+      const denied=await runtime.rehearsePreviewFenceCheckedTaskCompletionBatch([{
+        id:'fenced-real-task-after-freeze',taskId:'task-preview',
+        title:'Must not write when frozen',points:4,
+        completedAtISO:'2026-11-08T12:01:00.000Z'
+      }],token());
+      const rawAfter=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      return {first,freeze,denied,rawBeforeFreeze,rawAfter,
+        authority:runtime.getStatus().readAuthority};
+    });
+    if(proof.first.reason==='lock_manager_unavailable'){
+      assert.equal(proof.first.committed,false);
+      return {unsupportedWebLockFailsClosed:true};
+    }
+    assert.equal(proof.first.reason,'preview_task_batch_admitted',
+      JSON.stringify(proof.first));
+    assert.equal(proof.first.previewFenceChecked,true);
+    assert.equal(proof.first.confirmedDurable,true);
+    assert.equal(proof.freeze.reason,'preview_fence_frozen');
+    assert.equal(proof.denied.reason,'preview_fence_frozen');
+    assert.equal(proof.denied.committed,false);
+    assert.equal(proof.denied.canPromote,false);
+    assert.equal(proof.rawAfter,proof.rawBeforeFreeze);
+    assert.equal(proof.authority,'legacy_only');
+    return {previewRealTaskWriteVerified:true,frozenPreviewTaskBlocked:true,
+      existingV1JournalPreserved:true,noCutover:true};
+  });
+
   await run('nine-family preview admission rejects incomplete freeze and preserves legacy old-tab writes',async context=>{
     const page=await open(context);
     const familyNames=["scoring_core_snapshot_and_habit_journal","home_direct_keys_and_snapshot_saves","game_players_schedules_and_preferences","today_snapshot_and_view_state","settings_import_reset_and_direct_storage","notes_content_dirty_and_authority_flags","emergency_recovery_and_restore","task_journal_and_idle_compaction","work_entry_fast_path_and_editor_fallback"];
