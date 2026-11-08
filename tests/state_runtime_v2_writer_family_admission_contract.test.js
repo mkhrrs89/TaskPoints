@@ -50,11 +50,13 @@ const TASK_JOURNAL='taskpoints_pending_task_mutations_v1';
 async function bootRealTaskAdapter(opts={}){
   let commits=0;
   let storage;
-  const navigator={locks:{request:async(_name,_options,callback)=>{
-    if(opts.beforeLock)await opts.beforeLock();
-    return callback({name:'v2-preview-exclusive'});
+  const navigator=opts.navigator||{locks:{request:async(name,_options,callback)=>{
+    if(opts.beforeLock)await opts.beforeLock(name);
+    return callback({name});
   }}};
-  const api=await boot({navigator,coreOverrides:{
+  const api=await boot({navigator,
+    indexedDB:opts.indexedDB,localStorage:opts.localStorage,
+    coreOverrides:{
     assertTaskMutationJournalWritable(){return true},
     journalTaskCompletionBatch(rows){
       commits++;
@@ -103,8 +105,8 @@ test('frozen preview fence refuses real Task adapter before the V1 journal write
 
 test('concurrent preview freeze never receives a false clean Task acknowledgement',async()=>{
   let a,freeze=null,once=false;
-  a=await bootRealTaskAdapter({beforeLock:async()=>{
-    if(!once){
+  a=await bootRealTaskAdapter({beforeLock:async lockName=>{
+    if(lockName==='taskpoints_v2_writer_handoff_rehearsal_v1'&&!once){
       once=true;
       freeze=await a.api.rehearsePreviewDurableWriterFence('freeze',{
         expectedEpoch:0});
