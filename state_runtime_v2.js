@@ -13044,62 +13044,177 @@
   }
 
   
-  // Preview-only bridge between a REAL atomic V1 Task completion journal write
-  // and the isolated V2 synthetic writer fence. This API is opt-in and never
-  // replaces production saves. Audit-before and audit-after are conservative
-  // observations, NOT atomic exclusion of a legacy-only tab or concurrent
-  // independent freeze. Never promote authority based on these results.
-  async function rehearsePreviewFenceCheckedTaskCompletionBatch(rows, token) {
-    const refuse=(reason,extra={})=>({
-      checked:true,previewOnly:true,previewFenceChecked:false,
-      committed:false,confirmedDurable:false,canPromote:false,
-      productionWritersFenced:false,mutationAuthority:'legacy_only',
-      readAuthority:'legacy_only',reason,...extra
+  // Explicit preview-only coordination for a real V1 Task journal adapter
+  // and an isolated V2 writer-fence freeze. Both NEW entry points honor
+  // this same-origin Web Lock. The original freeze, production V1 writers,
+  // and older tabs do NOT honor it; this proves only cooperative ordering.
+  const PREVIEW_COOPERATIVE_TASK_FREEZE_LOCK =
+    'taskpoints_v2_preview_task_freeze_cooperative_v1';
+
+  async function rehearsePreviewCooperativeWriterFreeze(options = {}) {
+    const refuse = (reason, extra = {}) => ({
+      checked: true, previewOnly: true, cooperativeTaskFreezeLockUsed: false,
+      canPromote: false, productionWritersFenced: false,
+      mutationAuthority: 'legacy_only', readAuthority: 'legacy_only',
+      reason, ...extra
     });
-    if(!isWalTestPreviewHost())return refuse('preview_host_required');
-    if(!isDarkEnabled())return refuse('dark_disabled');
-    const initialGeneration=currentGeneration({create:false});
-    if(!initialGeneration)return refuse('generation_unavailable');
-    const initialEpoch=darkMirrorModeEpoch;
-    const preflight=await rehearsePreviewDurableWriterFence('audit');
-    if(preflight.reason!=='preview_writer_inventory_consistent')
-      return refuse('preview_fence_inventory_unverified',{
-        prerequisiteReason:preflight.reason
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    const requestedEpoch = options?.expectedEpoch;
+    if (!Number.isSafeInteger(requestedEpoch) || requestedEpoch < 0)
+      return refuse('expected_epoch_required');
+    const locks = global.navigator?.locks;
+    if (typeof locks?.request !== 'function')
+      return refuse('lock_manager_unavailable');
+    const expectedGeneration = currentGeneration({ create: false });
+    if (!expectedGeneration) return refuse('generation_unavailable');
+    const originalEpoch = darkMirrorModeEpoch;
+    // Capture the caller's decision BEFORE waiting on a shared browser lock.
+    const freezeOptions = {
+      expectedEpoch: requestedEpoch,
+      requireAllKnownFamilies: options?.requireAllKnownFamilies === true
+    };
+    let result = refuse('cooperative_freeze_lock_not_available');
+    let entered = false;
+    try {
+      await locks.request(PREVIEW_COOPERATIVE_TASK_FREEZE_LOCK,
+        { mode: 'exclusive', ifAvailable: true }, async lock => {
+          if (!lock) {
+            result = refuse('cooperative_freeze_lock_held_elsewhere');
+            return;
+          }
+          if (!isDarkEnabled() || darkMirrorModeEpoch !== originalEpoch
+            || currentGeneration({ create: false }) !== expectedGeneration) {
+            result = refuse('generation_changed_under_cooperative_lock');
+            return;
+          }
+          entered = true;
+          const frozen = await rehearsePreviewDurableWriterFence(
+            'freeze', freezeOptions);
+          result = {
+            ...frozen, cooperativeTaskFreezeLockUsed: true,
+            canPromote: false, productionWritersFenced: false
+          };
+        });
+    } catch (_) {
+      // A failed lock callback may have committed the frozen fence already.
+      // Never claim rollback: callers must inspect the durable control row.
+      return refuse('cooperative_freeze_lock_request_failed', {
+        freezeOutcomeUncertain: entered,
+        inspectFenceBeforeRetry: entered
       });
-    if(preflight.fence?.generation!==initialGeneration
-      ||initialEpoch!==darkMirrorModeEpoch||!isDarkEnabled())
-      return refuse('preview_generation_changed_before_fence_checked_write');
-    if(preflight.fence.frozen)
-      return refuse('preview_fence_frozen',{
-        previewFenceChecked:true,fenceEpoch:preflight.fence.epoch
+    }
+    return result;
+  }
+
+  // A real Task completion journal write can be guarded by the same shared
+  // preview lock as the cooperative freeze. The existing V1 Task adapter
+  // retains its own separate Web Lock, canonical-journal preflight, full-
+  // origin checks and synchronous readback; NO production route is changed.
+  async function rehearsePreviewFenceCheckedTaskCompletionBatch(rows, token) {
+    const refuse = (reason, extra = {}) => ({
+      checked: true, previewOnly: true, previewFenceChecked: false,
+      cooperativeTaskFreezeLockUsed: false,
+      committed: false, confirmedDurable: false, canPromote: false,
+      productionWritersFenced: false, mutationAuthority: 'legacy_only',
+      readAuthority: 'legacy_only', reason, ...extra
+    });
+    if (!isWalTestPreviewHost()) return refuse('preview_host_required');
+    if (!isDarkEnabled()) return refuse('dark_disabled');
+    const locks = global.navigator?.locks;
+    if (typeof locks?.request !== 'function')
+      return refuse('lock_manager_unavailable');
+    const initialGeneration = currentGeneration({ create: false });
+    if (!initialGeneration) return refuse('generation_unavailable');
+    const initialEpoch = darkMirrorModeEpoch;
+    let result = refuse('cooperative_task_lock_not_available');
+    let attemptedWrite = false;
+    let writeEvidence = null;
+    try {
+      await locks.request(PREVIEW_COOPERATIVE_TASK_FREEZE_LOCK,
+        { mode: 'exclusive', ifAvailable: true }, async lock => {
+          if (!lock) {
+            result = refuse('cooperative_task_lock_held_elsewhere');
+            return;
+          }
+          if (initialEpoch !== darkMirrorModeEpoch || !isDarkEnabled()
+            || currentGeneration({ create: false }) !== initialGeneration) {
+            result = refuse('generation_changed_under_cooperative_lock');
+            return;
+          }
+          // Both the admission audit and the final acknowledgment happen
+          // WHILE this shared cooperative lock is held. A participating
+          // freeze cannot interleave, unlike the original unlocked preview.
+          const preflight = await rehearsePreviewDurableWriterFence('audit');
+          if (preflight.reason !== 'preview_writer_inventory_consistent') {
+            result = refuse('preview_fence_inventory_unverified', {
+              prerequisiteReason: preflight.reason
+            });
+            return;
+          }
+          if (preflight.fence?.generation !== initialGeneration
+            || initialEpoch !== darkMirrorModeEpoch || !isDarkEnabled()) {
+            result = refuse('preview_generation_changed_before_fence_checked_write');
+            return;
+          }
+          if (preflight.fence.frozen) {
+            result = refuse('preview_fence_frozen', {
+              previewFenceChecked: true, cooperativeTaskFreezeLockUsed: true,
+              fenceEpoch: preflight.fence.epoch
+            });
+            return;
+          }
+          // This adapter writes the existing durable V1 Task journal, NOT
+          // V2 authority. Silent old tabs and direct preview freeze callers
+          // can still interleave; the second audit diagnoses those races.
+          attemptedWrite = true;
+          const write = await rehearsePreviewAdmittedTaskCompletionBatch(
+            rows, token);
+          writeEvidence = write;
+          const postflight = await rehearsePreviewDurableWriterFence('audit');
+          if (postflight.reason !== 'preview_writer_inventory_consistent') {
+            result = refuse('preview_fence_postwrite_unverified', {
+              prerequisiteReason: postflight.reason, taskBatchReason: write.reason,
+              committed: write.committed === true,
+              writeOutcomeUncertain: write.committed === true
+                || write.writeOutcomeUncertain === true,
+              fenceReadbackRequired: true,
+              cooperativeTaskFreezeLockUsed: true
+            });
+            return;
+          }
+          if (postflight.fence?.generation !== initialGeneration
+            || postflight.fence.epoch !== preflight.fence.epoch
+            || postflight.fence.frozen !== preflight.fence.frozen
+            || initialEpoch !== darkMirrorModeEpoch || !isDarkEnabled()) {
+            result = refuse('preview_fence_changed_during_task_batch', {
+              taskBatchReason: write.reason,
+              committed: write.committed === true,
+              writeOutcomeUncertain: write.committed === true
+                || write.writeOutcomeUncertain === true,
+              fenceReadbackRequired: true,
+              cooperativeTaskFreezeLockUsed: true,
+              initialFenceEpoch: preflight.fence.epoch,
+              finalFenceEpoch: postflight.fence.epoch
+            });
+            return;
+          }
+          result = {
+            ...write, previewFenceChecked: true,
+            previewFenceBeforeAndAfterStable: true,
+            cooperativeTaskFreezeLockUsed: true,
+            fenceEpoch: postflight.fence.epoch,
+            canPromote: false, productionWritersFenced: false
+          };
+        });
+    } catch (_) {
+      return refuse('cooperative_task_lock_request_failed', {
+        writeOutcomeUncertain: attemptedWrite,
+        committed: writeEvidence?.committed === true,
+        fenceReadbackRequired: attemptedWrite
       });
-    // The existing Task adapter still performs its mandatory full-origin,
-    // Web Lock, canonical prior-journal and exact readback validations.
-    const write=await rehearsePreviewAdmittedTaskCompletionBatch(rows,token);
-    const postflight=await rehearsePreviewDurableWriterFence('audit');
-    if(postflight.reason!=='preview_writer_inventory_consistent')
-      return refuse('preview_fence_postwrite_unverified',{
-        prerequisiteReason:postflight.reason,taskBatchReason:write.reason,
-        committed:write.committed===true,
-        writeOutcomeUncertain:write.committed===true
-          ||write.writeOutcomeUncertain===true,
-        fenceReadbackRequired:true
-      });
-    if(postflight.fence?.generation!==initialGeneration
-      ||postflight.fence.epoch!==preflight.fence.epoch
-      ||postflight.fence.frozen!==preflight.fence.frozen
-      ||initialEpoch!==darkMirrorModeEpoch||!isDarkEnabled())
-      return refuse('preview_fence_changed_during_task_batch',{
-        taskBatchReason:write.reason,committed:write.committed===true,
-        writeOutcomeUncertain:write.committed===true
-          ||write.writeOutcomeUncertain===true,
-        fenceReadbackRequired:true,
-        initialFenceEpoch:preflight.fence.epoch,
-        finalFenceEpoch:postflight.fence.epoch
-      });
-    return {...write,previewFenceChecked:true,
-      previewFenceBeforeAndAfterStable:true,
-      fenceEpoch:postflight.fence.epoch};
+    }
+    return result;
   }
 
   // Frozen-preview origin witness. Only the SHA-256 of a full-origin V1
@@ -14700,6 +14815,7 @@
     exercisePreviewSerializedSnapshotLease,
     rehearsePreviewAdmittedTaskCompletionBatch,
     rehearsePreviewFenceCheckedTaskCompletionBatch,
+    rehearsePreviewCooperativeWriterFreeze,
     inspectPreviewNotesSource,
     rehearsePreviewNotesBundleSeed,
     rehearsePreviewNotesBundleReconcile,
