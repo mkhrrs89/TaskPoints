@@ -94,3 +94,13 @@ test('Gold Ledger displays circulation prominently and refreshes it after manual
   assert.match(page, /state\.goldLedger[\s\S]*?ids\.add\(id\)/,
     'wallets present only in historical Gold transactions must stay visible');
 });
+
+test('Gold Ledger clears the iPhone status bar and hides only its stray mobile Projects shortcut', () => {
+  assert.match(page, /@media \\(max-width:767px\\)\\s*\\{\\s*\\.gold-shell\\s*\\{/);
+  assert.match(page, /padding-top:\\s*max\\(76px, calc\\(env\\(safe-area-inset-top, 0px\\) \\+ 16px\\)\\)/);
+  assert.match(page, /\\.gold-shell \\.header-nav > a\\[href="projects\\.html"\\]\\s*\\{\\s*display: none !important;/);
+  assert.match(page, /<a href="projects\\.html" class="btn btn-teal btn-toolbar nav-btn">Projects<\\/a>/,
+    'the desktop Projects shortcut remains intact');
+  assert.match(page, /<script src="toolbar\\.js" defer><\\/script>/,
+    'the existing mobile navigation is retained');
+});
