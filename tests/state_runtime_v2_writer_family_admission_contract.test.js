@@ -317,6 +317,76 @@ test('nine family claims from different V1 revisions cannot authorize strict fre
     .fence.frozen,false);
 });
 
+test('post-commit old-tab write makes strict freeze acknowledgment uncertain',async()=>{
+  const a=await boot();
+  for(const [i,family] of FAMILIES.entries())
+    assert.equal((await writer(a,family,'postfreeze-family-'+i)).reason,
+      'preview_writer_recorded');
+  const db=a.indexedDB._databases.get(DB),original=db.transaction.bind(db);
+  const changed='[{"id":"old-tab-wrote-after-freeze-commit"}]';
+  let injected=false;
+  db.transaction=(stores,mode)=>{
+    const tx=original(stores,mode);
+    if(mode==='readwrite'&&!injected){
+      const commit=tx._commit.bind(tx);
+      tx._commit=()=>{
+        commit();
+        injected=true;
+        a.localStorage.setItem('tp_projects_v1',changed);
+      };
+    }
+    return tx;
+  };
+  const result=await a.api.rehearsePreviewDurableWriterFence('freeze',{
+    expectedEpoch:0,requireAllKnownFamilies:true});
+  assert.equal(injected,true);
+  assert.equal(result.reason,
+    'preview_writer_family_freeze_origin_changed_after_transaction',
+    JSON.stringify(result));
+  assert.equal(result.canPromote,false);
+  assert.equal(result.fenceMayAlreadyBeFrozen,true);
+  assert.equal(result.inspectFenceBeforeRetry,true);
+  assert.equal(result.fence.frozen,true);
+  assert.equal((await a.api.rehearsePreviewDurableWriterFence('read'))
+    .fence.frozen,true);
+  assert.equal(a.localStorage.getItem('tp_projects_v1'),changed);
+  const audit=await a.api.rehearsePreviewDurableWriterFence('audit');
+  assert.equal(audit.syntheticFamilyOriginMatchesCurrent,false);
+  assert.equal(audit.productionWritersFenced,false);
+});
+
+test('unreadable V1 after committed strict freeze never reports clean success',async()=>{
+  const a=await boot();
+  for(const [i,family] of FAMILIES.entries())
+    assert.equal((await writer(a,family,'unreadable-family-'+i)).reason,
+      'preview_writer_recorded');
+  const db=a.indexedDB._databases.get(DB),original=db.transaction.bind(db);
+  const normalRead=a.localStorage.getItem.bind(a.localStorage);
+  let unreadable=false;
+  a.localStorage.getItem=key=>{
+    if(unreadable)throw Error('source-now-unreadable');
+    return normalRead(key);
+  };
+  db.transaction=(stores,mode)=>{
+    const tx=original(stores,mode);
+    if(mode==='readwrite'){
+      const commit=tx._commit.bind(tx);
+      tx._commit=()=>{commit();unreadable=true;};
+    }
+    return tx;
+  };
+  const result=await a.api.rehearsePreviewDurableWriterFence('freeze',{
+    expectedEpoch:0,requireAllKnownFamilies:true});
+  assert.equal(result.reason,
+    'preview_writer_family_freeze_origin_unreadable_after_transaction');
+  assert.equal(result.canPromote,false);
+  assert.equal(result.inspectFenceBeforeRetry,true);
+  assert.equal(result.fenceMayAlreadyBeFrozen,true);
+  unreadable=false;
+  assert.equal((await a.api.rehearsePreviewDurableWriterFence('read'))
+    .fence.frozen,true);
+});
+
 test('old tab changing source after all nine admissions refuses strict freeze',async()=>{
   const a=await boot();
   for(const [i,family] of FAMILIES.entries())
