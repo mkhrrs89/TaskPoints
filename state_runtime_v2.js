@@ -13043,6 +13043,64 @@
     return result;
   }
 
+  
+  // Preview-only bridge between a REAL atomic V1 Task completion journal write
+  // and the isolated V2 synthetic writer fence. This API is opt-in and never
+  // replaces production saves. Audit-before and audit-after are conservative
+  // observations, NOT atomic exclusion of a legacy-only tab or concurrent
+  // independent freeze. Never promote authority based on these results.
+  async function rehearsePreviewFenceCheckedTaskCompletionBatch(rows, token) {
+    const refuse=(reason,extra={})=>({
+      checked:true,previewOnly:true,previewFenceChecked:false,
+      committed:false,confirmedDurable:false,canPromote:false,
+      productionWritersFenced:false,mutationAuthority:'legacy_only',
+      readAuthority:'legacy_only',reason,...extra
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    const initialGeneration=currentGeneration({create:false});
+    if(!initialGeneration)return refuse('generation_unavailable');
+    const initialEpoch=darkMirrorModeEpoch;
+    const preflight=await rehearsePreviewDurableWriterFence('audit');
+    if(preflight.reason!=='preview_writer_inventory_consistent')
+      return refuse('preview_fence_inventory_unverified',{
+        prerequisiteReason:preflight.reason
+      });
+    if(preflight.fence?.generation!==initialGeneration
+      ||initialEpoch!==darkMirrorModeEpoch||!isDarkEnabled())
+      return refuse('preview_generation_changed_before_fence_checked_write');
+    if(preflight.fence.frozen)
+      return refuse('preview_fence_frozen',{
+        previewFenceChecked:true,fenceEpoch:preflight.fence.epoch
+      });
+    // The existing Task adapter still performs its mandatory full-origin,
+    // Web Lock, canonical prior-journal and exact readback validations.
+    const write=await rehearsePreviewAdmittedTaskCompletionBatch(rows,token);
+    const postflight=await rehearsePreviewDurableWriterFence('audit');
+    if(postflight.reason!=='preview_writer_inventory_consistent')
+      return refuse('preview_fence_postwrite_unverified',{
+        prerequisiteReason:postflight.reason,taskBatchReason:write.reason,
+        committed:write.committed===true,
+        writeOutcomeUncertain:write.committed===true
+          ||write.writeOutcomeUncertain===true,
+        fenceReadbackRequired:true
+      });
+    if(postflight.fence?.generation!==initialGeneration
+      ||postflight.fence.epoch!==preflight.fence.epoch
+      ||postflight.fence.frozen!==preflight.fence.frozen
+      ||initialEpoch!==darkMirrorModeEpoch||!isDarkEnabled())
+      return refuse('preview_fence_changed_during_task_batch',{
+        taskBatchReason:write.reason,committed:write.committed===true,
+        writeOutcomeUncertain:write.committed===true
+          ||write.writeOutcomeUncertain===true,
+        fenceReadbackRequired:true,
+        initialFenceEpoch:preflight.fence.epoch,
+        finalFenceEpoch:postflight.fence.epoch
+      });
+    return {...write,previewFenceChecked:true,
+      previewFenceBeforeAndAfterStable:true,
+      fenceEpoch:postflight.fence.epoch};
+  }
 
   // Frozen-preview origin witness. Only the SHA-256 of a full-origin V1
   // inventory is persisted; legacy bytes and key names stay in V1 storage.
@@ -14641,6 +14699,7 @@
     exercisePreviewCooperativeWriterLease,
     exercisePreviewSerializedSnapshotLease,
     rehearsePreviewAdmittedTaskCompletionBatch,
+    rehearsePreviewFenceCheckedTaskCompletionBatch,
     inspectPreviewNotesSource,
     rehearsePreviewNotesBundleSeed,
     rehearsePreviewNotesBundleReconcile,
