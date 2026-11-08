@@ -326,6 +326,130 @@ test('Task journal recovery inspection refuses invalid inputs and disabled previ
     .reason,'dark_disabled');
 });
 
+test('effective Task evidence recognizes a completion compacted from journal into V1 snapshot',async()=>{
+  const a=await boot();
+  const row={id:'snapshot-compacted-task',taskId:'task-a',points:5};
+  const source=JSON.parse(a.localStorage.getItem(V1));
+  source.completions.push(row);
+  a.localStorage.setItem(V1,JSON.stringify(source));
+  a.localStorage.removeItem(TASK_JOURNAL);
+  const snapshot=a.localStorage.getItem(V1);
+  const evidence=a.api.inspectPreviewTaskBatchEffectiveEvidence(
+    JSON.stringify([row]));
+  assert.equal(evidence.reason,'task_batch_rows_observed_in_v1_snapshot',
+    JSON.stringify(evidence));
+  assert.equal(evidence.effectiveRowsObserved,true);
+  assert.equal(evidence.observedSnapshotRowCount,1);
+  assert.equal(evidence.observedJournalRowCount,0);
+  assert.equal(evidence.safeToRetry,false);
+  assert.equal(evidence.confirmedDurable,false);
+  assert.equal(evidence.canPromote,false);
+  assert.equal(a.localStorage.getItem(V1),snapshot);
+  assert.equal(a.localStorage.getItem(TASK_JOURNAL),null);
+});
+
+test('effective Task evidence handles mixed snapshot and journal completions after partial compaction',async()=>{
+  const a=await boot();
+  const old={id:'compacted-old-task',taskId:'task-1',points:3};
+  const newer={id:'pending-new-task',taskId:'task-2',points:7};
+  const state=JSON.parse(a.localStorage.getItem(V1));
+  state.completions=[old];
+  a.localStorage.setItem(V1,JSON.stringify(state));
+  a.localStorage.setItem(TASK_JOURNAL,JSON.stringify({
+    schemaVersion:1,tasks:[],completionUpserts:[newer],
+    completionDeletes:[],updatedAtISO:null
+  }));
+  const evidence=a.api.inspectPreviewTaskBatchEffectiveEvidence(
+    JSON.stringify([old,newer]));
+  assert.equal(evidence.reason,'task_batch_rows_observed_in_both_sources',
+    JSON.stringify(evidence));
+  assert.equal(evidence.effectiveRowsObserved,true);
+  assert.equal(evidence.observedSnapshotRowCount,1);
+  assert.equal(evidence.observedJournalRowCount,1);
+  assert.equal(evidence.safeToRetry,false);
+});
+
+test('effective Task evidence prioritizes newer journal corrections and tombstones',async()=>{
+  const a=await boot();
+  const old={id:'corrected-after-compaction',taskId:'task-1',points:3};
+  const newer={...old,points:9};
+  const state=JSON.parse(a.localStorage.getItem(V1));
+  state.completions.push(old);
+  a.localStorage.setItem(V1,JSON.stringify(state));
+  const journal={schemaVersion:1,tasks:[],completionUpserts:[newer],
+    completionDeletes:[],updatedAtISO:null};
+  const save=()=>a.localStorage.setItem(TASK_JOURNAL,JSON.stringify(journal));
+  save();
+  const exact=a.api.inspectPreviewTaskBatchEffectiveEvidence(
+    JSON.stringify([newer]));
+  assert.equal(exact.reason,'task_batch_rows_observed_in_pending_journal');
+  assert.equal(exact.effectiveRowsObserved,true);
+  const stale=a.api.inspectPreviewTaskBatchEffectiveEvidence(
+    JSON.stringify([old]));
+  assert.equal(stale.reason,'task_batch_effective_conflict');
+  assert.equal(stale.effectiveRowsObserved,false);
+  assert.equal(stale.conflictingRowCount,1);
+  journal.completionDeletes=[old.id];save();
+  const deleted=a.api.inspectPreviewTaskBatchEffectiveEvidence(
+    JSON.stringify([newer]));
+  assert.equal(deleted.reason,'task_batch_effectively_tombstoned');
+  assert.equal(deleted.effectiveRowsObserved,false);
+  assert.equal(deleted.tombstonedRowCount,1);
+  assert.equal(deleted.safeToRetry,false);
+});
+
+test('effective Task evidence refuses duplicate or corrupted sources without modifying them',async()=>{
+  const a=await boot();
+  const row={id:'duplicate-effective-row',taskId:'task-z'};
+  const state=JSON.parse(a.localStorage.getItem(V1));
+  state.completions=[row,{...row,points:2}];
+  a.localStorage.setItem(V1,JSON.stringify(state));
+  const raw=a.localStorage.getItem(V1);
+  assert.equal(a.api.inspectPreviewTaskBatchEffectiveEvidence(
+    JSON.stringify([row])).reason,'task_snapshot_completion_ids_invalid');
+  assert.equal(a.localStorage.getItem(V1),raw);
+  state.completions=[row];
+  a.localStorage.setItem(V1,JSON.stringify(state));
+  const journal={schemaVersion:1,tasks:[],completionUpserts:[row,row],
+    completionDeletes:[],updatedAtISO:null};
+  a.localStorage.setItem(TASK_JOURNAL,JSON.stringify(journal));
+  assert.equal(a.api.inspectPreviewTaskBatchEffectiveEvidence(
+    JSON.stringify([row])).reason,'task_journal_completion_ids_invalid');
+  assert.equal(a.localStorage.getItem(TASK_JOURNAL),JSON.stringify(journal));
+  a.localStorage.setItem(TASK_JOURNAL,'malformed{');
+  assert.equal(a.api.inspectPreviewTaskBatchEffectiveEvidence(
+    JSON.stringify([row])).reason,'task_source_inspection_unreadable');
+  assert.equal(a.localStorage.getItem(TASK_JOURNAL),'malformed{');
+});
+
+test('effective Task evidence rejects old-tab source drift and never retries',async()=>{
+  const a=await boot();
+  const row={id:'effective-race-row',taskId:'task-a',points:3};
+  const state=JSON.parse(a.localStorage.getItem(V1));
+  state.completions.push(row);
+  a.localStorage.setItem(V1,JSON.stringify(state));
+  const normal=a.localStorage.getItem.bind(a.localStorage);
+  let oldTabWrote=false,reads=0;
+  a.localStorage.getItem=key=>{
+    const value=normal(key);
+    if(key===V1&&++reads===2){
+      oldTabWrote=true;
+      a.localStorage.setItem('tp_projects_v1','old-tab-changed-project');
+    }
+    return value;
+  };
+  // Capture inventory reads snapshot first; the separate snapshot read
+  // then triggers the concurrent older-tab Projects save.
+  const result=a.api.inspectPreviewTaskBatchEffectiveEvidence(
+    JSON.stringify([row]));
+  assert.equal(oldTabWrote,true);
+  assert.equal(result.reason,'full_origin_changed_during_inspection');
+  assert.equal(result.effectiveRowsObserved,false);
+  assert.equal(result.safeToRetry,false);
+  assert.equal(a.localStorage.getItem('tp_projects_v1'),
+    'old-tab-changed-project');
+});
+
 test('strict synthetic freeze requires all nine historical writer families',async()=>{
   const a=await boot();
   const before=await a.api.rehearsePreviewDurableWriterFence('freeze',{
