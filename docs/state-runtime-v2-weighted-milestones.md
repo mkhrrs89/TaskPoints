@@ -2059,3 +2059,43 @@ exclusion: exact visible rows do not reveal who wrote them, prove all
 unrelated data survived, protect from a dormant old tab or guarantee physical
 iPhone durability. Neither Main nor production V1 save paths are changed.
 Overall credited milestone readiness remains **67/100**.
+
+
+## Cooperative V1 Projects direct-key save rehearsal — November 8
+
+The isolated V2 preview now includes
+`rehearsePreviewCooperativeProjectsSave(nextProjectsRaw, token)`, a
+**developer/fixture-only** direct writer for the actual independent V1
+Projects localStorage key (`tp_projects_v1`). It is an additional
+participant in the **same native Web Lock** already used by the
+experimental Task completion bridge and cooperative freeze. No existing
+production Home/Projects writer is rerouted or disabled.
+
+The new adapter requires bounded canonical JSON with unique Project
+and subtask IDs, preserving unknown fields as exact raw bytes. It refuses
+malformed existing Projects data rather than silently replacing it.
+Before writing it checks the complete original localStorage inventory
+both on lock entry and immediately before the synchronous save, plus
+generation/mode/preview fence state. After saving it requires exact raw
+readback, unchanged unrelated origin keys, stable fence epoch and a final
+point-in-time full-origin comparison. Postwrite errors, stale/frozen
+sources and detectable non-cooperating old-tab edits have explicit
+fail-closed or uncertain results; **nothing is automatically rolled
+back, repaired, retried or deleted**.
+
+Node tests cover an independent real V1 Projects-key save, preservation
+of unknown fields, stale-source refusal, invalid JSON/source rejection,
+an already-frozen fence, competing Task writer lock, unrelated old-tab
+writes and a failure thrown *after* localStorage changed. Browser
+regressions cover older-tab Projects edits, native same-origin Web Lock
+contention, data persistence after reload and cooperative freeze refusal.
+
+**Scope remains intentionally narrow:** This is only the second
+experimental writer family (Task journal plus Projects direct key);
+production Home, import, settings and recovery still use their existing
+V1 paths, older suspended tabs still bypass the lock, and a final
+snapshot check is not an atomic cross-store compare-and-swap. These
+results DO NOT credit the production writer-fencing milestone (still
+**0/11**), change authority, imply physical iPhone validation, or
+authorize cutover. Main and existing V1 safety/recovery paths remain
+untouched. Overall weighted V2 readiness remains **67/100**.
