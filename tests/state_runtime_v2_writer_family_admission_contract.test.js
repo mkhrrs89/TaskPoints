@@ -126,6 +126,86 @@ test('concurrent preview freeze never receives a false clean Task acknowledgemen
     .completionUpserts[0].id,'interleaved-task');
 });
 
+const TASK_BRIDGE_LOCK='taskpoints_v2_preview_task_freeze_cooperative_v1';
+const TASK_ATOMIC_LOCK='taskpoints_v2_writer_handoff_rehearsal_v1';
+function sharedFakeWebLocks(onAcquired){
+  const held=new Set();
+  return {request:async(name,_opts,callback)=>{
+    if(held.has(name))return callback(null);
+    held.add(name);
+    try{
+      if(onAcquired)await onAcquired(name);
+      return await callback({name});
+    }finally{held.delete(name);}
+  }};
+}
+
+test('cooperative preview freeze is refused while the guarded Task writer holds its lock',async()=>{
+  let a,attemptedFreeze=null,once=false;
+  const navigator={locks:sharedFakeWebLocks(async name=>{
+    if(name===TASK_ATOMIC_LOCK&&!once){
+      once=true;
+      attemptedFreeze=await a.api.rehearsePreviewCooperativeWriterFreeze({
+        expectedEpoch:0});
+    }
+  })};
+  a=await bootRealTaskAdapter({navigator});
+  const wrote=await a.api.rehearsePreviewFenceCheckedTaskCompletionBatch(
+    [{id:'lock-writer-first',points:4}],a.token());
+  assert.equal(wrote.reason,'preview_task_batch_admitted',JSON.stringify(wrote));
+  assert.equal(wrote.confirmedDurable,true);
+  assert.equal(wrote.cooperativeTaskFreezeLockUsed,true);
+  assert.equal(attemptedFreeze.reason,'cooperative_freeze_lock_held_elsewhere');
+  assert.equal(attemptedFreeze.canPromote,false);
+  assert.equal(a.commits,1);
+  assert.equal((await a.api.rehearsePreviewDurableWriterFence('read'))
+    .fence.frozen,false);
+  const frozen=await a.api.rehearsePreviewCooperativeWriterFreeze({expectedEpoch:0});
+  assert.equal(frozen.reason,'preview_fence_frozen',JSON.stringify(frozen));
+  assert.equal(frozen.cooperativeTaskFreezeLockUsed,true);
+  const previous=a.localStorage.getItem(TASK_JOURNAL);
+  const denied=await a.api.rehearsePreviewFenceCheckedTaskCompletionBatch(
+    [{id:'must-not-write-after-coop-freeze'}],a.token());
+  assert.equal(denied.reason,'preview_fence_frozen');
+  assert.equal(a.commits,1);
+  assert.equal(a.localStorage.getItem(TASK_JOURNAL),previous);
+});
+
+test('guarded Task writer cannot enter a cooperative preview freeze in progress',async()=>{
+  let a,attemptedTask=null,once=false;
+  const navigator={locks:sharedFakeWebLocks(async name=>{
+    if(name===TASK_BRIDGE_LOCK&&!once){
+      once=true;
+      attemptedTask=await a.api.rehearsePreviewFenceCheckedTaskCompletionBatch(
+        [{id:'freeze-wins-over-task'}],a.token());
+    }
+  })};
+  a=await bootRealTaskAdapter({navigator});
+  const frozen=await a.api.rehearsePreviewCooperativeWriterFreeze({
+    expectedEpoch:0});
+  assert.equal(frozen.reason,'preview_fence_frozen',JSON.stringify(frozen));
+  assert.equal(frozen.cooperativeTaskFreezeLockUsed,true);
+  assert.equal(attemptedTask.reason,'cooperative_task_lock_held_elsewhere');
+  assert.equal(attemptedTask.confirmedDurable,false);
+  assert.equal(attemptedTask.committed,false);
+  assert.equal(a.commits,0);
+  assert.equal(a.localStorage.getItem(TASK_JOURNAL),null);
+  assert.equal((await a.api.rehearsePreviewDurableWriterFence('read'))
+    .fence.frozen,true);
+});
+
+test('cooperative preview admission and freeze fail closed without Web Locks',async()=>{
+  const a=await bootRealTaskAdapter({navigator:{locks:null}});
+  assert.equal((await a.api.rehearsePreviewFenceCheckedTaskCompletionBatch(
+    [{id:'no-lock-write'}],a.token())).reason,'lock_manager_unavailable');
+  assert.equal((await a.api.rehearsePreviewCooperativeWriterFreeze({
+    expectedEpoch:0})).reason,'lock_manager_unavailable');
+  assert.equal(a.commits,0);
+  assert.equal(a.localStorage.getItem(TASK_JOURNAL),null);
+  assert.equal((await a.api.rehearsePreviewDurableWriterFence('read'))
+    .fence.frozen,false);
+});
+
 test('strict synthetic freeze requires all nine historical writer families',async()=>{
   const a=await boot();
   const before=await a.api.rehearsePreviewDurableWriterFence('freeze',{
