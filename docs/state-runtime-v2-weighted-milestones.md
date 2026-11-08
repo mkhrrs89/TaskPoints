@@ -1941,3 +1941,31 @@ A matching fingerprint proves only a sampled point in time and cannot detect
 an undetected intermediate ABA write, a dormant old tab, or independently
 stored IndexedDB images. V1 remains primary, the production writer-exclusion
 gate remains 0/11, and weighted overall V2 readiness remains **67/100**.
+
+
+## Real Task journal + preview fence admission bridge — November 8
+
+The new preview-host-only `rehearsePreviewFenceCheckedTaskCompletionBatch()`
+is an **additive, explicitly invoked** bridge between the existing real,
+atomic V1 Task completion journal adapter and the isolated IndexedDB writer
+fence. It audits the complete synthetic fence inventory **before** calling
+the unchanged Task batch adapter and again afterward. A fence already
+frozen at entry or a corrupted inventory refuses **before any V1 journal
+write**. If a concurrent freeze commits between the two audits, the
+bridge preserves any durable journal write and reports an **uncertain**
+result, never a falsely confirmed handoff.
+
+Node regressions check admitted real journal batches, frozen refusal and
+the concurrent-freeze race in which V1 may already be durable. Chromium
+and WebKit exercise a real Task journal write before freeze and verify
+a subsequent preview-fenced write cannot modify that journal.
+
+The original preview Task adapter remains available with exactly its
+previous behavior. No normal production Task, Work, SCWM, Habit, Game,
+Notes, Projects, Today, import or fallback writer is routed through this
+experimental bridge. The two IndexedDB/localStorage observations are
+**not one atomic cross-store transaction**, and a nonparticipating or
+suspended legacy tab can still write regardless of this fence. This is
+proof of an initial integration seam, **not** the production-wide gate.
+V1 remains authoritative; no feature or protection is removed; overall
+weighted readiness remains **67/100** until a complete gate passes.
