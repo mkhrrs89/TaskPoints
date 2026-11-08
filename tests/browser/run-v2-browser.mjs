@@ -4730,6 +4730,83 @@ try {
       nonCooperatingOldTabStillWrites:true,noCutover:true};
   });
 
+  await run('uncertain real Task journal save can be inspected after reload without retry or repair',async context=>{
+    const page=await open(context);
+    const row={id:'uncertain-postsave-browser-journal',taskId:'task-uncertain',
+      title:'Interrupted journal acknowledgment',points:3,
+      completedAtISO:'2026-11-08T15:00:00.000Z'};
+    const attempt=await page.evaluate(async row=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const core=window.TaskPointsCore;
+      const original=core.journalTaskCompletionBatch;
+      const primary=localStorage.getItem('taskpoints_v1');
+      let verdict;
+      core.journalTaskCompletionBatch=function(rows){
+        original.call(this,rows);
+        throw Error('simulated_failure_after_atomic_journal_append');
+      };
+      try{
+        verdict=await api.rehearsePreviewFenceCheckedTaskCompletionBatch(
+          [row],token);
+      }finally{core.journalTaskCompletionBatch=original;}
+      return {verdict,primary,
+        journal:localStorage.getItem('taskpoints_pending_task_mutations_v1')};
+    },row);
+    if(attempt.verdict.reason==='lock_manager_unavailable'){
+      assert.equal(attempt.verdict.committed,false);
+      return {unsupportedWebLocksFailClosed:true};
+    }
+    assert.equal(attempt.verdict.reason,'task_journal_write_failed',
+      JSON.stringify(attempt));
+    assert.equal(attempt.verdict.writeOutcomeUncertain,true);
+    assert.ok(attempt.journal?.includes(row.id));
+    await page.reload({waitUntil:'load'});
+    const recovery=await page.evaluate(row=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const before=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const verdict=api.inspectPreviewTaskBatchJournalEvidence(
+        JSON.stringify([row]));
+      return {verdict,before,
+        after:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        primary:localStorage.getItem('taskpoints_v1'),
+        authority:api.getStatus().readAuthority};
+    },row);
+    assert.equal(recovery.verdict.reason,
+      'task_batch_rows_observed_in_pending_journal',JSON.stringify(recovery));
+    assert.equal(recovery.verdict.pendingJournalRowsMatched,true);
+    assert.equal(recovery.verdict.safeToRetry,false);
+    assert.equal(recovery.verdict.confirmedDurable,false);
+    assert.equal(recovery.before,recovery.after);
+    assert.equal(recovery.primary,attempt.primary);
+    assert.equal(recovery.authority,'legacy_only');
+    const oldPage=await context.newPage();
+    await oldPage.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const changed=await oldPage.evaluate(id=>{
+      const key='taskpoints_pending_task_mutations_v1';
+      const journal=JSON.parse(localStorage.getItem(key));
+      const row=journal.completionUpserts.find(r=>r.id===id);
+      row.points=77;
+      const raw=JSON.stringify(journal);
+      localStorage.setItem(key,raw);
+      return raw;
+    },row.id);
+    await requireCrossTabStorageValue(page,
+      'taskpoints_pending_task_mutations_v1',changed);
+    const drift=await page.evaluate(row=>
+      window.TaskPointsStateRuntimeV2.inspectPreviewTaskBatchJournalEvidence(
+        JSON.stringify([row])),row);
+    assert.equal(drift.reason,'task_batch_journal_conflict',JSON.stringify(drift));
+    assert.equal(drift.pendingJournalRowsMatched,false);
+    assert.equal(drift.safeToRetry,false);
+    return {uncertainCommittedWritePreserved:true,
+      restartReadOnlyEvidence:true,noImplicitRetryOrRepair:true,
+      uncooperativeOldTabConflictDetected:true,noCutover:true};
+  });
+
   await run('nine-family preview admission rejects incomplete freeze and preserves legacy old-tab writes',async context=>{
     const page=await open(context);
     const familyNames=["scoring_core_snapshot_and_habit_journal","home_direct_keys_and_snapshot_saves","game_players_schedules_and_preferences","today_snapshot_and_view_state","settings_import_reset_and_direct_storage","notes_content_dirty_and_authority_flags","emergency_recovery_and_restore","task_journal_and_idle_compaction","work_entry_fast_path_and_editor_fallback"];
