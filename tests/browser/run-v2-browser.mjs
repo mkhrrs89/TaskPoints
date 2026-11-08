@@ -4632,6 +4632,7 @@ try {
     assert.ok(preview.recorded.every(x=>x.reason==='preview_writer_recorded'),
       JSON.stringify(preview.recorded));
     assert.equal(preview.audit.syntheticFamilyInventoryComplete,true);
+    assert.equal(preview.audit.syntheticFamilyOriginMatchesCurrent,true);
     assert.equal(preview.audit.productionWritersFenced,false);
     assert.equal(preview.audit.allLegacyWritersKnown,false);
     assert.equal(preview.frozen.reason,'preview_fence_frozen',
@@ -4659,6 +4660,8 @@ try {
     });
     assert.equal(final.fence.fence.frozen,true);
     assert.equal(final.audit.syntheticFamilyInventoryComplete,true);
+    assert.equal(final.audit.syntheticFamilyOriginConsistent,true);
+    assert.equal(final.audit.syntheticFamilyOriginMatchesCurrent,false);
     assert.equal(final.audit.productionWritersFenced,false);
     assert.equal(final.authority,'legacy_only');
     assert.equal(final.oldTabTask,true);
