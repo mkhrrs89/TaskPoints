@@ -4620,11 +4620,12 @@ try {
       const frozen=await api.rehearsePreviewDurableWriterFence('freeze',{
         expectedEpoch:0,requireAllKnownFamilies:true
       });
+      const sealedAudit=await api.rehearsePreviewDurableWriterFence('audit');
       const after=await api.rehearsePreviewDurableWriterFence('writer',{
         expectedEpoch:1,marker:'blocked-family',writerFamily:names[0],
         fullOriginToken:token()
       });
-      return {incomplete,recorded,audit,frozen,after};
+      return {incomplete,recorded,audit,frozen,sealedAudit,after};
     },familyNames);
     assert.equal(preview.incomplete.reason,'preview_writer_families_incomplete',
       JSON.stringify(preview.incomplete));
@@ -4637,6 +4638,8 @@ try {
     assert.equal(preview.audit.allLegacyWritersKnown,false);
     assert.equal(preview.frozen.reason,'preview_fence_frozen',
       JSON.stringify(preview.frozen));
+    assert.equal(preview.sealedAudit.strictFreezeSourceSealed,true);
+    assert.equal(preview.sealedAudit.strictFreezeSourceMatchesCurrent,true);
     assert.equal(preview.after.reason,'fence_frozen',JSON.stringify(preview.after));
     const legacy=await context.newPage();
     await legacy.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
@@ -4662,9 +4665,17 @@ try {
     assert.equal(final.audit.syntheticFamilyInventoryComplete,true);
     assert.equal(final.audit.syntheticFamilyOriginConsistent,true);
     assert.equal(final.audit.syntheticFamilyOriginMatchesCurrent,false);
+    assert.equal(final.audit.strictFreezeSourceSealed,true);
+    assert.equal(final.audit.strictFreezeSourceMatchesCurrent,false);
     assert.equal(final.audit.productionWritersFenced,false);
     assert.equal(final.authority,'legacy_only');
     assert.equal(final.oldTabTask,true);
+    await page.reload({waitUntil:'load'});
+    const reloaded=await page.evaluate(async()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewDurableWriterFence('audit'));
+    assert.equal(reloaded.reason,'preview_writer_inventory_consistent');
+    assert.equal(reloaded.strictFreezeSourceSealed,true);
+    assert.equal(reloaded.strictFreezeSourceMatchesCurrent,false);
     return {allNineSimulatedFamiliesObserved:true,
       incompleteStrictFreezeRefused:true,participantBlockedAfterFreeze:true,
       oldVersionWriterStillActive:true,noCutover:true};
