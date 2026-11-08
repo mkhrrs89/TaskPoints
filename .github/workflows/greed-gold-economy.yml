@@ -14,6 +14,7 @@ on:
       - _worker.js
       - gold_ledger.html
       - tests/gold_manual_adjustment.test.js
+      - tests/gold_manual_adjustment_core_integration.test.js
       - tests/greed_gold_economy.test.js
       - tests/greed_rating.test.js
       - tests/season_champion_gold_bonus.test.js
@@ -44,6 +45,7 @@ jobs:
           node --test
           tests/greed_gold_economy.test.js
           tests/gold_manual_adjustment.test.js
+          tests/gold_manual_adjustment_core_integration.test.js
           tests/greed_rating.test.js
           tests/season_champion_gold_bonus.test.js
           tests/inbox_gold_theft_top50_notification.test.js
