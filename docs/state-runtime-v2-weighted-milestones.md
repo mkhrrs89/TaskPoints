@@ -1861,3 +1861,21 @@ between successive preview admission markers. It does not prevent an
 old tab writing after a successful freeze. Real production writer paths
 remain unmodified and independent IndexedDB/photos remain outside the
 full-origin localStorage comparison. Writer-fencing milestone: 0/11.
+
+
+## Read-only current-origin family audit — November 8
+
+The isolated nine-family writer-marker audit now checks **two distinct facts**:
+whether the recorded V1 origin digests agree with each other, and whether
+those claims still match the actual current localStorage V1 origin. The
+second flag, `syntheticFamilyOriginMatchesCurrent`, is false when an old
+tab writes after admission or races the audit's preflight. An unreadable or
+unverifiable source also cannot produce a positive match. A successful
+read-only check remains only a point-in-time observation: an old V1 tab
+can still save immediately afterward, and independent IndexedDB/photo
+sources are not covered. Node and Chromium/WebKit regressions cover the
+matching baseline and changed-old-tab source. No real writer interception,
+production cutover, migration, or V1 save-path behavior was changed.
+
+Writer-fencing weighted milestone remains 0/11; overall weighted V2
+readiness stays 67/100 until a complete safety gate is verified.
