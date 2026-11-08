@@ -387,6 +387,66 @@ test('unreadable V1 after committed strict freeze never reports clean success',a
     .fence.frozen,true);
 });
 
+test('strict preview freeze retains its V1 source seal across reload and detects drift',async()=>{
+  const a=await boot();
+  for(const [i,family] of FAMILIES.entries())
+    assert.equal((await writer(a,family,'durable-seal-'+i)).reason,
+      'preview_writer_recorded');
+  const frozen=await a.api.rehearsePreviewDurableWriterFence('freeze',{
+    expectedEpoch:0,requireAllKnownFamilies:true});
+  assert.equal(frozen.reason,'preview_fence_frozen',JSON.stringify(frozen));
+  const baseline=await a.api.rehearsePreviewDurableWriterFence('audit');
+  assert.equal(baseline.reason,'preview_writer_inventory_consistent');
+  assert.equal(baseline.strictFreezeSourceSealed,true);
+  assert.equal(baseline.strictFreezeSourceMatchesCurrent,true);
+  const stored=a.indexedDB._databases.get(DB)._stores.get('control')
+    .get('writer_fence');
+  assert.match(stored.strictFreezeSourceFingerprint,
+    /^sha256:[a-f0-9]{64}:\d+$/);
+  const reloaded=await boot({localStorage:a.localStorage,indexedDB:a.indexedDB});
+  const afterReload=await reloaded.api.rehearsePreviewDurableWriterFence('audit');
+  assert.equal(afterReload.strictFreezeSourceSealed,true);
+  assert.equal(afterReload.strictFreezeSourceMatchesCurrent,true);
+  a.localStorage.setItem('tp_projects_v1','[{"id":"older-tab-after-reload"}]');
+  const drift=await reloaded.api.rehearsePreviewDurableWriterFence('audit');
+  assert.equal(drift.reason,'preview_writer_inventory_consistent');
+  assert.equal(drift.strictFreezeSourceSealed,true);
+  assert.equal(drift.strictFreezeSourceMatchesCurrent,false);
+  assert.equal(drift.productionWritersFenced,false);
+  assert.equal(drift.canPromote,false);
+});
+
+test('tampered durable strict-freeze seal fails closed without repairing stored evidence',async()=>{
+  const a=await boot();
+  for(const [i,family] of FAMILIES.entries())
+    assert.equal((await writer(a,family,'seal-tamper-'+i)).reason,
+      'preview_writer_recorded');
+  assert.equal((await a.api.rehearsePreviewDurableWriterFence('freeze',{
+    expectedEpoch:0,requireAllKnownFamilies:true})).reason,'preview_fence_frozen');
+  const db=a.indexedDB._databases.get(DB),store=db._stores.get('control');
+  const existing=store.get('writer_fence');
+  const tampered={...existing,
+    strictFreezeSourceFingerprint:'sha256:'+('0'.repeat(64))+':123'};
+  store.set('writer_fence',tampered);
+  const denied=await a.api.rehearsePreviewDurableWriterFence('audit');
+  assert.equal(denied.reason,'fence_writer_inventory_inconsistent',
+    JSON.stringify(denied));
+  assert.equal(denied.canPromote,false);
+  assert.equal(db._stores.get('control').get('writer_fence')
+    .strictFreezeSourceFingerprint,tampered.strictFreezeSourceFingerprint);
+});
+
+test('older non-strict freezes remain readable without manufacturing a source seal',async()=>{
+  const a=await boot();
+  assert.equal((await a.api.rehearsePreviewDurableWriterFence('freeze',{
+    expectedEpoch:0})).reason,'preview_fence_frozen');
+  const audit=await a.api.rehearsePreviewDurableWriterFence('audit');
+  assert.equal(audit.reason,'preview_writer_inventory_consistent');
+  assert.equal(audit.strictFreezeSourceSealed,false);
+  assert.equal(audit.strictFreezeSourceMatchesCurrent,null);
+  assert.equal(audit.canPromote,false);
+});
+
 test('old tab changing source after all nine admissions refuses strict freeze',async()=>{
   const a=await boot();
   for(const [i,family] of FAMILIES.entries())
