@@ -13615,7 +13615,7 @@
                         || (owns(row,'originFingerprint')
                           && (!owns(row,'writerFamily')
                             || typeof row.originFingerprint!=='string'
-                            || !/^sha256:[a-f0-9]{64}:\\d+$/.test(row.originFingerprint)))
+                            || !/^sha256:[a-f0-9]{64}:\d+$/.test(row.originFingerprint)))
                         || !syntheticMarkerValid(row)
                         || (owns(row,'writerSequence')
                           && (!Number.isSafeInteger(row.writerSequence)
