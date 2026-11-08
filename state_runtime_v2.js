@@ -14181,8 +14181,29 @@
         }
       };
     });
-    if(attemptResult.reason!=='fence_writer_digest_snapshot_stale')
+    if(attemptResult.reason!=='fence_writer_digest_snapshot_stale'){
+      // The atomic marker may have committed before a non-cooperating V1 tab
+      // saved different source data. A successful IDB transaction is NOT
+      // proof that the legacy source is still identical when we acknowledge.
+      // Refuse a clean success but retain the durable marker for read-only
+      // recovery inspection. Never undo or rewrite either storage system.
+      if(familyOwned&&action==='writer'
+        &&(attemptResult.reason==='preview_writer_recorded'
+          ||attemptResult.reason==='preview_writer_replayed')){
+        const uncertain=reason=>refuse(reason,{
+          durableMarkerMayExist:true,
+          inspectMarkerBeforeRetry:true,
+          fence:attemptResult.fence
+        });
+        try{
+          if(captureReadOnlyFullStorageInventory()!==familyOrigin)
+            return uncertain('preview_writer_family_origin_changed_after_transaction');
+        }catch(_){
+          return uncertain('preview_writer_family_origin_unreadable_after_transaction');
+        }
+      }
       return attemptResult;
+    }
     }
     return refuse('fence_writer_digest_snapshot_stale');
   }
