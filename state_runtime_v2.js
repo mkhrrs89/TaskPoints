@@ -13321,6 +13321,136 @@
   }
 
 
+  // Read-only effective Task completion evidence across the durable V1
+  // snapshot AND still-pending Task journal. Absence from the journal alone
+  // is ambiguous after compaction. Never retry, merge, or alter V1 here.
+  // Exact current-row visibility is NOT proof of action provenance or
+  // independent off-device durability; an old tab may still write later.
+  function inspectPreviewTaskBatchEffectiveEvidence(expectedRowsJson) {
+    const refuse=(reason,extra={})=>({
+      checked:true,previewOnly:true,recoveryInspectionOnly:true,
+      effectiveRowsObserved:false,safeToRetry:false,
+      confirmedDurable:false,canPromote:false,
+      productionWritersFenced:false,mutationAuthority:'legacy_only',
+      readAuthority:'legacy_only',reason,...extra
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    if(typeof expectedRowsJson!=='string'||expectedRowsJson.length<2
+      ||expectedRowsJson.length>262144)
+      return refuse('expected_batch_json_required');
+    let expected;
+    try{
+      expected=JSON.parse(expectedRowsJson);
+      if(!Array.isArray(expected)||!expected.length||expected.length>64)
+        return refuse('invalid_expected_batch');
+      const ids=new Set();
+      for(const row of expected){
+        if(!row||typeof row!=='object'||Array.isArray(row)
+          ||typeof row.id!=='string'||!row.id||row.id.length>128
+          ||ids.has(row.id))return refuse('invalid_expected_batch');
+        ids.add(row.id);
+      }
+    }catch(_){return refuse('invalid_expected_batch');}
+    let origin;
+    try{origin=captureReadOnlyFullStorageInventory();}
+    catch(_){return refuse('full_origin_unreadable_before_inspection');}
+    let journalRows=[],deletions=[],snapshotRows=[];
+    let journalPresent=false;
+    try{
+      const snapshotRaw=global.localStorage.getItem(
+        core.STORAGE_KEY||'taskpoints_v1');
+      if(typeof snapshotRaw!=='string'||!snapshotRaw.length
+        ||snapshotRaw.length>16777216)
+        return refuse('task_snapshot_missing_or_oversized');
+      const snapshot=typeof core.parseTaskPointsStorageJson==='function'
+        ?core.parseTaskPointsStorageJson(snapshotRaw,{})
+        :JSON.parse(snapshotRaw);
+      if(!snapshot||typeof snapshot!=='object'||Array.isArray(snapshot)
+        ||!Array.isArray(snapshot.completions)
+        ||snapshot.completions.length>100000)
+        return refuse('task_snapshot_invalid');
+      snapshotRows=snapshot.completions;
+      const journalRaw=global.localStorage.getItem(
+        'taskpoints_pending_task_mutations_v1');
+      if(journalRaw!==null){
+        journalPresent=true;
+        if(typeof journalRaw!=='string'||!journalRaw.length
+          ||journalRaw.length>8388608)
+          return refuse('task_journal_unreadable_or_oversized');
+        const journal=JSON.parse(journalRaw);
+        if(!journal||typeof journal!=='object'||Array.isArray(journal)
+          ||journal.schemaVersion!==1
+          ||!Array.isArray(journal.tasks)
+          ||!Array.isArray(journal.completionUpserts)
+          ||!Array.isArray(journal.completionDeletes)
+          ||!(journal.updatedAtISO===null
+            ||typeof journal.updatedAtISO==='string')
+          ||stableJson(Object.keys(journal).sort())!==stableJson([
+            'completionDeletes','completionUpserts','schemaVersion',
+            'tasks','updatedAtISO']))
+          return refuse('task_journal_shape_invalid');
+        if(journal.completionUpserts.length>100000
+          ||journal.completionDeletes.length>100000)
+          return refuse('task_journal_row_limit');
+        journalRows=journal.completionUpserts;
+        deletions=journal.completionDeletes;
+      }
+    }catch(_){return refuse('task_source_inspection_unreadable');}
+    const asUniqueMap=(rows)=>{
+      const byId=new Map();
+      for(const row of rows){
+        if(!row||typeof row!=='object'||Array.isArray(row)
+          ||typeof row.id!=='string'||!row.id||row.id.length>128
+          ||byId.has(row.id))return null;
+        byId.set(row.id,row);
+      }
+      return byId;
+    };
+    const snapshotMap=asUniqueMap(snapshotRows);
+    const journalMap=asUniqueMap(journalRows);
+    const deletes=new Set(deletions);
+    if(!snapshotMap)return refuse('task_snapshot_completion_ids_invalid');
+    if(!journalMap)return refuse('task_journal_completion_ids_invalid');
+    if(deletes.size!==deletions.length||deletions.some(id=>
+      typeof id!=='string'||!id||id.length>128))
+      return refuse('task_journal_deletions_invalid');
+    let fromJournal=0,fromSnapshot=0,missing=0,conflicting=0,tombstoned=0;
+    for(const target of expected){
+      if(deletes.has(target.id)){tombstoned++;continue;}
+      // V1's pending upsert overrides the older snapshot value. A newer
+      // correction need not agree with the pre-compaction snapshot.
+      const inJournal=journalMap.has(target.id);
+      const actual=inJournal?journalMap.get(target.id):
+        snapshotMap.get(target.id);
+      if(!actual){missing++;continue;}
+      if(stableJson(actual)!==stableJson(target)){conflicting++;continue;}
+      if(inJournal)fromJournal++;else fromSnapshot++;
+    }
+    try{
+      if(captureReadOnlyFullStorageInventory()!==origin)
+        return refuse('full_origin_changed_during_inspection');
+    }catch(_){return refuse('full_origin_unreadable_after_inspection');}
+    const verified=fromJournal+fromSnapshot===expected.length
+      &&missing===0&&conflicting===0&&tombstoned===0;
+    const reason=tombstoned?'task_batch_effectively_tombstoned'
+      :conflicting?'task_batch_effective_conflict'
+      :missing?'task_batch_effective_missing_or_compacted'
+      :fromJournal&&fromSnapshot?'task_batch_rows_observed_in_both_sources'
+      :fromJournal?'task_batch_rows_observed_in_pending_journal'
+      :'task_batch_rows_observed_in_v1_snapshot';
+    return refuse(reason,{
+      effectiveRowsObserved:verified,
+      expectedRowCount:expected.length,
+      observedJournalRowCount:fromJournal,
+      observedSnapshotRowCount:fromSnapshot,
+      missingRowCount:missing,conflictingRowCount:conflicting,
+      tombstonedRowCount:tombstoned,
+      pendingTaskJournalPresent:journalPresent
+    });
+  }
+
+
   // Frozen-preview origin witness. Only the SHA-256 of a full-origin V1
   // inventory is persisted; legacy bytes and key names stay in V1 storage.
   // An observed difference proves source drift, NOT who wrote it. Equal
@@ -14921,6 +15051,7 @@
     rehearsePreviewFenceCheckedTaskCompletionBatch,
     rehearsePreviewCooperativeWriterFreeze,
     inspectPreviewTaskBatchJournalEvidence,
+    inspectPreviewTaskBatchEffectiveEvidence,
     inspectPreviewNotesSource,
     rehearsePreviewNotesBundleSeed,
     rehearsePreviewNotesBundleReconcile,
