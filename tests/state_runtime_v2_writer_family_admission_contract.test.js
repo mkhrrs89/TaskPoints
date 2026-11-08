@@ -120,7 +120,9 @@ test('tampering a stored writer family blocks audit, further writers and freeze'
   assert.equal(freeze.reason,'fence_writer_inventory_inconsistent');
   const attempted=await writer(a,FAMILIES[1],'blocked');
   assert.equal(attempted.reason,'fence_writer_inventory_inconsistent');
-  store.set(saved.id,saved);
+  // Fake readwrite transactions replace their backing Map on completion.
+  // The stale Map from before the refused freeze is not the active store.
+  a.indexedDB._databases.get(DB)._stores.get('control').set(saved.id,saved);
   assert.equal((await a.api.rehearsePreviewDurableWriterFence('audit')).reason,
     'preview_writer_inventory_consistent');
 });
@@ -151,4 +153,31 @@ test('invalid family and disabled preview hosts fail before writing any markers'
   a.ctx.location.hostname='localhost';
   a.localStorage.removeItem(DARK);
   assert.equal((await writer(a,FAMILIES[0],'dark')).reason,'dark_disabled');
+});
+
+test('independent old tab modifying V1 during admission prevents an atomic family marker',async()=>{
+  const a=await boot();
+  // Open the preview fence first, so the competing old-tab write can be
+  // triggered after the initial origin token check, at IDB transaction entry.
+  await a.api.rehearsePreviewDurableWriterFence('read');
+  const db=a.indexedDB._databases.get(DB),original=db.transaction.bind(db);
+  const token=a.token();
+  let injected=false;
+  db.transaction=(stores,mode)=>{
+    if(!injected&&mode==='readwrite'){
+      injected=true;
+      a.localStorage.setItem('taskpoints_today_view_v1',
+        '{"version":1,"notesByDay":{"2026-11-07":[]}}');
+    }
+    return original(stores,mode);
+  };
+  const r=await writer(a,FAMILIES[3],'old-tab-race',{fullOriginToken:token});
+  assert.equal(injected,true);
+  assert.equal(r.reason,'preview_writer_family_origin_stale',JSON.stringify(r));
+  const fence=await a.api.rehearsePreviewDurableWriterFence('read');
+  assert.equal(fence.fence.writersCommitted,0);
+  assert.equal(a.indexedDB.dump(DB).control.some(row=>
+    row.id==='writer_marker:old-tab-race'),false);
+  assert.match(a.localStorage.getItem('taskpoints_today_view_v1'),
+    /notesByDay/);
 });
