@@ -51,6 +51,18 @@
     .gold-manual-status.gold-manual-error { color:#fca5a5; }
     .gold-manual-actions { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
     .gold-manual-actions button:disabled { opacity:.45; cursor:not-allowed; }
+    /* Standalone iPhones render underneath the status bar with viewport-fit=cover.
+       Keep the entire ledger shell (logo, header, cards) below that area. */
+    @media (max-width:767px) {
+      .gold-shell {
+        padding-top: max(76px, calc(env(safe-area-inset-top, 0px) + 16px));
+      }
+      /* The shared bottom toolbar keeps Projects accessible on mobile. Hide
+         only the out-of-place extra button in this page's upper header. */
+      .gold-shell .header-nav > a[href="projects.html"] {
+        display: none !important;
+      }
+    }
     @media (max-width:640px) {
       .gold-manual-fields { grid-template-columns:1fr; }
     }
