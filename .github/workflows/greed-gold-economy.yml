@@ -14,6 +14,8 @@ on:
       - records_gold_theft_history_fix.js
       - _worker.js
       - gold_ledger.html
+      - rankings.html
+      - tests/player_badge_power_rankings.test.js
       - tests/gold_manual_adjustment.test.js
       - tests/gold_circulation_total.test.js
       - tests/gold_manual_adjustment_core_integration.test.js
@@ -47,6 +49,7 @@ jobs:
       - name: Run Greed Gold contracts
         run: >-
           node --test
+          tests/player_badge_power_rankings.test.js
           tests/greed_gold_economy.test.js
           tests/gold_manual_adjustment.test.js
           tests/gold_circulation_total.test.js
