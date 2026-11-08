@@ -96,11 +96,12 @@ test('Gold Ledger displays circulation prominently and refreshes it after manual
 });
 
 test('Gold Ledger clears the iPhone status bar and hides only its stray mobile Projects shortcut', () => {
-  assert.match(page, /@media \\(max-width:767px\\)\\s*\\{\\s*\\.gold-shell\\s*\\{/);
-  assert.match(page, /padding-top:\\s*max\\(76px, calc\\(env\\(safe-area-inset-top, 0px\\) \\+ 16px\\)\\)/);
-  assert.match(page, /\\.gold-shell \\.header-nav > a\\[href="projects\\.html"\\]\\s*\\{\\s*display: none !important;/);
-  assert.match(page, /<a href="projects\\.html" class="btn btn-teal btn-toolbar nav-btn">Projects<\\/a>/,
+  assert.ok(page.includes('@media (max-width:767px)'));
+  assert.ok(page.includes('padding-top: max(76px, calc(env(safe-area-inset-top, 0px) + 16px))'));
+  assert.ok(page.includes('.gold-shell .header-nav > a[href="projects.html"]'));
+  assert.ok(page.includes('display: none !important;'));
+  assert.ok(page.includes('<a href="projects.html" class="btn btn-teal btn-toolbar nav-btn">Projects</a>'),
     'the desktop Projects shortcut remains intact');
-  assert.match(page, /<script src="toolbar\\.js" defer><\\/script>/,
+  assert.ok(page.includes('<script src="toolbar.js" defer></script>'),
     'the existing mobile navigation is retained');
 });
