@@ -13264,6 +13264,20 @@
           return refuse('preview_writer_family_origin_stale');
       }catch(_){return refuse('preview_writer_family_origin_unreadable');}
     }
+    // A read-only audit can compare sealed family claims with the *current*
+    // V1 origin. Digest outside IndexedDB, then recheck the exact source
+    // synchronously in the audit transaction. This never fences old tabs.
+    let auditOrigin=null,auditOriginFingerprint=null;
+    if(action==='audit'){
+      try{
+        auditOrigin=captureReadOnlyFullStorageInventory();
+        auditOriginFingerprint=await previewRecoveryFingerprint(auditOrigin);
+        if(captureReadOnlyFullStorageInventory()!==auditOrigin){
+          auditOrigin=null;
+          auditOriginFingerprint=null;
+        }
+      }catch(_){auditOrigin=null;auditOriginFingerprint=null;}
+    }
     const strictFamilyFreeze=action==='freeze'
       &&options?.requireAllKnownFamilies===true;
     let freezeOrigin=null,freezeOriginFingerprint=null;
@@ -13769,11 +13783,22 @@
                   const missingObservedFamilies=AUTHORITY_CUTOVER_WRITER_FAMILIES
                     .filter(family=>!eligible.some(row=>row.writerFamily===family));
                   const familyFingerprints=new Set(eligible.map(row=>row.originFingerprint));
+                  let originStillCurrent=false;
+                  try{
+                    originStillCurrent=auditOrigin!==null
+                      &&captureReadOnlyFullStorageInventory()===auditOrigin;
+                  }catch(_){}
                   result = refuse('preview_writer_inventory_consistent', {
                     previewWriterFamilyCounts:observedFamilyCounts,
                     missingObservedFamilies,
                     syntheticFamilyInventoryComplete:missingObservedFamilies.length===0,
                     syntheticFamilyOriginConsistent:familyFingerprints.size===1,
+                    // A matching partial roster is still NOT a production
+                    // writer handoff. An old tab can change V1 immediately
+                    // after this purely observational check.
+                    syntheticFamilyOriginMatchesCurrent:eligible.length>0
+                      &&originStillCurrent&&familyFingerprints.size===1
+                      &&familyFingerprints.has(auditOriginFingerprint),
                     readOnlyInventoryAudit: true,
                     historicalPayloadDigestsVerified: true,
                     initialized: !!prior, observedMarkerCount: count,
