@@ -206,6 +206,124 @@ test('cooperative preview admission and freeze fail closed without Web Locks',as
     .fence.frozen,false);
 });
 
+test('read-only Task journal evidence survives reload after a confirmed preview write',async()=>{
+  const a=await bootRealTaskAdapter();
+  const row={id:'journal-evidence-after-reload',taskId:'task-a',points:3.5};
+  const saved=await a.api.rehearsePreviewFenceCheckedTaskCompletionBatch(
+    [row],a.token());
+  assert.equal(saved.reason,'preview_task_batch_admitted',JSON.stringify(saved));
+  const original=a.localStorage.getItem(TASK_JOURNAL);
+  const restarted=await boot({
+    localStorage:a.localStorage,indexedDB:a.indexedDB});
+  const evidence=restarted.api.inspectPreviewTaskBatchJournalEvidence(
+    JSON.stringify([row]));
+  assert.equal(evidence.reason,'task_batch_rows_observed_in_pending_journal',
+    JSON.stringify(evidence));
+  assert.equal(evidence.pendingJournalRowsMatched,true);
+  assert.equal(evidence.observedRowCount,1);
+  assert.equal(evidence.safeToRetry,false);
+  assert.equal(evidence.confirmedDurable,false);
+  assert.equal(evidence.canPromote,false);
+  assert.equal(a.localStorage.getItem(TASK_JOURNAL),original);
+});
+
+test('read-only Task journal evidence finds a potentially committed uncertain Task batch',async()=>{
+  let a,freeze=null,once=false;
+  a=await bootRealTaskAdapter({beforeLock:async name=>{
+    if(name==='taskpoints_v2_writer_handoff_rehearsal_v1'&&!once){
+      once=true;
+      freeze=await a.api.rehearsePreviewDurableWriterFence('freeze',{
+        expectedEpoch:0});
+    }
+  }});
+  const row={id:'uncertain-task-journal-row',taskId:'task-b',points:1};
+  const result=await a.api.rehearsePreviewFenceCheckedTaskCompletionBatch(
+    [row],a.token());
+  assert.equal(freeze.reason,'preview_fence_frozen');
+  assert.equal(result.reason,'preview_fence_changed_during_task_batch');
+  assert.equal(result.writeOutcomeUncertain,true);
+  const raw=a.localStorage.getItem(TASK_JOURNAL);
+  const verdict=a.api.inspectPreviewTaskBatchJournalEvidence(
+    JSON.stringify([row]));
+  assert.equal(verdict.pendingJournalRowsMatched,true);
+  assert.equal(verdict.safeToRetry,false);
+  assert.equal(a.localStorage.getItem(TASK_JOURNAL),raw);
+});
+
+test('Task journal evidence distinguishes missing, conflicting, duplicate and deleted rows',async()=>{
+  const a=await boot();
+  const row={id:'target-journal-evidence',taskId:'task-c',points:4};
+  const request=JSON.stringify([row]);
+  assert.equal(a.api.inspectPreviewTaskBatchJournalEvidence(request).reason,
+    'task_journal_absent_or_compacted');
+  const journal={schemaVersion:1,tasks:[],completionUpserts:[row],
+    completionDeletes:[],updatedAtISO:null};
+  const set=()=>a.localStorage.setItem(TASK_JOURNAL,JSON.stringify(journal));
+  journal.completionUpserts=[{...row,points:9}];set();
+  const wrong=a.api.inspectPreviewTaskBatchJournalEvidence(request);
+  assert.equal(wrong.reason,'task_batch_journal_conflict');
+  assert.equal(wrong.conflictingRowCount,1);
+  journal.completionUpserts=[row,{...row,points:9}];set();
+  const duplicate=a.api.inspectPreviewTaskBatchJournalEvidence(request);
+  assert.equal(duplicate.reason,'task_batch_journal_conflict');
+  assert.equal(duplicate.pendingJournalRowsMatched,false);
+  journal.completionUpserts=[row];journal.completionDeletes=[row.id];set();
+  const deleted=a.api.inspectPreviewTaskBatchJournalEvidence(request);
+  assert.equal(deleted.reason,'task_batch_journal_tombstoned');
+  assert.equal(deleted.tombstonedRowCount,1);
+  journal.completionUpserts=[];journal.completionDeletes=[];set();
+  const missing=a.api.inspectPreviewTaskBatchJournalEvidence(request);
+  assert.equal(missing.reason,'task_batch_journal_incomplete_or_compacted');
+  for(const value of [wrong,duplicate,deleted,missing]){
+    assert.equal(value.safeToRetry,false);
+    assert.equal(value.canPromote,false);
+  }
+});
+
+test('Task journal recovery inspection detects concurrent old-tab source drift and leaves it untouched',async()=>{
+  const a=await boot();
+  const row={id:'old-tab-during-read',taskId:'task-d'};
+  a.localStorage.setItem(TASK_JOURNAL,JSON.stringify({
+    schemaVersion:1,tasks:[],completionUpserts:[row],
+    completionDeletes:[],updatedAtISO:null
+  }));
+  const read=a.localStorage.getItem.bind(a.localStorage);
+  let injected=false;
+  a.localStorage.getItem=key=>{
+    const value=read(key);
+    if(key===TASK_JOURNAL&&!injected){
+      injected=true;
+      a.localStorage.setItem('tp_projects_v1','old-tab-write-during-inspection');
+    }
+    return value;
+  };
+  const verdict=a.api.inspectPreviewTaskBatchJournalEvidence(
+    JSON.stringify([row]));
+  assert.equal(injected,true);
+  assert.equal(verdict.reason,'full_origin_changed_during_inspection');
+  assert.equal(verdict.pendingJournalRowsMatched,false);
+  assert.equal(a.localStorage.getItem('tp_projects_v1'),
+    'old-tab-write-during-inspection');
+});
+
+test('Task journal recovery inspection refuses invalid inputs and disabled preview',async()=>{
+  const a=await boot();
+  for(const input of ['[]','not-json','[{"id":"x"},{"id":"x"}]',
+      '[{"id":""}]',JSON.stringify([{id:'x'},null])]){
+    const result=a.api.inspectPreviewTaskBatchJournalEvidence(input);
+    assert.equal(result.pendingJournalRowsMatched,false);
+    assert.equal(result.safeToRetry,false);
+    assert.equal(result.canPromote,false);
+  }
+  a.ctx.location.hostname='taskpoints.pages.dev';
+  assert.equal(a.api.inspectPreviewTaskBatchJournalEvidence('[{"id":"x"}]')
+    .reason,'preview_host_required');
+  a.ctx.location.hostname='localhost';
+  a.localStorage.removeItem(DARK);
+  assert.equal(a.api.inspectPreviewTaskBatchJournalEvidence('[{"id":"x"}]')
+    .reason,'dark_disabled');
+});
+
 test('strict synthetic freeze requires all nine historical writer families',async()=>{
   const a=await boot();
   const before=await a.api.rehearsePreviewDurableWriterFence('freeze',{
