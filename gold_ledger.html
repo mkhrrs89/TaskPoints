@@ -38,6 +38,18 @@
     .gold-ledger-check.warning { border-color:rgba(251,146,60,.55); background:rgba(154,52,18,.13); }
     .gold-ledger-check strong { color:#fdba74; }
     .gold-ledger-check p + p { margin-top:7px; }
+    .gold-manual-fields { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+    .gold-manual-field { display:flex; flex-direction:column; gap:6px; min-width:0; font-size:13px; font-weight:600; color:#cbd5e1; }
+    .gold-manual-input { min-width:0; width:100%; min-height:42px; border:1px solid rgba(148,163,184,.3); border-radius:10px; padding:9px 11px; background:#111827; color:#f8fafc; font:inherit; }
+    .gold-manual-input:focus { outline:2px solid rgba(251,146,60,.6); outline-offset:1px; }
+    .gold-manual-preview { color:#fdba74; font-weight:700; font-variant-numeric:tabular-nums; padding:10px 0; min-height:42px; }
+    .gold-manual-status { font-size:13px; color:#86efac; min-height:18px; }
+    .gold-manual-status.gold-manual-error { color:#fca5a5; }
+    .gold-manual-actions { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
+    .gold-manual-actions button:disabled { opacity:.45; cursor:not-allowed; }
+    @media (max-width:640px) {
+      .gold-manual-fields { grid-template-columns:1fr; }
+    }
     @media (max-width:640px) {
       .gold-shell { padding-left:12px; padding-right:12px; }
       .gold-card { border-radius:15px; }
@@ -108,6 +120,43 @@
         <div id="goldBalances" class="gold-balance-grid"></div>
       </section>
 
+      <section class="gold-card p-4 sm:p-5" aria-labelledby="goldManualHeading">
+        <h2 id="goldManualHeading" class="text-lg font-bold mb-1">Manual Gold Adjustment</h2>
+        <p class="text-sm gold-muted mb-4">Give or remove Gold, or set an exact balance. Every adjustment is saved as a new transaction; existing history is never edited.</p>
+        <form id="goldManualForm">
+          <div class="gold-manual-fields">
+            <label class="gold-manual-field" for="goldManualPlayer">
+              Player
+              <select id="goldManualPlayer" class="gold-manual-input" required>
+                <option value="">Choose a player</option>
+              </select>
+            </label>
+            <label class="gold-manual-field" for="goldManualMode">
+              Action
+              <select id="goldManualMode" class="gold-manual-input">
+                <option value="add">Add Gold</option>
+                <option value="subtract">Subtract Gold</option>
+                <option value="set">Set Exact Balance</option>
+              </select>
+            </label>
+            <label class="gold-manual-field" for="goldManualAmount">
+              Amount (Gold)
+              <input id="goldManualAmount" class="gold-manual-input" type="number" inputmode="decimal" step="0.1" min="0" max="1000000" placeholder="0.0" required />
+            </label>
+          </div>
+          <label class="gold-manual-field mt-3" for="goldManualNote">
+            Note (optional)
+            <input id="goldManualNote" class="gold-manual-input" type="text" maxlength="200" placeholder="Reason for this adjustment" />
+          </label>
+          <div id="goldManualPreview" class="gold-manual-preview" aria-live="polite">Select a player and enter an amount to preview the change.</div>
+          <div class="gold-manual-actions">
+            <button type="submit" id="goldManualSubmit" class="btn btn-teal btn-toolbar" disabled>Confirm Gold Adjustment</button>
+            <span class="text-xs gold-muted">Balances cannot go below zero. A confirmation is required before saving.</span>
+          </div>
+          <p id="goldManualStatus" class="gold-manual-status mt-3" role="status" aria-live="polite"></p>
+        </form>
+      </section>
+
       <section class="gold-card p-4 sm:p-5">
         <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
           <div>
@@ -122,6 +171,7 @@
               <option value="matchup_margin">Matchup Margin</option>
               <option value="matchup_theft">Gold Theft</option>
               <option value="champion_bonus">Champion Bonus</option>
+              <option value="manual_adjustment">Manual Adjustment</option>
             </select>
           </div>
         </div>
@@ -158,7 +208,7 @@
     }
 
     let state = loadState();
-    const players = new Map((Array.isArray(state.players) ? state.players : []).map((player) => [String(player.id || player.playerId || ''), player]));
+    let players = new Map((Array.isArray(state.players) ? state.players : []).map((player) => [String(player.id || player.playerId || ''), player]));
     const playerName = (id) => {
       if (String(id) === 'YOU') return String(state.youName || 'You');
       return String(players.get(String(id))?.name || id || 'Unknown');
@@ -166,7 +216,7 @@
 
     // Historical records may outlive their underlying Gold ledger rows.
     // Show the discrepancy without inventing transfers or changing balances.
-    const historicalCheck = window.TaskPointsGoldLedgerIntegrity?.analyzeGoldLedger?.(state);
+    let historicalCheck = window.TaskPointsGoldLedgerIntegrity?.analyzeGoldLedger?.(state);
     function renderGoldLedgerHistoryCheck(selectedId = '') {
       const el = document.getElementById('goldLedgerHistoryCheck');
       if (!el) return;
@@ -207,7 +257,8 @@
       opening_balance: 'Opening Balance',
       matchup_margin: 'Matchup Margin',
       matchup_theft: 'Gold Theft',
-      champion_bonus: 'Champion Bonus'
+      champion_bonus: 'Champion Bonus',
+      manual_adjustment: 'Manual Adjustment'
     }[type] || type || 'Transaction');
 
     function formatLedgerDate(value) {
@@ -223,6 +274,11 @@
     function transactionDetail(row) {
       const opponent = row.opponentId ? playerName(row.opponentId) : '';
       if (row.type === 'opening_balance') return 'Gold carried into the new ledger at launch.';
+      if (row.type === 'manual_adjustment') {
+        const mode = { add: 'Gold added', subtract: 'Gold removed', set: 'Balance set' }[row.meta?.mode] || 'Manual change';
+        const note = String(row.meta?.note || '').trim();
+        return mode + (note ? ': ' + note : '.');
+      }
       if (row.type === 'champion_bonus') return `Season championship bonus${row.seasonId ? ` · ${row.seasonId}` : ''}.`;
       if (row.type === 'matchup_margin') {
         const diff = Number(row.meta?.pointDifferential);
@@ -251,6 +307,8 @@
 
     function installPlayerFilter() {
       const select = document.getElementById('playerFilter');
+      const selected = select.value;
+      select.replaceChildren(new Option('All players', ''));
       const ids = new Set((Array.isArray(state.goldLedger) ? state.goldLedger : []).map((row) => String(row.playerId || '')).filter(Boolean));
       const options = [...ids].map((id) => ({ id, name: playerName(id) })).sort((a,b) => a.name.localeCompare(b.name));
       options.forEach(({ id, name }) => {
@@ -259,6 +317,7 @@
         option.textContent = name;
         select.appendChild(option);
       });
+      select.value = [...select.options].some(option => option.value === selected) ? selected : '';
     }
 
     function renderLedger() {
@@ -298,7 +357,21 @@
     renderLedger();
     document.getElementById('playerFilter').addEventListener('change', renderLedger);
     document.getElementById('typeFilter').addEventListener('change', renderLedger);
+    window.addEventListener('taskpoints:gold-manual-adjusted', (event) => {
+      // Refresh the on-screen wallet totals, transaction history and filters
+      // from the verified snapshot returned by the protected save.
+      const refreshed = event.detail?.state || loadState();
+      if (!refreshed || !Array.isArray(refreshed.goldLedger)) return;
+      state = refreshed;
+      players = new Map((Array.isArray(state.players) ? state.players : []).map(player =>
+        [String(player.id || player.playerId || ''), player]));
+      historicalCheck = window.TaskPointsGoldLedgerIntegrity?.analyzeGoldLedger?.(state);
+      renderBalances();
+      installPlayerFilter();
+      renderLedger();
+    });
   })();
   </script>
+  <script src="gold_manual_adjustment.js?v=20261108-manual-gold-1"></script>
 </body>
 </html>
