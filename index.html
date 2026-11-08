@@ -14,10 +14,14 @@ Nothing visible on the page is built here. === -->
   <meta name="color-scheme" content="dark">
   <style id="tp-prepaint">
     html, body { background:#0b0d10 !important; }
+    /* Sunday-only display rule; Work Hours data and calculations stay intact. */
+    html.tp-home-sunday #homeWorkHoursSection { display:none !important; }
   </style>
   <script>
     (function () {
       const root = document.documentElement;
+      // Apply the local Sunday rule before Home paints, including cached visits.
+      root.classList.toggle('tp-home-sunday', new Date().getDay() === 0);
       try {
         if (sessionStorage.getItem('tpBootSeenThisSession') === '1') {
           root.classList.add('tp-boot-seen');
@@ -11409,6 +11413,12 @@ function formatHomeWorkHours(value) {
 }
 
 function renderHomeWorkHours() {
+  const now = new Date();
+  // Visibility is strictly presentational. Sunday hours still count toward
+  // the Mon–Sun week and are never removed or rewritten.
+  if (typeof document !== 'undefined') {
+    document.documentElement?.classList?.toggle('tp-home-sunday', now.getDay() === 0);
+  }
   const loggedEl = $('homeWorkHoursLogged');
   if (!loggedEl) return;
   const remainingEl = $('homeWorkHoursRemaining');
@@ -11417,7 +11427,7 @@ function renderHomeWorkHours() {
   const trackEl = $('homeWorkHoursProgressTrack');
   const statusEl = $('homeWorkHoursStatus');
   const averageEl = $('homeWorkHoursAverage');
-  const summary = calculateHomeWeeklyWorkHours(getDerived().workEntries, new Date());
+  const summary = calculateHomeWeeklyWorkHours(getDerived().workEntries, now);
   const dateOptions = { month: 'short', day: 'numeric' };
   const startText = summary.weekStart.toLocaleDateString(undefined, dateOptions);
   const endText = summary.weekEnd.toLocaleDateString(undefined, dateOptions);
@@ -11438,15 +11448,16 @@ function renderHomeWorkHours() {
   }
 }
 
-// A read-only timer refreshes the card if TaskPoints stays open across Sunday
-// night. On suspended iPhones, pageshow/visibilitychange refresh it instead.
+// Read-only daily refresh keeps the Sunday display rule and Monday weekly
+// rollover correct, even when Home stays open across midnight. On suspended
+// iPhones, pageshow/visibilitychange refreshes the display on return.
 function startHomeWorkHoursWeekRollover() {
   const scheduleNext = () => {
     const now = new Date();
-    const nextMonday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    nextMonday.setDate(nextMonday.getDate() + (((8 - nextMonday.getDay()) % 7) || 7));
-    nextMonday.setHours(0, 0, 1, 0);
-    const delay = Math.max(1000, nextMonday.getTime() - now.getTime());
+    const nextDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    nextDay.setDate(nextDay.getDate() + 1);
+    nextDay.setHours(0, 0, 1, 0);
+    const delay = Math.max(1000, nextDay.getTime() - now.getTime());
     setTimeout(() => {
       renderHomeWorkHours();
       scheduleNext();
