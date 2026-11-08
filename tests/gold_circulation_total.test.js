@@ -157,3 +157,34 @@ test('Gold controls remain inside their independent sections after collapsing is
   assert.ok(page.includes("document.getElementById('typeFilter').addEventListener('change', renderLedger)"),
     'existing transaction filters remain active');
 });
+
+test('Gold Ledger anchors the existing mobile bottom toolbar to viewport instead of document flow', () => {
+  assert.ok(page.includes('<body class="min-h-screen gold-ledger-page">'),
+    'the mobile positioning fix must be scoped to the Gold Ledger page');
+  assert.ok(page.includes('body.gold-ledger-page #bottomToolbarMount {'),
+    'the existing toolbar mount must be the fixed viewport anchor');
+  const start = page.indexOf('body.gold-ledger-page #bottomToolbarMount {');
+  const end = page.indexOf('}', start);
+  const anchor = page.slice(start, end);
+  for (const property of ['position: fixed;', 'bottom: 0;', 'left: 0;',
+    'right: 0;', 'min-height: 0;', 'pointer-events: none;']) {
+    assert.ok(anchor.includes(property), 'viewport mount missing ' + property);
+  }
+  assert.ok(page.includes('body.gold-ledger-page #bottomToolbarMount > #mobileBottomNav {'),
+    'the original toolbar must remain inside the anchored mount');
+  const childStart = page.indexOf('body.gold-ledger-page #bottomToolbarMount > #mobileBottomNav {');
+  const childEnd = page.indexOf('}', childStart);
+  const child = page.slice(childStart, childEnd);
+  assert.ok(child.includes('position: absolute;'), 'nav should anchor to the fixed mount');
+  assert.ok(child.includes('bottom: -10px;'), 'retain the current toolbar vertical offset');
+  assert.ok(child.includes('pointer-events: auto;'), 'navigation remains clickable');
+  assert.ok(page.includes('padding-bottom: max(150px, calc(var(--tp-toolbar-height) + var(--tp-safe-bottom) + 24px))'),
+    'the bottom of Gold Ledger must scroll beyond the toolbar instead of behind it');
+  assert.ok(page.includes('<script src="toolbar.js" defer></script>'),
+    'do not replace or disable the existing shared toolbar');
+  for (const section of ['goldOverviewSection', 'goldCirculationSection', 'goldManualSection',
+    'goldTransactionsSection']) {
+    assert.ok(page.includes('id="' + section + '"'),
+      section + ' must retain its collapsible controls');
+  }
+});
