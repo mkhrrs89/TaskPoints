@@ -1879,3 +1879,22 @@ production cutover, migration, or V1 save-path behavior was changed.
 
 Writer-fencing weighted milestone remains 0/11; overall weighted V2
 readiness stays 67/100 until a complete safety gate is verified.
+
+
+## Post-commit synthetic writer acknowledgment guard — November 8
+
+A preview writer or idempotent replay can pass its origin checks, commit an
+atomic IndexedDB marker, and then race an older tab that writes new V1 bytes
+before the promise resolves. The preview now checks full-origin V1 source
+**again after the IndexedDB transaction completes**. If the source changed or
+became unreadable, the result is uncertain and explicitly directs the caller
+to inspect the durable marker before any retry. It does not claim that a
+committed marker was rolled back or that the V1 write was blocked.
+
+The normal unchanged-source acknowledgment is preserved. The guard changes
+only synthetic family-owned preview writer results; existing production
+V1 save paths are untouched. Node race regressions inject the old-tab write
+at the exact fake-IDB commit boundary and independently reopen the saved
+marker. This is a point-in-time drift check, **not** a fix for an old tab
+writing after the final check. Main remains unchanged, V1 authoritative,
+writer exclusion milestone 0/11 and overall completion 67/100.
