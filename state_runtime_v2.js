@@ -13217,6 +13217,110 @@
     return result;
   }
 
+  // READ ONLY, preview-host-only recovery inspection for a Task journal batch
+  // whose outcome may have been uncertain after a tab close / lock failure.
+  // A positive result means those exact rows are visible in the pending
+  // V1 journal NOW; it never proves they originated from this invocation,
+  // that older unrelated work survived, or that a dormant tab cannot write.
+  // No retry, compaction, snapshot repair, or authority transfer is allowed.
+  function inspectPreviewTaskBatchJournalEvidence(expectedRowsJson) {
+    const report=(reason,details={})=>({
+      checked:true,previewOnly:true,recoveryInspectionOnly:true,
+      pendingJournalRowsMatched:false,safeToRetry:false,
+      confirmedDurable:false,canPromote:false,
+      productionWritersFenced:false,mutationAuthority:'legacy_only',
+      readAuthority:'legacy_only',reason,...details
+    });
+    if(!isWalTestPreviewHost())return report('preview_host_required');
+    if(!isDarkEnabled())return report('dark_disabled');
+    if(typeof expectedRowsJson!=='string'
+      ||expectedRowsJson.length<2||expectedRowsJson.length>262144)
+      return report('expected_batch_json_required');
+    let expected;
+    try{
+      expected=JSON.parse(expectedRowsJson);
+      if(!Array.isArray(expected)||expected.length<1||expected.length>64)
+        return report('invalid_expected_batch');
+      const ids=new Set();
+      for(const row of expected){
+        if(!row||typeof row!=='object'||Array.isArray(row)
+          ||typeof row.id!=='string'||!row.id||row.id.length>128
+          ||ids.has(row.id))return report('invalid_expected_batch');
+        ids.add(row.id);
+      }
+    }catch(_){return report('invalid_expected_batch');}
+    let startingOrigin;
+    try{startingOrigin=captureReadOnlyFullStorageInventory();}
+    catch(_){return report('full_origin_unreadable_before_inspection');}
+    let reason='task_journal_absent_or_compacted';
+    let present=0;
+    let missing=expected.length;
+    let conflicting=0;
+    let deleted=0;
+    try{
+      const raw=global.localStorage.getItem(
+        'taskpoints_pending_task_mutations_v1');
+      if(raw!==null){
+        if(typeof raw!=='string'||!raw.length||raw.length>8388608)
+          return report('task_journal_unreadable_or_oversized');
+        const journal=JSON.parse(raw);
+        if(!journal||typeof journal!=='object'||Array.isArray(journal)
+          ||journal.schemaVersion!==1
+          ||!Array.isArray(journal.tasks)
+          ||!Array.isArray(journal.completionUpserts)
+          ||!Array.isArray(journal.completionDeletes)
+          || !(journal.updatedAtISO===null
+            ||typeof journal.updatedAtISO==='string')
+          || stableJson(Object.keys(journal).sort())!==stableJson([
+            'completionDeletes','completionUpserts','schemaVersion',
+            'tasks','updatedAtISO']))
+          return report('task_journal_shape_invalid');
+        if(!journal.completionUpserts.every(row=>row
+          &&typeof row==='object'&&!Array.isArray(row)
+          &&typeof row.id==='string'&&row.id.length>0)
+          ||!journal.completionDeletes.every(id=>
+            typeof id==='string'&&id.length>0))
+          return report('task_journal_rows_invalid');
+        const rowById=new Map();
+        for(const row of journal.completionUpserts){
+          const list=rowById.get(row.id)||[];
+          list.push(row);
+          rowById.set(row.id,list);
+        }
+        const deletes=new Set(journal.completionDeletes);
+        const allDeletesDistinct=deletes.size===journal.completionDeletes.length;
+        if(!allDeletesDistinct)return report('task_journal_deletions_invalid');
+        for(const target of expected){
+          const entries=rowById.get(target.id)||[];
+          if(deletes.has(target.id)){deleted++;continue;}
+          if(entries.length>1){conflicting++;continue;}
+          if(entries.length===0)continue;
+          if(stableJson(entries[0])!==stableJson(target)){
+            conflicting++;continue;
+          }
+          present++;
+        }
+        missing=expected.length-present-conflicting-deleted;
+        reason=deleted>0?'task_batch_journal_tombstoned'
+          :conflicting>0?'task_batch_journal_conflict'
+          :missing>0?'task_batch_journal_incomplete_or_compacted'
+          :'task_batch_rows_observed_in_pending_journal';
+      }
+    }catch(_){return report('task_journal_inspection_unreadable');}
+    try{
+      if(captureReadOnlyFullStorageInventory()!==startingOrigin)
+        return report('full_origin_changed_during_inspection');
+    }catch(_){return report('full_origin_unreadable_after_inspection');}
+    return report(reason,{
+      pendingJournalRowsMatched:present===expected.length
+        &&conflicting===0&&deleted===0,
+      expectedRowCount:expected.length,observedRowCount:present,
+      missingOrCompactedRowCount:missing,conflictingRowCount:conflicting,
+      tombstonedRowCount:deleted
+    });
+  }
+
+
   // Frozen-preview origin witness. Only the SHA-256 of a full-origin V1
   // inventory is persisted; legacy bytes and key names stay in V1 storage.
   // An observed difference proves source drift, NOT who wrote it. Equal
@@ -14816,6 +14920,7 @@
     rehearsePreviewAdmittedTaskCompletionBatch,
     rehearsePreviewFenceCheckedTaskCompletionBatch,
     rehearsePreviewCooperativeWriterFreeze,
+    inspectPreviewTaskBatchJournalEvidence,
     inspectPreviewNotesSource,
     rehearsePreviewNotesBundleSeed,
     rehearsePreviewNotesBundleReconcile,
