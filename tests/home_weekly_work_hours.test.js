@@ -278,3 +278,88 @@ test('Work Hours border is removed without changing the shared teal gradient', (
   assert.match(styles, /\.home-work-hours-footer\s*\{[^}]*flex-wrap:\s*wrap/);
   assert.match(styles, /\.home-work-hours-average\s*\{/);
 });
+
+test('Work Hours is hidden only on local Sundays, without changing saved entries', () => {
+  const workEntries = [entry('2026-11-05', 8), entry('2026-11-06', 7.5)];
+  const original = JSON.stringify(workEntries);
+  const renderSource = extractFunction('renderHomeWorkHours');
+  const visibilityChecks = [];
+  const ids = ['homeWorkHoursLogged', 'homeWorkHoursRemaining', 'homeWorkHoursWeek',
+    'homeWorkHoursProgress', 'homeWorkHoursProgressTrack', 'homeWorkHoursStatus', 'homeWorkHoursAverage'];
+  const nodes = new Map(ids.map(id => [id, {
+    textContent: '', style: {}, attributes: {},
+    setAttribute(name, value) { this.attributes[name] = value; }
+  }]));
+  const document = {
+    documentElement: {
+      classList: {
+        toggle(name, enabled) { visibilityChecks.push({ name, enabled }); }
+      }
+    }
+  };
+  const runAt = day => {
+    class FixedDate extends Date {
+      constructor(...args) {
+        if (args.length) super(...args);
+        else super(day + 'T12:00:00');
+      }
+    }
+    const render = new Function('Date', 'document', '$', 'getDerived',
+      'calculateHomeWeeklyWorkHours', 'formatHomeWorkHours',
+      renderSource + '\nreturn renderHomeWorkHours;')(
+        FixedDate, document, id => nodes.get(id),
+        () => ({ workEntries }), context.calculate, context.format);
+    render();
+    return visibilityChecks.at(-1);
+  };
+
+  assert.deepEqual(runAt('2026-11-07'), { name: 'tp-home-sunday', enabled: false },
+    'Saturday stays visible');
+  assert.equal(nodes.get('homeWorkHoursLogged').textContent, '15.5');
+  assert.deepEqual(runAt('2026-11-08'), { name: 'tp-home-sunday', enabled: true },
+    'Sunday is hidden');
+  assert.equal(nodes.get('homeWorkHoursLogged').textContent, '15.5',
+    'Sunday hiding does not stop calculating or counting hours');
+  assert.deepEqual(runAt('2026-11-09'), { name: 'tp-home-sunday', enabled: false },
+    'Monday displays the card again');
+  assert.equal(nodes.get('homeWorkHoursLogged').textContent, '0',
+    'new Monday still starts a new week');
+  assert.equal(JSON.stringify(workEntries), original, 'no Work history was changed');
+});
+
+test('Sunday Work Hours hides before first paint, including restored Home sessions', () => {
+  const headStyle = home.slice(home.indexOf('<style id="tp-prepaint">'),
+    home.indexOf('</style>', home.indexOf('<style id="tp-prepaint">')));
+  assert.ok(headStyle.includes('html.tp-home-sunday #homeWorkHoursSection { display:none !important; }'),
+    'prepaint CSS must hide the panel without removing it from the DOM');
+  const bootScript = home.slice(home.indexOf('<script>', home.indexOf('<style id="tp-prepaint">')),
+    home.indexOf('</script>', home.indexOf('<style id="tp-prepaint">')));
+  assert.ok(bootScript.includes("root.classList.toggle('tp-home-sunday', new Date().getDay() === 0)"),
+    'local Sunday is applied before the saved-session boot branch');
+  assert.ok(home.includes('id="homeWorkHoursSection" class="glass home-work-hours-card mb-6"'));
+});
+
+test('daily local midnight refresh changes Sunday visibility without changing Work storage', () => {
+  const source = extractFunction('startHomeWorkHoursWeekRollover');
+  assert.ok(source.includes('nextDay.setDate(nextDay.getDate() + 1)'));
+  assert.ok(source.includes('nextDay.setHours(0, 0, 1, 0)'));
+  assert.ok(source.includes('renderHomeWorkHours()'));
+  assert.ok(!source.includes('localStorage') && !source.includes('save('));
+
+  for (const day of ['2026-11-07', '2026-11-08', '2026-11-09']) {
+    class FixedDate extends Date {
+      constructor(...args) {
+        if (args.length) super(...args);
+        else super(day + 'T12:00:00');
+      }
+    }
+    const scheduled = [];
+    const schedule = new Function('Date', 'setTimeout', 'renderHomeWorkHours',
+      source + '\nreturn startHomeWorkHoursWeekRollover;')(
+      FixedDate, (fn, delay) => scheduled.push({ fn, delay }), () => {});
+    schedule();
+    assert.equal(scheduled.length, 1);
+    assert.ok(scheduled[0].delay >= 1000 && scheduled[0].delay < 24 * 60 * 60 * 1000,
+      'midnight refresh should occur within the next day');
+  }
+});
