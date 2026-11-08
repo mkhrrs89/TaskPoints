@@ -108,20 +108,23 @@ test('Gold Ledger clears the iPhone status bar and hides only its stray mobile P
 
 test('every Gold Ledger section has its own native, initially open mobile-friendly disclosure', () => {
   const ids = ['goldOverviewSection', 'goldCirculationSection', 'goldManualSection', 'goldTransactionsSection'];
-  const matches = [...page.matchAll(/<details id="(gold\\w+Section)" class="gold-card p-4 sm:p-5 gold-fold" open>/g)];
-  assert.deepEqual(matches.map(row => row[1]), ids, 'exactly four independent Gold sections');
-  assert.equal((page.match(/<\\/details>/g) || []).length, ids.length, 'each section closes independently');
-  assert.equal((page.match(/<summary class="gold-fold-summary">/g) || []).length, ids.length);
-  for (let index = 0; index < ids.length; index++) {
-    const start = page.indexOf('<details id="' + ids[index] + '"');
+  assert.equal(page.split('<details id="gold').length - 1, ids.length, 'four independent Gold sections');
+  assert.equal(page.split('</details>').length - 1, ids.length, 'every section closes independently');
+  assert.equal(page.split('<summary class="gold-fold-summary">').length - 1, ids.length);
+  const appearances = ids.map(id => page.indexOf('<details id="' + id + '"'));
+  assert.ok(appearances.every(position => position >= 0), 'all sections exist');
+  assert.deepEqual([...appearances].sort((a, b) => a - b), appearances, 'sections stay in expected order');
+  ids.forEach(id => {
+    const start = page.indexOf('<details id="' + id + '"');
     const end = page.indexOf('</details>', start);
-    assert.ok(start >= 0 && end > start, ids[index] + ' should have an intact disclosure');
+    assert.ok(start >= 0 && end > start, id + ' has a matching closing tag');
     const section = page.slice(start, end);
-    assert.match(section, /<summary class="gold-fold-summary">/);
-    assert.match(section, /<span class="gold-fold-chevron" aria-hidden="true"><\\/span>/);
-    assert.match(section, /<div class="gold-fold-content">/);
-  }
-  assert.ok(page.includes('.gold-fold > summary:focus-visible'), 'keyboard users need a visible focus ring');
+    assert.ok(section.startsWith('<details id="' + id + '" class="gold-card p-4 sm:p-5 gold-fold" open>'));
+    assert.ok(section.includes('<summary class="gold-fold-summary">'), id + ' has a tappable heading');
+    assert.ok(section.includes('<span class="gold-fold-chevron" aria-hidden="true"></span>'), id + ' has a chevron');
+    assert.ok(section.includes('<div class="gold-fold-content">'), id + ' keeps its contents');
+  });
+  assert.ok(page.includes('.gold-fold > summary:focus-visible'), 'keyboard focus stays visible');
   assert.ok(page.includes('summary::-webkit-details-marker'), 'avoid duplicate Safari disclosure arrows');
 });
 
@@ -149,7 +152,7 @@ test('Gold controls remain inside their independent sections after collapsing is
   for (const id of ['transactionCount', 'playerFilter', 'typeFilter', 'ledgerRows', 'ledgerEmpty']) {
     assert.ok(transactions.includes('id="' + id + '"'), 'transactions keeps ' + id);
   }
-  assert.ok(page.includes('window.addEventListener(\'taskpoints:gold-manual-adjusted\''),
+  assert.ok(page.includes("window.addEventListener('taskpoints:gold-manual-adjusted'"),
     'manual entries still trigger live ledger refresh');
   assert.ok(page.includes("document.getElementById('typeFilter').addEventListener('change', renderLedger)"),
     'existing transaction filters remain active');
