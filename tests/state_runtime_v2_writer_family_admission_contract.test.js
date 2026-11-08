@@ -181,3 +181,70 @@ test('independent old tab modifying V1 during admission prevents an atomic famil
   assert.match(a.localStorage.getItem('taskpoints_today_view_v1'),
     /notesByDay/);
 });
+
+test('nine family claims from different V1 revisions cannot authorize strict freeze',async()=>{
+  const a=await boot();
+  for(const [i,family] of FAMILIES.entries()){
+    if(i===5)a.localStorage.setItem('tp_projects_v1','[{"id":"old-tab-edit"}]');
+    assert.equal((await writer(a,family,'split-'+i)).reason,
+      'preview_writer_recorded');
+  }
+  const audit=await a.api.rehearsePreviewDurableWriterFence('audit');
+  assert.equal(audit.syntheticFamilyInventoryComplete,true);
+  assert.equal(audit.syntheticFamilyOriginConsistent,false);
+  const frozen=await a.api.rehearsePreviewDurableWriterFence('freeze',{
+    expectedEpoch:0,requireAllKnownFamilies:true
+  });
+  assert.equal(frozen.reason,'preview_writer_families_origin_diverged',
+    JSON.stringify(frozen));
+  assert.equal((await a.api.rehearsePreviewDurableWriterFence('read'))
+    .fence.frozen,false);
+});
+
+test('old tab changing source after all nine admissions refuses strict freeze',async()=>{
+  const a=await boot();
+  for(const [i,family] of FAMILIES.entries())
+    assert.equal((await writer(a,family,'same-source-'+i)).reason,
+      'preview_writer_recorded');
+  a.localStorage.setItem('taskpoints_notes_v1','old-tab-edit');
+  const denied=await a.api.rehearsePreviewDurableWriterFence('freeze',{
+    expectedEpoch:0,requireAllKnownFamilies:true
+  });
+  assert.equal(denied.reason,'preview_writer_families_origin_diverged',
+    JSON.stringify(denied));
+  assert.equal(denied.canPromote,false);
+  assert.equal((await a.api.rehearsePreviewDurableWriterFence('read'))
+    .fence.frozen,false);
+});
+
+test('legacy unbound family markers remain inspectable but cannot complete strict roster',async()=>{
+  const a=await boot();
+  assert.equal((await writer(a,FAMILIES[0],'old-format')).reason,
+    'preview_writer_recorded');
+  const db=a.indexedDB._databases.get(DB);
+  const store=db._stores.get('control'),old=store.get('writer_marker:old-format');
+  const legacy={...old};delete legacy.originFingerprint;
+  store.set(old.id,legacy);
+  const audit=await a.api.rehearsePreviewDurableWriterFence('audit');
+  assert.equal(audit.reason,'preview_writer_inventory_consistent',JSON.stringify(audit));
+  assert.equal(audit.previewWriterFamilyCounts[FAMILIES[0]],1);
+  assert.ok(audit.missingObservedFamilies.includes(FAMILIES[0]));
+  assert.equal(audit.syntheticFamilyInventoryComplete,false);
+  const marker=await a.api.rehearsePreviewDurableWriterFence('inspect_marker',{
+    marker:'old-format',writerFamily:FAMILIES[0]});
+  assert.equal(marker.reason,'preview_writer_marker_present');
+  assert.equal(marker.recordedOriginFingerprint,null);
+});
+
+test('corrupted family source digest fails closed instead of admitting another family',async()=>{
+  const a=await boot();
+  assert.equal((await writer(a,FAMILIES[0],'sealed')).reason,
+    'preview_writer_recorded');
+  const store=a.indexedDB._databases.get(DB)._stores.get('control');
+  const marker=store.get('writer_marker:sealed');
+  store.set(marker.id,{...marker,originFingerprint:'invalid'});
+  assert.equal((await a.api.rehearsePreviewDurableWriterFence('audit')).reason,
+    'fence_writer_inventory_inconsistent');
+  assert.equal((await writer(a,FAMILIES[1],'next')).reason,
+    'fence_writer_inventory_inconsistent');
+});

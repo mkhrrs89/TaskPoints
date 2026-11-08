@@ -13254,9 +13254,24 @@
       &&(typeof familyOrigin!=='string'||!familyOrigin.length
         ||familyOrigin.length>10485760))
       return refuse('preview_writer_family_full_origin_token_required');
+    let familyOriginFingerprint=null;
     if(familyOwned&&action==='writer'){
       try{
         if(captureReadOnlyFullStorageInventory()!==familyOrigin)
+          return refuse('preview_writer_family_origin_stale');
+        familyOriginFingerprint=await previewRecoveryFingerprint(familyOrigin);
+        if(captureReadOnlyFullStorageInventory()!==familyOrigin)
+          return refuse('preview_writer_family_origin_stale');
+      }catch(_){return refuse('preview_writer_family_origin_unreadable');}
+    }
+    const strictFamilyFreeze=action==='freeze'
+      &&options?.requireAllKnownFamilies===true;
+    let freezeOrigin=null,freezeOriginFingerprint=null;
+    if(strictFamilyFreeze){
+      try{
+        freezeOrigin=captureReadOnlyFullStorageInventory();
+        freezeOriginFingerprint=await previewRecoveryFingerprint(freezeOrigin);
+        if(captureReadOnlyFullStorageInventory()!==freezeOrigin)
           return refuse('preview_writer_family_origin_stale');
       }catch(_){return refuse('preview_writer_family_origin_unreadable');}
     }
@@ -13597,6 +13612,10 @@
                         || !validPayloadFingerprint(row.payloadFingerprint)
                         || (owns(row,'writerFamily')
                           && !AUTHORITY_CUTOVER_WRITER_FAMILIES.includes(row.writerFamily))
+                        || (owns(row,'originFingerprint')
+                          && (!owns(row,'writerFamily')
+                            || typeof row.originFingerprint!=='string'
+                            || !/^sha256:[a-f0-9]{64}:\\d+$/.test(row.originFingerprint)))
                         || !syntheticMarkerValid(row)
                         || (owns(row,'writerSequence')
                           && (!Number.isSafeInteger(row.writerSequence)
@@ -13744,12 +13763,17 @@
                     AUTHORITY_CUTOVER_WRITER_FAMILIES.map(family=>[
                       family,markers.filter(row=>row.writerFamily===family).length
                     ]));
+                  const eligible=markers.filter(row=>
+                    typeof row.writerFamily==='string'
+                    &&typeof row.originFingerprint==='string');
                   const missingObservedFamilies=AUTHORITY_CUTOVER_WRITER_FAMILIES
-                    .filter(family=>observedFamilyCounts[family]===0);
+                    .filter(family=>!eligible.some(row=>row.writerFamily===family));
+                  const familyFingerprints=new Set(eligible.map(row=>row.originFingerprint));
                   result = refuse('preview_writer_inventory_consistent', {
                     previewWriterFamilyCounts:observedFamilyCounts,
                     missingObservedFamilies,
                     syntheticFamilyInventoryComplete:missingObservedFamilies.length===0,
+                    syntheticFamilyOriginConsistent:familyFingerprints.size===1,
                     readOnlyInventoryAudit: true,
                     historicalPayloadDigestsVerified: true,
                     initialized: !!prior, observedMarkerCount: count,
@@ -13862,6 +13886,7 @@
                           : null,
                         markerPayloadFingerprint: item ? item.payloadFingerprint : null,
                         recordedWriterFamily:item?.writerFamily||null,
+                        recordedOriginFingerprint:item?.originFingerprint||null,
                         previewFamilyClaimMatched:familyOwned&&!!item,
                         syntheticMutationPresent:
                           !!(item?.syntheticMutationJson || item?.syntheticMutationBatchJson),
@@ -13903,8 +13928,11 @@
                 // interleave a marker commit between these two operations.
                 inspectAllWriterMarkers((count,entities,markers) => {
                   if(options?.requireAllKnownFamilies===true){
+                    const eligible=markers.filter(row=>
+                      typeof row.writerFamily==='string'
+                      &&typeof row.originFingerprint==='string');
                     const missing=AUTHORITY_CUTOVER_WRITER_FAMILIES.filter(
-                      family=>!markers.some(row=>row.writerFamily===family));
+                      family=>!eligible.some(row=>row.writerFamily===family));
                     if(missing.length){
                       result=refuse('preview_writer_families_incomplete',{
                         missingObservedFamilies:missing,
@@ -13912,6 +13940,27 @@
                           -missing.length,
                         fence:describe(state)
                       });
+                      return;
+                    }
+                    // All nine claims must refer to ONE V1 snapshot, and
+                    // the real current V1 inventory must still equal it.
+                    // Even then, silent old tabs remain fully unfenced.
+                    const seals=new Set(eligible.map(row=>row.originFingerprint));
+                    if(seals.size!==1||!seals.has(freezeOriginFingerprint)){
+                      result=refuse('preview_writer_families_origin_diverged',{
+                        distinctRecordedOrigins:seals.size,fence:describe(state)
+                      });
+                      return;
+                    }
+                    try{
+                      if(captureReadOnlyFullStorageInventory()!==freezeOrigin){
+                        result=refuse('preview_writer_family_origin_stale',{
+                          fence:describe(state)
+                        });
+                        return;
+                      }
+                    }catch(_){
+                      result=refuse('preview_writer_family_origin_unreadable');
                       return;
                     }
                   }
@@ -13976,6 +14025,13 @@
                     }
                     if((marker.writerFamily||null)!==writerFamily){
                       result=refuse('fence_writer_family_mismatch',{
+                        fence:describe(state)
+                      });
+                      return;
+                    }
+                    if(familyOwned&&marker.originFingerprint!==undefined
+                      &&marker.originFingerprint!==familyOriginFingerprint){
+                      result=refuse('fence_writer_origin_fingerprint_mismatch',{
                         fence:describe(state)
                       });
                       return;
@@ -14058,7 +14114,9 @@
                     store.put({ id: markerId, generation, epoch: state.epoch,
                       writerSequence: next.writersCommitted,
                       payloadFingerprint: effectivePayloadFingerprint,
-                      ...(familyOwned?{writerFamily}:{}),
+                      ...(familyOwned?{
+                        writerFamily,originFingerprint:familyOriginFingerprint
+                      }:{}),
                       ...(hasSyntheticMutation ? {
                         syntheticMutationJson, syntheticEntityKey,
                         syntheticSequence: next.writersCommitted

@@ -1842,3 +1842,22 @@ exclusion, photo/IndexedDB coverage or cross-store atomicity is
 established. Production authority stays V1, all migration and writer
 fencing gates still require explicit approval, and the weighted score
 remains 67/100.
+
+## Source-bound nine-family freeze hardening — November 7
+
+New synthetic family markers store **only** a SHA-256 fingerprint of
+their V1 full-origin source inventory, never the original source bytes.
+The existing source token is still checked synchronously at the atomic
+writer-marker boundary. The optional strict nine-family freeze now
+requires all nine families to have cryptographically fingerprinted
+markers from **the same** V1 snapshot and checks that the current V1
+source still matches it. Mixed revisions, stale source, legacy unbound
+family markers and malformed fingerprints fail closed. Older unbound
+markers remain inspectable and are never deleted or silently upgraded.
+
+The read-only family audit distinguishes observed names from origin-sealed
+claims. This prevents a fake green result when a legacy tab changes V1
+between successive preview admission markers. It does not prevent an
+old tab writing after a successful freeze. Real production writer paths
+remain unmodified and independent IndexedDB/photos remain outside the
+full-origin localStorage comparison. Writer-fencing milestone: 0/11.
