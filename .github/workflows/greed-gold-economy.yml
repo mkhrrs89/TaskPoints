@@ -8,10 +8,12 @@ on:
   pull_request:
     paths:
       - greed_gold_economy.js
+      - gold_manual_adjustment.js
       - gold_theft_top50_notifications.js
       - records_gold_theft_history_fix.js
       - _worker.js
       - gold_ledger.html
+      - tests/gold_manual_adjustment.test.js
       - tests/greed_gold_economy.test.js
       - tests/greed_rating.test.js
       - tests/season_champion_gold_bonus.test.js
@@ -31,6 +33,8 @@ jobs:
           node-version: 22
       - name: Check Greed Gold runtime syntax
         run: node --check greed_gold_economy.js
+      - name: Check Manual Gold adjustment syntax
+        run: node --check gold_manual_adjustment.js
       - name: Check Gold Theft inbox notification syntax
         run: node --check gold_theft_top50_notifications.js
       - name: Check Gold Theft records history syntax
@@ -39,6 +43,7 @@ jobs:
         run: >-
           node --test
           tests/greed_gold_economy.test.js
+          tests/gold_manual_adjustment.test.js
           tests/greed_rating.test.js
           tests/season_champion_gold_bonus.test.js
           tests/inbox_gold_theft_top50_notification.test.js
