@@ -105,3 +105,52 @@ test('Gold Ledger clears the iPhone status bar and hides only its stray mobile P
   assert.ok(page.includes('<script src="toolbar.js" defer></script>'),
     'the existing mobile navigation is retained');
 });
+
+test('every Gold Ledger section has its own native, initially open mobile-friendly disclosure', () => {
+  const ids = ['goldOverviewSection', 'goldCirculationSection', 'goldManualSection', 'goldTransactionsSection'];
+  const matches = [...page.matchAll(/<details id="(gold\\w+Section)" class="gold-card p-4 sm:p-5 gold-fold" open>/g)];
+  assert.deepEqual(matches.map(row => row[1]), ids, 'exactly four independent Gold sections');
+  assert.equal((page.match(/<\\/details>/g) || []).length, ids.length, 'each section closes independently');
+  assert.equal((page.match(/<summary class="gold-fold-summary">/g) || []).length, ids.length);
+  for (let index = 0; index < ids.length; index++) {
+    const start = page.indexOf('<details id="' + ids[index] + '"');
+    const end = page.indexOf('</details>', start);
+    assert.ok(start >= 0 && end > start, ids[index] + ' should have an intact disclosure');
+    const section = page.slice(start, end);
+    assert.match(section, /<summary class="gold-fold-summary">/);
+    assert.match(section, /<span class="gold-fold-chevron" aria-hidden="true"><\\/span>/);
+    assert.match(section, /<div class="gold-fold-content">/);
+  }
+  assert.ok(page.includes('.gold-fold > summary:focus-visible'), 'keyboard users need a visible focus ring');
+  assert.ok(page.includes('summary::-webkit-details-marker'), 'avoid duplicate Safari disclosure arrows');
+});
+
+test('Gold controls remain inside their independent sections after collapsing is added', () => {
+  const section = id => {
+    const start = page.indexOf('<details id="' + id + '"');
+    return page.slice(start, page.indexOf('</details>', start));
+  };
+  const overview = section('goldOverviewSection');
+  const circulation = section('goldCirculationSection');
+  const manual = section('goldManualSection');
+  const transactions = section('goldTransactionsSection');
+  for (const id of ['ledgerLaunchMeta', 'goldLedgerHistoryCheck']) {
+    assert.ok(overview.includes('id="' + id + '"'), 'overview keeps ' + id);
+  }
+  for (const id of ['goldCirculationTotal', 'goldCirculationContext', 'goldBalances']) {
+    assert.ok(circulation.includes('id="' + id + '"'), 'circulation keeps ' + id);
+  }
+  assert.ok(circulation.indexOf('goldCirculationTotal') < circulation.indexOf('</summary>'),
+    'circulating Gold remains visible even with balances folded');
+  for (const id of ['goldManualForm', 'goldManualPlayer', 'goldManualMode', 'goldManualAmount',
+    'goldManualNote', 'goldManualPreview', 'goldManualSubmit', 'goldManualStatus']) {
+    assert.ok(manual.includes('id="' + id + '"'), 'manual adjustment keeps ' + id);
+  }
+  for (const id of ['transactionCount', 'playerFilter', 'typeFilter', 'ledgerRows', 'ledgerEmpty']) {
+    assert.ok(transactions.includes('id="' + id + '"'), 'transactions keeps ' + id);
+  }
+  assert.ok(page.includes('window.addEventListener(\'taskpoints:gold-manual-adjusted\''),
+    'manual entries still trigger live ledger refresh');
+  assert.ok(page.includes("document.getElementById('typeFilter').addEventListener('change', renderLedger)"),
+    'existing transaction filters remain active');
+});
