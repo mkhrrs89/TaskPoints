@@ -66,6 +66,12 @@
         0 0 12px rgba(251, 146, 60, 0.14);
     }
 
+    /* Visually narrow only three-digit ranks; preserve all row dimensions. */
+    .ranking-index--three-digit {
+      transform: scaleX(0.78);
+      transform-origin: center center;
+    }
+
     .ranking-delta {
       display:flex;
       flex-direction:column;
@@ -636,7 +642,7 @@ function rankingStatsHtml(player, row, state) {
       return `
         <article class="ranking-row">
           <div class="ranking-rank">
-            <div class="ranking-index">${rank}</div>
+            <div class="ranking-index${rank >= 100 ? ' ranking-index--three-digit' : ''}">${rank}</div>
             ${renderRankDelta(delta)}
           </div>
           ${photo}
