@@ -4642,6 +4642,94 @@ try {
       existingV1JournalPreserved:true,noCutover:true};
   });
 
+  await run('cooperative preview Task and freeze locks serialize across actual browser tabs',async context=>{
+    const first=await open(context);
+    const second=await open(context);
+    const supported=await first.evaluate(()=>typeof navigator.locks?.request==='function');
+    if(!supported){
+      const denied=await second.evaluate(async()=>
+        window.TaskPointsStateRuntimeV2.rehearsePreviewCooperativeWriterFreeze({
+          expectedEpoch:0}));
+      assert.equal(denied.reason,'lock_manager_unavailable');
+      return {nativeWebLocksUnavailableFailClosed:true};
+    }
+    await first.evaluate(()=>{
+      window.__coopV2Held=false;
+      window.__coopV2Holding=navigator.locks.request(
+        'taskpoints_v2_preview_task_freeze_cooperative_v1',
+        {mode:'exclusive'},async()=>{
+          window.__coopV2Held=true;
+          await new Promise(resolve=>{window.__coopV2Release=resolve;});
+          window.__coopV2Held=false;
+        });
+    });
+    await first.waitForFunction(()=>window.__coopV2Held===true);
+    const denied=await second.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const journalBefore=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const task=await api.rehearsePreviewFenceCheckedTaskCompletionBatch([{
+        id:'task-refused-under-shared-lock',taskId:'lock-test',points:1
+      }],token);
+      const freeze=await api.rehearsePreviewCooperativeWriterFreeze({expectedEpoch:0});
+      return {task,freeze,journalBefore,
+        journalAfter:localStorage.getItem('taskpoints_pending_task_mutations_v1')};
+    });
+    assert.equal(denied.task.reason,'cooperative_task_lock_held_elsewhere',
+      JSON.stringify(denied.task));
+    assert.equal(denied.freeze.reason,'cooperative_freeze_lock_held_elsewhere');
+    assert.equal(denied.task.committed,false);
+    assert.equal(denied.journalAfter,denied.journalBefore);
+    await first.evaluate(async()=>{
+      window.__coopV2Release();
+      await window.__coopV2Holding;
+    });
+    const wrote=await second.evaluate(async()=>{
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      return window.TaskPointsStateRuntimeV2.rehearsePreviewFenceCheckedTaskCompletionBatch([{
+        id:'task-admitted-after-cooperative-unlock',taskId:'lock-test',
+        title:'Native browser lock Task batch',points:1,
+        completedAtISO:'2026-11-08T13:00:00.000Z'
+      }],token);
+    });
+    assert.equal(wrote.reason,'preview_task_batch_admitted',JSON.stringify(wrote));
+    assert.equal(wrote.confirmedDurable,true);
+    assert.equal(wrote.cooperativeTaskFreezeLockUsed,true);
+    const frozen=await first.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewCooperativeWriterFreeze({
+        expectedEpoch:0}));
+    assert.equal(frozen.reason,'preview_fence_frozen',JSON.stringify(frozen));
+    assert.equal(frozen.cooperativeTaskFreezeLockUsed,true);
+    const blocked=await second.evaluate(async()=>{
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const before=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const result=await window.TaskPointsStateRuntimeV2
+        .rehearsePreviewFenceCheckedTaskCompletionBatch([{
+          id:'task-refused-after-cooperative-freeze',taskId:'lock-test',points:3
+        }],token);
+      return {result,before,
+        after:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(blocked.result.reason,'preview_fence_frozen');
+    assert.equal(blocked.result.committed,false);
+    assert.equal(blocked.before,blocked.after);
+    assert.equal(blocked.authority,'legacy_only');
+    const oldTab=await context.newPage();
+    await oldTab.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    await oldTab.evaluate(()=>localStorage.setItem('tp_projects_v1',
+      'old-version-tab-bypasses-cooperative-lock'));
+    await requireCrossTabStorageValue(second,'tp_projects_v1',
+      'old-version-tab-bypasses-cooperative-lock');
+    return {crossTabWebLockMutualExclusion:true,
+      authorizedPreviewTaskJournalWrite:true,cooperativeFreezeBlocksTask:true,
+      nonCooperatingOldTabStillWrites:true,noCutover:true};
+  });
+
   await run('nine-family preview admission rejects incomplete freeze and preserves legacy old-tab writes',async context=>{
     const page=await open(context);
     const familyNames=["scoring_core_snapshot_and_habit_journal","home_direct_keys_and_snapshot_saves","game_players_schedules_and_preferences","today_snapshot_and_view_state","settings_import_reset_and_direct_storage","notes_content_dirty_and_authority_flags","emergency_recovery_and_restore","task_journal_and_idle_compaction","work_entry_fast_path_and_editor_fallback"];
