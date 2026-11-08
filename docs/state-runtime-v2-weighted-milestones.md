@@ -1969,3 +1969,33 @@ suspended legacy tab can still write regardless of this fence. This is
 proof of an initial integration seam, **not** the production-wide gate.
 V1 remains authoritative; no feature or protection is removed; overall
 weighted readiness remains **67/100** until a complete gate passes.
+
+
+## Cooperative preview Task/freeze Web Lock — November 8
+
+The explicitly invoked, preview-host-only V2 Task journal bridge now holds
+one **shared native Web Lock** from its initial synthetic writer-fence audit
+through the existing real V1 Task journal adapter and final fence audit.
+A new opt-in `rehearsePreviewCooperativeWriterFreeze()` takes **the same
+lock** before calling the existing isolated preview freeze. Participating
+freeze and Task bridge calls cannot overlap: with `ifAvailable:true`, a
+competing caller is refused before its operation starts instead of waiting
+indefinitely. Existing V1 Task journal durability, exact readback, full-origin
+checks, its *separate* inner journal lock, and source recovery remain intact.
+
+Node regressions check both ordering directions: Task writing first refuses
+a cooperative freeze; a cooperative freeze holding the lock refuses a Task
+write; subsequent frozen Task writes remain blocked. Missing Web Locks
+fails closed. Real Chromium/WebKit browser tests acquire the lock in one tab,
+verify the other tab cannot write or freeze, release it, commit a real Task
+journal completion, then cooperatively freeze and verify further guarded
+Task writes are refused. The browser tests also prove an older V1 tab can
+still write a separate Projects key regardless.
+
+**Scope:** This protects only the two *newly cooperating preview APIs*.
+The older uncoordinated preview freeze and real legacy V1 writers do not
+use the shared lock, so preexisting race/uncertainty checks remain necessary.
+This does not enforce cross-store atomicity, stop suspended/old tabs,
+cover all nine production writer families, or authorize a V2 cutover.
+Main is not changed. The writer-fencing gate remains **0/11** and overall
+weighted readiness stays **67/100**.
