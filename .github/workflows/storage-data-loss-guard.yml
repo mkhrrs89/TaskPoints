@@ -7,6 +7,7 @@ on:
       - 'index.html'
       - 'mobile_boot_gate.js'
       - 'tests/home_worker_route_contract.test.js'
+      - 'tests/home_weekly_work_hours.test.js'
       - 'tests/mobile_boot_recovery_notice.test.js'
       - 'tests/shared_read_cache_clone_failure.test.js'
       - 'tests/load_state_decode_fail_closed.test.js'
@@ -79,6 +80,9 @@ jobs:
           node --test tests/home_worker_route_contract.test.js
           node --test tests/mobile_boot_recovery_notice.test.js
           node --test tests/shared_read_cache_clone_failure.test.js
+
+      - name: Verify Sunday Work Hours visibility and Monday restoration
+        run: node --test tests/home_weekly_work_hours.test.js
 
       - name: Run full TaskPoints suite
         run: npm test
