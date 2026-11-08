@@ -14187,6 +14187,23 @@
       // proof that the legacy source is still identical when we acknowledge.
       // Refuse a clean success but retain the durable marker for read-only
       // recovery inspection. Never undo or rewrite either storage system.
+      // Strict preview freeze can race a real old-tab save after the
+      // synthetic IndexedDB fence commits. Treat that outcome as uncertain,
+      // not as evidence of an immutable V1 origin or production exclusion.
+      // The fence may already be frozen; never attempt to undo it here.
+      if(strictFamilyFreeze&&attemptResult.reason==='preview_fence_frozen'){
+        const uncertain=reason=>refuse(reason,{
+          fenceMayAlreadyBeFrozen:true,
+          inspectFenceBeforeRetry:true,
+          fence:attemptResult.fence
+        });
+        try{
+          if(captureReadOnlyFullStorageInventory()!==freezeOrigin)
+            return uncertain('preview_writer_family_freeze_origin_changed_after_transaction');
+        }catch(_){
+          return uncertain('preview_writer_family_freeze_origin_unreadable_after_transaction');
+        }
+      }
       if(familyOwned&&action==='writer'
         &&(attemptResult.reason==='preview_writer_recorded'
           ||attemptResult.reason==='preview_writer_replayed')){
