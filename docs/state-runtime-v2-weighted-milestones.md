@@ -1898,3 +1898,18 @@ at the exact fake-IDB commit boundary and independently reopen the saved
 marker. This is a point-in-time drift check, **not** a fix for an old tab
 writing after the final check. Main remains unchanged, V1 authoritative,
 writer exclusion milestone 0/11 and overall completion 67/100.
+
+
+## Strict preview freeze post-commit race — November 8
+
+The optional nine-family strict preview freeze now also rereads the exact V1
+origin **after** the IndexedDB freeze transaction completes. An old tab can
+commit new V1 data between the atomic fence update and its acknowledgment.
+If that happens (or the source becomes unreadable), the API returns an
+**uncertain outcome**, directs the caller to inspect the durable fence, and
+does not claim the freeze did not commit. No rollback, unfreeze, or V1
+restoration is attempted. Node regressions inject both cases at the exact
+fake-IDB commit boundary and prove the persisted fence and newer V1 data
+remain intact. A successful point-in-time check still cannot stop an older
+uncooperative V1 tab from writing afterward. Production writers are still
+unfenced, V1 remains primary, and weighted readiness remains **67/100**.
