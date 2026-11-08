@@ -450,6 +450,134 @@ test('effective Task evidence rejects old-tab source drift and never retries',as
     'old-tab-changed-project');
 });
 
+test('cooperative preview Projects writer saves real V1 data while preserving unknown fields',async()=>{
+  const a=await bootRealTaskAdapter();
+  const original=JSON.stringify([{id:'p1',title:'Existing',
+    description:'keep this',subtasks:[{id:'s1',done:false}]}]);
+  a.localStorage.setItem('tp_projects_v1',original);
+  const updated=JSON.stringify([{id:'p1',title:'Updated',description:'keep this',
+    extra:{arbitrary:'preserved'},subtasks:[{id:'s1',done:true}]},
+    {id:'p2',title:'New',subtasks:[]}]);
+  const before=a.localStorage.getItem(V1);
+  const result=await a.api.rehearsePreviewCooperativeProjectsSave(
+    updated,a.token());
+  assert.equal(result.reason,'preview_projects_saved',JSON.stringify(result));
+  assert.equal(result.projectsSaved,true);
+  assert.equal(result.confirmedDurable,true);
+  assert.equal(result.committed,true);
+  assert.equal(result.productionWritersFenced,false);
+  assert.equal(result.cooperativeTaskFreezeLockUsed,true);
+  assert.equal(a.localStorage.getItem('tp_projects_v1'),updated);
+  assert.equal(a.localStorage.getItem(V1),before);
+  assert.equal(a.localStorage.getItem(TASK_JOURNAL),null);
+  assert.equal(a.commits,0);
+});
+
+test('cooperative Projects writer refuses stale origin, invalid sources and invalid payloads',async()=>{
+  const a=await bootRealTaskAdapter();
+  const payload=JSON.stringify([{id:'keep',title:'Projects'}]);
+  const originalToken=a.token();
+  a.localStorage.setItem('taskpoints_notes_v1','old-tab-changed-notes');
+  const denied=await a.api.rehearsePreviewCooperativeProjectsSave(
+    payload,originalToken);
+  assert.equal(denied.reason,'full_origin_changed',JSON.stringify(denied));
+  assert.equal(a.localStorage.getItem('tp_projects_v1'),null);
+  assert.equal(a.localStorage.getItem('taskpoints_notes_v1'),
+    'old-tab-changed-notes');
+  a.localStorage.setItem('tp_projects_v1','corrupt[');
+  const invalid=await a.api.rehearsePreviewCooperativeProjectsSave(
+    payload,a.token());
+  assert.equal(invalid.reason,'projects_existing_source_invalid');
+  assert.equal(a.localStorage.getItem('tp_projects_v1'),'corrupt[');
+  for(const bad of ['[{"id":"a"},{"id":"a"}]',
+    '[{"id":"a","subtasks":[{"id":"x"},{"id":"x"}]}]',
+    '[{"id":"a"}] ', '{"id":"not-an-array"}']){
+    const fail=await a.api.rehearsePreviewCooperativeProjectsSave(
+      bad,a.token());
+    assert.equal(fail.projectsSaved,false);
+    assert.equal(fail.confirmedDurable,false);
+    assert.equal(a.localStorage.getItem('tp_projects_v1'),'corrupt[');
+  }
+});
+
+test('cooperative Projects writer cannot write behind a frozen preview fence',async()=>{
+  const a=await bootRealTaskAdapter();
+  const frozen=await a.api.rehearsePreviewCooperativeWriterFreeze({
+    expectedEpoch:0});
+  assert.equal(frozen.reason,'preview_fence_frozen');
+  const result=await a.api.rehearsePreviewCooperativeProjectsSave(
+    JSON.stringify([{id:'frozen-project'}]),a.token());
+  assert.equal(result.reason,'preview_fence_frozen',JSON.stringify(result));
+  assert.equal(result.projectsSaved,false);
+  assert.equal(result.committed,false);
+  assert.equal(a.localStorage.getItem('tp_projects_v1'),null);
+});
+
+test('shared lock excludes Projects save while cooperative Task adapter is active',async()=>{
+  let a,competing=null,once=false;
+  const navigator={locks:sharedFakeWebLocks(async name=>{
+    if(name===TASK_ATOMIC_LOCK&&!once){
+      once=true;
+      competing=await a.api.rehearsePreviewCooperativeProjectsSave(
+        JSON.stringify([{id:'cross-writer-project'}]),a.token());
+    }
+  })};
+  a=await bootRealTaskAdapter({navigator});
+  const task=await a.api.rehearsePreviewFenceCheckedTaskCompletionBatch(
+    [{id:'task-holds-coop-lock',taskId:'t1',points:2}],a.token());
+  assert.equal(task.reason,'preview_task_batch_admitted',JSON.stringify(task));
+  assert.equal(competing.reason,'cooperative_projects_lock_held_elsewhere');
+  assert.equal(a.localStorage.getItem('tp_projects_v1'),null);
+  const saved=await a.api.rehearsePreviewCooperativeProjectsSave(
+    JSON.stringify([{id:'cross-writer-project'}]),a.token());
+  assert.equal(saved.reason,'preview_projects_saved',JSON.stringify(saved));
+  assert.equal(a.localStorage.getItem(TASK_JOURNAL).includes('task-holds-coop-lock'),
+    true);
+});
+
+test('Projects write racing a noncooperating old tab reports uncertainty without repair',async()=>{
+  const a=await bootRealTaskAdapter();
+  const original=a.localStorage.setItem.bind(a.localStorage);
+  let injected=false;
+  a.localStorage.setItem=(key,value)=>{
+    original(key,value);
+    if(key==='tp_projects_v1'&&!injected){
+      injected=true;
+      original('taskpoints_notes_v1','older-tab-keeps-new-notes');
+    }
+  };
+  const result=await a.api.rehearsePreviewCooperativeProjectsSave(
+    JSON.stringify([{id:'projects-race'}]),a.token());
+  assert.equal(injected,true);
+  assert.equal(result.reason,'other_origin_changed_during_projects_write',
+    JSON.stringify(result));
+  assert.equal(result.writeOutcomeUncertain,true);
+  assert.equal(result.confirmedDurable,false);
+  assert.equal(result.committed,true);
+  assert.equal(result.canPromote,false);
+  assert.equal(a.localStorage.getItem('tp_projects_v1'),
+    '[{"id":"projects-race"}]');
+  assert.equal(a.localStorage.getItem('taskpoints_notes_v1'),
+    'older-tab-keeps-new-notes');
+});
+
+test('Projects write failure can leave durable data and is never falsely acknowledged',async()=>{
+  const a=await bootRealTaskAdapter();
+  const original=a.localStorage.setItem.bind(a.localStorage);
+  a.localStorage.setItem=(key,value)=>{
+    original(key,value);
+    if(key==='tp_projects_v1')throw Error('postwrite-error');
+  };
+  const result=await a.api.rehearsePreviewCooperativeProjectsSave(
+    JSON.stringify([{id:'written-then-error'}]),a.token());
+  assert.equal(result.reason,'projects_write_failed');
+  assert.equal(result.writeOutcomeUncertain,true);
+  assert.equal(result.projectsSaved,false);
+  assert.equal(result.confirmedDurable,false);
+  assert.equal(a.localStorage.getItem('tp_projects_v1'),
+    '[{"id":"written-then-error"}]');
+});
+
 test('strict synthetic freeze requires all nine historical writer families',async()=>{
   const a=await boot();
   const before=await a.api.rehearsePreviewDurableWriterFence('freeze',{
