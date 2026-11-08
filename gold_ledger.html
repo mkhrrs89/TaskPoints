@@ -19,6 +19,10 @@
     .gold-balance-card { padding:12px 14px; border:1px solid rgba(148,163,184,.14); border-radius:14px; background:rgba(255,255,255,.025); min-width:0; }
     .gold-balance-name { font-size:12px; color:#cbd5e1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .gold-balance-value { margin-top:3px; font-size:23px; line-height:1; font-weight:900; color:#fb923c; font-variant-numeric:tabular-nums; }
+    .gold-circulation { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px 20px; border-bottom:1px solid rgba(148,163,184,.18); margin-bottom:16px; padding:2px 0 16px; }
+    .gold-circulation-label { color:#e2e8f0; font-weight:800; font-size:15px; }
+    .gold-circulation-value { color:#fb923c; font-size:clamp(28px,6vw,38px); line-height:1.15; font-weight:900; letter-spacing:-.04em; font-variant-numeric:tabular-nums; }
+    .gold-circulation-note { font-size:12px; color:#94a3b8; margin-top:4px; }
     .gold-controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
     .gold-select { min-height:38px; padding:7px 10px; border-radius:10px; border:1px solid rgba(148,163,184,.3); background:#111827; color:#f8fafc; }
     .gold-table-wrap { overflow-x:auto; }
@@ -117,6 +121,13 @@
           <div id="ledgerLaunchMeta" class="text-xs gold-muted text-right"></div>
         </div>
         <div id="goldLedgerHistoryCheck" class="gold-ledger-check hidden" role="status" aria-live="polite"></div>
+        <div class="gold-circulation" aria-live="polite" aria-atomic="true">
+          <div>
+            <div class="gold-circulation-label">Gold in Circulation</div>
+            <div id="goldCirculationContext" class="gold-circulation-note">Combined Gold held by every player, including inactive and retired players.</div>
+          </div>
+          <div class="gold-circulation-value"><span id="goldCirculationTotal">—</span> <span class="text-sm gold-muted">Gold</span></div>
+        </div>
         <div id="goldBalances" class="gold-balance-grid"></div>
       </section>
 
@@ -188,6 +199,7 @@
 
   <script src="scoring_core.js"></script>
   <script src="gold_ledger_integrity.js?v=20261105-gold-check-1"></script>
+  <script src="gold_circulation_total.js?v=20261108-gold-in-circulation-1"></script>
   <script>
   (function () {
     const core = window.TaskPointsCore || {};
@@ -293,9 +305,30 @@
       return '';
     }
 
+    function renderGoldCirculation() {
+      const result = window.TaskPointsGoldCirculation?.calculate?.(state);
+      const total = document.getElementById('goldCirculationTotal');
+      const context = document.getElementById('goldCirculationContext');
+      if (!result?.ok) {
+        total.textContent = '—';
+        context.textContent = result?.reason || 'Gold total unavailable until saved data can be read.';
+        return;
+      }
+      total.textContent = result.total.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+      context.textContent = 'Across ' + result.walletCount + ' player wallet' + (result.walletCount === 1 ? '' : 's')
+        + ', including inactive and retired players.';
+    }
+
     function renderBalances() {
+      renderGoldCirculation();
       const ids = new Set(['YOU']);
       players.forEach((player, id) => { if (id) ids.add(id); });
+      // Keep wallets belonging to former or no-longer-rostered players visible;
+      // their Gold remains part of the total in circulation.
+      (Array.isArray(state.goldLedger) ? state.goldLedger : []).forEach(row => {
+        const id = String(row?.playerId || '').trim();
+        if (id) ids.add(id);
+      });
       const rows = [...ids].map((id) => ({ id, name: playerName(id), gold: core.getGoldBalance ? core.getGoldBalance(state, id) : 0 }))
         .sort((a, b) => b.gold - a.gold || a.name.localeCompare(b.name));
       document.getElementById('goldBalances').innerHTML = rows.map((row) => `
