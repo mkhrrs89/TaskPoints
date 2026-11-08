@@ -4598,6 +4598,75 @@ try {
       authorityRemainsLegacy:true};
   });
 
+
+  await run('nine-family preview admission rejects incomplete freeze and preserves legacy old-tab writes',async context=>{
+    const page=await open(context);
+    const familyNames=["scoring_core_snapshot_and_habit_journal","home_direct_keys_and_snapshot_saves","game_players_schedules_and_preferences","today_snapshot_and_view_state","settings_import_reset_and_direct_storage","notes_content_dirty_and_authority_flags","emergency_recovery_and_restore","task_journal_and_idle_compaction","work_entry_fast_path_and_editor_fallback"];
+    const preview=await page.evaluate(async names=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(key=>[key,localStorage.getItem(key)]));
+      const incomplete=await api.rehearsePreviewDurableWriterFence('freeze',{
+        expectedEpoch:0,requireAllKnownFamilies:true
+      });
+      const recorded=[];
+      for(const [i,writerFamily] of names.entries())
+        recorded.push(await api.rehearsePreviewDurableWriterFence('writer',{
+          expectedEpoch:0,marker:'browser-family-'+i,writerFamily,
+          fullOriginToken:token()
+        }));
+      const audit=await api.rehearsePreviewDurableWriterFence('audit');
+      const frozen=await api.rehearsePreviewDurableWriterFence('freeze',{
+        expectedEpoch:0,requireAllKnownFamilies:true
+      });
+      const after=await api.rehearsePreviewDurableWriterFence('writer',{
+        expectedEpoch:1,marker:'blocked-family',writerFamily:names[0],
+        fullOriginToken:token()
+      });
+      return {incomplete,recorded,audit,frozen,after};
+    },familyNames);
+    assert.equal(preview.incomplete.reason,'preview_writer_families_incomplete',
+      JSON.stringify(preview.incomplete));
+    assert.equal(preview.recorded.length,9);
+    assert.ok(preview.recorded.every(x=>x.reason==='preview_writer_recorded'),
+      JSON.stringify(preview.recorded));
+    assert.equal(preview.audit.syntheticFamilyInventoryComplete,true);
+    assert.equal(preview.audit.productionWritersFenced,false);
+    assert.equal(preview.audit.allLegacyWritersKnown,false);
+    assert.equal(preview.frozen.reason,'preview_fence_frozen',
+      JSON.stringify(preview.frozen));
+    assert.equal(preview.after.reason,'fence_frozen',JSON.stringify(preview.after));
+    const legacy=await context.newPage();
+    await legacy.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const changed=await legacy.evaluate(()=>{
+      const state=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      state.tasks.push({id:'unfenced-older-version-after-nine-families',
+        title:'legacy writer remains active'});
+      const raw=JSON.stringify(state);
+      localStorage.setItem('taskpoints_v1',raw);
+      return raw;
+    });
+    await requireCrossTabStorageValue(page,'taskpoints_v1',changed);
+    const final=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      return {fence:await api.rehearsePreviewDurableWriterFence('read'),
+        audit:await api.rehearsePreviewDurableWriterFence('audit'),
+        authority:api.getStatus().readAuthority,
+        oldTabTask:JSON.parse(localStorage.getItem('taskpoints_v1')).tasks
+          .some(t=>t.id==='unfenced-older-version-after-nine-families')};
+    });
+    assert.equal(final.fence.fence.frozen,true);
+    assert.equal(final.audit.syntheticFamilyInventoryComplete,true);
+    assert.equal(final.audit.productionWritersFenced,false);
+    assert.equal(final.authority,'legacy_only');
+    assert.equal(final.oldTabTask,true);
+    return {allNineSimulatedFamiliesObserved:true,
+      incompleteStrictFreezeRefused:true,participantBlockedAfterFreeze:true,
+      oldVersionWriterStillActive:true,noCutover:true};
+  });
+
   await run('preview IDB freeze cannot fence a nonparticipating legacy V1 snapshot writer',async context=>{
     const observer=await open(context);
     const frozen=await observer.evaluate(async()=>{

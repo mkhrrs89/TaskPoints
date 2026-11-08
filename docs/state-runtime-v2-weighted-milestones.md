@@ -1813,3 +1813,32 @@ identify which tab wrote, block production writes, back up content
 off-device or authorize any promotion. Existing V1 writers and exports
 remain unchanged. The 11-point production cross-tab admission milestone
 still earns **0**, overall **67/100**.
+
+## Nine-family synthetic writer admission matrix — November 7
+
+The experimental V2 IndexedDB writer fence now accepts an optional
+`writerFamily` claim for one of the nine existing audited V1 save
+families. These are **synthetic markers**, not real production hooks.
+The caller must also provide the exact current full-origin V1 inventory;
+the fence checks it before its transaction and synchronously again just
+before its atomic marker write. It never persists or returns the V1 token.
+Tampered family tags and replays with a different family fail closed.
+
+A new optional `requireAllKnownFamilies:true` **preview-only** freeze
+cannot complete until all nine families have durable markers in the
+same IndexedDB control ledger. Existing unqualified freeze and writer
+rehearsals remain unchanged. The read-only inventory audit now reports
+observed counts and missing synthetic family representatives without
+pretending they prove live write protection.
+
+Node and Chromium/WebKit tests cover incomplete and complete family
+rosters, stolen marker identities, malformed family tags, cross-tab stale
+origin tokens, replay identity, and the crucial negative proof: a real
+older page with no V2 runtime **can still save V1 after the synthetic
+freeze**, even with every family represented.
+
+**No production V1 writer is intercepted.** No background old-tab
+exclusion, photo/IndexedDB coverage or cross-store atomicity is
+established. Production authority stays V1, all migration and writer
+fencing gates still require explicit approval, and the weighted score
+remains 67/100.

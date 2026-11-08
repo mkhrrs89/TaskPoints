@@ -13240,6 +13240,26 @@
     // The optional caller-supplied SHA-256 fingerprint binds a *synthetic*
     // writer marker to its claimed payload. This preview does not hash or
     // persist a real TaskPoints mutation, and cannot authorize production.
+    // Optional synthetic writer-family admission, never enabled by a real V1
+    // save path. Each claim names one of the nine audited legacy writer
+    // families and carries an exact in-memory full-origin V1 inventory.
+    // The inventory is never persisted to the marker database.
+    const familyOwned=(action==='writer'||action==='inspect_marker')
+      && Object.prototype.hasOwnProperty.call(options||{},'writerFamily');
+    const writerFamily=familyOwned ? options.writerFamily : null;
+    if(familyOwned&&!AUTHORITY_CUTOVER_WRITER_FAMILIES.includes(writerFamily))
+      return refuse('preview_writer_family_invalid');
+    const familyOrigin=familyOwned&&action==='writer' ? options.fullOriginToken : null;
+    if(familyOwned&&action==='writer'
+      &&(typeof familyOrigin!=='string'||!familyOrigin.length
+        ||familyOrigin.length>10485760))
+      return refuse('preview_writer_family_full_origin_token_required');
+    if(familyOwned&&action==='writer'){
+      try{
+        if(captureReadOnlyFullStorageInventory()!==familyOrigin)
+          return refuse('preview_writer_family_origin_stale');
+      }catch(_){return refuse('preview_writer_family_origin_unreadable');}
+    }
     const hasPayloadFingerprint = (action === 'writer' || action === 'inspect_marker')
       && Object.prototype.hasOwnProperty.call(options || {}, 'payloadFingerprint');
     const payloadFingerprint = hasPayloadFingerprint ? options.payloadFingerprint : null;
@@ -13575,6 +13595,8 @@
                         || !Number.isSafeInteger(row.epoch)
                         || row.epoch < 0 || row.epoch > state.epoch
                         || !validPayloadFingerprint(row.payloadFingerprint)
+                        || (owns(row,'writerFamily')
+                          && !AUTHORITY_CUTOVER_WRITER_FAMILIES.includes(row.writerFamily))
                         || !syntheticMarkerValid(row)
                         || (owns(row,'writerSequence')
                           && (!Number.isSafeInteger(row.writerSequence)
@@ -13701,7 +13723,7 @@
                       });
                       return;
                     }
-                    callback(markers.length,entityByKey);
+                    callback(markers.length,entityByKey,markers);
                   } catch (_) {
                     result = refuse('fence_writer_inventory_unreadable', {
                       fence: describe(state)
@@ -13717,8 +13739,17 @@
                 return;
               }
               if (action === 'audit') {
-                inspectAllWriterMarkers((count,entities) => {
+                inspectAllWriterMarkers((count,entities,markers) => {
+                  const observedFamilyCounts=Object.fromEntries(
+                    AUTHORITY_CUTOVER_WRITER_FAMILIES.map(family=>[
+                      family,markers.filter(row=>row.writerFamily===family).length
+                    ]));
+                  const missingObservedFamilies=AUTHORITY_CUTOVER_WRITER_FAMILIES
+                    .filter(family=>observedFamilyCounts[family]===0);
                   result = refuse('preview_writer_inventory_consistent', {
+                    previewWriterFamilyCounts:observedFamilyCounts,
+                    missingObservedFamilies,
+                    syntheticFamilyInventoryComplete:missingObservedFamilies.length===0,
                     readOnlyInventoryAudit: true,
                     historicalPayloadDigestsVerified: true,
                     initialized: !!prior, observedMarkerCount: count,
@@ -13780,6 +13811,13 @@
                       });
                       return;
                     }
+                    if(item&&familyOwned
+                      &&(item.writerFamily||null)!==writerFamily){
+                      result=refuse('fence_writer_family_mismatch',{
+                        fence:describe(state)
+                      });
+                      return;
+                    }
                     if (item && hasAnySynthetic
                       && ((item.syntheticMutationJson || null) !== syntheticMutationJson
                         || (item.syntheticMutationBatchJson || null) !== syntheticBatchJson)) {
@@ -13823,6 +13861,8 @@
                           ? (item.writerSequence ?? item.syntheticSequence ?? null)
                           : null,
                         markerPayloadFingerprint: item ? item.payloadFingerprint : null,
+                        recordedWriterFamily:item?.writerFamily||null,
+                        previewFamilyClaimMatched:familyOwned&&!!item,
                         syntheticMutationPresent:
                           !!(item?.syntheticMutationJson || item?.syntheticMutationBatchJson),
                         syntheticMutationVerified: hasAnySynthetic && !!item,
@@ -13861,7 +13901,20 @@
                 // ledger. The scan and frozen-control put share one IDB
                 // readwrite transaction, so cooperating writers cannot
                 // interleave a marker commit between these two operations.
-                inspectAllWriterMarkers(() => {
+                inspectAllWriterMarkers((count,entities,markers) => {
+                  if(options?.requireAllKnownFamilies===true){
+                    const missing=AUTHORITY_CUTOVER_WRITER_FAMILIES.filter(
+                      family=>!markers.some(row=>row.writerFamily===family));
+                    if(missing.length){
+                      result=refuse('preview_writer_families_incomplete',{
+                        missingObservedFamilies:missing,
+                        observedFamilyCount:AUTHORITY_CUTOVER_WRITER_FAMILIES.length
+                          -missing.length,
+                        fence:describe(state)
+                      });
+                      return;
+                    }
+                  }
                   const next = { ...state, frozen: true, epoch: state.epoch + 1 };
                   store.put(next);
                   result = refuse('preview_fence_frozen', {
@@ -13893,6 +13946,21 @@
                     result = refuse('preview_or_generation_changed_in_transaction');
                     return;
                   }
+                  // This is an observational admission check; an old tab
+                  // that ignores it may still write an instant later.
+                  if(familyOwned){
+                    try{
+                      if(captureReadOnlyFullStorageInventory()!==familyOrigin){
+                        result=refuse('preview_writer_family_origin_stale',{
+                          fence:describe(state)
+                        });
+                        return;
+                      }
+                    }catch(_){
+                      result=refuse('preview_writer_family_origin_unreadable');
+                      return;
+                    }
+                  }
                   const marker = markerRequest.result;
                   if (marker) {
                     if (!prior || state.writersCommitted < 1
@@ -13903,6 +13971,12 @@
                       || !syntheticMarkerValid(marker)) {
                       result = refuse('fence_writer_marker_conflict', {
                         fence: describe(state)
+                      });
+                      return;
+                    }
+                    if((marker.writerFamily||null)!==writerFamily){
+                      result=refuse('fence_writer_family_mismatch',{
+                        fence:describe(state)
                       });
                       return;
                     }
@@ -13954,6 +14028,19 @@
                   // Both puts commit together or neither does. Request
                   // callbacks stay synchronous to keep the IDB tx alive.
                   const commitPreviewWriter = () => {
+                    if(familyOwned){
+                      try{
+                        if(captureReadOnlyFullStorageInventory()!==familyOrigin){
+                          result=refuse('preview_writer_family_origin_stale',{
+                            fence:describe(state)
+                          });
+                          return;
+                        }
+                      }catch(_){
+                        result=refuse('preview_writer_family_origin_unreadable');
+                        return;
+                      }
+                    }
                     // Materialized put/delete (tombstone), immutable intent
                     // and acknowledgement all commit in ONE IDB transaction.
                     // Never delete an entity row: a deletion remains explicit.
@@ -13971,6 +14058,7 @@
                     store.put({ id: markerId, generation, epoch: state.epoch,
                       writerSequence: next.writersCommitted,
                       payloadFingerprint: effectivePayloadFingerprint,
+                      ...(familyOwned?{writerFamily}:{}),
                       ...(hasSyntheticMutation ? {
                         syntheticMutationJson, syntheticEntityKey,
                         syntheticSequence: next.writersCommitted
