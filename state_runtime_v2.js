@@ -13217,6 +13217,215 @@
     return result;
   }
 
+  // An explicitly invoked preview-host-only real Projects localStorage writer.
+  // Uses the SAME cooperative lock as Task batches and the preview freeze.
+  // No production Home/Projects save route is redirected into this method.
+  // New JSON is a bounded exact raw value, never normalized or trimmed; all
+  // unknown Project properties remain intact. Any competing old-tab save
+  // detected after the write yields an uncertain result, not a rollback.
+  async function rehearsePreviewCooperativeProjectsSave(nextProjectsRaw,
+    expectedInventoryToken) {
+    const refuse=(reason,extra={})=>({
+      checked:true,previewOnly:true,cooperativeTaskFreezeLockUsed:false,
+      projectsSaved:false,confirmedDurable:false,committed:false,
+      canPromote:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...extra
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    if(typeof expectedInventoryToken!=='string'||!expectedInventoryToken.length)
+      return refuse('full_origin_token_required');
+    const locks=global.navigator?.locks;
+    if(typeof locks?.request!=='function')return refuse('lock_manager_unavailable');
+    if(typeof nextProjectsRaw!=='string'||nextProjectsRaw.length<2
+      ||nextProjectsRaw.length>262144)
+      return refuse('projects_json_required_or_oversized');
+    // Never let a lossy JSON round-trip silently rewrite unknown Project
+    // fields. The caller supplies the exact canonical JSON bytes to save.
+    let projects;
+    try{
+      projects=JSON.parse(nextProjectsRaw);
+      if(!Array.isArray(projects)||JSON.stringify(projects)!==nextProjectsRaw)
+        return refuse('projects_json_noncanonical');
+      const ids=new Set();
+      for(const project of projects){
+        if(!project||typeof project!=='object'||Array.isArray(project)
+          ||typeof project.id!=='string'||!project.id
+          ||project.id.length>128||ids.has(project.id))
+          return refuse('projects_ids_invalid');
+        ids.add(project.id);
+        if(project.subtasks!=null){
+          if(!Array.isArray(project.subtasks))
+            return refuse('projects_subtasks_invalid');
+          const subIds=new Set();
+          for(const sub of project.subtasks){
+            if(!sub||typeof sub!=='object'||Array.isArray(sub)
+              ||typeof sub.id!=='string'||!sub.id||sub.id.length>128
+              ||subIds.has(sub.id))
+              return refuse('projects_subtasks_invalid');
+            subIds.add(sub.id);
+          }
+        }
+      }
+    }catch(_){return refuse('projects_json_invalid');}
+    const generation=currentGeneration({create:false});
+    if(!generation)return refuse('generation_unavailable');
+    const originalEpoch=darkMirrorModeEpoch;
+    let result=refuse('cooperative_projects_lock_not_available');
+    let attemptedWrite=false;
+    try{
+      await locks.request(PREVIEW_COOPERATIVE_TASK_FREEZE_LOCK,
+        {mode:'exclusive',ifAvailable:true},async lock=>{
+          if(!lock){
+            result=refuse('cooperative_projects_lock_held_elsewhere');
+            return;
+          }
+          if(!isDarkEnabled()||darkMirrorModeEpoch!==originalEpoch
+            ||currentGeneration({create:false})!==generation){
+            result=refuse('generation_changed_under_cooperative_lock');
+            return;
+          }
+          const fence=await rehearsePreviewDurableWriterFence('audit');
+          if(fence.reason!=='preview_writer_inventory_consistent'){
+            result=refuse('preview_fence_inventory_unverified',{
+              prerequisiteReason:fence.reason});return;
+          }
+          if(fence.fence?.generation!==generation
+            ||!isDarkEnabled()||darkMirrorModeEpoch!==originalEpoch){
+            result=refuse('preview_generation_changed_before_projects_write');
+            return;
+          }
+          if(fence.fence.frozen){
+            result=refuse('preview_fence_frozen',{
+              cooperativeTaskFreezeLockUsed:true,
+              fenceEpoch:fence.fence.epoch});
+            return;
+          }
+          let before;
+          try{before=captureReadOnlyFullStorageInventory();}
+          catch(_){result=refuse('full_origin_unreadable');return;}
+          if(before!==expectedInventoryToken){
+            result=refuse('full_origin_changed');return;
+          }
+          const key='tp_projects_v1';
+          let priorRaw;
+          try{priorRaw=global.localStorage.getItem(key);}
+          catch(_){result=refuse('projects_source_unreadable');return;}
+          // Refuse overwriting malformed existing Projects data, even if the
+          // caller captured that corruption in its supplied source token.
+          if(priorRaw!==null){
+            try{
+              const old=JSON.parse(priorRaw);
+              if(!Array.isArray(old))throw Error('not_an_array');
+              const ids=new Set();
+              for(const item of old){
+                if(!item||typeof item!=='object'||Array.isArray(item)
+                  ||typeof item.id!=='string'||!item.id
+                  ||item.id.length>128||ids.has(item.id))
+                  throw Error('existing_project_ids_invalid');
+                ids.add(item.id);
+                if(item.subtasks!=null){
+                  if(!Array.isArray(item.subtasks))
+                    throw Error('existing_subtasks_invalid');
+                  const subs=new Set();
+                  for(const sub of item.subtasks){
+                    if(!sub||typeof sub!=='object'||Array.isArray(sub)
+                      ||typeof sub.id!=='string'||!sub.id
+                      ||sub.id.length>128||subs.has(sub.id))
+                      throw Error('existing_subtask_ids_invalid');
+                    subs.add(sub.id);
+                  }
+                }
+              }
+            }catch(_){result=refuse('projects_existing_source_invalid');return;}
+          }
+          // This last complete-source check is immediately before the
+          // synchronous V1 localStorage write. A dormant old page can still
+          // race it, so subsequent readback must fail closed as well.
+          try{
+            if(captureReadOnlyFullStorageInventory()!==expectedInventoryToken){
+              result=refuse('full_origin_changed_before_projects_write');
+              return;
+            }
+          }catch(_){
+            result=refuse('full_origin_unreadable_before_projects_write');
+            return;
+          }
+          if(!isDarkEnabled()||darkMirrorModeEpoch!==originalEpoch
+            ||currentGeneration({create:false})!==generation){
+            result=refuse('generation_changed_before_projects_write');
+            return;
+          }
+          if(priorRaw===nextProjectsRaw){
+            result=refuse('projects_source_already_identical',{
+              cooperativeTaskFreezeLockUsed:true,projectsSaved:true,
+              confirmedDurable:true,committed:false});
+            return;
+          }
+          attemptedWrite=true;
+          try{global.localStorage.setItem(key,nextProjectsRaw);}
+          catch(_){
+            result=refuse('projects_write_failed',{
+              writeOutcomeUncertain:true});return;
+          }
+          let after;
+          try{
+            if(global.localStorage.getItem(key)!==nextProjectsRaw){
+              result=refuse('projects_readback_mismatch',{
+                writeOutcomeUncertain:true,committed:true});
+              return;
+            }
+            after=captureReadOnlyFullStorageInventory();
+            const filter=token=>JSON.parse(token)
+              .filter(entry=>Array.isArray(entry)&&entry[0]!==key);
+            if(stableJson(filter(after))!==stableJson(
+              filter(expectedInventoryToken))){
+              result=refuse('other_origin_changed_during_projects_write',{
+                writeOutcomeUncertain:true,committed:true});return;
+            }
+          }catch(_){
+            result=refuse('projects_readback_unreadable',{
+              writeOutcomeUncertain:true,committed:true});return;
+          }
+          const afterFence=await rehearsePreviewDurableWriterFence('audit');
+          if(afterFence.reason!=='preview_writer_inventory_consistent'
+            ||afterFence.fence?.generation!==generation
+            ||afterFence.fence?.epoch!==fence.fence.epoch
+            ||afterFence.fence.frozen
+            ||!isDarkEnabled()||darkMirrorModeEpoch!==originalEpoch
+            ||currentGeneration({create:false})!==generation){
+            result=refuse('projects_fence_changed_after_write',{
+              writeOutcomeUncertain:true,committed:true,
+              fenceReadbackRequired:true});return;
+          }
+          // The asynchronous postwrite fence audit can permit an older V1
+          // page to write after synchronous readback. Sample again before
+          // acknowledgment, still without assuming permanent exclusion.
+          try{
+            if(global.localStorage.getItem(key)!==nextProjectsRaw
+              ||captureReadOnlyFullStorageInventory()!==after){
+              result=refuse('projects_origin_changed_after_write',{
+                writeOutcomeUncertain:true,committed:true});return;
+            }
+          }catch(_){
+            result=refuse('projects_origin_unreadable_after_write',{
+              writeOutcomeUncertain:true,committed:true});return;
+          }
+          result=refuse('preview_projects_saved',{
+            cooperativeTaskFreezeLockUsed:true,projectsSaved:true,
+            confirmedDurable:true,committed:true,
+            fenceEpoch:afterFence.fence.epoch,projectCount:projects.length});
+        });
+    }catch(_){
+      return refuse('cooperative_projects_lock_request_failed',{
+        writeOutcomeUncertain:attemptedWrite,
+        inspectV1BeforeRetry:attemptedWrite});
+    }
+    return result;
+  }
+
+
   // READ ONLY, preview-host-only recovery inspection for a Task journal batch
   // whose outcome may have been uncertain after a tab close / lock failure.
   // A positive result means those exact rows are visible in the pending
@@ -15050,6 +15259,7 @@
     rehearsePreviewAdmittedTaskCompletionBatch,
     rehearsePreviewFenceCheckedTaskCompletionBatch,
     rehearsePreviewCooperativeWriterFreeze,
+    rehearsePreviewCooperativeProjectsSave,
     inspectPreviewTaskBatchJournalEvidence,
     inspectPreviewTaskBatchEffectiveEvidence,
     inspectPreviewNotesSource,
