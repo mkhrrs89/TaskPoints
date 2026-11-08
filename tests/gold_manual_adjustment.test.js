@@ -147,7 +147,7 @@ test('invalid and unsafe requests cannot change Gold or write anything', () => {
     request('add', '1', 'A', 'x'.repeat(201))
   ];
   for (const input of invalid) {
-    assert.throws(() => h.api.preview(input), Error, JSON.stringify(input));
+    assert.throws(() => h.api.preview(input), error => Boolean(error?.message), JSON.stringify(input));
   }
   assert.equal(h.calls.save, 0);
   assert.equal(h.current().goldLedger.length, 3);
