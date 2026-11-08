@@ -42,6 +42,17 @@
     .gold-ledger-check.warning { border-color:rgba(251,146,60,.55); background:rgba(154,52,18,.13); }
     .gold-ledger-check strong { color:#fdba74; }
     .gold-ledger-check p + p { margin-top:7px; }
+    /* Native details/summary keeps all four Gold sections accessible and
+       independently collapsible without touching any saved game state. */
+    .gold-fold > summary { list-style:none; cursor:pointer; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px 16px; min-height:44px; }
+    .gold-fold > summary::-webkit-details-marker { display:none; }
+    .gold-fold > summary::marker { content:''; }
+    .gold-fold > summary:focus-visible { outline:2px solid #fb923c; outline-offset:5px; border-radius:8px; }
+    .gold-fold-content { padding-top:16px; }
+    .gold-fold-chevron { display:inline-block; width:12px; height:12px; flex:none; border-bottom:2px solid #fdba74; border-right:2px solid #fdba74; transform:rotate(45deg); transition:transform 140ms ease; margin:0 6px 5px 10px; }
+    .gold-fold[open] > summary .gold-fold-chevron { transform:rotate(225deg); margin-bottom:-5px; }
+    .gold-fold-summary-right { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-left:auto; }
+    @media (prefers-reduced-motion:reduce) { .gold-fold-chevron { transition:none; } }
     .gold-manual-fields { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
     .gold-manual-field { display:flex; flex-direction:column; gap:6px; min-width:0; font-size:13px; font-weight:600; color:#cbd5e1; }
     .gold-manual-input { min-width:0; width:100%; min-height:42px; border:1px solid rgba(148,163,184,.3); border-radius:10px; padding:9px 11px; background:#111827; color:#f8fafc; font:inherit; }
@@ -123,29 +134,44 @@
     </header>
 
     <main class="space-y-4">
-      <section class="gold-card p-4 sm:p-5">
-        <div class="flex items-start justify-between gap-4 flex-wrap mb-4">
+      <details id="goldOverviewSection" class="gold-card p-4 sm:p-5 gold-fold" open>
+        <summary class="gold-fold-summary">
           <div>
             <div class="text-xs uppercase tracking-[.16em] gold-muted">Gold Economy</div>
             <h2 class="text-2xl font-black gold-title mt-1">Gold Ledger</h2>
+          </div>
+          <span class="gold-fold-chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="gold-fold-content">
+          <div class="flex items-start justify-between gap-4 flex-wrap mb-4">
             <p class="text-sm gold-muted mt-1">Permanent Gold transactions from the Greed economy. Historical activity before launch is condensed into a legacy-rule opening balance; previous Gold thefts can remain visible in Records without appearing as individual ledger transactions.</p>
+            <div id="ledgerLaunchMeta" class="text-xs gold-muted text-right"></div>
           </div>
-          <div id="ledgerLaunchMeta" class="text-xs gold-muted text-right"></div>
+          <div id="goldLedgerHistoryCheck" class="gold-ledger-check hidden" role="status" aria-live="polite"></div>
         </div>
-        <div id="goldLedgerHistoryCheck" class="gold-ledger-check hidden" role="status" aria-live="polite"></div>
-        <div class="gold-circulation" aria-live="polite" aria-atomic="true">
-          <div>
-            <div class="gold-circulation-label">Gold in Circulation</div>
-            <div id="goldCirculationContext" class="gold-circulation-note">Combined Gold held by every player, including inactive and retired players.</div>
-          </div>
-          <div class="gold-circulation-value"><span id="goldCirculationTotal">—</span> <span class="text-sm gold-muted">Gold</span></div>
-        </div>
-        <div id="goldBalances" class="gold-balance-grid"></div>
-      </section>
+      </details>
 
-      <section class="gold-card p-4 sm:p-5" aria-labelledby="goldManualHeading">
-        <h2 id="goldManualHeading" class="text-lg font-bold mb-1">Manual Gold Adjustment</h2>
-        <p class="text-sm gold-muted mb-4">Give or remove Gold, or set an exact balance. Every adjustment is saved as a new transaction; existing history is never edited.</p>
+      <details id="goldCirculationSection" class="gold-card p-4 sm:p-5 gold-fold" open>
+        <summary class="gold-fold-summary">
+          <h2 class="gold-circulation-label">Gold in Circulation</h2>
+          <span class="gold-fold-summary-right">
+            <span class="gold-circulation-value" aria-live="polite"><span id="goldCirculationTotal">—</span> <span class="text-sm gold-muted">Gold</span></span>
+            <span class="gold-fold-chevron" aria-hidden="true"></span>
+          </span>
+        </summary>
+        <div class="gold-fold-content">
+          <p id="goldCirculationContext" class="gold-circulation-note mb-4">Combined Gold held by every player, including inactive and retired players.</p>
+          <div id="goldBalances" class="gold-balance-grid"></div>
+        </div>
+      </details>
+
+      <details id="goldManualSection" class="gold-card p-4 sm:p-5 gold-fold" open>
+        <summary class="gold-fold-summary">
+          <h2 id="goldManualHeading" class="text-lg font-bold">Manual Gold Adjustment</h2>
+          <span class="gold-fold-chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="gold-fold-content">
+          <p class="text-sm gold-muted mb-4">Give or remove Gold, or set an exact balance. Every adjustment is saved as a new transaction; existing history is never edited.</p>
         <form id="goldManualForm">
           <div class="gold-manual-fields">
             <label class="gold-manual-field" for="goldManualPlayer">
@@ -177,15 +203,18 @@
             <span class="text-xs gold-muted">Balances cannot go below zero. A confirmation is required before saving.</span>
           </div>
           <p id="goldManualStatus" class="gold-manual-status mt-3" role="status" aria-live="polite"></p>
-        </form>
-      </section>
+          </form>
+        </div>
+      </details>
 
-      <section class="gold-card p-4 sm:p-5">
-        <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
-          <div>
-            <h2 class="text-lg font-bold">Transactions</h2>
+      <details id="goldTransactionsSection" class="gold-card p-4 sm:p-5 gold-fold" open>
+        <summary class="gold-fold-summary">
+          <h2 class="text-lg font-bold">Transactions</h2>
+          <span class="gold-fold-chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="gold-fold-content">
+          <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
             <div id="transactionCount" class="text-xs gold-muted"></div>
-          </div>
           <div class="gold-controls">
             <select id="playerFilter" class="gold-select" aria-label="Filter Gold transactions by player"><option value="">All players</option></select>
             <select id="typeFilter" class="gold-select" aria-label="Filter Gold transactions by type">
@@ -204,8 +233,9 @@
             <tbody id="ledgerRows"></tbody>
           </table>
           <div id="ledgerEmpty" class="gold-empty hidden">No Gold transactions match these filters.</div>
+          </div>
         </div>
-      </section>
+      </details>
     </main>
   </div>
 
