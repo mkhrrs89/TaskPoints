@@ -13549,7 +13549,7 @@
                   'strictFreezeSourceFingerprint')
                   && (!prior.frozen
                     || typeof prior.strictFreezeSourceFingerprint !== 'string'
-                    || !/^sha256:[a-f0-9]{64}:\\d+$/.test(
+                    || !/^sha256:[a-f0-9]{64}:\d+$/.test(
                       prior.strictFreezeSourceFingerprint))))) {
                 result = refuse('fence_record_malformed');
                 return;
