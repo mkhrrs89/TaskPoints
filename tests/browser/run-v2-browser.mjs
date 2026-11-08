@@ -4875,6 +4875,151 @@ try {
       oldTabConflictDetected:true,noAutomaticRepair:true,noCutover:true};
   });
 
+  await run('Projects real V1 writer honors source tokens, cooperative freeze and older-tab changes',async context=>{
+    const page=await open(context);
+    const legacy=await context.newPage();
+    await legacy.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const baseline=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const projects=localStorage.getItem('tp_projects_v1');
+      const all=projects===null?[]:JSON.parse(projects);
+      const proposed=JSON.stringify([...all,{id:'projects-browser-guard',
+        title:'Guarded Projects Save',subtasks:[{id:'subguard',title:'Keep'}],
+        custom:{unknownField:'must-survive'}}]);
+      return {token:token(),proposed,
+        primary:localStorage.getItem('taskpoints_v1'),
+        taskJournal:localStorage.getItem('taskpoints_pending_task_mutations_v1')};
+    });
+    const legacyRaw=await legacy.evaluate(()=>{
+      const key='tp_projects_v1';
+      const prior=localStorage.getItem(key);
+      const list=prior===null?[]:JSON.parse(prior);
+      const raw=JSON.stringify([...list,
+        {id:'older-tab-project-change',title:'An independent V1 edit'}]);
+      localStorage.setItem(key,raw);
+      return raw;
+    });
+    await requireCrossTabStorageValue(page,'tp_projects_v1',legacyRaw);
+    const stale=await page.evaluate(([proposed,token])=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewCooperativeProjectsSave(
+        proposed,token),[baseline.proposed,baseline.token]);
+    if(stale.reason==='lock_manager_unavailable'){
+      assert.equal(stale.committed,false);
+      return {nativeWebLocksUnavailableFailClosed:true};
+    }
+    assert.equal(stale.reason,'full_origin_changed',JSON.stringify(stale));
+    const attempt=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const raw=localStorage.getItem('tp_projects_v1');
+      const rows=raw===null?[]:JSON.parse(raw);
+      const next=JSON.stringify([...rows,{
+        id:'projects-browser-guard',title:'Guarded Projects Save',
+        subtasks:[{id:'subguard',title:'Keep'}],
+        custom:{unknownField:'must-survive'}
+      }]);
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      return {result:await api.rehearsePreviewCooperativeProjectsSave(next,token),
+        source:localStorage.getItem('tp_projects_v1'),
+        snapshot:localStorage.getItem('taskpoints_v1'),
+        taskJournal:localStorage.getItem('taskpoints_pending_task_mutations_v1')};
+    });
+    assert.equal(attempt.result.reason,'preview_projects_saved',
+      JSON.stringify(attempt.result));
+    assert.equal(attempt.result.cooperativeTaskFreezeLockUsed,true);
+    assert.equal(attempt.result.confirmedDurable,true);
+    assert.equal(attempt.snapshot,baseline.primary);
+    assert.equal(attempt.taskJournal,baseline.taskJournal);
+    const projects=JSON.parse(attempt.source);
+    assert.ok(projects.some(x=>x.id==='older-tab-project-change'));
+    assert.equal(projects.find(x=>x.id==='projects-browser-guard')
+      ?.custom?.unknownField,'must-survive');
+    const freeze=await page.evaluate(()=>window.TaskPointsStateRuntimeV2
+      .rehearsePreviewCooperativeWriterFreeze({expectedEpoch:0}));
+    assert.equal(freeze.reason,'preview_fence_frozen',JSON.stringify(freeze));
+    const blocked=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const before=localStorage.getItem('tp_projects_v1');
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const rows=JSON.parse(before);
+      const result=await api.rehearsePreviewCooperativeProjectsSave(
+        JSON.stringify([...rows,{id:'prohibited-after-freeze'}]),token);
+      return {result,before,after:localStorage.getItem('tp_projects_v1'),
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(blocked.result.reason,'preview_fence_frozen',
+      JSON.stringify(blocked.result));
+    assert.equal(blocked.result.confirmedDurable,false);
+    assert.equal(blocked.before,blocked.after);
+    assert.equal(blocked.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    const afterReload=await page.evaluate(()=>
+      localStorage.getItem('tp_projects_v1'));
+    assert.equal(afterReload,attempt.source);
+    return {staleProjectsWriteBlocked:true,realV1ProjectStored:true,
+      unknownFieldsPreserved:true,oldTabEditRetained:true,
+      freezeBlocksProjects:true,reloadDurable:true,noCutover:true};
+  });
+
+  await run('Projects cooperative writer respects a real cross-tab native Web Lock',async context=>{
+    const first=await open(context);
+    const second=await open(context);
+    const supported=await first.evaluate(()=>typeof navigator.locks?.request==='function');
+    if(!supported){
+      const denied=await second.evaluate(()=>window.TaskPointsStateRuntimeV2
+        .rehearsePreviewCooperativeProjectsSave('[]','[]'));
+      assert.equal(denied.reason,'lock_manager_unavailable');
+      return {nativeLocksUnavailableFailClosed:true};
+    }
+    await first.evaluate(()=>{
+      window.__projLockHeld=false;
+      window.__projHolding=navigator.locks.request(
+        'taskpoints_v2_preview_task_freeze_cooperative_v1',
+        {mode:'exclusive'},async()=>{
+          window.__projLockHeld=true;
+          await new Promise(resolve=>{window.__projRelease=resolve;});
+          window.__projLockHeld=false;
+        });
+    });
+    await first.waitForFunction(()=>window.__projLockHeld===true);
+    const denied=await second.evaluate(async()=>{
+      const source=localStorage.getItem('tp_projects_v1');
+      const projects=source===null?[]:JSON.parse(source);
+      const raw=JSON.stringify([...projects,{id:'locked-project'}]);
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const result=await window.TaskPointsStateRuntimeV2
+        .rehearsePreviewCooperativeProjectsSave(raw,token);
+      return {result,after:localStorage.getItem('tp_projects_v1'),before:source};
+    });
+    assert.equal(denied.result.reason,'cooperative_projects_lock_held_elsewhere',
+      JSON.stringify(denied.result));
+    assert.equal(denied.result.committed,false);
+    assert.equal(denied.after,denied.before);
+    await first.evaluate(async()=>{
+      window.__projRelease();await window.__projHolding;
+    });
+    const approved=await second.evaluate(async()=>{
+      const source=localStorage.getItem('tp_projects_v1');
+      const projects=source===null?[]:JSON.parse(source);
+      const raw=JSON.stringify([...projects,{id:'locked-project'}]);
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      return window.TaskPointsStateRuntimeV2
+        .rehearsePreviewCooperativeProjectsSave(raw,token);
+    });
+    assert.equal(approved.reason,'preview_projects_saved',
+      JSON.stringify(approved));
+    assert.equal(approved.confirmedDurable,true);
+    return {sharedLockBlocksRealProjectsWrite:true,
+      unlockPermitsProjectsWrite:true,noCutover:true};
+  });
+
   await run('nine-family preview admission rejects incomplete freeze and preserves legacy old-tab writes',async context=>{
     const page=await open(context);
     const familyNames=["scoring_core_snapshot_and_habit_journal","home_direct_keys_and_snapshot_saves","game_players_schedules_and_preferences","today_snapshot_and_view_state","settings_import_reset_and_direct_storage","notes_content_dirty_and_authority_flags","emergency_recovery_and_restore","task_journal_and_idle_compaction","work_entry_fast_path_and_editor_fallback"];
