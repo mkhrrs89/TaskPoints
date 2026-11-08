@@ -4807,6 +4807,74 @@ try {
       uncooperativeOldTabConflictDetected:true,noCutover:true};
   });
 
+  await run('read-only effective Task evidence finds journal-compacted rows across reload',async context=>{
+    const page=await open(context);
+    const row={id:'task-recovery-compacted-to-snapshot',
+      taskId:'task-compaction-fixture',title:'Durable after journal cleanup',
+      points:6,completedAtISO:'2026-11-08T14:00:00.000Z'};
+    const setup=await page.evaluate(row=>{
+      const snapshot=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      snapshot.completions=Array.isArray(snapshot.completions)
+        ?snapshot.completions:[];
+      snapshot.completions.push(row);
+      const raw=JSON.stringify(snapshot);
+      localStorage.setItem('taskpoints_v1',raw);
+      localStorage.removeItem('taskpoints_pending_task_mutations_v1');
+      const api=window.TaskPointsStateRuntimeV2;
+      return {journal:api.inspectPreviewTaskBatchJournalEvidence(
+        JSON.stringify([row])),
+        effective:api.inspectPreviewTaskBatchEffectiveEvidence(
+        JSON.stringify([row])),
+        raw};
+    },row);
+    assert.equal(setup.journal.reason,'task_journal_absent_or_compacted');
+    assert.equal(setup.effective.reason,'task_batch_rows_observed_in_v1_snapshot',
+      JSON.stringify(setup.effective));
+    assert.equal(setup.effective.effectiveRowsObserved,true);
+    assert.equal(setup.effective.safeToRetry,false);
+    await page.reload({waitUntil:'load'});
+    const recovered=await page.evaluate(row=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const before=localStorage.getItem('taskpoints_v1');
+      const evidence=api.inspectPreviewTaskBatchEffectiveEvidence(
+        JSON.stringify([row]));
+      return {evidence,before,after:localStorage.getItem('taskpoints_v1'),
+        authority:api.getStatus().readAuthority};
+    },row);
+    assert.equal(recovered.evidence.reason,
+      'task_batch_rows_observed_in_v1_snapshot');
+    assert.equal(recovered.evidence.effectiveRowsObserved,true);
+    assert.equal(recovered.before,recovered.after);
+    assert.equal(recovered.authority,'legacy_only');
+    const oldTab=await context.newPage();
+    await oldTab.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const changed=await oldTab.evaluate(row=>{
+      const journal={schemaVersion:1,tasks:[],
+        completionUpserts:[{...row,points:88}],
+        completionDeletes:[],updatedAtISO:null};
+      const raw=JSON.stringify(journal);
+      localStorage.setItem('taskpoints_pending_task_mutations_v1',raw);
+      return raw;
+    },row);
+    await requireCrossTabStorageValue(page,
+      'taskpoints_pending_task_mutations_v1',changed);
+    const conflict=await page.evaluate(row=>
+      window.TaskPointsStateRuntimeV2.inspectPreviewTaskBatchEffectiveEvidence(
+        JSON.stringify([row])),row);
+    assert.equal(conflict.reason,'task_batch_effective_conflict',
+      JSON.stringify(conflict));
+    assert.equal(conflict.effectiveRowsObserved,false);
+    assert.equal(conflict.conflictingRowCount,1);
+    assert.equal(conflict.safeToRetry,false);
+    const snapshotAfter=await page.evaluate(()=>
+      localStorage.getItem('taskpoints_v1'));
+    assert.equal(snapshotAfter,recovered.before);
+    return {compactedRowsObserved:true,preservedThroughReload:true,
+      staleSnapshotCannotHideJournalOverride:true,
+      oldTabConflictDetected:true,noAutomaticRepair:true,noCutover:true};
+  });
+
   await run('nine-family preview admission rejects incomplete freeze and preserves legacy old-tab writes',async context=>{
     const page=await open(context);
     const familyNames=["scoring_core_snapshot_and_habit_journal","home_direct_keys_and_snapshot_saves","game_players_schedules_and_preferences","today_snapshot_and_view_state","settings_import_reset_and_direct_storage","notes_content_dirty_and_authority_flags","emergency_recovery_and_restore","task_journal_and_idle_compaction","work_entry_fast_path_and_editor_fallback"];
