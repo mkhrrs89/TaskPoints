@@ -23,11 +23,13 @@ async function boot(opts={}){
       tasks:[],completionUpserts:[],completionDeletes:[]}}},
     readTaskPointsStoredState(){return JSON.parse(localStorage.getItem(V1))},
     writePendingHabitDelta(row){return {...row}},
-    habitCompletionId(a,b){return 'habit:'+a+':'+b}
+    habitCompletionId(a,b){return 'habit:'+a+':'+b},
+    ...opts.coreOverrides
   };
   const ctx={indexedDB,localStorage,structuredClone,TextEncoder,
     crypto:{subtle:webcrypto.subtle,randomUUID(){return 'family-test'}} ,
-    location:{hostname:'localhost'},JSON,Date,Math,String,Number,Boolean,
+    location:{hostname:'localhost'},navigator:opts.navigator,
+    JSON,Date,Math,String,Number,Boolean,
     Array,Object,Map,Set,Promise,TaskPointsCore:core,
     document:{readyState:'loading',addEventListener(){}},
     console:{log(){},warn(){},error(){}}};
@@ -44,6 +46,84 @@ async function boot(opts={}){
 const writer=(a,family,marker,extras={})=>a.api.rehearsePreviewDurableWriterFence(
   'writer',{expectedEpoch:0,marker,writerFamily:family,
     fullOriginToken:a.token(),...extras});
+const TASK_JOURNAL='taskpoints_pending_task_mutations_v1';
+async function bootRealTaskAdapter(opts={}){
+  let commits=0;
+  let storage;
+  const navigator={locks:{request:async(_name,_options,callback)=>{
+    if(opts.beforeLock)await opts.beforeLock();
+    return callback({name:'v2-preview-exclusive'});
+  }}};
+  const api=await boot({navigator,coreOverrides:{
+    assertTaskMutationJournalWritable(){return true},
+    journalTaskCompletionBatch(rows){
+      commits++;
+      const prior=storage.getItem(TASK_JOURNAL);
+      const next=prior?JSON.parse(prior):{
+        schemaVersion:1,tasks:[],completionUpserts:[],completionDeletes:[],
+        updatedAtISO:null
+      };
+      next.completionUpserts.push(...rows);
+      storage.setItem(TASK_JOURNAL,JSON.stringify(next));
+    }
+  }});
+  storage=api.localStorage;
+  return {...api,get commits(){return commits}};
+}
+
+test('fence-audited real Task adapter commits a valid batch while preview is open',async()=>{
+  const a=await bootRealTaskAdapter();
+  const row={id:'v2-real-task',taskId:'t-1',points:4};
+  const verdict=await a.api.rehearsePreviewFenceCheckedTaskCompletionBatch(
+    [row],a.token());
+  assert.equal(verdict.reason,'preview_task_batch_admitted',JSON.stringify(verdict));
+  assert.equal(verdict.previewFenceChecked,true);
+  assert.equal(verdict.previewFenceBeforeAndAfterStable,true);
+  assert.equal(verdict.confirmedDurable,true);
+  assert.equal(verdict.productionWritersFenced,false);
+  assert.equal(a.commits,1);
+  assert.deepEqual(JSON.parse(a.localStorage.getItem(TASK_JOURNAL))
+    .completionUpserts,[row]);
+});
+
+test('frozen preview fence refuses real Task adapter before the V1 journal write',async()=>{
+  const a=await bootRealTaskAdapter();
+  const frozen=await a.api.rehearsePreviewDurableWriterFence('freeze',{
+    expectedEpoch:0});
+  assert.equal(frozen.reason,'preview_fence_frozen');
+  const before=a.localStorage.getItem(TASK_JOURNAL);
+  const verdict=await a.api.rehearsePreviewFenceCheckedTaskCompletionBatch(
+    [{id:'refused-task'}],a.token());
+  assert.equal(verdict.reason,'preview_fence_frozen');
+  assert.equal(verdict.canPromote,false);
+  assert.equal(verdict.confirmedDurable,false);
+  assert.equal(a.commits,0);
+  assert.equal(a.localStorage.getItem(TASK_JOURNAL),before);
+});
+
+test('concurrent preview freeze never receives a false clean Task acknowledgement',async()=>{
+  let a,freeze=null,once=false;
+  a=await bootRealTaskAdapter({beforeLock:async()=>{
+    if(!once){
+      once=true;
+      freeze=await a.api.rehearsePreviewDurableWriterFence('freeze',{
+        expectedEpoch:0});
+    }
+  }});
+  const verdict=await a.api.rehearsePreviewFenceCheckedTaskCompletionBatch(
+    [{id:'interleaved-task',points:1}],a.token());
+  assert.equal(freeze.reason,'preview_fence_frozen');
+  assert.equal(verdict.reason,'preview_fence_changed_during_task_batch',
+    JSON.stringify(verdict));
+  assert.equal(verdict.committed,true);
+  assert.equal(verdict.confirmedDurable,false);
+  assert.equal(verdict.writeOutcomeUncertain,true);
+  assert.equal(verdict.canPromote,false);
+  assert.equal(a.commits,1);
+  assert.equal(JSON.parse(a.localStorage.getItem(TASK_JOURNAL))
+    .completionUpserts[0].id,'interleaved-task');
+});
+
 test('strict synthetic freeze requires all nine historical writer families',async()=>{
   const a=await boot();
   const before=await a.api.rehearsePreviewDurableWriterFence('freeze',{
