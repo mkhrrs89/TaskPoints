@@ -205,6 +205,72 @@ test('invalid family and disabled preview hosts fail before writing any markers'
   assert.equal((await writer(a,FAMILIES[0],'dark')).reason,'dark_disabled');
 });
 
+test('post-commit old-tab save makes writer acknowledgment uncertain, not clean',async()=>{
+  const a=await boot();
+  await a.api.rehearsePreviewDurableWriterFence('read');
+  const db=a.indexedDB._databases.get(DB),original=db.transaction.bind(db);
+  const changed=JSON.stringify({habits:[],completions:[],tasks:[
+    {id:'old-tab-after-commit'}]});
+  let injected=false;
+  db.transaction=(stores,mode)=>{
+    const tx=original(stores,mode);
+    if(mode==='readwrite'&&!injected){
+      const commit=tx._commit.bind(tx);
+      tx._commit=()=>{
+        commit();
+        injected=true;
+        a.localStorage.setItem(V1,changed);
+      };
+    }
+    return tx;
+  };
+  const attempt=await writer(a,FAMILIES[0],'committed-before-old-tab');
+  assert.equal(injected,true);
+  assert.equal(attempt.reason,
+    'preview_writer_family_origin_changed_after_transaction',JSON.stringify(attempt));
+  assert.equal(attempt.canPromote,false);
+  assert.equal(attempt.durableMarkerMayExist,true);
+  assert.equal(attempt.inspectMarkerBeforeRetry,true);
+  assert.equal(attempt.fence.writersCommitted,1);
+  const marker=await a.api.rehearsePreviewDurableWriterFence('inspect_marker',{
+    marker:'committed-before-old-tab',writerFamily:FAMILIES[0]});
+  assert.equal(marker.reason,'preview_writer_marker_present');
+  assert.equal(a.localStorage.getItem(V1),changed);
+  const audit=await a.api.rehearsePreviewDurableWriterFence('audit');
+  assert.equal(audit.syntheticFamilyOriginMatchesCurrent,false);
+  assert.equal(audit.productionWritersFenced,false);
+});
+
+test('post-commit unreadable source cannot produce clean writer acknowledgment',async()=>{
+  const a=await boot();
+  await a.api.rehearsePreviewDurableWriterFence('read');
+  const db=a.indexedDB._databases.get(DB),original=db.transaction.bind(db);
+  const normalGet=a.localStorage.getItem.bind(a.localStorage);
+  let makeUnreadable=false;
+  a.localStorage.getItem=(key)=>{
+    if(makeUnreadable)throw Error('old-tab-storage-access-denied');
+    return normalGet(key);
+  };
+  db.transaction=(stores,mode)=>{
+    const tx=original(stores,mode);
+    if(mode==='readwrite'){
+      const commit=tx._commit.bind(tx);
+      tx._commit=()=>{commit();makeUnreadable=true;};
+    }
+    return tx;
+  };
+  const attempt=await writer(a,FAMILIES[1],'source-unreadable-after-commit');
+  assert.equal(attempt.reason,
+    'preview_writer_family_origin_unreadable_after_transaction');
+  assert.equal(attempt.inspectMarkerBeforeRetry,true);
+  assert.equal(attempt.durableMarkerMayExist,true);
+  assert.equal(attempt.canPromote,false);
+  makeUnreadable=false;
+  assert.equal((await a.api.rehearsePreviewDurableWriterFence('inspect_marker',{
+    marker:'source-unreadable-after-commit',writerFamily:FAMILIES[1]
+  })).reason,'preview_writer_marker_present');
+});
+
 test('independent old tab modifying V1 during admission prevents an atomic family marker',async()=>{
   const a=await boot();
   // Open the preview fence first, so the competing old-tab write can be
