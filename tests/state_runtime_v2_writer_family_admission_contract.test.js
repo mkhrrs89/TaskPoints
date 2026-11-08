@@ -288,10 +288,12 @@ test('Task journal recovery inspection detects concurrent old-tab source drift a
     completionDeletes:[],updatedAtISO:null
   }));
   const read=a.localStorage.getItem.bind(a.localStorage);
-  let injected=false;
+  let injected=false,reads=0;
   a.localStorage.getItem=key=>{
     const value=read(key);
-    if(key===TASK_JOURNAL&&!injected){
+    // The first read belongs to the opening full-origin inventory; trigger
+    // the old-tab mutation on the separate raw-journal evidence read.
+    if(key===TASK_JOURNAL&&++reads===2){
       injected=true;
       a.localStorage.setItem('tp_projects_v1','old-tab-write-during-inspection');
     }
