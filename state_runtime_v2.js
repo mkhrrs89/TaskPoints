@@ -13544,7 +13544,13 @@
                   && (typeof prior.lastWriterMarker !== 'string'
                     || !prior.lastWriterMarker
                     || prior.lastWriterMarker.length > 128))
-                || (prior.frozen && prior.epoch === 0))) {
+                || (prior.frozen && prior.epoch === 0)
+                || (Object.prototype.hasOwnProperty.call(prior,
+                  'strictFreezeSourceFingerprint')
+                  && (!prior.frozen
+                    || typeof prior.strictFreezeSourceFingerprint !== 'string'
+                    || !/^sha256:[a-f0-9]{64}:\\d+$/.test(
+                      prior.strictFreezeSourceFingerprint))))) {
                 result = refuse('fence_record_malformed');
                 return;
               }
@@ -13740,7 +13746,19 @@
                           || lastKnownSequence===state.writersCommitted)
                         && (!finalSequenceOwner
                           || finalSequenceOwner.id===lastKey));
+                    // Strict freezes seal the origin in the atomic fence
+                    // record as well as in nine family markers. A tampered
+                    // fence-only claim cannot pass an independent audit.
+                    const sealed=markers.filter(row=>
+                      typeof row.writerFamily==='string'
+                      &&typeof row.originFingerprint==='string');
+                    const strictSealValid=!owns(state,'strictFreezeSourceFingerprint')
+                      || (AUTHORITY_CUTOVER_WRITER_FAMILIES.every(family=>
+                        sealed.some(row=>row.writerFamily===family))
+                        &&sealed.every(row=>row.originFingerprint===
+                          state.strictFreezeSourceFingerprint));
                     const inventoryValid = Array.isArray(records)
+                      && strictSealValid
                       && typedMarkerCount === historicalDigestProofs.size
                       && lastMarkerSequenceValid
                       && markers.filter(row=>historicalMarkerSnapshots.has(row.id)).length
@@ -13793,6 +13811,12 @@
                     missingObservedFamilies,
                     syntheticFamilyInventoryComplete:missingObservedFamilies.length===0,
                     syntheticFamilyOriginConsistent:familyFingerprints.size===1,
+                    strictFreezeSourceSealed:typeof state.strictFreezeSourceFingerprint
+                      ==='string',
+                    strictFreezeSourceMatchesCurrent:
+                      typeof state.strictFreezeSourceFingerprint==='string'
+                        ? originStillCurrent&&auditOriginFingerprint===
+                          state.strictFreezeSourceFingerprint : null,
                     // A matching partial roster is still NOT a production
                     // writer handoff. An old tab can change V1 immediately
                     // after this purely observational check.
@@ -13989,7 +14013,11 @@
                       return;
                     }
                   }
-                  const next = { ...state, frozen: true, epoch: state.epoch + 1 };
+                  const next = { ...state, frozen: true, epoch: state.epoch + 1,
+                    ...(strictFamilyFreeze ? {
+                      strictFreezeSourceFingerprint:freezeOriginFingerprint
+                    } : {})
+                  };
                   store.put(next);
                   result = refuse('preview_fence_frozen', {
                     atomicPreviewTransaction: true,
