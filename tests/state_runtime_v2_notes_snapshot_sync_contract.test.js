@@ -431,3 +431,109 @@ test('noncanonical snapshot bytes are refused without rewriting unrelated legacy
     assert.deepEqual(a.indexedDB.dump('taskpoints_state_v2'),beforeIdb,kind);
   }
 });
+
+
+async function witnessBoot(){
+  const handlers=new Map();
+  const on=(event,callback)=>{
+    if(!handlers.has(event))handlers.set(event,new Set());
+    handlers.get(event).add(callback);
+  };
+  const off=(event,callback)=>handlers.get(event)?.delete(callback);
+  const a=await boot({addEventListener:on,removeEventListener:off});
+  const signal=(key='tp_projects_v1')=>{
+    for(const handler of handlers.get('storage')||[])handler({key});
+  };
+  return {...a,signal};
+}
+
+test('transient external-tab event blocks Notes first intent and cache writes',async()=>{
+  const intentApp=await witnessBoot();
+  const prior=intentApp.token();
+  const started=await intentApp.api.beginPreviewLegacyStorageEventWitness(prior);
+  assert.equal(started.observing,true,JSON.stringify(started));
+  intentApp.localStorage.setItem('tp_projects_v1','ephemeral');
+  intentApp.localStorage.removeItem('tp_projects_v1');
+  assert.equal(intentApp.token(),prior);
+  intentApp.signal();
+  const blocked=await intentApp.api.rehearsePreviewNotesFirstEditIntent(
+    'short',intentApp.token(),'intent-transient');
+  assert.equal(blocked.reason,'notes_first_edit_external_tab_event_observed',
+    JSON.stringify(blocked));
+  assert.equal(intentApp.localStorage.getItem(INTENT),null);
+  assert.equal(intentApp.localStorage.getItem(DIRTY),null);
+  assert.equal(intentApp.api.stopPreviewLegacyStorageEventWitness().stopped,true);
+
+  const cacheApp=await witnessBoot();
+  const recorded=await cacheApp.api.rehearsePreviewNotesFirstEditIntent(
+    'short',cacheApp.token(),'cache-transient');
+  assert.equal(recorded.intentRecorded,true,JSON.stringify(recorded));
+  const sealed=cacheApp.localStorage.getItem(INTENT);
+  const raw=cacheApp.localStorage.getItem(V1);
+  assert.equal((await cacheApp.api.beginPreviewLegacyStorageEventWitness(
+    cacheApp.token())).observing,true);
+  cacheApp.signal();
+  const blockedCache=await cacheApp.api
+    .rehearsePreviewAdmittedNotesFirstEditCacheWrite(
+      cacheApp.token(),'cache-transient');
+  assert.equal(blockedCache.reason,'first_edit_external_tab_event_observed',
+    JSON.stringify(blockedCache));
+  assert.equal(blockedCache.firstEditApplied,false);
+  assert.equal(cacheApp.localStorage.getItem(V1),raw);
+  assert.equal(cacheApp.localStorage.getItem(INTENT),sealed);
+  assert.equal(cacheApp.localStorage.getItem(AUTH),null);
+  assert.equal(cacheApp.localStorage.getItem(DIRTY),null);
+  cacheApp.api.stopPreviewLegacyStorageEventWitness();
+});
+
+test('transient external-tab event blocks snapshot despite restored full-origin token',async()=>{
+  const a=await witnessBoot();
+  const original=await stage(a,'sync-transient','tiny');
+  const signed=a.localStorage.getItem(INTENT);
+  const token=a.token();
+  const begin=await a.api.beginPreviewLegacyStorageEventWitness(token);
+  assert.equal(begin.observing,true,JSON.stringify(begin));
+  a.localStorage.setItem('tp_projects_v1','temporary old-tab value');
+  a.localStorage.removeItem('tp_projects_v1');
+  a.signal();
+  a.signal();
+  assert.equal(a.token(),token);
+  const denied=await a.api.rehearsePreviewAdmittedNotesSnapshotSync(
+    token,'sync-transient');
+  assert.equal(denied.reason,'snapshot_sync_external_tab_event_observed',
+    JSON.stringify(denied));
+  assert.equal(denied.snapshotWriteAttempted,false);
+  assert.equal(denied.notesSnapshotSynchronized,false);
+  assert.equal(denied.oldTabsExcluded,false);
+  assert.equal(denied.canPromote,false);
+  assert.equal(a.localStorage.getItem(V1),original);
+  assert.equal(a.localStorage.getItem(INTENT),signed);
+  assert.equal(a.localStorage.getItem(CACHE),'tiny');
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+  assert.equal(a.token(),token);
+  a.api.stopPreviewLegacyStorageEventWitness();
+});
+
+test('event observed during Notes snapshot write remains uncertain, not green',async()=>{
+  const a=await witnessBoot();
+  await stage(a,'midwrite-event','tiny');
+  assert.equal((await a.api.beginPreviewLegacyStorageEventWitness(
+    a.token())).observing,true);
+  const originalSet=a.localStorage.setItem.bind(a.localStorage);
+  a.localStorage.setItem=(key,value)=>{
+    const result=originalSet(key,value);
+    if(key===V1)a.signal();
+    return result;
+  };
+  const result=await a.api.rehearsePreviewAdmittedNotesSnapshotSync(
+    a.token(),'midwrite-event');
+  assert.equal(result.reason,'snapshot_sync_postwrite_fence_changed',
+    JSON.stringify(result));
+  assert.equal(result.writeOutcomeUncertain,true);
+  assert.equal(result.snapshotWriteAttempted,true);
+  assert.equal(result.notesSnapshotSynchronized,false);
+  assert.equal(result.safeToClearDirtyMarker,false);
+  assert.equal(result.canPromote,false);
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+  a.api.stopPreviewLegacyStorageEventWitness();
+});
