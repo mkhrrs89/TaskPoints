@@ -2282,3 +2282,44 @@ the cache before it becomes authoritative, fence all older writers,
 and verify recovery across interrupted and quota-denied writes.
 Main, live Notes save handlers, off-device backup and rollback remain
 unchanged. Weighted readiness remains **67/100**.
+
+
+## Guarded Notes first-edit recovery intent — November 9 (V2 only)
+
+V2 now has a **developer-preview-only** synchronous recovery-intent
+rehearsal: `rehearsePreviewNotesFirstEditIntent(text, originToken, actionId)`.
+It establishes **one immutable, bounded (64 KiB) intent** in an independent
+`taskpoints_v2_preview_notes_first_edit_intent_v1` localStorage key
+**before** attempting to modify any canonical Notes keys. The first-edit
+source must be unmarked, a current full-origin source token and generation
+must match, Web Locks must be available, and the existing cooperative
+Task/Today/Projects/Notes preview freeze must not be active. An existing
+intent is **never overwritten**, normalized, retried, deleted or discarded
+automatically. Quota errors and exceptions after a possible write are
+reported as uncertain and require inspection before any deliberate retry.
+
+The sealed record includes exact proposed text, source provenance,
+generation and a SHA-256 integrity checksum. The companion
+`inspectPreviewNotesFirstEditIntent()` checks the stored bytes after a
+restart, reports whether the live V1 cache currently matches the intent
+and whether the original source inventory is still the same. It returns
+**no Notes text**, performs no write, and neither replays nor authorizes
+restoration from this same-device evidence. A failed, stale, corrupted,
+wrong-generation or missing intent cannot be called a saved Notes action.
+
+Node tests cover initial recording, repeat/no-overwrite, first-edit
+shortening, restart, older-tab changes, quota denial, postwrite exceptions,
+digest corruption, wrong generation, preview freeze and production-host
+refusal. Browser tests exercise a separate older-code tab interrupted
+between writing the cache and its markers, followed by reload and
+read-only intent inspection; the live snapshot and markers remain intact.
+
+**Limitations:** This rehearsal does not install a production Notes
+listener, prevent old-version tabs from overwriting the cache or snapshot,
+provide atomic multi-key writes, or prove off-device restore. A confirmed
+intent records only that **one independent localStorage key**; it is not
+confirmation that the application saved Notes, and no automatic recovery
+may be attempted. For that reason `confirmedNotesDurable:false`,
+`safeToRestore:false` and `canPromote:false` remain hard-coded.
+No existing V1 feature, recovery lock, import/export or Main file changed.
+Weighted milestone readiness stays **67/100**.
