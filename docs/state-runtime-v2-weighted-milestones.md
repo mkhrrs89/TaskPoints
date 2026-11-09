@@ -2630,3 +2630,50 @@ signed Notes edit and recovery flag remain inspectable after reload.
 
 This remains an uncredited migration/fencing increment. Weighted milestone
 readiness is **67/100**, with V1 authoritative and Main untouched.
+
+## Two-edit Notes preview continuity — November 9
+
+The first Notes edit already had a sealed first-edit intent, baseline-first
+authoritative cache write, and separate V1 snapshot synchronization. A second
+edit previously could use the generic dirty Notes cache path, but lacked its
+own immutable crash-recovery intent and end-to-end sync evidence.
+
+Three additional developer-preview-only methods now exercise a *second*
+independently sealed edit:
+
+- `rehearsePreviewNotesFollowupIntent(text, token, actionId)` records a
+  new signed, immutable intent **only after the first edit's cache and snapshot
+  match with the dirty recovery marker still set**. It binds the exact
+  full-origin inventory, the original snapshot, the prior cache, generation,
+  first action ID, and the proposed text. The original intent is untouched.
+- `rehearsePreviewAdmittedNotesFollowupCacheWrite(token, actionId)` admits
+  only that exact action and writes just the already-authoritative dirty
+  Notes cache, with lock, writer-fence, source digest, storage-event witness
+  and post-write checks. Interrupted or quota-denied writes remain inspectable
+  and are never automatically replayed.
+- `rehearsePreviewAdmittedNotesFollowupSnapshotSync(token, actionId)`
+  later updates **only** the Notes field of the canonical, unchanged V1
+  snapshot. It reconstructs the sealed original full-origin inventory by
+  substituting the first intent's text for the now-updated cache, so a newly
+  supplied token cannot bless an old tab's unrelated edits. It refuses
+  noncanonical/encoded source, stale snapshots, marker loss, missing locks,
+  witness events, frozen fences, quota errors, or unverified readback.
+  It deliberately leaves both signed intents and the dirty marker untouched.
+
+`inspectPreviewNotesFollowupIntent()` is read-only and distinguishes the
+intent-recorded, cache-saved/snapshot-pending, and snapshot-synced/dirty-pending
+stages across reload. Lost dirty or authority markers are explicitly reported,
+**not** mislabeled as synchronized. No method automatically resumes a save.
+
+Node regressions check interrupted stages, quota failures, old-tab edits,
+newly captured stale-source tokens, replay refusal, tampered intents, reload,
+lost marker conditions and unrelated Task preservation. Real-browser tests
+rehearse two edits separated by a browser restart, with explicit second
+snapshot sync and a second reload.
+
+This remains a **bounded two-edit preview**, not the production Notes input
+route and not an indefinite Notes edit protocol. Old legacy tabs are not
+excluded, storage events can be missed, no atomic multi-key durable commit
+or physical-device durability is proven, and the dirty marker cannot be
+safely cleared. V1 remains the only authority. Weighted cutover readiness
+remains **67/100**, and Main is untouched.
