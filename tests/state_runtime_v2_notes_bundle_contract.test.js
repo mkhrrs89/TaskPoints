@@ -741,3 +741,114 @@ test('Read-only Notes transition audit cannot create an absent preview database'
   assert.equal((await app.api.inspectPreviewNotesTransitionSafety(
     app.token())).notesSourceMatchesPreview,true);
 });
+
+
+test('First Notes edit shortening or clearing exposes cache-before-marker crash gap',async()=>{
+  const app=await boot({cache:'An older cached draft much longer than snapshot'});
+  const origin=app.token();
+  const before=app.indexedDB.dump('taskpoints_state_v2');
+  const result=await app.api.inspectPreviewNotesInterruptedSaveWindows(
+    '',origin);
+  assert.equal(result.reason,'notes_interruption_windows_inspected',JSON.stringify(result));
+  assert.equal(result.sourceVerified,true);
+  assert.equal(result.firstEditWindowVerified,true);
+  assert.equal(result.finalSaveWindowVerified,true);
+  assert.equal(result.proposedEditIsChange,true);
+  assert.equal(result.cacheMarkerBootstrapRequired,true);
+  assert.equal(result.hasUnprotectedFirstEditWindow,true);
+  assert.equal(result.scenarios.length,5);
+  assert.equal(result.scenarios[0].stage,
+    'after_cache_write_before_authority_marker');
+  assert.equal(result.scenarios[0].proposedEditMayBeHidden,true);
+  assert.equal(result.scenarios[0].selectedSource,'unmarked_snapshot_only');
+  assert.equal(result.scenarios[1].proposedEditWouldBeSelected,true);
+  assert.equal(result.scenarios[2].proposedEditWouldBeSelected,true);
+  assert.equal(result.scenarios[3].snapshotContainsProposedEdit,true);
+  assert.equal(result.scenarios[4].snapshotContainsProposedEdit,true);
+  assert.equal(result.scenarios[4].cacheAuthorityMarked,true);
+  assert.equal(result.safeToBeginNotesWrite,false);
+  assert.equal(result.safeToClearDirtyMarker,false);
+  assert.equal(result.notesMultiKeySyncVerified,false);
+  assert.equal(result.canPromote,false);
+  assert.equal(JSON.stringify(result).includes('An older cached draft'),false);
+  assert.equal(JSON.stringify(result).includes('snapshot secret'),false);
+  assert.equal(app.token(),origin);
+  assert.equal(app.indexedDB.dump(DB),null);
+  assert.deepEqual(app.indexedDB.dump('taskpoints_state_v2'),before);
+});
+
+test('Marked Notes edits and longer first edits remain observable but never authorize writing',async()=>{
+  for(const options of [
+    {cache:'Existing cache',authority:'1'},
+    {cache:'Existing cache',dirty:'1'},
+    {cache:'Existing cache',dirty:'1',authority:'1'}
+  ]){
+    const app=await boot(options);
+    const report=await app.api.inspectPreviewNotesInterruptedSaveWindows('',app.token());
+    assert.equal(report.sourceVerified,true,JSON.stringify(report));
+    assert.equal(report.hasUnprotectedFirstEditWindow,false);
+    assert.equal(report.scenarios[0].proposedEditWouldBeSelected,true);
+    assert.equal(report.scenarios[0].cacheAuthorityMarked,true);
+    assert.equal(report.safeToBeginNotesWrite,false);
+    assert.equal(report.canPromote,false);
+  }
+  const app=await boot({cache:'brief cache'});
+  const report=await app.api.inspectPreviewNotesInterruptedSaveWindows(
+    'A very long new first draft beyond both older copies',app.token());
+  assert.equal(report.cacheMarkerBootstrapRequired,true);
+  assert.equal(report.hasUnprotectedFirstEditWindow,false);
+  assert.equal(report.scenarios[0].proposedEditWouldBeSelected,true);
+  assert.equal(report.scenarios[0].cacheAuthorityMarked,false);
+  assert.equal(report.safeToBeginNotesWrite,false,
+    'a lucky bootstrap length is not an atomic save or tab fence');
+});
+
+test('Notes interruption audit refuses stale, malformed or changed data without touching storage',async()=>{
+  const app=await boot({cache:'Unmarked notes'});
+  const old=app.token();
+  app.localStorage.setItem(CACHE,'newer old-tab note');
+  const stale=await app.api.inspectPreviewNotesInterruptedSaveWindows('x',old);
+  assert.equal(stale.reason,'full_origin_changed');
+  assert.equal(stale.sourceVerified,false);
+  assert.equal(app.indexedDB.dump(DB),null);
+  const changed=app.token();
+  const invalid=await app.api.inspectPreviewNotesInterruptedSaveWindows(
+    {unexpected:'object'},changed);
+  assert.equal(invalid.reason,'notes_text_invalid_or_oversized');
+  assert.equal(app.token(),changed);
+  app.localStorage.setItem(DIRTY,'broken');
+  const malformed=await app.api.inspectPreviewNotesInterruptedSaveWindows('x',app.token());
+  assert.equal(malformed.reason,'notes_source_preflight_failed');
+  assert.equal(malformed.sourceVerified,false);
+  assert.equal(app.localStorage.getItem(DIRTY),'broken');
+  assert.equal(app.indexedDB.dump(DB),null);
+  app.ctx.location.hostname='taskpoints.pages.dev';
+  assert.equal((await app.api.inspectPreviewNotesInterruptedSaveWindows('x',
+    app.token())).reason,'preview_host_required');
+  app.ctx.location.hostname='localhost';
+  app.localStorage.removeItem(DARK);
+  assert.equal((await app.api.inspectPreviewNotesInterruptedSaveWindows('x',
+    app.token())).reason,'dark_disabled');
+});
+
+test('Notes interruption audit detects concurrent old-tab edit during source digest',async()=>{
+  let app,armed=false;
+  const crypto={randomUUID(){return 'notes-crash-window-race'},subtle:{
+    digest:async(...args)=>{
+      const hash=await webcrypto.subtle.digest(...args);
+      if(armed){armed=false;app.localStorage.setItem(CACHE,'newer browser edit');}
+      return hash;
+    }
+  }};
+  app=await boot({cache:'Original cache',crypto});
+  const before=app.indexedDB.dump('taskpoints_state_v2');
+  armed=true;
+  const result=await app.api.inspectPreviewNotesInterruptedSaveWindows(
+    'a shorter edit',app.token());
+  assert.equal(result.sourceVerified,false,JSON.stringify(result));
+  assert.equal(result.reason,'notes_source_preflight_failed');
+  assert.equal(result.canPromote,false);
+  assert.equal(app.localStorage.getItem(CACHE),'newer browser edit');
+  assert.equal(app.indexedDB.dump(DB),null);
+  assert.deepEqual(app.indexedDB.dump('taskpoints_state_v2'),before);
+});
