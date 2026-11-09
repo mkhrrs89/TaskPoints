@@ -200,3 +200,48 @@ test('backup coverage refuses an IDB count failure and preserves all source byte
   assert.equal(a.token(),before);
   assert.deepEqual(a.indexedDB.dump('taskpoints_state_v2'),v2);
 });
+
+test('backup census rejects same-catalog record-count drift from an older tab',async()=>{
+  const a=await boot();
+  const imageDb=await createDb(a.indexedDB,'taskpoints','images');
+  imageDb.close();
+  const prior=a.token();
+  const priorV2=a.indexedDB.dump('taskpoints_state_v2');
+  const open=a.indexedDB.open.bind(a.indexedDB);
+  let imageOpens=0;
+  a.indexedDB.open=(name,version)=>{
+    if(name==='taskpoints'&&++imageOpens===2){
+      // An uncooperative tab creates a record after the first count.
+      // The database catalog and localStorage remain unchanged.
+      a.indexedDB._databases.get('taskpoints')
+        ._stores.get('images')
+        .set('late-image',{id:'late-image',payload:'keep image bytes'});
+    }
+    return open(name,version);
+  };
+  const denied=await a.api.inspectPreviewIndependentBackupCoverage(prior);
+  assert.equal(denied.reason,'backup_coverage_record_count_changed',
+    JSON.stringify(denied));
+  assert.equal(denied.backupComplete,false);
+  assert.equal(denied.canRestore,false);
+  assert.equal(denied.canPromote,false);
+  assert.equal(a.token(),prior);
+  assert.deepEqual(a.indexedDB.dump('taskpoints_state_v2'),priorV2);
+  assert.equal(a.indexedDB.dump('taskpoints').images.length,1,
+    'read-only inspection must preserve the external write');
+});
+
+test('backup census recount does not claim content-level consistency',async()=>{
+  const a=await boot();
+  const token=a.token();
+  const report=await a.api.inspectPreviewIndependentBackupCoverage(token);
+  assert.equal(report.reason,'backup_coverage_inventory_readonly_observed',
+    JSON.stringify(report));
+  assert.equal(report.indexedDbRecordCountsRechecked,true);
+  assert.equal(report.indexedDbRecordContentStable,false);
+  assert.equal(report.recordContentVerified,false);
+  assert.equal(report.binaryImageBytesVerified,false);
+  assert.equal(report.offDeviceBackupVerified,false);
+  assert.equal(report.backupComplete,false);
+  assert.equal(report.canPromote,false);
+});
