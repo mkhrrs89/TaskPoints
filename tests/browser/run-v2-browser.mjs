@@ -5171,6 +5171,65 @@ try {
 
 
 
+
+  await run('Explicit preview admitted Notes first edit writes real V1 cache safely without snapshot migration',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const old=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      old.notes='A longer original document must survive';
+      localStorage.setItem('taskpoints_v1',JSON.stringify(old));
+      localStorage.setItem('taskpoints_notes_v1','stale');
+      localStorage.removeItem('taskpoints_notes_authoritative_v1');
+      localStorage.removeItem('taskpoints_notes_dirty_v1');
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const before=localStorage.getItem('taskpoints_v1');
+      const intent=await api.rehearsePreviewNotesFirstEditIntent(
+        '',token(),'browser-real-first-edit');
+      const applied=await api.rehearsePreviewAdmittedNotesFirstEditCacheWrite(
+        token(),'browser-real-first-edit');
+      const verified=await api.inspectPreviewNotesFirstEditIntent();
+      return {intent,applied,verified,before,
+        after:localStorage.getItem('taskpoints_v1'),
+        cache:localStorage.getItem('taskpoints_notes_v1'),
+        authority:localStorage.getItem('taskpoints_notes_authoritative_v1'),
+        dirty:localStorage.getItem('taskpoints_notes_dirty_v1')};
+    });
+    if(result.intent.reason==='lock_manager_unavailable'){
+      assert.equal(result.intent.intentRecorded,false);
+      return {lockManagerUnavailableFailsClosed:true};
+    }
+    assert.equal(result.intent.intentRecorded,true,JSON.stringify(result.intent));
+    assert.equal(result.applied.reason,
+      'preview_first_edit_cache_and_markers_recorded',
+      JSON.stringify(result.applied));
+    assert.equal(result.applied.firstEditApplied,true);
+    assert.equal(result.applied.canPromote,false);
+    assert.equal(result.verified.intentEvidenceVerified,true);
+    assert.equal(result.verified.legacySelectsIntendedText,true);
+    assert.equal(result.before,result.after);
+    assert.equal(result.cache,'');
+    assert.equal(result.authority,'1');
+    assert.equal(result.dirty,'1');
+    await page.reload({waitUntil:'load'});
+    const restarted=await page.evaluate(async()=>{
+      const audit=await window.TaskPointsStateRuntimeV2
+        .inspectPreviewNotesFirstEditIntent();
+      return {audit,cache:localStorage.getItem('taskpoints_notes_v1'),
+        dirty:localStorage.getItem('taskpoints_notes_dirty_v1')};
+    });
+    assert.equal(restarted.audit.intentEvidenceVerified,true);
+    assert.equal(restarted.audit.legacySelectsIntendedText,true);
+    assert.equal(restarted.audit.safeToRestore,false);
+    assert.equal(restarted.cache,'');
+    assert.equal(restarted.dirty,'1');
+    return {realCacheAndAuthorityWriteVerified:true,
+      snapshotIntact:true,reloadPreservesShortenedEdit:true,
+      noProductionHookOrCutover:true};
+  });
+
   await run('Baseline-first Notes protocol protects prior text across every simulated interruption',async context=>{
     const page=await open(context);
     const old=await context.newPage();

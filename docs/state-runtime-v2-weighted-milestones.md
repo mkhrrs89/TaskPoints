@@ -2470,3 +2470,39 @@ Every result keeps `oldTabsExcluded:false`,
 and `canPromote:false`. Production writers, live Notes handling,
 restore, Main and V1 authority remain unchanged. Weighted readiness
 remains **67/100**.
+
+
+## First admitted Notes edit — real cache/marker write in disposable preview only
+
+A new explicit developer-only method,
+`rehearsePreviewAdmittedNotesFirstEditCacheWrite(token, actionId)`,
+now performs **real localStorage writes** to the existing V1 Notes cache,
+authority and dirty marker in a disposable V2 preview origin, instead of
+only simulating those steps. It requires a previously SHA-256 verified,
+generation-bound, immutable first-edit intent with the exact action ID,
+a current full-origin token, a clean unmarked Notes source, the existing
+cooperative Web Lock and a nonfrozen durable preview writer fence.
+
+It synchronously seeds the cache with the currently selected older Notes,
+sets the authority marker, writes the intended first edit and sets dirty.
+It reads back all keys and verifies that the entire rest of the origin,
+including the V1 snapshot, stayed unchanged; afterward it rechecks the
+preview fence and generation. A quota denial, partial write, old-tab source
+change, stale token, already-marked Notes or concurrent preview lock fails
+closed. The intent is never removed or replayed automatically. The dirty
+marker is **deliberately not cleared**, and the V1 snapshot is untouched,
+pending the existing legacy synchronization path.
+
+Unlike prior read-only diagnostics, this tests an actual guarded writer
+admission path while still keeping V1 as the sole authority. It is **not
+wired to live Notes inputs**, enabled on production hosts, or enabled in
+Main. Pre-V2 tabs can still bypass the shared lock; the multi-key operation
+is not atomic; physical browser crash durability and independent off-device
+backup remain unproven. All results keep `notesFullySynchronized:false`,
+`confirmedNotesDurable:false`, `oldTabsExcluded:false`, and
+`canPromote:false`. Node tests cover successful real writes, idempotent
+refusal, four denial families, every write failure prefix, and unrelated
+old-tab mutation; browser tests exercise real cache/marker writes and reload.
+
+Weighted milestone gate stays **67/100** until end-to-end nonpilot writer
+admission and collection parity are proven.

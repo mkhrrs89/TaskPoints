@@ -16238,6 +16238,213 @@
     }catch(_){return refuse('notes_baseline_first_audit_unavailable');}
   }
 
+
+  // This is an ACTUAL, explicitly invoked V1 Notes cache+marker writer for
+  // a disposable developer-preview origin, not merely a state simulator.
+  // Production Notes inputs never call it and V1 remains sole authority.
+  // All first-edit writes use the same lock and existing sealed intent.
+  // The baseline comes FIRST so a failure cannot resurrect stale cache.
+  async function rehearsePreviewAdmittedNotesFirstEditCacheWrite(
+    expectedInventoryToken, actionId) {
+    const refuse=(reason,extra={})=>({
+      checked:true,previewOnly:true,v1CacheWriteOnly:true,
+      firstEditApplied:false,committed:false,
+      readbackVerified:false,cooperativeLockUsed:false,
+      writeOutcomeUncertain:false,inspectIntentBeforeRetry:false,
+      notesFullySynchronized:false,notesMultiKeySyncVerified:false,
+      confirmedNotesDurable:false,productionWritersFenced:false,
+      oldTabsExcluded:false,canAutomaticallyResume:false,
+      safeToClearDirtyMarker:false,safeToRestore:false,
+      canPromote:false,readAuthority:'legacy_only',
+      mutationAuthority:'legacy_only',reason,...extra
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    if(typeof expectedInventoryToken!=='string'||!expectedInventoryToken)
+      return refuse('full_origin_token_required');
+    if(typeof actionId!=='string'
+      ||!/^[a-zA-Z0-9_:.-]{1,96}$/.test(actionId))
+      return refuse('first_edit_action_id_invalid');
+    const locks=global.navigator?.locks;
+    if(typeof locks?.request!=='function')
+      return refuse('lock_manager_unavailable');
+    const generation=currentGeneration({create:false});
+    if(!generation)return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    let result=refuse('first_edit_cooperative_lock_unavailable');
+    let attempted=false;
+    const key='taskpoints_notes_v1';
+    const authorityKey='taskpoints_notes_authoritative_v1';
+    const dirtyKey='taskpoints_notes_dirty_v1';
+    const allowed=new Set([key,authorityKey,dirtyKey]);
+    const withoutNotes=token=>stableJson(JSON.parse(token)
+      .filter(row=>Array.isArray(row)&&!allowed.has(row[0])));
+    try{
+      await locks.request(PREVIEW_COOPERATIVE_TASK_FREEZE_LOCK,
+        {mode:'exclusive',ifAvailable:true},async lock=>{
+          if(!lock){
+            result=refuse('first_edit_cooperative_lock_held_elsewhere');
+            return;
+          }
+          const stableMode=()=>isWalTestPreviewHost()&&isDarkEnabled()
+            &&epoch===darkMirrorModeEpoch
+            &&currentGeneration({create:false})===generation;
+          if(!stableMode()){
+            result=refuse('first_edit_generation_changed_under_lock');
+            return;
+          }
+          let before;
+          try{
+            before=captureReadOnlyFullStorageInventory();
+            if(before!==expectedInventoryToken){
+              result=refuse('full_origin_changed_under_lock');return;
+            }
+          }catch(_){
+            result=refuse('first_edit_source_unreadable');return;
+          }
+          const fence=await rehearsePreviewDurableWriterFence('audit');
+          if(!stableMode()
+            ||fence.reason!=='preview_writer_inventory_consistent'
+            ||fence.fence?.generation!==generation||fence.fence.frozen){
+            result=refuse('first_edit_preview_fence_unverified_or_frozen');
+            return;
+          }
+          const intent=await inspectPreviewNotesFirstEditIntent();
+          if(!intent.intentEvidenceVerified
+            ||!intent.sourceInventoryMatchesAdmission){
+            result=refuse('first_edit_intent_not_current',{
+              prerequisiteReason:intent.reason});
+            return;
+          }
+          const rawIntent=global.localStorage.getItem(
+            PREVIEW_NOTES_FIRST_EDIT_INTENT_KEY);
+          let sealed;
+          try{
+            sealed=JSON.parse(rawIntent);
+            if(!sealed||sealed.actionId!==actionId
+              ||sealed.resetGeneration!==generation
+              ||typeof sealed.text!=='string'
+              ||sealed.text.length>PREVIEW_NOTES_FIRST_EDIT_LIMIT)
+              throw Error('invalid_action');
+            const {integrityFingerprint,...payload}=sealed;
+            if(await previewRecoveryFingerprint(payload)!==integrityFingerprint)
+              throw Error('invalid_integrity');
+          }catch(_){
+            result=refuse('first_edit_intent_or_action_invalid');return;
+          }
+          const captured=await capturePreviewNotesBundle(
+            expectedInventoryToken,generation,epoch);
+          if(captured.reason){
+            result=refuse('first_edit_legacy_source_invalid',{
+              prerequisiteReason:captured.reason});
+            return;
+          }
+          const bundle=captured.bundle;
+          if(bundle.authorityRaw==='1'||bundle.dirtyRaw==='1'){
+            result=refuse('first_edit_markers_already_established');return;
+          }
+          const chosenFromCache=['unmarked_cache_only',
+            'unmarked_cache_longer','unmarked_equal'].includes(
+              bundle.selectedSource);
+          const baseline=chosenFromCache?bundle.cacheNotes:bundle.stateNotes;
+          const nextText=sealed.text;
+          if(baseline===nextText){
+            result=refuse('first_edit_intent_does_not_change_notes');return;
+          }
+          try{
+            if(!stableMode()||!captured.current()
+              ||global.localStorage.getItem(
+                PREVIEW_NOTES_FIRST_EDIT_INTENT_KEY)!==rawIntent){
+              result=refuse('first_edit_source_changed_before_write');
+              return;
+            }
+          }catch(_){
+            result=refuse('first_edit_source_unreadable_before_write');
+            return;
+          }
+          // There is deliberately NO await between these writes. A tab
+          // stopped after any prefix still has the previous Notes or the
+          // new cache marked authoritative. This is not cross-tab atomic:
+          // pre-V2 tabs do not acquire this cooperative lock.
+          const write=(k,value)=>{
+            attempted=true;
+            global.localStorage.setItem(k,value);
+            if(global.localStorage.getItem(k)!==value)
+              throw Error('notes_first_edit_readback_mismatch');
+          };
+          try{
+            if(global.localStorage.getItem(key)!==baseline)
+              write(key,baseline);
+            write(authorityKey,'1');
+            write(key,nextText);
+            write(dirtyKey,'1');
+          }catch(_){
+            result=refuse('first_edit_cache_write_uncertain',{
+              committed:attempted,writeOutcomeUncertain:attempted,
+              inspectIntentBeforeRetry:attempted,
+              cooperativeLockUsed:true});
+            return;
+          }
+          let saved;
+          try{
+            saved=captureReadOnlyFullStorageInventory();
+            if(!stableMode()
+              ||withoutNotes(saved)!==withoutNotes(expectedInventoryToken)
+              ||global.localStorage.getItem(key)!==nextText
+              ||global.localStorage.getItem(authorityKey)!=='1'
+              ||global.localStorage.getItem(dirtyKey)!=='1'
+              ||global.localStorage.getItem(
+                PREVIEW_NOTES_FIRST_EDIT_INTENT_KEY)!==rawIntent){
+              result=refuse('first_edit_other_origin_changed_during_write',{
+                committed:true,writeOutcomeUncertain:true,
+                inspectIntentBeforeRetry:true,cooperativeLockUsed:true});
+              return;
+            }
+          }catch(_){
+            result=refuse('first_edit_postwrite_readback_unavailable',{
+              committed:true,writeOutcomeUncertain:true,
+              inspectIntentBeforeRetry:true,cooperativeLockUsed:true});
+            return;
+          }
+          const afterFence=await rehearsePreviewDurableWriterFence('audit');
+          try{
+            if(!stableMode()
+              ||afterFence.reason!=='preview_writer_inventory_consistent'
+              ||afterFence.fence?.generation!==generation
+              ||afterFence.fence?.epoch!==fence.fence.epoch
+              ||afterFence.fence?.frozen
+              ||captureReadOnlyFullStorageInventory()!==saved){
+              result=refuse('first_edit_postwrite_fence_or_origin_changed',{
+                committed:true,writeOutcomeUncertain:true,
+                inspectIntentBeforeRetry:true,cooperativeLockUsed:true});
+              return;
+            }
+          }catch(_){
+            result=refuse('first_edit_postwrite_evidence_unavailable',{
+              committed:true,writeOutcomeUncertain:true,
+              inspectIntentBeforeRetry:true,cooperativeLockUsed:true});
+            return;
+          }
+          result=refuse('preview_first_edit_cache_and_markers_recorded',{
+            firstEditApplied:true,committed:true,
+            readbackVerified:true,cooperativeLockUsed:true,
+            baselineSeededBeforeAuthority:true,
+            notesCacheLength:nextText.length,
+            // The V1 snapshot remains unchanged and its dirty marker
+            // deliberately stays set pending the existing V1 sync path.
+            notesFullySynchronized:false,notesMultiKeySyncVerified:false,
+            confirmedNotesDurable:false,oldTabsExcluded:false,
+            canAutomaticallyResume:false,canPromote:false
+          });
+        });
+    }catch(_){
+      return refuse('first_edit_cooperative_lock_request_failed',{
+        committed:attempted,writeOutcomeUncertain:attempted,
+        inspectIntentBeforeRetry:attempted});
+    }
+    return result;
+  }
+
   // V2-only Notes keystroke rehearsal: participate in the same preview Web
   // Lock as Task / Projects / Today / freeze, but mutate ONLY the existing
   // V1 Notes cache after BOTH durable authority/dirty markers already equal
@@ -16500,6 +16707,7 @@
     rehearsePreviewCooperativeTodaySave,
     rehearsePreviewCooperativeDirtyNotesCacheSave,
     rehearsePreviewNotesFirstEditIntent,
+    rehearsePreviewAdmittedNotesFirstEditCacheWrite,
     inspectPreviewNotesFirstEditIntent,
     inspectPreviewCooperativeNotesFirstEditConflict,
     beginPreviewLegacyStorageEventWitness,

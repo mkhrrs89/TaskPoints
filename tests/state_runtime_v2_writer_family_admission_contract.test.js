@@ -1966,3 +1966,146 @@ test('Storage-event witness fails closed when a remote edit arrives during SHA i
   a.api.stopPreviewLegacyStorageEventWitness();
   assert.equal(events.count(),0);
 });
+
+
+test('Admitted Notes first-edit writer updates real cache and markers while V1 snapshot stays intact',async()=>{
+  const a=await bootRealTaskAdapter();
+  setupUnmarkedFirstNotesEdit(a);
+  const snapshot=a.localStorage.getItem(V1);
+  const prior=a.token();
+  const first=await a.api.rehearsePreviewNotesFirstEditIntent(
+    '',prior,'admitted-first');
+  assert.equal(first.intentRecorded,true,JSON.stringify(first));
+  const intended=a.localStorage.getItem(FIRST_NOTES_INTENT);
+  const result=await a.api.rehearsePreviewAdmittedNotesFirstEditCacheWrite(
+    a.token(),'admitted-first');
+  assert.equal(result.reason,'preview_first_edit_cache_and_markers_recorded',
+    JSON.stringify(result));
+  assert.equal(result.firstEditApplied,true);
+  assert.equal(result.readbackVerified,true);
+  assert.equal(result.cooperativeLockUsed,true);
+  assert.equal(result.baselineSeededBeforeAuthority,true);
+  assert.equal(result.notesFullySynchronized,false);
+  assert.equal(result.confirmedNotesDurable,false);
+  assert.equal(result.productionWritersFenced,false);
+  assert.equal(result.canPromote,false);
+  assert.equal(a.localStorage.getItem('taskpoints_notes_v1'),'');
+  assert.equal(a.localStorage.getItem('taskpoints_notes_authoritative_v1'),'1');
+  assert.equal(a.localStorage.getItem('taskpoints_notes_dirty_v1'),'1');
+  assert.equal(a.localStorage.getItem(V1),snapshot);
+  assert.equal(a.localStorage.getItem(FIRST_NOTES_INTENT),intended);
+  assert.equal(a.commits,0);
+  const audit=await a.api.inspectPreviewNotesFirstEditIntent();
+  assert.equal(audit.intentEvidenceVerified,true);
+  assert.equal(audit.observedRecoveryStage,'snapshot_synced_dirty_pending'===audit.observedRecoveryStage
+    ?'snapshot_synced_dirty_pending':'dirty_cache_snapshot_pending');
+  assert.equal(audit.legacySelectsIntendedText,true);
+  assert.equal(audit.canAutomaticallyResume,false);
+  const repeated=await a.api.rehearsePreviewAdmittedNotesFirstEditCacheWrite(
+    a.token(),'admitted-first');
+  assert.equal(repeated.reason,'first_edit_intent_not_current');
+  assert.equal(repeated.firstEditApplied,false);
+  assert.equal(a.localStorage.getItem(V1),snapshot);
+});
+
+test('Admitted first edit refuses mismatched action, stale source, frozen fence and production host',async()=>{
+  const a=await bootRealTaskAdapter();
+  setupUnmarkedFirstNotesEdit(a);
+  const missing=await a.api.rehearsePreviewAdmittedNotesFirstEditCacheWrite(
+    a.token(),'missing-intent');
+  assert.equal(missing.reason,'first_edit_intent_not_current');
+  await a.api.rehearsePreviewNotesFirstEditIntent('short',
+    a.token(),'correct-action');
+  const token=a.token(),snapshot=a.localStorage.getItem(V1);
+  const wrong=await a.api.rehearsePreviewAdmittedNotesFirstEditCacheWrite(
+    token,'other-action');
+  assert.equal(wrong.reason,'first_edit_intent_or_action_invalid');
+  a.localStorage.setItem('tp_projects_v1','an older page wrote this');
+  const stale=await a.api.rehearsePreviewAdmittedNotesFirstEditCacheWrite(
+    token,'correct-action');
+  assert.equal(stale.reason,'full_origin_changed_under_lock');
+  assert.equal(a.localStorage.getItem(V1),snapshot);
+  assert.equal(a.localStorage.getItem('taskpoints_notes_authoritative_v1'),null);
+  const f=await bootRealTaskAdapter();
+  setupUnmarkedFirstNotesEdit(f);
+  await f.api.rehearsePreviewNotesFirstEditIntent('short',
+    f.token(),'freeze-action');
+  assert.equal((await f.api.rehearsePreviewCooperativeWriterFreeze({
+    expectedEpoch:0})).reason,'preview_fence_frozen');
+  const blocked=await f.api.rehearsePreviewAdmittedNotesFirstEditCacheWrite(
+    f.token(),'freeze-action');
+  assert.equal(blocked.reason,'first_edit_preview_fence_unverified_or_frozen',
+    JSON.stringify(blocked));
+  assert.equal(f.localStorage.getItem('taskpoints_notes_authoritative_v1'),null);
+  f.ctx.location.hostname='taskpoints.pages.dev';
+  assert.equal((await f.api.rehearsePreviewAdmittedNotesFirstEditCacheWrite(
+    f.token(),'freeze-action')).reason,'preview_host_required');
+});
+
+test('Admitted first-edit failures at each durable prefix preserve intent and never clear dirty',async()=>{
+  for(const failureKey of [
+    'taskpoints_notes_v1',
+    'taskpoints_notes_authoritative_v1',
+    'taskpoints_notes_dirty_v1'
+  ]){
+    const a=await bootRealTaskAdapter();
+    setupUnmarkedFirstNotesEdit(a);
+    const snapshot=a.localStorage.getItem(V1);
+    await a.api.rehearsePreviewNotesFirstEditIntent('short',
+      a.token(),'fail-stage');
+    const evidence=a.localStorage.getItem(FIRST_NOTES_INTENT);
+    const set=a.localStorage.setItem.bind(a.localStorage);
+    let failureSeen=false;
+    a.localStorage.setItem=(key,value)=>{
+      if(key===failureKey&&!failureSeen){
+        failureSeen=true;
+        throw Error('quota denied at '+key);
+      }
+      return set(key,value);
+    };
+    const result=await a.api.rehearsePreviewAdmittedNotesFirstEditCacheWrite(
+      a.token(),'fail-stage');
+    a.localStorage.setItem=set;
+    assert.equal(result.reason,'first_edit_cache_write_uncertain',
+      JSON.stringify(result));
+    assert.equal(result.firstEditApplied,false);
+    assert.equal(result.inspectIntentBeforeRetry,true);
+    assert.equal(result.writeOutcomeUncertain,true);
+    assert.equal(result.canPromote,false);
+    assert.equal(a.localStorage.getItem(V1),snapshot);
+    assert.equal(a.localStorage.getItem(FIRST_NOTES_INTENT),evidence);
+    assert.notEqual(a.localStorage.getItem('taskpoints_notes_dirty_v1'),'0',
+      'writer never rolls back or fabricates a clean marker');
+    const inspected=await a.api.inspectPreviewNotesFirstEditIntent();
+    assert.equal(inspected.intentEvidenceVerified,true);
+    assert.equal(inspected.canAutomaticallyResume,false);
+    assert.equal(inspected.safeToRestore,false);
+  }
+});
+
+test('Admitted first edit detects old-tab writes outside its protected keys and never claims authority',async()=>{
+  let a,interleaved=false;
+  a=await bootRealTaskAdapter();
+  setupUnmarkedFirstNotesEdit(a);
+  await a.api.rehearsePreviewNotesFirstEditIntent('short',a.token(),'origin-race');
+  const oldSet=a.localStorage.setItem.bind(a.localStorage);
+  a.localStorage.setItem=(key,value)=>{
+    const r=oldSet(key,value);
+    if(key==='taskpoints_notes_authoritative_v1'&&!interleaved){
+      interleaved=true;
+      oldSet('tp_projects_v1','old tab writes independently');
+    }
+    return r;
+  };
+  const result=await a.api.rehearsePreviewAdmittedNotesFirstEditCacheWrite(
+    a.token(),'origin-race');
+  a.localStorage.setItem=oldSet;
+  assert.equal(result.reason,'first_edit_other_origin_changed_during_write',
+    JSON.stringify(result));
+  assert.equal(result.writeOutcomeUncertain,true);
+  assert.equal(result.canPromote,false);
+  assert.equal(a.localStorage.getItem('tp_projects_v1'),'old tab writes independently');
+  assert.equal(a.localStorage.getItem('taskpoints_notes_dirty_v1'),'1');
+  assert.equal((await a.api.inspectPreviewNotesFirstEditIntent())
+    .intentEvidenceVerified,true);
+});
