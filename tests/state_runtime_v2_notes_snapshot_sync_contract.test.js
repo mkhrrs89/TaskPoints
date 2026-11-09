@@ -40,6 +40,8 @@ async function boot(opts={}){
     navigator:{locks:{request:async(name,options,callback)=>
       callback({name})}},
     location:{hostname:opts.hostname||'localhost'},
+    addEventListener:opts.addEventListener,
+    removeEventListener:opts.removeEventListener,
     TaskPointsCore:core,JSON,Date,Math,String,Number,Boolean,
     Array,Object,Map,Set,Promise,
     document:{readyState:'loading',addEventListener(){}},
@@ -183,4 +185,133 @@ test('snapshot continuation refuses non-JSON legacy payload instead of rewriting
   assert.equal(denial.canPromote,false);
   assert.equal(a.localStorage.getItem(V1),previous);
   assert.equal(a.localStorage.getItem(DIRTY),'1');
+});
+
+
+test('read-only completion evidence verifies a synced snapshot without clearing dirty',async()=>{
+  const a=await boot();
+  await stage(a,'complete-proof','short');
+  const before=a.token(),raw=a.localStorage.getItem(V1);
+  const unsynced=await a.api.inspectPreviewNotesSnapshotCompletionEvidence(
+    before,'complete-proof');
+  assert.equal(unsynced.completionPointInTimeVerified,false);
+  assert.equal(unsynced.reason,'notes_completion_not_synchronized',
+    JSON.stringify(unsynced));
+  assert.equal(unsynced.dirtyMarkerRetained,true);
+  const sync=await a.api.rehearsePreviewAdmittedNotesSnapshotSync(
+    a.token(),'complete-proof');
+  assert.equal(sync.notesSnapshotSynchronized,true,JSON.stringify(sync));
+  const updated=a.token(),seal=a.localStorage.getItem(INTENT);
+  const proved=await a.api.inspectPreviewNotesSnapshotCompletionEvidence(
+    updated,'complete-proof');
+  assert.equal(proved.reason,'notes_snapshot_completion_point_in_time_observed',
+    JSON.stringify(proved));
+  assert.equal(proved.completionPointInTimeVerified,true);
+  assert.equal(proved.snapshotAndCacheMatchIntent,true);
+  assert.equal(proved.dirtyMarkerRetained,true);
+  assert.equal(proved.safeToClearDirtyMarker,false);
+  assert.equal(proved.missedStorageEventsRuledOut,false);
+  assert.equal(proved.oldTabsExcluded,false);
+  assert.equal(proved.notesMultiKeySyncVerified,false);
+  assert.equal(proved.confirmedNotesDurable,false);
+  assert.equal(proved.canPromote,false);
+  assert.equal(a.token(),updated,'audit must never edit the origin');
+  assert.equal(a.localStorage.getItem(INTENT),seal);
+  assert.notEqual(raw,a.localStorage.getItem(V1));
+  const reloaded=await boot({
+    localStorage:a.localStorage,indexedDB:a.indexedDB
+  });
+  const later=await reloaded.api.inspectPreviewNotesSnapshotCompletionEvidence(
+    reloaded.token(),'complete-proof');
+  assert.equal(later.completionPointInTimeVerified,true,JSON.stringify(later));
+  assert.equal(reloaded.localStorage.getItem(DIRTY),'1');
+});
+
+test('completion evidence detects older-tab snapshot overwrite and refuses clean marker',async()=>{
+  const a=await boot();
+  await stage(a,'postwrite-overwrite','new');
+  assert.equal((await a.api.rehearsePreviewAdmittedNotesSnapshotSync(
+    a.token(),'postwrite-overwrite')).notesSnapshotSynchronized,true);
+  const cleanToken=a.token();
+  const state=JSON.parse(a.localStorage.getItem(V1));
+  state.notes='Older tab restored long Notes';
+  state.tasks.push({id:'t2',title:'Newer task from older tab'});
+  a.localStorage.setItem(V1,JSON.stringify(state));
+  const stale=await a.api.inspectPreviewNotesSnapshotCompletionEvidence(
+    cleanToken,'postwrite-overwrite');
+  assert.equal(stale.reason,'notes_completion_origin_changed');
+  const updated=await a.api.inspectPreviewNotesSnapshotCompletionEvidence(
+    a.token(),'postwrite-overwrite');
+  assert.equal(updated.completionPointInTimeVerified,false);
+  assert.equal(updated.snapshotAndCacheMatchIntent,false);
+  assert.equal(updated.safeToClearDirtyMarker,false);
+  assert.equal(updated.oldTabsExcluded,false);
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+  assert.equal(JSON.parse(a.localStorage.getItem(V1)).tasks[1].id,'t2');
+});
+
+test('completion evidence refuses wrong action, corrupted signed intent, and marker clearing',async()=>{
+  const a=await boot();
+  await stage(a,'sealed-proof','');
+  assert.equal((await a.api.rehearsePreviewAdmittedNotesSnapshotSync(
+    a.token(),'sealed-proof')).notesSnapshotSynchronized,true);
+  const wrong=await a.api.inspectPreviewNotesSnapshotCompletionEvidence(
+    a.token(),'incorrect-action');
+  assert.equal(wrong.completionPointInTimeVerified,false);
+  assert.equal(wrong.safeToClearDirtyMarker,false);
+  const sealed=a.localStorage.getItem(INTENT);
+  a.localStorage.setItem(INTENT,
+    sealed.replace('"text":""','"text":"tampered"'));
+  const tampered=await a.api.inspectPreviewNotesSnapshotCompletionEvidence(
+    a.token(),'sealed-proof');
+  assert.equal(tampered.reason,'notes_completion_intent_unverified');
+  a.localStorage.setItem(INTENT,sealed);
+  a.localStorage.removeItem(DIRTY);
+  const cleaned=await a.api.inspectPreviewNotesSnapshotCompletionEvidence(
+    a.token(),'sealed-proof');
+  assert.equal(cleaned.completionPointInTimeVerified,false);
+  assert.equal(cleaned.dirtyMarkerRetained,false);
+  assert.equal(cleaned.safeToClearDirtyMarker,false);
+});
+
+test('completion evidence refuses a frozen writer fence and production host',async()=>{
+  const a=await boot();
+  await stage(a,'fence-proof','short');
+  await a.api.rehearsePreviewAdmittedNotesSnapshotSync(
+    a.token(),'fence-proof');
+  a.ctx.location.hostname='taskpoints.pages.dev';
+  assert.equal((await a.api.inspectPreviewNotesSnapshotCompletionEvidence(
+    a.token(),'fence-proof')).reason,'preview_host_required');
+  a.ctx.location.hostname='localhost';
+  await a.api.rehearsePreviewDurableWriterFence('freeze',{expectedEpoch:0});
+  const refused=await a.api.inspectPreviewNotesSnapshotCompletionEvidence(
+    a.token(),'fence-proof');
+  assert.equal(refused.reason,'notes_completion_fence_unverified_or_frozen');
+  assert.equal(refused.canPromote,false);
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+});
+
+test('page-lifetime storage witness denies clean completion after observed external event',async()=>{
+  const listeners=new Map();
+  const on=(name,handler)=>{
+    if(!listeners.has(name))listeners.set(name,new Set());
+    listeners.get(name).add(handler);
+  };
+  const off=(name,handler)=>listeners.get(name)?.delete(handler);
+  const a=await boot({addEventListener:on,removeEventListener:off});
+  await stage(a,'witness-proof','short');
+  await a.api.rehearsePreviewAdmittedNotesSnapshotSync(
+    a.token(),'witness-proof');
+  const start=await a.api.beginPreviewLegacyStorageEventWitness(a.token());
+  assert.equal(start.observing,true,JSON.stringify(start));
+  const before=a.token();
+  for(const cb of listeners.get('storage')||[])cb({key:CACHE});
+  const verdict=await a.api.inspectPreviewNotesSnapshotCompletionEvidence(
+    a.token(),'witness-proof');
+  assert.equal(verdict.completionPointInTimeVerified,false);
+  assert.equal(verdict.externalStorageEventsObserved,true);
+  assert.equal(verdict.reason,'notes_completion_external_storage_event_observed');
+  assert.equal(a.token(),before);
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+  a.api.stopPreviewLegacyStorageEventWitness();
 });
