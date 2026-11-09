@@ -2435,3 +2435,38 @@ a write racing between synchronous localStorage instructions, or storage
 quota/eviction. It is **not** an atomic multi-key commit, a background
 recovery process, an independent backup or an authority migration. Main
 and live Notes storage remain unchanged; official readiness stays **67/100**.
+
+
+## Transient old-tab A→B→A storage-event witness — November 9 (V2 only)
+
+A new explicitly opt-in, page-lifetime preview diagnostic,
+`beginPreviewLegacyStorageEventWitness(fullOriginToken)`,
+`inspectPreviewLegacyStorageEventWitness()`, and
+`stopPreviewLegacyStorageEventWitness()`, listens for browser **storage
+events from other same-origin contexts**. It captures the starting
+full-origin state as a SHA-256 fingerprint and tracks only bounded counts
+for Notes-related keys, unrelated origin keys and clear-origin events.
+It never stores the Notes text, changed key values, plaintext inventory,
+or event sender identifiers. The witness is in-memory only: after reload
+it no longer claims to have seen earlier events.
+
+The specific missing evidence this targets is a transient **A→B→A**
+change by an older tab: a full-origin checksum before and after is
+identical, but the listener can report that the external tab changed the
+Notes cache twice while the preview was open. Asynchronous digest
+rechecks refuse to report stable evidence when events or storage change
+mid-inspection. Tests cover two-tab real-browser A→B→A behavior,
+intermediate storage changes, quota-independent read-only operation,
+unrelated-key counts, generation changes, observer teardown, and events
+during SHA validation.
+
+**Major limitation:** a missed event, sleeping tab, same-tab write, event
+delivered before witness start, or event replayed after reload can escape
+this observation. The browser StorageEvent is NOT a durable journal,
+writer lease, source-of-truth or exclusion protocol. Absence of observed
+events therefore **never** establishes that all old tabs are quiet.
+Every result keeps `oldTabsExcluded:false`,
+`missedEventsRuledOut:false`, `productionWritersFenced:false`,
+and `canPromote:false`. Production writers, live Notes handling,
+restore, Main and V1 authority remain unchanged. Weighted readiness
+remains **67/100**.
