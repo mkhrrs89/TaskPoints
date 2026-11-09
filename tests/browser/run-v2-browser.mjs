@@ -5627,6 +5627,8 @@ try {
       assert.equal(completed.sync.oldTabsExcluded,false);
       assert.equal(completed.sync.canPromote,false);
       assert.equal(completed.inspected.journalEvidenceVerified,true);
+      assert.equal(completed.inspected.sourceOriginMatchesAdmission,true);
+      assert.equal(completed.inspected.lastActionProvenanceVerified,true);
       assert.equal(completed.inspected.observedRecoveryStage,
         'repeat_snapshot_synced_dirty_pending');
       assert.equal(completed.snapshot.notes,nextText);
@@ -5678,7 +5680,9 @@ try {
     assert.equal(inspected.journalEvidenceVerified,true,
       JSON.stringify(inspected));
     assert.equal(inspected.observedRecoveryStage,
-      'repeat_cache_written_snapshot_pending');
+      'repeat_source_diverged');
+    assert.equal(inspected.sourceOriginMatchesAdmission,false);
+    assert.equal(inspected.lastActionProvenanceVerified,false);
     assert.equal(inspected.canPromote,false);
     return {repeatJournalSurvivesReload:true,
       threeSequentialActionsPreserved:true,
