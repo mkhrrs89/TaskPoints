@@ -1723,3 +1723,110 @@ test('Older-tab write during asynchronous Notes conflict evidence is rejected',a
   assert.equal((await a.api.inspectPreviewNotesFirstEditIntent())
     .intentEvidenceVerified,true);
 });
+
+
+test('Baseline-first protocol preserves existing Notes across every simulated crash step',async()=>{
+  const page=fs.readFileSync(path.join(__dirname,'..','notes.html'),'utf8');
+  const begin=page.indexOf('function getBestNotesTextFromStorage()');
+  const end=page.indexOf('function syncNotesStorageLocations',begin);
+  assert.ok(begin>=0&&end>begin);
+  const actualReader=new Function('localStorage','TaskPointsCore','STORAGE_KEY',
+    'NOTES_STORAGE_KEY','NOTES_DIRTY_KEY','NOTES_AUTHORITY_KEY',
+    page.slice(begin,end)+';return getBestNotesTextFromStorage();');
+  const cases=[
+    {snapshot:'longer original snapshot',cache:'stale',proposed:'x',shortcutRisk:true},
+    {snapshot:'short',cache:'longer cached note',proposed:'',shortcutRisk:false},
+    {snapshot:'original snapshot',cache:null,proposed:'',shortcutRisk:false},
+    {snapshot:'both equal',cache:'both equal',proposed:'changed',shortcutRisk:false},
+    {snapshot:'',cache:'',proposed:'new draft',shortcutRisk:false},
+    {snapshot:'more extensive initial text',cache:' ',proposed:'',shortcutRisk:true},
+    {snapshot:'short',cache:'a long saved cache',proposed:'a',shortcutRisk:false}
+  ];
+  for(const c of cases){
+    const a=await bootRealTaskAdapter();
+    const state=JSON.parse(a.localStorage.getItem(V1));
+    state.notes=c.snapshot;
+    a.localStorage.setItem(V1,JSON.stringify(state));
+    if(c.cache===null)a.localStorage.removeItem('taskpoints_notes_v1');
+    else a.localStorage.setItem('taskpoints_notes_v1',c.cache);
+    a.localStorage.removeItem('taskpoints_notes_authoritative_v1');
+    a.localStorage.removeItem('taskpoints_notes_dirty_v1');
+    const original=a.token();
+    const pre=actualReader(a.localStorage,{readTaskPointsStoredState:()=>
+      JSON.parse(a.localStorage.getItem(V1))},V1,
+      'taskpoints_notes_v1','taskpoints_notes_dirty_v1',
+      'taskpoints_notes_authoritative_v1');
+    assert.equal((await a.api.rehearsePreviewNotesFirstEditIntent(
+      c.proposed,original,'plan')).intentRecorded,true);
+    const evidence=a.token();
+    const plan=await a.api.inspectPreviewNotesBaselineFirstProtocol(evidence);
+    assert.equal(plan.reason,'notes_baseline_first_protocol_inspected',
+      JSON.stringify(plan));
+    assert.equal(plan.intentEvidenceVerified,true);
+    assert.equal(plan.sourceVerified,true);
+    assert.equal(plan.simulatedStages.length,7);
+    assert.equal(plan.allCrashPrefixesPreserveExpectedSelection,true);
+    assert.equal(plan.previousNotesPreservedUntilNewCache,true);
+    assert.equal(plan.proposedNotesSelectedAfterNewCache,true);
+    assert.equal(plan.shortcutAuthorityFirstWouldHideBaseline,c.shortcutRisk);
+    assert.equal(plan.oldTabsExcluded,false);
+    assert.equal(plan.canApply,false);
+    assert.equal(plan.liveWriterActivated,false);
+    assert.equal(plan.canPromote,false);
+    assert.equal(JSON.stringify(plan).includes(c.proposed)&&c.proposed.length>2,
+      false,'diagnostic must never expose proposed Notes');
+    // Derive all seven interrupted storage states in a DISPOSABLE
+    // FakeStorage instance and cross-check the actual Notes page reader.
+    const stages=[
+      {cache:c.cache,auth:null,dirty:null,snapshot:c.snapshot},
+      {cache:pre,auth:null,dirty:null,snapshot:c.snapshot},
+      {cache:pre,auth:'1',dirty:null,snapshot:c.snapshot},
+      {cache:c.proposed,auth:'1',dirty:null,snapshot:c.snapshot},
+      {cache:c.proposed,auth:'1',dirty:'1',snapshot:c.snapshot},
+      {cache:c.proposed,auth:'1',dirty:'1',snapshot:c.proposed},
+      {cache:c.proposed,auth:'1',dirty:null,snapshot:c.proposed}
+    ];
+    for(let i=0;i<stages.length;i++){
+      const p=stages[i];
+      const fixture=new FakeStorage({
+        [V1]:JSON.stringify({notes:p.snapshot}),
+        ...(p.cache===null?{}:{taskpoints_notes_v1:p.cache}),
+        ...(p.auth===null?{}:{taskpoints_notes_authoritative_v1:p.auth}),
+        ...(p.dirty===null?{}:{taskpoints_notes_dirty_v1:p.dirty})
+      });
+      const actual=actualReader(fixture,{
+        readTaskPointsStoredState:()=>JSON.parse(fixture.getItem(V1))
+      },V1,'taskpoints_notes_v1','taskpoints_notes_dirty_v1',
+        'taskpoints_notes_authoritative_v1');
+      const expected=i<3?pre:c.proposed;
+      assert.equal(actual,expected,'live Notes reader differs at stage '+i);
+      assert.equal(plan.simulatedStages[i].expectedTextWouldBeSelected,true);
+      assert.equal(plan.simulatedStages[i].proposedTextWouldBeSelected,
+        actual===c.proposed);
+    }
+    assert.equal(a.token(),evidence,'preview cannot write any V1 key');
+    assert.equal(a.localStorage.getItem(V1),JSON.stringify(state));
+  }
+});
+
+test('Baseline-first rehearsal refuses stale intent, stale origin, damaged markers or production host',async()=>{
+  const a=await bootRealTaskAdapter();
+  setupUnmarkedFirstNotesEdit(a);
+  const missing=await a.api.inspectPreviewNotesBaselineFirstProtocol(a.token());
+  assert.equal(missing.reason,'notes_first_edit_intent_unverified');
+  assert.equal(missing.canApply,false);
+  const prior=a.token();
+  await a.api.rehearsePreviewNotesFirstEditIntent('new text',prior,'safe-intent');
+  a.localStorage.setItem('taskpoints_notes_v1','old-tab-write');
+  const changed=await a.api.inspectPreviewNotesBaselineFirstProtocol(a.token());
+  assert.equal(changed.reason,'notes_source_changed_since_intent',
+    JSON.stringify(changed));
+  assert.equal(changed.canPromote,false);
+  a.ctx.location.hostname='taskpoints.pages.dev';
+  assert.equal((await a.api.inspectPreviewNotesBaselineFirstProtocol(a.token()))
+    .reason,'preview_host_required');
+  a.ctx.location.hostname='localhost';
+  a.localStorage.removeItem(DARK);
+  assert.equal((await a.api.inspectPreviewNotesBaselineFirstProtocol(a.token()))
+    .reason,'dark_disabled');
+});
