@@ -15331,6 +15331,170 @@
     return result;
   }
 
+
+  // V2-only Notes keystroke rehearsal: participate in the same preview Web
+  // Lock as Task / Projects / Today / freeze, but mutate ONLY the existing
+  // V1 Notes cache after BOTH durable authority/dirty markers already equal
+  // "1". First-edit marker initialization, snapshot sync and marker clearing
+  // require a multi-key recovery protocol and are intentionally REFUSED.
+  // No production Notes event listener calls this explicit developer API.
+  async function rehearsePreviewCooperativeDirtyNotesCacheSave(nextText,
+    expectedInventoryToken) {
+    const deny=(reason,extra={})=>({
+      checked:true,previewOnly:true,cacheOnly:true,
+      cacheWriteObserved:false,cacheReadbackVerified:false,
+      notesFullySynchronized:false,confirmedDurable:false,
+      committed:false,cooperativeTaskFreezeLockUsed:false,
+      canPromote:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...extra
+    });
+    if(!isWalTestPreviewHost())return deny('preview_host_required');
+    if(!isDarkEnabled())return deny('dark_disabled');
+    if(typeof expectedInventoryToken!=='string'||!expectedInventoryToken.length)
+      return deny('full_origin_token_required');
+    if(typeof nextText!=='string'||nextText.length>1048576)
+      return deny('notes_text_invalid_or_oversized');
+    const locks=global.navigator?.locks;
+    if(typeof locks?.request!=='function')return deny('lock_manager_unavailable');
+    const generation=currentGeneration({create:false});
+    if(!generation)return deny('generation_unavailable');
+    const modeEpoch=darkMirrorModeEpoch;
+    const key='taskpoints_notes_v1';
+    let attempted=false;
+    let result=deny('cooperative_notes_lock_not_available');
+    try{
+      await locks.request(PREVIEW_COOPERATIVE_TASK_FREEZE_LOCK,
+        {mode:'exclusive',ifAvailable:true},async lock=>{
+          if(!lock){result=deny('cooperative_notes_lock_held_elsewhere');return;}
+          if(!isDarkEnabled()||modeEpoch!==darkMirrorModeEpoch
+            ||currentGeneration({create:false})!==generation){
+            result=deny('generation_changed_under_cooperative_lock');return;
+          }
+          const fence=await rehearsePreviewDurableWriterFence('audit');
+          if(fence.reason!=='preview_writer_inventory_consistent'){
+            result=deny('preview_fence_inventory_unverified',{
+              prerequisiteReason:fence.reason});return;
+          }
+          if(fence.fence?.generation!==generation
+            ||!isDarkEnabled()||modeEpoch!==darkMirrorModeEpoch){
+            result=deny('preview_generation_changed_before_notes_write');return;
+          }
+          if(fence.fence.frozen){
+            result=deny('preview_fence_frozen',{
+              cooperativeTaskFreezeLockUsed:true,fenceEpoch:fence.fence.epoch});
+            return;
+          }
+          let before,prior,originalState;
+          try{
+            before=captureReadOnlyFullStorageInventory();
+            if(before!==expectedInventoryToken){
+              result=deny('full_origin_changed');return;
+            }
+            prior=global.localStorage.getItem(key);
+            const authoritative=global.localStorage.getItem(
+              'taskpoints_notes_authoritative_v1');
+            const dirty=global.localStorage.getItem(
+              'taskpoints_notes_dirty_v1');
+            if(prior===null||authoritative!=='1'||dirty!=='1'){
+              result=deny('notes_dirty_authority_not_established');return;
+            }
+            if(prior.length>1048576){
+              result=deny('notes_cache_too_large');return;
+            }
+            const rawState=global.localStorage.getItem(
+              core.STORAGE_KEY||'taskpoints_v1');
+            if(typeof rawState!=='string'||!rawState.length){
+              result=deny('notes_snapshot_missing');return;
+            }
+            originalState=typeof core.parseTaskPointsStorageJson==='function'
+              ?core.parseTaskPointsStorageJson(rawState,{})
+              :JSON.parse(rawState);
+            if(!originalState||typeof originalState!=='object'
+              ||Array.isArray(originalState)
+              ||(originalState.notes!==undefined
+                &&typeof originalState.notes!=='string')){
+              result=deny('notes_snapshot_invalid');return;
+            }
+          }catch(_){result=deny('notes_source_unreadable');return;}
+          // Prevent Notes cache from receiving a fresh value if any older
+          // page edited Projects, Tasks, Notes markers or the V1 snapshot
+          // while the preview was validating the source.
+          try{
+            if(captureReadOnlyFullStorageInventory()!==expectedInventoryToken
+              ||global.localStorage.getItem(key)!==prior){
+              result=deny('full_origin_changed_before_notes_write');return;
+            }
+          }catch(_){
+            result=deny('full_origin_unreadable_before_notes_write');return;
+          }
+          if(!isDarkEnabled()||modeEpoch!==darkMirrorModeEpoch
+            ||currentGeneration({create:false})!==generation){
+            result=deny('generation_changed_before_notes_write');return;
+          }
+          if(prior===nextText){
+            result=deny('notes_cache_already_identical',{
+              cooperativeTaskFreezeLockUsed:true,
+              cacheReadbackVerified:true});return;
+          }
+          attempted=true;
+          try{global.localStorage.setItem(key,nextText);}
+          catch(_){
+            result=deny('notes_cache_write_failed',{
+              writeOutcomeUncertain:true,inspectV1BeforeRetry:true});return;
+          }
+          let savedOrigin;
+          try{
+            if(global.localStorage.getItem(key)!==nextText){
+              result=deny('notes_cache_readback_mismatch',{
+                committed:true,writeOutcomeUncertain:true});return;
+            }
+            savedOrigin=captureReadOnlyFullStorageInventory();
+            const withoutCache=token=>JSON.parse(token)
+              .filter(row=>Array.isArray(row)&&row[0]!==key);
+            if(stableJson(withoutCache(savedOrigin))
+              !==stableJson(withoutCache(expectedInventoryToken))){
+              result=deny('other_origin_changed_during_notes_write',{
+                committed:true,writeOutcomeUncertain:true});return;
+            }
+          }catch(_){
+            result=deny('notes_cache_readback_unreadable',{
+              committed:true,writeOutcomeUncertain:true});return;
+          }
+          const finalFence=await rehearsePreviewDurableWriterFence('audit');
+          if(finalFence.reason!=='preview_writer_inventory_consistent'
+            ||finalFence.fence?.generation!==generation
+            ||finalFence.fence?.epoch!==fence.fence.epoch
+            ||finalFence.fence.frozen
+            ||!isDarkEnabled()||modeEpoch!==darkMirrorModeEpoch
+            ||currentGeneration({create:false})!==generation){
+            result=deny('notes_fence_changed_after_cache_write',{
+              committed:true,writeOutcomeUncertain:true,
+              inspectV1BeforeRetry:true});return;
+          }
+          try{
+            if(global.localStorage.getItem(key)!==nextText
+              ||captureReadOnlyFullStorageInventory()!==savedOrigin){
+              result=deny('notes_origin_changed_after_cache_write',{
+                committed:true,writeOutcomeUncertain:true});return;
+            }
+          }catch(_){
+            result=deny('notes_origin_unreadable_after_cache_write',{
+              committed:true,writeOutcomeUncertain:true});return;
+          }
+          result=deny('preview_notes_dirty_cache_saved',{
+            cacheWriteObserved:true,cacheReadbackVerified:true,
+            committed:true,cooperativeTaskFreezeLockUsed:true,
+            savedLength:nextText.length,fenceEpoch:finalFence.fence.epoch});
+        });
+    }catch(_){
+      return deny('cooperative_notes_lock_request_failed',{
+        writeOutcomeUncertain:attempted,inspectV1BeforeRetry:attempted
+      });
+    }
+    return result;
+  }
+
   const api = {
     __installedModule: true,
     DB_NAME,
@@ -15428,6 +15592,7 @@
     rehearsePreviewCooperativeWriterFreeze,
     rehearsePreviewCooperativeProjectsSave,
     rehearsePreviewCooperativeTodaySave,
+    rehearsePreviewCooperativeDirtyNotesCacheSave,
     inspectPreviewTaskBatchJournalEvidence,
     inspectPreviewTaskBatchEffectiveEvidence,
     inspectPreviewNotesSource,
