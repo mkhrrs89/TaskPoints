@@ -2356,3 +2356,37 @@ sequence's exclusive ownership**, `canAutomaticallyResume:false`,
 This helps specify the eventual writer handoff but does not close the
 production-wide old-tab fencing, independent backup, or physical iOS PWA
 validation gates. Weighted readiness remains **67/100**.
+
+
+## Shared-lock Notes first-edit conflict audit — November 9 (V2 only)
+
+New preview-only `inspectPreviewCooperativeNotesFirstEditConflict(token)`
+verifies the previously sealed first-edit intent and both the current full-
+origin inventory and preview fence under the **same native Web Lock** used by
+the Task, Projects, Today and Notes cooperative rehearsal. It double-checks
+the full origin before, during and after asynchronous evidence verification,
+and rechecks the fence epoch. It rejects a stale token, failed native lock,
+frozen fence, changed generation, missing/corrupted intent or any observed
+older-tab mutation mid-audit.
+
+It produces one of three cautious **point-in-time observations**: original
+origin unchanged; origin changed with cache matching the intended edit; or
+origin changed with a different Notes cache. It never attributes a change
+with certainty to a particular tab or user. Importantly,
+`oldTabsExcluded:false` and `productionWritersFenced:false` remain true
+**even after a successful cooperative lock**. A pre-V2 tab is under no
+obligation to acquire it, and an A-to-B-to-A legacy change could evade two
+identical snapshots. No code now attempts automatic recovery or changes
+any of the canonical Notes, Task, Habit or Project storage paths.
+
+Node regressions cover all three observations, reload, competing native
+lock, frozen preview, an old-tab edit injected after lock acquisition and
+an edit during asynchronous verification. A real Chromium/WebKit test
+holds the preview Web Lock in one tab while an older-code page successfully
+modifies Notes; the diagnostic then rejects the stale token and identifies
+the changed cache after reload. This establishes a concrete remaining
+cutover blocker rather than claiming production-wide exclusion.
+
+All safety flags stay restrictive: no automatic resume, marker clearing,
+restore, live Notes writer migration or cutover. Main remains unchanged.
+The weighted V2 readiness gate remains **67/100**.
