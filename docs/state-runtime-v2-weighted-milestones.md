@@ -2727,3 +2727,36 @@ iOS durability and independent recovery are not established, and the
 dirty recovery marker stays set. The weighted milestone rubric remains
 **67/100**, with the nonpilot migration and production-wide writer-fencing
 gates still uncredited. Main is unchanged.
+
+## Repeat Notes journal provenance checks — November 9
+
+The bounded preview Notes journal is now checked for **meaningful edit
+continuity**, not just the signed container checksum. Every entry must name
+the preceding action, use that action's exact intended text as its
+`previousText`, and carry the correct SHA-256 for that prior cache value.
+This prevents a malformed or re-signed journal with inconsistent ancestry
+from being treated as a usable recovery history.
+
+The read-only `inspectPreviewNotesRepeatEditJournal()` additionally checks
+the **current whole-origin state against the newest action's original
+admission fingerprint**. It reconstructs the prior Notes cache (and, only
+when the second location was already synchronized, the prior canonical V1
+snapshot Notes field) *in memory*, then checks exact origin and snapshot
+digests. It never overwrites the Notes cache, V1 snapshot, marker or journal.
+
+An independently updated legacy Task/Project/other storage key now reports
+`repeat_source_diverged` rather than a misleading fully synchronized
+recovery stage. Likewise, missing authority or dirty recovery markers
+remain explicitly unsafe. The audit separately reports whether the
+historical journal itself is internally verified and whether the
+current origin still matches the latest admission; neither result permits
+automatic replay, dirty-marker clearing, or authority transfer.
+
+Additional Node tests cover correctly re-signed but logically broken edit
+chains, false prior-cache fingerprints, three recovery stages, post-sync
+old-tab edits and marker loss. The browser regression also verifies a
+restored old-tab Task is recognized as source divergence, not safe sync.
+
+This is diagnostic hardening **inside** the uncredited nonpilot migration
+gate. The cutover estimate stays **67/100**, with V1 authoritative, V2
+preview-only, and Main unchanged.
