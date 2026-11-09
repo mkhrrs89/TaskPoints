@@ -2239,3 +2239,46 @@ Production Notes handlers, Main, exports, recovery and all existing
 safeguards remain unchanged. Official V2 readiness remains **67/100**
 until the independent production writer-fencing, recovery and physical
 iOS gates can be verified.
+
+
+## Notes first-edit and final-save crash-prefix rehearsal — November 9 (V2 only)
+
+The new explicit, developer-preview-only
+`inspectPreviewNotesInterruptedSaveWindows(proposedText, fullOriginToken)`
+simulates **five consecutive prefixes** of the existing V1 Notes edit/save
+sequence entirely **in memory**: cache write before authority marker,
+authority marker before dirty marker, dirty marker before snapshot sync,
+completed snapshot sync before dirty-marker removal, and cleared dirty
+marker. It uses the same legacy cache-vs-snapshot selection rules as
+`notes.html`, including a deliberately shortened or emptied Notes edit.
+
+The main finding is a concrete preexisting first-edit crash window:
+when neither authority marker has yet been established, a cache-only
+shortening/clear can be ignored in favor of the longer old V1 snapshot
+if the browser is killed before the next marker write. An edit that
+happens to be longer may remain visible under the bootstrap length
+rule, but that does **not** provide atomic durability or old-tab safety.
+Once the authority marker is successfully written, cache selection
+can preserve intentional shortening in the modeled states.
+
+The simulator accepts only validated V1 Notes sources and exact full-origin
+tokens, uses the existing asynchronous source-digest checks, and refuses
+stale, malformed, production-host and disabled-preview cases. It returns
+only selected-source classifications and risk flags; neither original nor
+proposed Notes text is returned. It **does not mutate any V1/V2 key,
+create a database, or attempt a restore/retry**. Node tests cover
+shortening/clearing, marker-established and longer-edit counterexamples,
+malformed/stale sources and an old-tab race during hashing. Real
+Chromium/WebKit browser tests simulate an interrupted old Notes page
+after its cache write, then the authority-marker continuation, with
+all storage changes confined to disposable browser fixtures.
+
+This is a *reproducible safety diagnosis*, not a fix to the live Notes
+first-edit sequence or proof of an atomic multi-key writer. Every
+response preserves `safeToBeginNotesWrite:false`,
+`notesMultiKeySyncVerified:false` and `canPromote:false`.
+A future production protocol must preserve the old snapshot, protect
+the cache before it becomes authoritative, fence all older writers,
+and verify recovery across interrupted and quota-denied writes.
+Main, live Notes save handlers, off-device backup and rollback remain
+unchanged. Weighted readiness remains **67/100**.
