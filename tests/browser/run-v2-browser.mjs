@@ -4875,6 +4875,154 @@ try {
       oldTabConflictDetected:true,noAutomaticRepair:true,noCutover:true};
   });
 
+  await run('cooperative Today V1 writer preserves day maps and refuses stale legacy tab writes',async context=>{
+    const page=await open(context);
+    const oldTab=await context.newPage();
+    await oldTab.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const baseline=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      return {token:token(),
+        snapshot:localStorage.getItem('taskpoints_v1'),
+        journal:localStorage.getItem('taskpoints_pending_task_mutations_v1')};
+    });
+    const older=await oldTab.evaluate(()=>{
+      const key='taskpoints_today_view_v1';
+      const before=localStorage.getItem(key);
+      const payload=before===null?{}:JSON.parse(before);
+      payload.version=1;
+      payload.notesByDay=payload.notesByDay||{};
+      payload.notesByDay['2026-11-09']=['legacy tab note'];
+      const raw=JSON.stringify(payload);
+      localStorage.setItem(key,raw);
+      return raw;
+    });
+    await requireCrossTabStorageValue(page,'taskpoints_today_view_v1',older);
+    const stale=await page.evaluate(token=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewCooperativeTodaySave(
+        '{"version":1}',token),baseline.token);
+    if(stale.reason==='lock_manager_unavailable'){
+      assert.equal(stale.committed,false);
+      return {unavailableNativeLockFailsClosed:true};
+    }
+    assert.equal(stale.reason,'full_origin_changed',JSON.stringify(stale));
+    const approved=await page.evaluate(async()=>{
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const prior=JSON.parse(localStorage.getItem('taskpoints_today_view_v1'));
+      prior.tasksByDay=prior.tasksByDay||{};
+      prior.tasksByDay['2026-11-10']=[{id:'preview-new-today-task'}];
+      prior.unknownSidecar={keepMe:'yes'};
+      const raw=JSON.stringify(prior);
+      const verdict=await window.TaskPointsStateRuntimeV2
+        .rehearsePreviewCooperativeTodaySave(raw,token());
+      return {verdict,raw,after:localStorage.getItem('taskpoints_today_view_v1'),
+        main:localStorage.getItem('taskpoints_v1'),
+        journal:localStorage.getItem('taskpoints_pending_task_mutations_v1')};
+    });
+    assert.equal(approved.verdict.reason,'preview_today_saved',
+      JSON.stringify(approved));
+    assert.equal(approved.verdict.todaySaved,true);
+    assert.equal(approved.verdict.confirmedDurable,true);
+    assert.equal(approved.verdict.canPromote,false);
+    assert.equal(approved.raw,approved.after);
+    assert.equal(approved.main,baseline.snapshot);
+    assert.equal(approved.journal,baseline.journal);
+    const today=JSON.parse(approved.after);
+    assert.deepEqual(today.notesByDay['2026-11-09'],['legacy tab note']);
+    assert.equal(today.unknownSidecar.keepMe,'yes');
+    const freeze=await page.evaluate(()=>window.TaskPointsStateRuntimeV2
+      .rehearsePreviewCooperativeWriterFreeze({expectedEpoch:0}));
+    assert.equal(freeze.reason,'preview_fence_frozen',JSON.stringify(freeze));
+    const blocked=await page.evaluate(async()=>{
+      const before=localStorage.getItem('taskpoints_today_view_v1');
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const result=await window.TaskPointsStateRuntimeV2
+        .rehearsePreviewCooperativeTodaySave('{"version":1}',token);
+      return {result,before,after:localStorage.getItem('taskpoints_today_view_v1'),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(blocked.result.reason,'preview_fence_frozen');
+    assert.equal(blocked.result.confirmedDurable,false);
+    assert.equal(blocked.before,blocked.after);
+    assert.equal(blocked.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    const reloaded=await page.evaluate(()=>
+      localStorage.getItem('taskpoints_today_view_v1'));
+    assert.equal(reloaded,approved.raw);
+    const bypass=await oldTab.evaluate(()=>{
+      const key='taskpoints_today_view_v1';
+      const payload=JSON.parse(localStorage.getItem(key));
+      payload.notesByDay['2026-11-09']=['older-tab-bypassed-freeze'];
+      const raw=JSON.stringify(payload);
+      localStorage.setItem(key,raw);
+      return raw;
+    });
+    await requireCrossTabStorageValue(page,'taskpoints_today_view_v1',bypass);
+    assert.notEqual(bypass,approved.raw);
+    return {staleTodayWriterRefused:true,allDayMapsRetained:true,
+      unknownFieldsPreserved:true,freezeBlocksParticipatingToday:true,
+      reloadPersistenceVerified:true,oldTabStillUnfenced:true};
+  });
+
+  await run('cooperative Today and Task previews use the same native cross-tab Web Lock',async context=>{
+    const first=await open(context),second=await open(context);
+    if(!await first.evaluate(()=>typeof navigator.locks?.request==='function')){
+      const fail=await second.evaluate(()=>window.TaskPointsStateRuntimeV2
+        .rehearsePreviewCooperativeTodaySave('{"version":1}','[]'));
+      assert.equal(fail.reason,'lock_manager_unavailable');
+      return {webLocksUnsupportedFailClosed:true};
+    }
+    await first.evaluate(()=>{
+      window.__todayLockHeld=false;
+      window.__todayHolding=navigator.locks.request(
+        'taskpoints_v2_preview_task_freeze_cooperative_v1',
+        {mode:'exclusive'},async()=>{
+          window.__todayLockHeld=true;
+          await new Promise(resolve=>{window.__todayRelease=resolve;});
+          window.__todayLockHeld=false;
+        });
+    });
+    await first.waitForFunction(()=>window.__todayLockHeld===true);
+    const attempts=await second.evaluate(async()=>{
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const key='taskpoints_today_view_v1',before=localStorage.getItem(key);
+      const today=await window.TaskPointsStateRuntimeV2
+        .rehearsePreviewCooperativeTodaySave('{"version":1}',token);
+      const freeze=await window.TaskPointsStateRuntimeV2
+        .rehearsePreviewCooperativeWriterFreeze({expectedEpoch:0});
+      return {today,freeze,before,after:localStorage.getItem(key)};
+    });
+    assert.equal(attempts.today.reason,'cooperative_today_lock_held_elsewhere');
+    assert.equal(attempts.today.committed,false);
+    assert.equal(attempts.freeze.reason,'cooperative_freeze_lock_held_elsewhere');
+    assert.equal(attempts.before,attempts.after);
+    await first.evaluate(async()=>{
+      window.__todayRelease();await window.__todayHolding;
+    });
+    const approved=await second.evaluate(async()=>{
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const raw=localStorage.getItem('taskpoints_today_view_v1');
+      const payload=raw===null?{}:JSON.parse(raw);
+      payload.version=1;
+      const next=JSON.stringify(payload);
+      return window.TaskPointsStateRuntimeV2
+        .rehearsePreviewCooperativeTodaySave(next,token);
+    });
+    assert.ok(['preview_today_saved','today_source_already_identical']
+      .includes(approved.reason),JSON.stringify(approved));
+    assert.equal(approved.confirmedDurable,true);
+    assert.equal(approved.canPromote,false);
+    return {nativeCrossTabMutualExclusion:true,
+      sameCooperativeLockForTaskTodayFreeze:true,noCutover:true};
+  });
+
   await run('Projects real V1 writer honors source tokens, cooperative freeze and older-tab changes',async context=>{
     const page=await open(context);
     const legacy=await context.newPage();
