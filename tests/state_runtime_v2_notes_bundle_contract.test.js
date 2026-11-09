@@ -852,3 +852,65 @@ test('Notes interruption audit detects concurrent old-tab edit during source dig
   assert.equal(app.indexedDB.dump(DB),null);
   assert.deepEqual(app.indexedDB.dump('taskpoints_state_v2'),before);
 });
+
+
+test('Notes crash-prefix simulation agrees with actual notes.html selection logic',async()=>{
+  const page=fs.readFileSync(path.join(__dirname,'..','notes.html'),'utf8');
+  const start=page.indexOf('function getBestNotesTextFromStorage()');
+  const end=page.indexOf('function syncNotesStorageLocations',start);
+  assert.ok(start>=0&&end>start);
+  const liveSelector=page.slice(start,end);
+  const compute=new Function('localStorage','TaskPointsCore','STORAGE_KEY',
+    'NOTES_STORAGE_KEY','NOTES_DIRTY_KEY','NOTES_AUTHORITY_KEY',
+    liveSelector+';return getBestNotesTextFromStorage();');
+  const scenarios=[
+    {snapshot:'A very long original note',cache:'A very long original note',
+      proposal:'',authority:null,dirty:null},
+    {snapshot:'A very long original note',cache:'Another long cache',
+      proposal:'tiny',authority:'0',dirty:'0'},
+    {snapshot:'short snapshot',cache:'short cache',
+      proposal:'a much longer proposed edit',authority:null,dirty:null},
+    {snapshot:'Existing document',cache:'Latest draft',
+      proposal:'',authority:'1',dirty:'1'},
+    {snapshot:'Existing document',cache:'Latest draft',
+      proposal:' ',authority:null,dirty:'1'},
+    {snapshot:' ',cache:'\t',proposal:'',authority:'0',dirty:null},
+    {snapshot:'Length tie 12',cache:'Length tie 12',
+      proposal:'Even tie too?',authority:null,dirty:null}
+  ];
+  for(const c of scenarios){
+    const app=await boot({
+      cache:c.cache,
+      ...(c.dirty===null?{}:{dirty:c.dirty}),
+      ...(c.authority===null?{}:{authority:c.authority})
+    });
+    app.localStorage.setItem(V1,JSON.stringify(legacy(c.snapshot)));
+    const before=app.token();
+    const plan=await app.api.inspectPreviewNotesInterruptedSaveWindows(
+      c.proposal,before);
+    assert.equal(plan.sourceVerified,true,JSON.stringify(plan));
+    const stages=[
+      {notes:c.snapshot,cache:c.proposal,auth:c.authority,dirty:c.dirty},
+      {notes:c.snapshot,cache:c.proposal,auth:'1',dirty:c.dirty},
+      {notes:c.snapshot,cache:c.proposal,auth:'1',dirty:'1'},
+      {notes:c.proposal,cache:c.proposal,auth:'1',dirty:'1'},
+      {notes:c.proposal,cache:c.proposal,auth:'1',dirty:null}
+    ];
+    for(let index=0;index<stages.length;index++){
+      const state=stages[index];
+      const isolated=new FakeStorage({
+        [V1]:JSON.stringify(legacy(state.notes)),[CACHE]:state.cache,
+        ...(state.auth===null?{}:{[AUTH]:state.auth}),
+        ...(state.dirty===null?{}:{[DIRTY]:state.dirty})
+      });
+      const core={readTaskPointsStoredState:()=>JSON.parse(
+        isolated.getItem(V1))};
+      const selected=compute(isolated,core,V1,CACHE,DIRTY,AUTH);
+      assert.equal(plan.scenarios[index].proposedEditWouldBeSelected,
+        selected===c.proposal,
+        'legacy Notes selection mismatch at '+plan.scenarios[index].stage);
+    }
+    assert.equal(app.token(),before);
+    assert.equal(app.indexedDB.dump(DB),null);
+  }
+});
