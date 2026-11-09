@@ -2099,3 +2099,41 @@ results DO NOT credit the production writer-fencing milestone (still
 **0/11**), change authority, imply physical iPhone validation, or
 authorize cutover. Main and existing V1 safety/recovery paths remain
 untouched. Overall weighted V2 readiness remains **67/100**.
+
+
+## Cooperative Today direct-key V1 writer rehearsal — November 9
+
+The V2-only explicit preview API
+\`rehearsePreviewCooperativeTodaySave(nextTodayRaw, expectedInventoryToken)\`
+adds **Today day-map** storage (\`taskpoints_today_view_v1\`) to the existing
+experimental shared Web Lock for Task, Projects, and cooperative freeze.
+It makes an actual, synchronous V1 localStorage write **only when explicitly
+called in a developer preview host**, not in production Today save paths.
+
+The caller supplies canonical, bounded JSON and an exact, full-origin V1
+inventory token from before any asynchronous work. It preserves all four
+native day maps (\`tasksByDay\`, \`notesByDay\`,
+\`selectedHabitIdsByDay\`, \`orderByDay\`) plus unknown custom fields, and
+rejects invalid source schemas, date keys, array shapes, and unrecognized
+versions. The writer refuses an already-frozen preview fence, a held
+cooperative lock, any detected old-tab source modification, and any
+generation/mode change before saving. It confirms exact readback and
+checks unchanged unrelated origin keys plus the fence epoch afterward.
+An exception after a possible durable write yields an **uncertain** outcome;
+there is no rollback, deletion, retry or normalization of V1 source.
+
+Six focused tests cover source fidelity, stale-source rejection, malformed
+existing Today records, cross-family locking, freeze refusal, an old-tab
+interleaving and a thrown postwrite exception. Chromium/WebKit browser tests
+verify a real old-version Today write, fresh guarded Today edit, persistence
+after reload, cooperative freeze refusal, shared native cross-tab Web Lock,
+and the critical fact that an old tab **still bypasses the preview fence**.
+
+**This is not production-wide protection**. The three tested explicit
+preview writer paths (Task completion journal, Projects direct key, Today
+direct key) do not protect Home, Settings import/reset, Notes, Game,
+Habit journals, emergency recovery, or previous-version tabs. An equal
+source fingerprint does not prove old tabs cannot write a moment later.
+V1 remains authoritative and every existing safeguard/back-up remains.
+Production writer-fencing credit stays **0/11**; overall weighted V2
+readiness stays **67/100**. Main is untouched.
