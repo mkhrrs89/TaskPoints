@@ -15601,6 +15601,13 @@
     if(!isDarkEnabled())return refuse('dark_disabled');
     if(typeof text!=='string'||text.length>PREVIEW_NOTES_FIRST_EDIT_LIMIT)
       return refuse('notes_first_edit_intent_text_invalid_or_oversized');
+    // The storage quota counts bytes, not just JS code units. Reject long
+    // multi-byte strings and any missing encoder before touching V1 or WAL.
+    if(typeof global.TextEncoder!=='function')
+      return refuse('notes_first_edit_intent_encoder_unavailable');
+    if(new global.TextEncoder().encode(text).byteLength
+      >PREVIEW_NOTES_FIRST_EDIT_LIMIT)
+      return refuse('notes_first_edit_intent_text_invalid_or_oversized');
     if(typeof fullOriginToken!=='string'||!fullOriginToken)
       return refuse('full_origin_token_required');
     if(typeof actionId!=='string'
@@ -15632,6 +15639,9 @@
     try {
       sealed=JSON.stringify({...record,
         integrityFingerprint:await previewRecoveryFingerprint(record)});
+      if(new global.TextEncoder().encode(sealed).byteLength
+        >PREVIEW_NOTES_FIRST_EDIT_LIMIT)
+        return refuse('notes_first_edit_intent_record_oversized');
       if(!captured.current())return refuse('notes_first_edit_source_changed_before_lock');
     }catch(_){return refuse('notes_first_edit_digest_unavailable');}
     let touched=false;
@@ -15729,6 +15739,10 @@
       const raw=global.localStorage.getItem(PREVIEW_NOTES_FIRST_EDIT_INTENT_KEY);
       if(raw===null)return refuse('notes_first_edit_intent_absent');
       const record=JSON.parse(raw);
+      if(typeof global.TextEncoder!=='function'
+        ||new global.TextEncoder().encode(raw).byteLength
+          >PREVIEW_NOTES_FIRST_EDIT_LIMIT)
+        return refuse('notes_first_edit_intent_invalid');
       if(!record||typeof record!=='object'||Array.isArray(record)
         ||Object.keys(record).length!==8
         ||record.id!=='notes-first-edit-intent'||record.schemaVersion!==1
