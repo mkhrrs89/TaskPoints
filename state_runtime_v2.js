@@ -16611,6 +16611,167 @@
   }
 
 
+  // Read-only final Notes snapshot/dirty-marker audit on a disposable
+  // preview origin. An observed sync is NOT permission to clear dirty:
+  // old deployed V1 tabs do not participate in the cooperative lock.
+  // Check intent, live V1 selection, both data locations and generation
+  // across two durable-fence inspections; never write or return Notes text.
+  async function inspectPreviewNotesSnapshotCompletionEvidence(
+    expectedInventoryToken,actionId) {
+    const deny=(reason,detail={})=>({
+      checked:true,previewOnly:true,readOnly:true,
+      completionPointInTimeVerified:false,
+      snapshotAndCacheMatchIntent:false,
+      dirtyMarkerRetained:false,
+      externalStorageEventsObserved:false,
+      missedStorageEventsRuledOut:false,
+      oldTabsExcluded:false,productionWritersFenced:false,
+      canAutomaticallyResume:false,safeToClearDirtyMarker:false,
+      safeToRestore:false,notesMultiKeySyncVerified:false,
+      confirmedNotesDurable:false,canPromote:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...detail
+    });
+    if(!isWalTestPreviewHost())return deny('preview_host_required');
+    if(!isDarkEnabled())return deny('dark_disabled');
+    if(typeof expectedInventoryToken!=='string'||!expectedInventoryToken)
+      return deny('full_origin_token_required');
+    if(typeof actionId!=='string'
+      ||!/^[a-zA-Z0-9_:.-]{1,96}$/.test(actionId))
+      return deny('notes_completion_action_id_invalid');
+    const locks=global.navigator?.locks;
+    if(typeof locks?.request!=='function')
+      return deny('lock_manager_unavailable');
+    const generation=currentGeneration({create:false});
+    if(!generation)return deny('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    const stableMode=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&currentGeneration({create:false})===generation
+      &&darkMirrorModeEpoch===epoch;
+    const eventCount=()=>{
+      const witness=previewLegacyStorageEventWitness;
+      if(!witness)return {active:false,unsafe:false,count:0};
+      return {active:true,
+        unsafe:witness.invalidated||witness.generation!==generation
+          ||witness.epoch!==epoch||witness.totalEvents>0,
+        count:witness.totalEvents};
+    };
+    let result=deny('notes_completion_lock_unavailable');
+    try{
+      await locks.request(PREVIEW_COOPERATIVE_TASK_FREEZE_LOCK,
+        {mode:'exclusive',ifAvailable:true},async lock=>{
+          if(!lock){
+            result=deny('notes_completion_lock_held_elsewhere');return;
+          }
+          let before;
+          try{
+            before=captureReadOnlyFullStorageInventory();
+            if(!stableMode()||before!==expectedInventoryToken){
+              result=deny('notes_completion_origin_changed');return;
+            }
+          }catch(_){result=deny('notes_completion_origin_unreadable');return;}
+          const startWitness=eventCount();
+          if(startWitness.unsafe){
+            result=deny('notes_completion_external_storage_event_observed',{
+              externalStorageEventsObserved:true});return;
+          }
+          const fence=await rehearsePreviewDurableWriterFence('audit');
+          if(!stableMode()
+            ||fence.reason!=='preview_writer_inventory_consistent'
+            ||fence.fence?.generation!==generation
+            ||fence.fence?.frozen){
+            result=deny('notes_completion_fence_unverified_or_frozen');
+            return;
+          }
+          const proof=await inspectPreviewNotesFirstEditIntent();
+          if(!proof.intentEvidenceVerified){
+            result=deny('notes_completion_intent_unverified',{
+              prerequisiteReason:proof.reason});return;
+          }
+          let intentRaw,cache,dirty,authority,snapshotNotes;
+          try{
+            intentRaw=global.localStorage.getItem(
+              PREVIEW_NOTES_FIRST_EDIT_INTENT_KEY);
+            const sealed=JSON.parse(intentRaw);
+            if(!sealed||sealed.actionId!==actionId
+              ||sealed.resetGeneration!==generation
+              ||typeof sealed.text!=='string')
+              throw Error('intent_wrong_action');
+            const {integrityFingerprint,...record}=sealed;
+            if(await previewRecoveryFingerprint(record)!==integrityFingerprint)
+              throw Error('intent_integrity_mismatch');
+            cache=global.localStorage.getItem('taskpoints_notes_v1');
+            dirty=global.localStorage.getItem('taskpoints_notes_dirty_v1');
+            authority=global.localStorage.getItem(
+              'taskpoints_notes_authoritative_v1');
+            const raw=global.localStorage.getItem(
+              core.STORAGE_KEY||'taskpoints_v1');
+            const state=core.parseTaskPointsStorageJson(raw);
+            if(!state||typeof state!=='object'||Array.isArray(state)
+              ||(state.notes!==undefined&&typeof state.notes!=='string'))
+              throw Error('snapshot_unreadable');
+            snapshotNotes=state.notes||'';
+            if(captureReadOnlyFullStorageInventory()!==before
+              ||global.localStorage.getItem(
+                PREVIEW_NOTES_FIRST_EDIT_INTENT_KEY)!==intentRaw)
+              throw Error('source_changed_during_audit');
+            if(!proof.notesCacheMatchesIntent
+              ||!proof.snapshotMatchesIntent
+              ||!proof.legacySelectsIntendedText
+              ||proof.observedRecoveryStage!=='snapshot_synced_dirty_pending'
+              ||cache!==sealed.text||snapshotNotes!==sealed.text
+              ||dirty!=='1'||authority!=='1'){
+              result=deny('notes_completion_not_synchronized',{
+                observedRecoveryStage:proof.observedRecoveryStage,
+                dirtyMarkerRetained:dirty==='1',
+                snapshotAndCacheMatchIntent:cache===sealed.text
+                  &&snapshotNotes===sealed.text});
+              return;
+            }
+          }catch(_){
+            result=deny('notes_completion_evidence_unreadable_or_invalid');
+            return;
+          }
+          const afterFence=await rehearsePreviewDurableWriterFence('audit');
+          let endWitness;
+          try{
+            endWitness=eventCount();
+            if(!stableMode()
+              ||afterFence.reason!=='preview_writer_inventory_consistent'
+              ||afterFence.fence?.generation!==generation
+              ||afterFence.fence?.epoch!==fence.fence.epoch
+              ||afterFence.fence?.frozen
+              ||captureReadOnlyFullStorageInventory()!==before
+              ||global.localStorage.getItem(
+                PREVIEW_NOTES_FIRST_EDIT_INTENT_KEY)!==intentRaw
+              ||endWitness.unsafe
+              ||endWitness.active!==startWitness.active){
+              result=deny('notes_completion_fence_origin_or_witness_changed',{
+                externalStorageEventsObserved:endWitness.unsafe,
+                dirtyMarkerRetained:true});
+              return;
+            }
+          }catch(_){
+            result=deny('notes_completion_postaudit_unreadable');return;
+          }
+          result=deny('notes_snapshot_completion_point_in_time_observed',{
+            completionPointInTimeVerified:true,
+            snapshotAndCacheMatchIntent:true,
+            dirtyMarkerRetained:true,
+            cooperativeLockUsed:true,
+            storageEventWitnessActive:endWitness.active,
+            observedRecoveryStage:'snapshot_synced_dirty_pending',
+            // This is only a point-in-time observation; old tabs and
+            // unobserved storage events remain possible.
+            missedStorageEventsRuledOut:false,oldTabsExcluded:false,
+            safeToClearDirtyMarker:false,canPromote:false
+          });
+        });
+    }catch(_){return deny('notes_completion_lock_request_failed');}
+    return result;
+  }
+
+
   // V2-only Notes keystroke rehearsal: participate in the same preview Web
   // Lock as Task / Projects / Today / freeze, but mutate ONLY the existing
   // V1 Notes cache after BOTH durable authority/dirty markers already equal
@@ -16875,6 +17036,7 @@
     rehearsePreviewNotesFirstEditIntent,
     rehearsePreviewAdmittedNotesFirstEditCacheWrite,
     rehearsePreviewAdmittedNotesSnapshotSync,
+    inspectPreviewNotesSnapshotCompletionEvidence,
     inspectPreviewNotesFirstEditIntent,
     inspectPreviewCooperativeNotesFirstEditConflict,
     beginPreviewLegacyStorageEventWitness,
