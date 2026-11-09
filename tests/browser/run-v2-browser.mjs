@@ -5694,8 +5694,11 @@ try {
   await run('Read-only whole-origin backup census identifies image database and never exports bytes',async context=>{
     const page=await open(context);
     const result=await page.evaluate(async()=>{
+      let stage='begin';
+      try{
       const api=window.TaskPointsStateRuntimeV2;
       await api.seedFromLegacy();
+      stage='legacy_seeded';
       const name=window.TaskPointsCore?.IMAGE_DB_NAME||'taskpoints';
       const storeName=window.TaskPointsCore?.IMAGE_STORE_NAME||'images';
       // This isolated fixture creates one real Blob-backed image. The
@@ -5709,6 +5712,7 @@ try {
         request.onsuccess=()=>resolve(request.result);
         request.onerror=()=>reject(request.error);
       });
+      stage='image_db_opened';
       const tx=imageDb.transaction(storeName,'readwrite');
       const completed=new Promise((resolve,reject)=>{
         tx.oncomplete=resolve;
@@ -5719,6 +5723,7 @@ try {
         new Blob(['fixture image byte content'],{type:'image/png'}),
         'fixture-img-01');
       await completed;
+      stage='image_written';
       imageDb.close();
       const token=()=>JSON.stringify(Array.from({length:localStorage.length},
         (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
@@ -5726,10 +5731,13 @@ try {
       const originalToken=token();
       const known=typeof indexedDB.databases==='function'
         ?(await indexedDB.databases()).map(x=>x.name).sort():null;
+      stage='before_backup_census';
       const census=await api.inspectPreviewIndependentBackupCoverage(
         originalToken);
+      stage='after_backup_census';
       const after=typeof indexedDB.databases==='function'
         ?(await indexedDB.databases()).map(x=>x.name).sort():null;
+      stage='after_catalog';
       const imageDbAfter=await new Promise((resolve,reject)=>{
         const request=indexedDB.open(name);
         request.onsuccess=()=>resolve(request.result);
@@ -5742,11 +5750,16 @@ try {
         request.onerror=()=>reject(request.error);
       });
       imageDbAfter.close();
+      stage='complete';
       return {census,known,after,imageCount,
         snapshotUnchanged:localStorage.getItem('taskpoints_v1')===
           originalSnapshot,
         originUnchanged:token()===originalToken};
+      }catch(error){return {__backupBrowserError:true,stage,
+        name:String(error?.name||''),message:String(error?.message||error),
+        stack:String(error?.stack||'')};}
     });
+    assert.equal(result?.__backupBrowserError,undefined,JSON.stringify(result));
     if(!result.known){
       assert.equal(result.census.reason,
         'indexeddb_database_catalog_unavailable');
