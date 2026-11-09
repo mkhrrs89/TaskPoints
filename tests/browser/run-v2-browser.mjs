@@ -5234,12 +5234,32 @@ try {
       JSON.stringify(recovered.proof));
     assert.equal(recovered.proof.notesCacheMatchesIntent,true);
     assert.equal(recovered.proof.sourceInventoryMatchesAdmission,false);
+    assert.equal(recovered.proof.observedRecoveryStage,
+      'unmarked_cache_snapshot_diverged');
+    assert.equal(recovered.proof.currentSnapshotReadable,true);
+    assert.equal(recovered.proof.legacySelectsIntendedText,false);
+    assert.equal(recovered.proof.safeToClearDirtyMarker,false);
+    assert.equal(recovered.proof.canAutomaticallyResume,false);
     assert.equal(recovered.proof.safeToRestore,false);
     assert.equal(recovered.legacyAudit.selectedSource,'unmarked_snapshot_only');
     assert.equal(recovered.cache,'');
     assert.equal(recovered.snapshot,intent.original);
     assert.equal(recovered.dirty,null);
     assert.equal(recovered.sidecar,intent.sidecar);
+    // Simulate the old Notes page finishing only its authority marker.
+    // This should make the shorter cache visible without any V2 replay.
+    await legacy.evaluate(()=>localStorage.setItem(
+      'taskpoints_notes_authoritative_v1','1'));
+    await requireCrossTabStorageValue(page,'taskpoints_notes_authoritative_v1','1');
+    const marked=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      return api.inspectPreviewNotesFirstEditIntent();
+    });
+    assert.equal(marked.intentEvidenceVerified,true,JSON.stringify(marked));
+    assert.equal(marked.observedRecoveryStage,'authority_marker_snapshot_pending');
+    assert.equal(marked.legacySelectsIntendedText,true);
+    assert.equal(marked.safeToRestore,false);
+    assert.equal(marked.canAutomaticallyResume,false);
     return {firstEditIntentPersistedAfterRestart:true,
       oldCodeCacheOnlyCrashDetected:true,noUnapprovedNotesRestore:true,
       unchangedLegacySnapshot:true,unfencedOldTabStillRecognized:true,
