@@ -17411,10 +17411,14 @@
         return deny('followup_snapshot_invalid');
       const cacheMatches=cache===signed.text;
       const snapshotMatches=snapshot.notes===signed.text;
-      const stage=cacheMatches
-        ?snapshotMatches?'followup_snapshot_synced_dirty_pending'
-          :'followup_cache_written_snapshot_pending'
-        :'followup_intent_recorded_cache_pending';
+      // Never label a snapshot as "dirty pending" when the actual
+      // recovery marker or cache authority has disappeared.
+      const markersIntact=dirty==='1'&&authority==='1';
+      const stage=!markersIntact?'followup_recovery_markers_missing'
+        :cacheMatches
+          ?snapshotMatches?'followup_snapshot_synced_dirty_pending'
+            :'followup_cache_written_snapshot_pending'
+          :'followup_intent_recorded_cache_pending';
       if(!isWalTestPreviewHost()||!isDarkEnabled()
         ||currentGeneration({create:false})!==generation
         ||captureReadOnlyFullStorageInventory()!==before
