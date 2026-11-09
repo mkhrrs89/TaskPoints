@@ -1216,3 +1216,133 @@ test('repeat snapshot readback detects independent old tab update after its writ
     'old-tab-new-project');
   assert.equal(a.localStorage.getItem(DIRTY),'1');
 });
+
+
+test('repeat journal provenance audit detects older-tab edit after completed snapshot',async()=>{
+  const a=await boot();
+  await completedTwoNotesEdits(a);
+  await repeatSequence(a,'provenance-third','third');
+  const before=a.token();
+  const valid=await a.api.inspectPreviewNotesRepeatEditJournal();
+  assert.equal(valid.journalEvidenceVerified,true,JSON.stringify(valid));
+  assert.equal(valid.sourceOriginMatchesAdmission,true);
+  assert.equal(valid.lastActionProvenanceVerified,true);
+  assert.equal(valid.observedRecoveryStage,
+    'repeat_snapshot_synced_dirty_pending');
+  assert.equal(a.token(),before,'read-only audit never edits storage');
+  const state=JSON.parse(a.localStorage.getItem(V1));
+  state.tasks.push({id:'older-tab-added',title:'Unrelated newer work'});
+  a.localStorage.setItem(V1,JSON.stringify(state));
+  const divergedToken=a.token();
+  const inspected=await a.api.inspectPreviewNotesRepeatEditJournal();
+  assert.equal(inspected.journalEvidenceVerified,true,
+    JSON.stringify(inspected));
+  assert.equal(inspected.sourceOriginMatchesAdmission,false);
+  assert.equal(inspected.lastActionProvenanceVerified,false);
+  assert.equal(inspected.observedRecoveryStage,'repeat_source_diverged');
+  assert.equal(inspected.safeToClearDirtyMarker,false);
+  assert.equal(inspected.canPromote,false);
+  assert.equal(a.token(),divergedToken);
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+  assert.equal(JSON.parse(a.localStorage.getItem(V1))
+    .tasks[1].id,'older-tab-added');
+});
+
+test('repeat journal audit distinguishes intent, cache and snapshot with proven source',async()=>{
+  const a=await boot();
+  await completedTwoNotesEdits(a);
+  const intent=await a.api.rehearsePreviewNotesRepeatEditIntent(
+    'recovery third',a.token(),'audit-stages');
+  assert.equal(intent.intentRecorded,true);
+  const one=await a.api.inspectPreviewNotesRepeatEditJournal();
+  assert.equal(one.observedRecoveryStage,
+    'repeat_intent_recorded_cache_pending',JSON.stringify(one));
+  assert.equal(one.sourceOriginMatchesAdmission,true);
+  assert.equal(one.lastActionProvenanceVerified,true);
+  const cached=await a.api.rehearsePreviewAdmittedNotesRepeatCacheWrite(
+    a.token(),'audit-stages');
+  assert.equal(cached.cacheReadbackVerified,true);
+  const two=await a.api.inspectPreviewNotesRepeatEditJournal();
+  assert.equal(two.observedRecoveryStage,
+    'repeat_cache_written_snapshot_pending',JSON.stringify(two));
+  assert.equal(two.sourceOriginMatchesAdmission,true);
+  assert.equal(two.lastActionProvenanceVerified,true);
+  const synced=await a.api.rehearsePreviewAdmittedNotesRepeatSnapshotSync(
+    a.token(),'audit-stages');
+  assert.equal(synced.notesSnapshotSynchronized,true);
+  const three=await a.api.inspectPreviewNotesRepeatEditJournal();
+  assert.equal(three.observedRecoveryStage,
+    'repeat_snapshot_synced_dirty_pending',JSON.stringify(three));
+  assert.equal(three.sourceOriginMatchesAdmission,true);
+  assert.equal(three.lastActionProvenanceVerified,true);
+  assert.equal(three.safeToClearDirtyMarker,false);
+  assert.equal(three.canPromote,false);
+});
+
+test('re-signed repeat journal with broken text ancestry fails closed',async()=>{
+  const a=await boot();
+  await completedTwoNotesEdits(a);
+  await repeatSequence(a,'chain-third','third');
+  await repeatSequence(a,'chain-fourth','fourth');
+  const state=a.localStorage.getItem(V1);
+  const cache=a.localStorage.getItem(CACHE);
+  const intent=a.localStorage.getItem(INTENT);
+  const followup=a.localStorage.getItem(FOLLOWUP_INTENT);
+  const journal=JSON.parse(a.localStorage.getItem(REPEAT_JOURNAL));
+  journal.entries[1].previousText='another history';
+  const {integrityFingerprint,...signed}=journal;
+  journal.integrityFingerprint=await signedFingerprint(signed);
+  a.localStorage.setItem(REPEAT_JOURNAL,JSON.stringify(journal));
+  const before=a.token();
+  const check=await a.api.inspectPreviewNotesRepeatEditJournal();
+  assert.equal(check.reason,'repeat_journal_unreadable_or_invalid',
+    JSON.stringify(check));
+  assert.equal(check.canPromote,false);
+  const denied=await a.api.rehearsePreviewNotesRepeatEditIntent(
+    'fifth',a.token(),'chain-fifth');
+  assert.equal(denied.intentRecorded,false,JSON.stringify(denied));
+  assert.equal(a.token(),before,'failed admission must not rewrite journal');
+  assert.equal(a.localStorage.getItem(V1),state);
+  assert.equal(a.localStorage.getItem(CACHE),cache);
+  assert.equal(a.localStorage.getItem(INTENT),intent);
+  assert.equal(a.localStorage.getItem(FOLLOWUP_INTENT),followup);
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+});
+
+test('re-signed repeat journal with false previous-cache fingerprint fails closed',async()=>{
+  const a=await boot();
+  await completedTwoNotesEdits(a);
+  await repeatSequence(a,'digest-third','third');
+  const journal=JSON.parse(a.localStorage.getItem(REPEAT_JOURNAL));
+  journal.entries[0].sourceCacheFingerprint=
+    await signedFingerprint('not the previous Notes');
+  const {integrityFingerprint,...signed}=journal;
+  journal.integrityFingerprint=await signedFingerprint(signed);
+  a.localStorage.setItem(REPEAT_JOURNAL,JSON.stringify(journal));
+  const origin=a.token();
+  const evidence=await a.api.inspectPreviewNotesRepeatEditJournal();
+  assert.equal(evidence.reason,'repeat_journal_unreadable_or_invalid');
+  const attempted=await a.api.rehearsePreviewNotesRepeatEditIntent(
+    'fourth',a.token(),'digest-fourth');
+  assert.equal(attempted.intentRecorded,false);
+  assert.equal(attempted.canPromote,false);
+  assert.equal(a.token(),origin);
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+});
+
+test('repeat audit denies false completed status after missing Notes dirty marker',async()=>{
+  const a=await boot();
+  await completedTwoNotesEdits(a);
+  await repeatSequence(a,'marker-third','third');
+  a.localStorage.removeItem(DIRTY);
+  const before=a.token();
+  const evidence=await a.api.inspectPreviewNotesRepeatEditJournal();
+  assert.equal(evidence.journalEvidenceVerified,true);
+  assert.equal(evidence.sourceOriginMatchesAdmission,false);
+  assert.equal(evidence.lastActionProvenanceVerified,false);
+  assert.equal(evidence.observedRecoveryStage,
+    'repeat_recovery_markers_missing');
+  assert.equal(evidence.canPromote,false);
+  assert.equal(evidence.safeToClearDirtyMarker,false);
+  assert.equal(a.token(),before);
+});
