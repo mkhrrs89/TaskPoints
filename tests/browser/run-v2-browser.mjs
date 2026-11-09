@@ -5373,6 +5373,122 @@ try {
       sealedNotesStillInspectable:true,dirtyNotCleared:true};
   });
 
+  await run('Notes completion read-only audit detects transient cross-tab and post-sync overwrite',async context=>{
+    const page=await open(context);
+    const old=await context.newPage();
+    await old.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const prepared=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const state=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      state.notes='An older much longer Notes entry';
+      state.tasks=[{id:'old-task',title:'Keep old task'}];
+      localStorage.setItem('taskpoints_v1',JSON.stringify(state));
+      localStorage.removeItem('taskpoints_notes_v1');
+      localStorage.removeItem('taskpoints_notes_dirty_v1');
+      localStorage.removeItem('taskpoints_notes_authoritative_v1');
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const intent=await api.rehearsePreviewNotesFirstEditIntent(
+        'tiny',token(),'browser-completion-audit');
+      if(!intent.intentRecorded)return {intent};
+      const first=await api.rehearsePreviewAdmittedNotesFirstEditCacheWrite(
+        token(),'browser-completion-audit');
+      const sync=await api.rehearsePreviewAdmittedNotesSnapshotSync(
+        token(),'browser-completion-audit');
+      const proof=await api.inspectPreviewNotesSnapshotCompletionEvidence(
+        token(),'browser-completion-audit');
+      return {intent,first,sync,proof};
+    });
+    if(prepared.intent.reason==='lock_manager_unavailable'){
+      assert.equal(prepared.intent.intentRecorded,false);
+      return {missingLockRefused:true};
+    }
+    assert.equal(prepared.intent.intentRecorded,true,JSON.stringify(prepared.intent));
+    assert.equal(prepared.first.firstEditApplied,true,JSON.stringify(prepared.first));
+    assert.equal(prepared.sync.notesSnapshotSynchronized,true,JSON.stringify(prepared.sync));
+    assert.equal(prepared.proof.completionPointInTimeVerified,true,
+      JSON.stringify(prepared.proof));
+    assert.equal(prepared.proof.snapshotAndCacheMatchIntent,true);
+    assert.equal(prepared.proof.dirtyMarkerRetained,true);
+    assert.equal(prepared.proof.safeToClearDirtyMarker,false);
+    assert.equal(prepared.proof.oldTabsExcluded,false);
+    assert.equal(prepared.proof.canPromote,false);
+    await page.reload({waitUntil:'load'});
+    const restarted=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const proof=await api.inspectPreviewNotesSnapshotCompletionEvidence(
+        token(),'browser-completion-audit');
+      const witness=await api.beginPreviewLegacyStorageEventWitness(token());
+      return {proof,witness};
+    });
+    assert.equal(restarted.proof.completionPointInTimeVerified,true);
+    assert.equal(restarted.witness.observing,true,
+      JSON.stringify(restarted.witness));
+    await old.evaluate(()=>{
+      localStorage.setItem('tp_projects_v1','transient other-tab value');
+      localStorage.removeItem('tp_projects_v1');
+    });
+    await page.waitForFunction(async()=>{
+      const witness=await window.TaskPointsStateRuntimeV2
+        .inspectPreviewLegacyStorageEventWitness();
+      return witness.observedStorageEvents>=2;
+    },null,{timeout:10000});
+    const transient=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const evidence=await api.inspectPreviewNotesSnapshotCompletionEvidence(
+        token(),'browser-completion-audit');
+      const stop=api.stopPreviewLegacyStorageEventWitness();
+      return {evidence,stop};
+    });
+    assert.equal(transient.evidence.reason,
+      'notes_completion_external_storage_event_observed',
+      JSON.stringify(transient.evidence));
+    assert.equal(transient.evidence.completionPointInTimeVerified,false);
+    assert.equal(transient.evidence.externalStorageEventsObserved,true);
+    assert.equal(transient.evidence.safeToClearDirtyMarker,false);
+    assert.equal(transient.stop.stopped,true);
+    await old.evaluate(()=>{
+      const state=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      state.notes='An older tab overwrote Notes again';
+      state.tasks.push({id:'new-task',title:'Preserve newer work'});
+      localStorage.setItem('taskpoints_v1',JSON.stringify(state));
+    });
+    const diverged=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const evidence=await api.inspectPreviewNotesSnapshotCompletionEvidence(
+        token(),'browser-completion-audit');
+      return {evidence,dirty:localStorage.getItem('taskpoints_notes_dirty_v1'),
+        state:JSON.parse(localStorage.getItem('taskpoints_v1'))};
+    });
+    assert.equal(diverged.evidence.completionPointInTimeVerified,false,
+      JSON.stringify(diverged.evidence));
+    assert.equal(diverged.evidence.safeToClearDirtyMarker,false);
+    assert.equal(diverged.dirty,'1');
+    assert.equal(diverged.state.tasks[1].id,'new-task');
+    await page.reload({waitUntil:'load'});
+    const final=await page.evaluate(async()=>({
+      proof:await window.TaskPointsStateRuntimeV2
+        .inspectPreviewNotesFirstEditIntent(),
+      dirty:localStorage.getItem('taskpoints_notes_dirty_v1')
+    }));
+    assert.equal(final.proof.intentEvidenceVerified,true);
+    assert.equal(final.proof.observedRecoveryStage,
+      'dirty_cache_snapshot_pending');
+    assert.equal(final.proof.canPromote,false);
+    assert.equal(final.dirty,'1');
+    return {reloadedAuditVerified:true,transientOldTabDetected:true,
+      postSyncOverwriteRefused:true,newerTaskRetained:true,
+      recoveryIntentAndDirtyPreserved:true};
+  });
+
   await run('Baseline-first Notes protocol protects prior text across every simulated interruption',async context=>{
     const page=await open(context);
     const old=await context.newPage();
