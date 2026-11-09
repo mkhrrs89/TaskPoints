@@ -2677,3 +2677,53 @@ excluded, storage events can be missed, no atomic multi-key durable commit
 or physical-device durability is proven, and the dirty marker cannot be
 safely cleared. V1 remains the only authority. Weighted cutover readiness
 remains **67/100**, and Main is untouched.
+
+## Bounded reusable Notes edit journal — November 9
+
+The previously demonstrated first and second Notes edits had separate,
+immutable signed intent records. V2 now adds a **single bounded, append-only
+preview journal** for further sequential edits, rather than inventing a
+new storage key per edit:
+
+- `rehearsePreviewNotesRepeatEditIntent(text, token, actionId)` admits a
+  new signed journal entry only after the previous edit's cache and V1
+  snapshot are synchronized and the legacy authoritative/dirty markers
+  remain intact. It binds the exact origin inventory excluding the journal,
+  prior Notes cache, original snapshot, previous action ID and proposed text.
+  It refuses duplicate action IDs, an unfinished preceding edit, tampered
+  entries, inconsistent generation and an already full journal.
+- `rehearsePreviewAdmittedNotesRepeatCacheWrite(token, actionId)` writes
+  the single authoritative Notes cache key only when the newest signed
+  action, full-origin provenance, original snapshot, cooperative lock,
+  nonfrozen writer fence and optional storage-event witness agree.
+- `rehearsePreviewAdmittedNotesRepeatSnapshotSync(token, actionId)` writes
+  only the Notes field of a canonical, unchanged V1 snapshot. The
+  immutable admission fingerprint is checked against the present full
+  origin **with the previous Notes cache text reconstructed**; a freshly
+  captured token cannot authorize erasing Tasks or Projects from an
+  uncooperative older tab.
+- `inspectPreviewNotesRepeatEditJournal()` is strictly read-only. It
+  distinguishes a pending intent, cache-written/snapshot-pending,
+  synchronized/dirty-pending, missing recovery markers and invalid journal
+  stages across reload. It never exposes saved note text or applies it.
+
+Journal admission is limited to **16 additional actions** and a total
+of **256 KiB** of serialized history, with 64 KiB maximum Notes text per
+action. These are conservative preview limits to prevent unbounded local
+storage growth; hitting either limit fails closed without deleting
+earlier actions or clearing the dirty recovery marker. No automatic replay
+or compaction is authorized.
+
+Node tests exercise three or more consecutive edits, the 16-action limit,
+crash/reload, duplicate identifiers, quota denial, tampering, altered Tasks,
+re-tokened old-tab changes, midwrite races and storage-event warnings.
+Chromium/WebKit browser checks exercise repeated edits separated by reload
+and a subsequent stale old-tab update.
+
+**This is a reusable synthetic preview, not a production cutover.** Existing
+live Notes editors are not redirected. V1 remains authoritative; older
+tabs may bypass locks, the multi-key sequence is not atomic, physical
+iOS durability and independent recovery are not established, and the
+dirty recovery marker stays set. The weighted milestone rubric remains
+**67/100**, with the nonpilot migration and production-wide writer-fencing
+gates still uncredited. Main is unchanged.
