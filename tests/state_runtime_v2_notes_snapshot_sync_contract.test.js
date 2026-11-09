@@ -395,3 +395,39 @@ test('legacy v1 signed intent remains inspectable but cannot sync without baseli
   assert.equal(a.localStorage.getItem(V1),previous);
   assert.equal(a.localStorage.getItem(DIRTY),'1');
 });
+
+
+test('noncanonical snapshot bytes are refused without rewriting unrelated legacy data',async()=>{
+  const original=JSON.stringify(legacy());
+  const altered=[
+    {kind:'pretty-printed snapshot',raw:JSON.stringify(legacy(),null,2)},
+    {kind:'duplicate JSON keys',
+      raw:original.slice(0,-1)+',"unknownExtra":"first","unknownExtra":"second"}'},
+    {kind:'escaped Unicode text',raw:original.replace('Walk','\\u0057alk')},
+    {kind:'precision-losing numeric token',
+      raw:original.slice(0,-1)+',"unrelatedPrecision":9007199254740993}'}
+  ];
+  for(const {kind,raw} of altered){
+    const a=await boot();
+    a.localStorage.setItem(V1,raw);
+    const beforeIdb=a.indexedDB.dump('taskpoints_state_v2');
+    const action='noncanonical-'+altered.indexOf(altered.find(x=>x.kind===kind));
+    await stage(a,action,'short');
+    const sealed=a.localStorage.getItem(INTENT);
+    const before=a.token();
+    const denied=await a.api.rehearsePreviewAdmittedNotesSnapshotSync(
+      before,action);
+    assert.equal(denied.reason,'snapshot_sync_noncanonical_legacy_json',
+      kind+': '+JSON.stringify(denied));
+    assert.equal(denied.snapshotWriteAttempted,false,kind);
+    assert.equal(denied.notesSnapshotSynchronized,false,kind);
+    assert.equal(denied.safeToClearDirtyMarker,false,kind);
+    assert.equal(denied.canPromote,false,kind);
+    assert.equal(a.localStorage.getItem(V1),raw,kind);
+    assert.equal(a.localStorage.getItem(INTENT),sealed,kind);
+    assert.equal(a.localStorage.getItem(DIRTY),'1',kind);
+    assert.equal(a.localStorage.getItem(CACHE),'short',kind);
+    assert.equal(a.token(),before,kind);
+    assert.deepEqual(a.indexedDB.dump('taskpoints_state_v2'),beforeIdb,kind);
+  }
+});
