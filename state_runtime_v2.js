@@ -5841,6 +5841,105 @@
   }
 
 
+
+  // Read-only Notes handoff evidence. A sealed V2 copy is a point-in-time
+  // observation, not authority to rewrite V1's multi-key Notes save.
+  async function inspectPreviewNotesTransitionSafety(expectedInventoryToken) {
+    const refuse=(reason,detail={})=>({
+      checked:true,previewOnly:true,sourceCompared:false,
+      previewEvidenceVerified:false,currentSourceVerified:false,
+      notesMultiKeySyncVerified:false,safeToAutoReconcile:false,
+      safeToClearDirtyMarker:false,safeToRestore:false,
+      notesMigrated:false,canPromote:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...detail
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    if(typeof expectedInventoryToken!=='string'||!expectedInventoryToken)
+      return refuse('full_origin_token_required');
+    const generation=currentGeneration({create:false});
+    if(!generation)return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    let captured,db;
+    try {
+      if(captureReadOnlyFullStorageInventory()!==expectedInventoryToken)
+        return refuse('full_origin_changed');
+      captured=await capturePreviewNotesBundle(
+        expectedInventoryToken,generation,epoch);
+      if(captured.reason)return refuse('notes_source_preflight_failed',{
+        prerequisiteReason:captured.reason});
+      db=await openNotesPreviewDb(generation,epoch);
+      const initial=await readNotesPreviewRows(db);
+      const proof=await validateNotesPreviewLineage(initial,generation);
+      if(!proof.verified)return refuse('notes_preview_evidence_unverified',{
+        prerequisiteReason:proof.reason});
+      const saved=initial.bundle,now=captured.bundle;
+      if(typeof saved.stateNotes!=='string'
+        ||typeof saved.cacheNotes!=='string'
+        ||![null,'0','1'].includes(saved.dirtyRaw)
+        ||![null,'0','1'].includes(saved.authorityRaw)
+        ||typeof saved.snapshotPresent!=='boolean'
+        ||typeof saved.cachePresent!=='boolean'
+        ||(!saved.cachePresent
+          &&(saved.dirtyRaw==='1'||saved.authorityRaw==='1')))
+        return refuse('notes_preview_saved_source_invalid');
+      const classify=b=>{
+        const dirty=b.dirtyRaw==='1',authoritative=b.authorityRaw==='1';
+        if(dirty)return authoritative
+          ?'dirty_cache_pending_snapshot_sync'
+          :'dirty_marker_without_authority';
+        if(!authoritative)return 'unmarked_legacy_bootstrap';
+        if(!b.snapshotPresent)return 'authoritative_cache_without_snapshot';
+        return b.stateNotes===b.cacheNotes
+          ?'authoritative_cache_matches_snapshot'
+          :'authoritative_cache_snapshot_diverged';
+      };
+      // Receipt digests are asynchronous; detect newer legacy edits and
+      // altered receipt rows before declaring this evidence current.
+      const after=await readNotesPreviewRows(db);
+      if(stableJson(initial)!==stableJson(after)
+        ||!isWalTestPreviewHost()||!captured.current()
+        ||!isDarkEnabled()||darkMirrorModeEpoch!==epoch
+        ||currentGeneration({create:false})!==generation)
+        return refuse('notes_transition_changed_during_audit');
+      const sameNotes=saved.sourceFingerprint===now.sourceFingerprint;
+      const sameOrigin=saved.originFingerprint===now.originFingerprint;
+      return {
+        ...refuse(sameNotes
+          ?sameOrigin?'notes_transition_source_unchanged'
+            :'notes_transition_unrelated_origin_changed'
+          :'notes_transition_notes_source_changed'),
+        sourceCompared:true,previewEvidenceVerified:true,
+        currentSourceVerified:true,receiptCount:proof.receiptCount,
+        currentNotesSavePhase:classify(now),
+        savedNotesSavePhase:classify(saved),
+        currentDirtyMarker:now.dirtyRaw==='1',
+        currentAuthoritativeMarker:now.authorityRaw==='1',
+        currentCachePreferred:now.selectedSource==='marked_cache',
+        currentSnapshotAndCacheDiffer:
+          now.snapshotPresent&&now.cachePresent
+          &&now.stateNotes!==now.cacheNotes,
+        notesSourceMatchesPreview:sameNotes,
+        fullOriginMatchesPreview:sameOrigin,
+        cacheChangedSincePreview:
+          saved.cachePresent!==now.cachePresent
+          ||saved.cacheNotes!==now.cacheNotes,
+        snapshotNotesChangedSincePreview:
+          saved.snapshotPresent!==now.snapshotPresent
+          ||saved.stateNotes!==now.stateNotes,
+        markersChangedSincePreview:
+          saved.dirtyRaw!==now.dirtyRaw
+          ||saved.authorityRaw!==now.authorityRaw,
+        // Matching content cannot exclude dormant old-tab writers or
+        // demonstrate the durability of a multi-key snapshot transition.
+        notesMultiKeySyncVerified:false,safeToAutoReconcile:false,
+        safeToClearDirtyMarker:false,safeToRestore:false
+      };
+    }catch(_){return refuse('notes_transition_audit_unavailable');}
+    finally{try{db?.close();}catch(_){}}
+  }
+
   // PREVIEW-ONLY, NONMUTATING Game preferences inventory. The Players page
   // keeps three independent raw localStorage keys outside the V1 snapshot.
   // Never substitute its forgiving UI defaults for missing/corrupt source
@@ -15620,6 +15719,7 @@
     inspectPreviewNotesBundleParity,
     inspectPreviewNotesRecoveryEvidence,
     inspectPreviewNotesCheckpointCoverage,
+    inspectPreviewNotesTransitionSafety,
     inspectPreviewGamePreferencesSource,
     rehearsePreviewHabitOrderSidecarSeed,
     rehearsePreviewHabitOrderSidecarReconcile,
