@@ -847,3 +847,27 @@ test('second snapshot refuses noncanonical source without modifying legacy field
   assert.equal(a.localStorage.getItem(V1),raw);
   assert.equal(a.localStorage.getItem(DIRTY),'1');
 });
+
+
+test('follow-up audit never reports synced dirty after marker loss',async()=>{
+  const a=await boot();
+  await stagedFollowup(a,'marker-first','marker-second');
+  const ok=await a.api.rehearsePreviewAdmittedNotesFollowupSnapshotSync(
+    a.token(),'marker-second');
+  assert.equal(ok.notesSnapshotSynchronized,true,JSON.stringify(ok));
+  a.localStorage.removeItem(DIRTY);
+  const missing=await a.api.inspectPreviewNotesFollowupIntent();
+  assert.equal(missing.intentEvidenceVerified,true);
+  assert.equal(missing.currentMarkersValid,false);
+  assert.equal(missing.observedRecoveryStage,
+    'followup_recovery_markers_missing');
+  assert.equal(missing.legacySelectsIntendedText,false);
+  assert.equal(missing.safeToClearDirtyMarker,false);
+  assert.equal(missing.canPromote,false);
+  a.localStorage.setItem(DIRTY,'1');
+  a.localStorage.removeItem(AUTH);
+  const noAuthority=await a.api.inspectPreviewNotesFollowupIntent();
+  assert.equal(noAuthority.observedRecoveryStage,
+    'followup_recovery_markers_missing');
+  assert.equal(noAuthority.canPromote,false);
+});
