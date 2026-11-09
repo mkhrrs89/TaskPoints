@@ -2582,3 +2582,25 @@ snapshot changes. The change improves an **uncredited gate** and does
 not establish production-wide writer fencing, full Notes migration,
 physical device durability or permission to promote. Overall remains
 **67/100**, and Main is unchanged.
+
+## Exact legacy snapshot representation guard — November 9
+
+The developer-preview Notes snapshot continuation now refuses an existing
+raw V1 JSON snapshot unless JSON parsing followed by serialization reproduces
+**exactly the same bytes**. This prevents a Notes-only save from inadvertently
+normalizing unrelated snapshot data (duplicate object keys, pretty-printing,
+escaped characters or numeric values that lose precision). The signed
+original-snapshot fingerprint is still verified *before* the codec check.
+
+Noncanonical data remains in the original V1 key, unchanged. The signed Notes
+edit intent, cache, authority and dirty recovery marker remain intact. The
+writer does not attempt a snapshot setItem; there is no automatic retry,
+conversion or recovery-marker clearing. The preview guard is intentionally
+conservative: unusual but valid JSON must use the actual legacy serializer,
+not this synthetic writer.
+
+Node regression scenarios cover formatted data, duplicate keys, Unicode
+escapes and unsafe-precision numbers. Real Chromium/WebKit scenarios cover
+noncanonical data surviving refusal and reload. The preview-only guard does
+not resolve uncooperative old tabs or establish production cutover authority.
+The weighted readiness gate remains **67/100**. No change to Main.
