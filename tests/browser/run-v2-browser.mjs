@@ -5487,10 +5487,48 @@ try {
     assert.equal(restored.snapshot.tasks[0].id,'retain-older-task');
     assert.equal(restored.cache,'second');
     assert.equal(restored.dirty,'1');
+    const synced=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const applied=await api.rehearsePreviewAdmittedNotesFollowupSnapshotSync(
+        token,'browser-second-of-two');
+      const evidence=await api.inspectPreviewNotesFollowupIntent();
+      return {applied,evidence,
+        snapshot:JSON.parse(localStorage.getItem('taskpoints_v1')),
+        cache:localStorage.getItem('taskpoints_notes_v1'),
+        dirty:localStorage.getItem('taskpoints_notes_dirty_v1')};
+    });
+    assert.equal(synced.applied.reason,
+      'preview_notes_followup_snapshot_written_dirty_retained',
+      JSON.stringify(synced.applied));
+    assert.equal(synced.applied.notesSnapshotSynchronized,true);
+    assert.equal(synced.applied.safeToClearDirtyMarker,false);
+    assert.equal(synced.applied.canPromote,false);
+    assert.equal(synced.evidence.observedRecoveryStage,
+      'followup_snapshot_synced_dirty_pending');
+    assert.equal(synced.snapshot.notes,'second');
+    assert.equal(synced.snapshot.tasks[0].id,'retain-older-task');
+    assert.equal(synced.cache,'second');
+    assert.equal(synced.dirty,'1');
+    await page.reload({waitUntil:'load'});
+    const final=await page.evaluate(async()=>({
+      evidence:await window.TaskPointsStateRuntimeV2
+        .inspectPreviewNotesFollowupIntent(),
+      dirty:localStorage.getItem('taskpoints_notes_dirty_v1'),
+      cache:localStorage.getItem('taskpoints_notes_v1')
+    }));
+    assert.equal(final.evidence.intentEvidenceVerified,true);
+    assert.equal(final.evidence.observedRecoveryStage,
+      'followup_snapshot_synced_dirty_pending');
+    assert.equal(final.evidence.canPromote,false);
+    assert.equal(final.dirty,'1');
+    assert.equal(final.cache,'second');
     return {firstAndSecondIntentsRemainSealed:true,
       secondCacheSelectedAfterRestart:true,
+      secondSnapshotSyncedOnExplicitRequest:true,
       snapshotAndUnrelatedTasksPreserved:true,
-      noAutomaticReplayOrCutover:true};
+      dirtyMarkerStillProtected:true,noAutomaticReplayOrCutover:true};
   });
 
   await run('Notes sync refuses noncanonical V1 snapshot bytes rather than normalize imported data',async context=>{
