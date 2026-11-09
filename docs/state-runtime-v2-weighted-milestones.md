@@ -2288,14 +2288,15 @@ unchanged. Weighted readiness remains **67/100**.
 
 V2 now has a **developer-preview-only** synchronous recovery-intent
 rehearsal: `rehearsePreviewNotesFirstEditIntent(text, originToken, actionId)`.
-It establishes **one immutable, bounded (64 KiB) intent** in an independent
+It establishes **one immutable intent bounded to 64 KiB of encoded JSON** in an independent
 `taskpoints_v2_preview_notes_first_edit_intent_v1` localStorage key
 **before** attempting to modify any canonical Notes keys. The first-edit
 source must be unmarked, a current full-origin source token and generation
 must match, Web Locks must be available, and the existing cooperative
 Task/Today/Projects/Notes preview freeze must not be active. An existing
 intent is **never overwritten**, normalized, retried, deleted or discarded
-automatically. Quota errors and exceptions after a possible write are
+automatically. The full UTF-8 serialized record, not merely its JavaScript
+character count, is capped before any storage write. Quota errors and exceptions after a possible write are
 reported as uncertain and require inspection before any deliberate retry.
 
 The sealed record includes exact proposed text, source provenance,
