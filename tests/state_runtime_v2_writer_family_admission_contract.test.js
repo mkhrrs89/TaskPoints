@@ -709,6 +709,174 @@ test('Today postwrite exception reports uncertain durability without rewriting V
     '{"version":1}');
 });
 
+const NOTES_CACHE='taskpoints_notes_v1';
+const NOTES_DIRTY='taskpoints_notes_dirty_v1';
+const NOTES_AUTH='taskpoints_notes_authoritative_v1';
+function primeDirtyNotesCache(app,cache='A safe cached note') {
+  const state=JSON.parse(app.localStorage.getItem(V1));
+  state.notes='Older saved notes';
+  app.localStorage.setItem(V1,JSON.stringify(state));
+  app.localStorage.setItem(NOTES_CACHE,cache);
+  app.localStorage.setItem(NOTES_AUTH,'1');
+  app.localStorage.setItem(NOTES_DIRTY,'1');
+}
+
+test('cooperative Notes preview keeps raw keystrokes without changing snapshot or markers',async()=>{
+  const a=await bootRealTaskAdapter();
+  primeDirtyNotesCache(a,'First draft');
+  const snapshot=a.localStorage.getItem(V1);
+  const result=await a.api.rehearsePreviewCooperativeDirtyNotesCacheSave(
+    'Shorter draft',a.token());
+  assert.equal(result.reason,'preview_notes_dirty_cache_saved',
+    JSON.stringify(result));
+  assert.equal(result.cacheWriteObserved,true);
+  assert.equal(result.cacheReadbackVerified,true);
+  assert.equal(result.committed,true);
+  assert.equal(result.confirmedDurable,false);
+  assert.equal(result.notesFullySynchronized,false);
+  assert.equal(result.canPromote,false);
+  assert.equal(result.cooperativeTaskFreezeLockUsed,true);
+  assert.equal(a.localStorage.getItem(NOTES_CACHE),'Shorter draft');
+  assert.equal(a.localStorage.getItem(V1),snapshot);
+  assert.equal(a.localStorage.getItem(NOTES_AUTH),'1');
+  assert.equal(a.localStorage.getItem(NOTES_DIRTY),'1');
+  assert.equal(a.localStorage.getItem(TASK_JOURNAL),null);
+  const inspected=await a.api.inspectPreviewNotesSource();
+  assert.equal(inspected.sourceVerified,true,JSON.stringify(inspected));
+  assert.equal(inspected.selectedSource,'marked_cache');
+  assert.equal(inspected.selectedLength,'Shorter draft'.length);
+  assert.equal(a.commits,0);
+  const cleared=await a.api.rehearsePreviewCooperativeDirtyNotesCacheSave(
+    '',a.token());
+  assert.equal(cleared.reason,'preview_notes_dirty_cache_saved');
+  assert.equal(a.localStorage.getItem(NOTES_CACHE),'');
+  assert.equal(a.localStorage.getItem(V1),snapshot);
+  const reloaded=await boot({localStorage:a.localStorage,indexedDB:a.indexedDB});
+  const proof=await reloaded.api.inspectPreviewNotesSource();
+  assert.equal(proof.selectedSource,'marked_cache');
+  assert.equal(proof.selectedLength,0);
+});
+
+test('cooperative Notes preview refuses first-edit marker initialization and unmarked cache',async()=>{
+  const a=await bootRealTaskAdapter();
+  const raw=JSON.stringify({habits:[],tasks:[],completions:[],
+    notes:'Must not erase existing Notes'});
+  a.localStorage.setItem(V1,raw);
+  const first=await a.api.rehearsePreviewCooperativeDirtyNotesCacheSave(
+    'Unsafe first edit',a.token());
+  assert.equal(first.reason,'notes_dirty_authority_not_established');
+  assert.equal(first.committed,false);
+  assert.equal(a.localStorage.getItem(NOTES_CACHE),null);
+  a.localStorage.setItem(NOTES_CACHE,'Cache exists');
+  a.localStorage.setItem(NOTES_AUTH,'1');
+  for(const marker of [null,'0']){
+    if(marker===null)a.localStorage.removeItem(NOTES_DIRTY);
+    else a.localStorage.setItem(NOTES_DIRTY,marker);
+    const rejected=await a.api.rehearsePreviewCooperativeDirtyNotesCacheSave(
+      'Not allowed',a.token());
+    assert.equal(rejected.reason,'notes_dirty_authority_not_established');
+    assert.equal(a.localStorage.getItem(NOTES_CACHE),'Cache exists');
+  }
+  a.localStorage.setItem(NOTES_DIRTY,'1');
+  a.localStorage.removeItem(NOTES_AUTH);
+  assert.equal((await a.api.rehearsePreviewCooperativeDirtyNotesCacheSave(
+    'Still blocked',a.token())).reason,'notes_dirty_authority_not_established');
+  assert.equal(a.localStorage.getItem(V1),raw);
+});
+
+test('cooperative Notes preview checks stale origin and invalid snapshot before writing',async()=>{
+  const a=await bootRealTaskAdapter();
+  primeDirtyNotesCache(a);
+  const token=a.token();
+  a.localStorage.setItem('tp_projects_v1','[{"id":"old-tab-project"}]');
+  const stale=await a.api.rehearsePreviewCooperativeDirtyNotesCacheSave(
+    'should not overwrite',token);
+  assert.equal(stale.reason,'full_origin_changed',JSON.stringify(stale));
+  assert.equal(a.localStorage.getItem(NOTES_CACHE),'A safe cached note');
+  a.localStorage.setItem(V1,'broken-json{');
+  const invalid=await a.api.rehearsePreviewCooperativeDirtyNotesCacheSave(
+    'not safe yet',a.token());
+  assert.equal(invalid.reason,'notes_source_unreadable');
+  assert.equal(a.localStorage.getItem(V1),'broken-json{');
+  for(const invalidValue of [null,123,{},'a'.repeat(1048577)]){
+    const refused=await a.api.rehearsePreviewCooperativeDirtyNotesCacheSave(
+      invalidValue,a.token());
+    assert.equal(refused.reason,'notes_text_invalid_or_oversized');
+  }
+  assert.equal(a.localStorage.getItem(NOTES_CACHE),'A safe cached note');
+});
+
+test('cooperative Notes cache is blocked by frozen preview and by a competing Task writer',async()=>{
+  let a, competing=null,once=false;
+  const navigator={locks:sharedFakeWebLocks(async name=>{
+    if(name===TASK_ATOMIC_LOCK&&!once){
+      once=true;
+      competing=await a.api.rehearsePreviewCooperativeDirtyNotesCacheSave(
+        'Concurrent note',a.token());
+    }
+  })};
+  a=await bootRealTaskAdapter({navigator});
+  primeDirtyNotesCache(a);
+  const task=await a.api.rehearsePreviewFenceCheckedTaskCompletionBatch(
+    [{id:'task-holds-notes-lock',taskId:'t1'}],a.token());
+  assert.equal(task.reason,'preview_task_batch_admitted');
+  assert.equal(competing.reason,'cooperative_notes_lock_held_elsewhere');
+  assert.equal(a.localStorage.getItem(NOTES_CACHE),'A safe cached note');
+  assert.equal(a.localStorage.getItem(TASK_JOURNAL).includes('task-holds-notes-lock'),true);
+  const frozen=await a.api.rehearsePreviewCooperativeWriterFreeze({
+    expectedEpoch:0});
+  assert.equal(frozen.reason,'preview_fence_frozen');
+  const denied=await a.api.rehearsePreviewCooperativeDirtyNotesCacheSave(
+    'No after freeze',a.token());
+  assert.equal(denied.reason,'preview_fence_frozen');
+  assert.equal(denied.cacheWriteObserved,false);
+  assert.equal(a.localStorage.getItem(NOTES_CACHE),'A safe cached note');
+});
+
+test('Notes preview detects older-tab writes during cache append and preserves both',async()=>{
+  const a=await bootRealTaskAdapter();
+  primeDirtyNotesCache(a);
+  const raw=a.localStorage.setItem.bind(a.localStorage);
+  let injected=false;
+  a.localStorage.setItem=(key,value)=>{
+    raw(key,value);
+    if(key===NOTES_CACHE&&!injected){
+      injected=true;
+      raw('tp_projects_v1','[{"id":"older-tab-unaltered"}]');
+    }
+  };
+  const result=await a.api.rehearsePreviewCooperativeDirtyNotesCacheSave(
+    'new Notes from preview',a.token());
+  assert.equal(injected,true);
+  assert.equal(result.reason,'other_origin_changed_during_notes_write',
+    JSON.stringify(result));
+  assert.equal(result.writeOutcomeUncertain,true);
+  assert.equal(result.committed,true);
+  assert.equal(result.confirmedDurable,false);
+  assert.equal(a.localStorage.getItem(NOTES_CACHE),'new Notes from preview');
+  assert.equal(a.localStorage.getItem('tp_projects_v1'),
+    '[{"id":"older-tab-unaltered"}]');
+});
+
+test('Notes preview postwrite failure leaves cached bytes and reports uncertainty',async()=>{
+  const a=await bootRealTaskAdapter();
+  primeDirtyNotesCache(a);
+  const raw=a.localStorage.setItem.bind(a.localStorage);
+  a.localStorage.setItem=(key,value)=>{
+    raw(key,value);
+    if(key===NOTES_CACHE)throw Error('failure-after-storage-wrote');
+  };
+  const result=await a.api.rehearsePreviewCooperativeDirtyNotesCacheSave(
+    'persisted despite error',a.token());
+  assert.equal(result.reason,'notes_cache_write_failed',JSON.stringify(result));
+  assert.equal(result.writeOutcomeUncertain,true);
+  assert.equal(result.committed,false);
+  assert.equal(result.confirmedDurable,false);
+  assert.equal(a.localStorage.getItem(NOTES_CACHE),'persisted despite error');
+  assert.equal(a.localStorage.getItem(NOTES_DIRTY),'1');
+  assert.equal(a.localStorage.getItem(NOTES_AUTH),'1');
+});
+
 test('strict synthetic freeze requires all nine historical writer families',async()=>{
   const a=await boot();
   const before=await a.api.rehearsePreviewDurableWriterFence('freeze',{
