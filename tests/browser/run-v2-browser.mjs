@@ -5167,6 +5167,75 @@ try {
   });
 
 
+
+  await run('Notes first-edit cache-before-marker interruption is diagnosed without V1 repair',async context=>{
+    const page=await open(context);
+    const legacy=await context.newPage();
+    await legacy.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const setup=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const raw=localStorage.getItem('taskpoints_v1');
+      const state=JSON.parse(raw);
+      state.notes='A long original Notes document that must remain in V1';
+      localStorage.setItem('taskpoints_v1',JSON.stringify(state));
+      localStorage.setItem('taskpoints_notes_v1',state.notes);
+      localStorage.removeItem('taskpoints_notes_authoritative_v1');
+      localStorage.removeItem('taskpoints_notes_dirty_v1');
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const baseline=token();
+      const matrix=await api.inspectPreviewNotesInterruptedSaveWindows('',baseline);
+      return {matrix,baseline};
+    });
+    assert.equal(setup.matrix.sourceVerified,true,JSON.stringify(setup.matrix));
+    assert.equal(setup.matrix.hasUnprotectedFirstEditWindow,true);
+    assert.equal(setup.matrix.scenarios[0].proposedEditMayBeHidden,true);
+    assert.equal(setup.matrix.scenarios[1].proposedEditWouldBeSelected,true);
+    assert.equal(setup.matrix.safeToBeginNotesWrite,false);
+
+    // Simulate an older V1 page being killed immediately after its FIRST
+    // cache setItem, before establishing either marker.
+    await legacy.evaluate(()=>{
+      localStorage.setItem('taskpoints_notes_v1','');
+    });
+    await requireCrossTabStorageValue(page,'taskpoints_notes_v1','');
+    const stranded=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const inspected=await api.inspectPreviewNotesSource();
+      return {inspected,cache:localStorage.getItem('taskpoints_notes_v1'),
+        snapshot:JSON.parse(localStorage.getItem('taskpoints_v1')).notes,
+        authority:localStorage.getItem('taskpoints_notes_authoritative_v1'),
+        dirty:localStorage.getItem('taskpoints_notes_dirty_v1')};
+    });
+    assert.equal(stranded.inspected.sourceVerified,true,JSON.stringify(stranded.inspected));
+    assert.equal(stranded.inspected.selectedSource,'unmarked_snapshot_only');
+    assert.equal(stranded.cache,'');
+    assert.equal(stranded.authority,null);
+    assert.equal(stranded.dirty,null);
+
+    // Finish just the authority marker from the simulated older page.
+    // Observe that the exact same empty cache now wins without asking V2
+    // to write, restore or normalize any legacy Notes data.
+    await legacy.evaluate(()=>localStorage.setItem(
+      'taskpoints_notes_authoritative_v1','1'));
+    await requireCrossTabStorageValue(page,'taskpoints_notes_authoritative_v1','1');
+    const after=await page.evaluate(async()=>{
+      const audit=await window.TaskPointsStateRuntimeV2.inspectPreviewNotesSource();
+      return {audit,cache:localStorage.getItem('taskpoints_notes_v1'),
+        dirty:localStorage.getItem('taskpoints_notes_dirty_v1')};
+    });
+    assert.equal(after.audit.sourceVerified,true,JSON.stringify(after.audit));
+    assert.equal(after.audit.selectedSource,'marked_cache');
+    assert.equal(after.audit.selectedLength,0);
+    assert.equal(after.dirty,null);
+    assert.equal(after.cache,'');
+    assert.equal(after.audit.canPromote,false);
+    return {shortenedOrClearedFirstEditGapProven:true,
+      observedRawV1Markers:true,noAutomaticRepair:true,noCutover:true};
+  });
+
   await run('Notes multi-key recovery flags old-tab edits and preserves sealed lineage after reload',async context=>{
     const page=await open(context);
     const old=await context.newPage();
