@@ -2324,3 +2324,35 @@ may be attempted. For that reason `confirmedNotesDurable:false`,
 `safeToRestore:false` and `canPromote:false` remain hard-coded.
 No existing V1 feature, recovery lock, import/export or Main file changed.
 Weighted milestone readiness stays **67/100**.
+
+
+## First-edit Notes intent: read-only crash-stage diagnosis — November 9
+
+The existing, developer-preview-only `inspectPreviewNotesFirstEditIntent()`
+now classifies the **currently observed** V1 Notes save stage after verifying
+the independent SHA-256 sealed first-edit intent. This can distinguish an
+intent that has not reached the cache; an unmarked shortened or cleared cache
+that the current Notes reader would hide behind an older snapshot; an
+authority marker with snapshot synchronization pending; a dirty cache with
+unsynchronized or synchronized snapshot; and matching cache/snapshot after
+the dirty marker has been cleared.
+
+The report also distinguishes damaged/unavailable current snapshots, invalid
+authority/dirty markers, and a cache changed by an older tab. The sealed
+intent can remain verifiable even when the current V1 snapshot is corrupted.
+The report contains flags and stage labels only, **never Notes text**, and
+rechecks the full localStorage inventory after source parsing and async
+checks. It changes no V1 storage key, V2 database, production writer,
+backup, or restore workflow.
+
+Node tests walk each stage, including restart, invalid source, and a
+conflicting older-tab cache. Real Chromium/WebKit browser tests inspect
+the actual interrupted old-tab cache write before and after the authority
+marker is written. Because these are **observations, not proof of the
+sequence's exclusive ownership**, `canAutomaticallyResume:false`,
+`safeToClearDirtyMarker:false`, `safeToRestore:false`, and
+`canPromote:false` remain enforced regardless of matching copies.
+
+This helps specify the eventual writer handoff but does not close the
+production-wide old-tab fencing, independent backup, or physical iOS PWA
+validation gates. Weighted readiness remains **67/100**.
