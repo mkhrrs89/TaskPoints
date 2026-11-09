@@ -17507,6 +17507,7 @@
       throw Error('repeat_journal_ancestor_intents_invalid');
     const unique=new Set([record.firstActionId,record.followupActionId]);
     let prior=record.followupActionId;
+    let priorText=second.text;
     for(const item of record.entries){
       if(!item||typeof item!=='object'||Array.isArray(item)
         ||Object.keys(item).length!==7
@@ -17515,6 +17516,7 @@
         ||unique.has(item.actionId)
         ||item.previousActionId!==prior
         ||typeof item.previousText!=='string'
+        ||item.previousText!==priorText
         ||typeof item.text!=='string'
         ||item.text.length>PREVIEW_NOTES_FIRST_EDIT_LIMIT
         ||item.previousText===item.text
@@ -17527,7 +17529,12 @@
         if(!/^sha256:[a-f0-9]{64}:\d+$/.test(digest))
           throw Error('repeat_journal_action_digest_invalid');
       }
-      prior=item.actionId;unique.add(prior);
+      // Even a correctly re-signed record must describe a coherent edit
+      // history and a truthful cached starting value for each action.
+      if(await previewRecoveryFingerprint(item.previousText)
+          !==item.sourceCacheFingerprint)
+        throw Error('repeat_journal_prior_cache_digest_mismatch');
+      prior=item.actionId;priorText=item.text;unique.add(prior);
     }
     return {raw,journal:record,last:record.entries.at(-1)};
   }
