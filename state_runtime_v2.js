@@ -18252,6 +18252,196 @@
     return result;
   }
 
+
+  // Explicit developer-preview-only recovery *coverage* inventory.
+  // Browser origin data lives in multiple independent stores: the full
+  // localStorage namespace, V2 runtime/WAL, shadow migration, and images.
+  // Never mistake a count-only census for a portable, off-device backup.
+  // The inspection enumerates *existing* IDBs only and uses readonly counts;
+  // it must neither create absent databases nor read/serialize user records.
+  async function inspectPreviewIndependentBackupCoverage(expectedInventoryToken){
+    const deny=(reason,detail={})=>({
+      checked:true,previewOnly:true,readOnly:true,
+      localStorageInventoryStable:false,
+      indexedDbCatalogStable:false,recordContentVerified:false,
+      binaryImageBytesVerified:false,offDeviceBackupVerified:false,
+      independentRecoveryVerified:false,backupPackageCreated:false,
+      backupComplete:false,canRestore:false,canPromote:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...detail
+    });
+    if(!isWalTestPreviewHost())return deny('preview_host_required');
+    if(!isDarkEnabled())return deny('dark_disabled');
+    if(typeof expectedInventoryToken!=='string'||!expectedInventoryToken)
+      return deny('full_origin_token_required');
+    if(typeof global.TextEncoder!=='function'
+      ||typeof global.crypto?.subtle?.digest!=='function')
+      return deny('sha256_or_text_encoder_unavailable');
+    const idb=global.indexedDB;
+    if(typeof idb?.databases!=='function')
+      return deny('indexeddb_database_catalog_unavailable');
+    const locks=global.navigator?.locks;
+    if(typeof locks?.request!=='function')
+      return deny('lock_manager_unavailable');
+    const generation=currentGeneration({create:false});
+    if(!generation)return deny('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    const stableMode=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&currentGeneration({create:false})===generation
+      &&darkMirrorModeEpoch===epoch;
+    const normalizedCatalog=rows=>{
+      if(!Array.isArray(rows)||rows.length>64)
+        throw Error('invalid_database_catalog');
+      const seen=new Set();
+      return rows.map(row=>{
+        const name=row?.name;
+        const version=row?.version;
+        if(typeof name!=='string'||!name||name.length>256
+          ||seen.has(name)
+          ||!Number.isSafeInteger(version)||version<1)
+          throw Error('invalid_database_identity');
+        seen.add(name);
+        return {name,version};
+      }).sort((a,b)=>a.name.localeCompare(b.name));
+    };
+    let result=deny('backup_coverage_lock_unavailable');
+    try{
+      await locks.request(PREVIEW_COOPERATIVE_TASK_FREEZE_LOCK,
+        {mode:'exclusive',ifAvailable:true},async lock=>{
+          if(!lock){result=deny('backup_coverage_lock_held_elsewhere');return;}
+          let before,catalogBefore,inventory,originFingerprint;
+          try{
+            before=captureReadOnlyFullStorageInventory();
+            if(!stableMode()||before!==expectedInventoryToken){
+              result=deny('backup_coverage_origin_changed');return;
+            }
+            catalogBefore=normalizedCatalog(await idb.databases());
+            originFingerprint=await previewRecoveryFingerprint(before);
+            const entries=JSON.parse(before);
+            if(!Array.isArray(entries)||entries.length>100000)
+              throw Error('too_many_origin_keys');
+            const encoder=new global.TextEncoder();
+            let totalBytes=0;
+            for(const row of entries){
+              if(!Array.isArray(row)||row.length!==2
+                ||typeof row[0]!=='string'||typeof row[1]!=='string')
+                throw Error('invalid_origin_entry');
+              totalBytes+=encoder.encode(row[0]).byteLength
+                +encoder.encode(row[1]).byteLength;
+            }
+            inventory={keyCount:entries.length,utf8Bytes:totalBytes};
+          }catch(_){result=deny('backup_coverage_source_unavailable');return;}
+          if(!stableMode()
+            ||previewNotesWitnessObservedExternalChange(generation,epoch)
+            ||captureReadOnlyFullStorageInventory()!==before){
+            result=deny('backup_coverage_source_changed_before_catalog');
+            return;
+          }
+          const databases=[];
+          let storeCount=0;
+          try{
+            for(const item of catalogBefore){
+              // Opening without a version avoids upgrades to EXISTING DBs.
+              // If deleted between catalog and open(), abort onupgradeneeded
+              // rather than accidentally resurrecting a missing database.
+              const db=await new Promise((resolve,reject)=>{
+                const request=idb.open(item.name);
+                request.onupgradeneeded=()=>{
+                  try{request.transaction?.abort?.();}catch(_){}
+                  reject(Error('backup_coverage_database_recreated'));
+                };
+                request.onerror=()=>reject(request.error||Error('db_open_failed'));
+                request.onblocked=()=>reject(Error('db_open_blocked'));
+                request.onsuccess=()=>resolve(request.result);
+              });
+              try{
+                if(db.version!==item.version)
+                  throw Error('backup_coverage_database_version_changed');
+                const stores=Array.from(db.objectStoreNames);
+                if(stores.length>64||storeCount+stores.length>256)
+                  throw Error('backup_coverage_store_limit_exceeded');
+                if(stores.some(name=>typeof name!=='string'||!name))
+                  throw Error('backup_coverage_store_name_invalid');
+                storeCount+=stores.length;
+                const counts=[];
+                if(stores.length){
+                  // Queue every count() synchronously in one readonly tx.
+                  // Safari may deactivate a transaction between awaits.
+                  const tx=db.transaction(stores,'readonly');
+                  const completed=transactionPromise(tx);
+                  const requests=stores.map(name=>
+                    requestPromise(tx.objectStore(name).count()));
+                  const values=await Promise.all(requests);
+                  await completed;
+                  for(let i=0;i<stores.length;i++){
+                    if(!Number.isSafeInteger(values[i])||values[i]<0)
+                      throw Error('backup_coverage_count_invalid');
+                    counts.push({name:stores[i],recordCount:values[i]});
+                  }
+                }
+                databases.push({
+                  name:item.name,version:item.version,
+                  stores:counts,
+                  recordCount:counts.reduce((sum,v)=>sum+v.recordCount,0)
+                });
+              }finally{try{db.close();}catch(_){}}
+              if(!stableMode()
+                ||previewNotesWitnessObservedExternalChange(generation,epoch)
+                ||captureReadOnlyFullStorageInventory()!==before)
+                throw Error('backup_coverage_origin_changed_during_scan');
+            }
+          }catch(_){
+            result=deny('backup_coverage_database_scan_unavailable');
+            return;
+          }
+          let catalogAfter;
+          try{
+            catalogAfter=normalizedCatalog(await idb.databases());
+            if(!stableMode()
+              ||previewNotesWitnessObservedExternalChange(generation,epoch)
+              ||captureReadOnlyFullStorageInventory()!==before
+              ||stableJson(catalogAfter)!==stableJson(catalogBefore)
+              ||await previewRecoveryFingerprint(
+                captureReadOnlyFullStorageInventory())!==originFingerprint){
+              result=deny('backup_coverage_inventory_changed');
+              return;
+            }
+          }catch(_){result=deny('backup_coverage_final_audit_unavailable');return;}
+          const imageName=core.IMAGE_DB_NAME||'taskpoints';
+          const imageStore=core.IMAGE_STORE_NAME||'images';
+          const image=databases.find(db=>db.name===imageName);
+          const imageRows=image?.stores.find(store=>store.name===imageStore);
+          const knownDbNames=[DB_NAME,PREVIEW_RECOVERY_DB,imageName,
+            core.SHADOW_MIGRATION_DB_NAME].filter(Boolean);
+          const unexpectedDatabases=databases
+            .filter(db=>!knownDbNames.includes(db.name))
+            .map(db=>db.name);
+          result=deny('backup_coverage_inventory_readonly_observed',{
+            localStorageInventoryStable:true,
+            indexedDbCatalogStable:true,
+            cooperativeLockUsed:true,
+            localStorage:inventory,
+            originFingerprint,
+            databaseCount:databases.length,
+            objectStoreCount:storeCount,
+            databaseInventory:databases,
+            unexpectedDatabases,
+            imageDatabasePresent:!!image,
+            imageStorePresent:!!imageRows,
+            imageRecordCount:imageRows?.recordCount??null,
+            // A count-only scan says nothing about Blob bytes, the
+            // consistency of concurrent IDB content edits, or off-device
+            // preservation of the records.
+            imageBytesIncludedInBackup:false,
+            allDatabaseRecordsExported:false,
+            fullOriginBackupRestorable:false,
+            canPromote:false
+          });
+        });
+    }catch(_){return deny('backup_coverage_lock_or_catalog_failed');}
+    return result;
+  }
+
   const api = {
     __installedModule: true,
     DB_NAME,
@@ -18361,6 +18551,7 @@
     rehearsePreviewAdmittedNotesRepeatCacheWrite,
     rehearsePreviewAdmittedNotesRepeatSnapshotSync,
     inspectPreviewNotesRepeatEditJournal,
+    inspectPreviewIndependentBackupCoverage,
     inspectPreviewNotesSnapshotCompletionEvidence,
     inspectPreviewNotesFirstEditIntent,
     inspectPreviewCooperativeNotesFirstEditConflict,
