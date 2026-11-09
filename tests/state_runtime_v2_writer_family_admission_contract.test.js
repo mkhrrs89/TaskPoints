@@ -578,6 +578,137 @@ test('Projects write failure can leave durable data and is never falsely acknowl
     '[{"id":"written-then-error"}]');
 });
 
+test('cooperative Today V1 writer preserves all four day maps and unknown fields',async()=>{
+  const a=await bootRealTaskAdapter();
+  const original=JSON.stringify({version:1,tasksByDay:{
+    '2026-11-09':[{id:'old-task',done:false}]}});
+  a.localStorage.setItem('taskpoints_today_view_v1',original);
+  const proposed=JSON.stringify({version:1,tasksByDay:{
+    '2026-11-09':[{id:'old-task',done:true},{id:'new-task'}]},
+    notesByDay:{'2026-11-09':['Hello']},
+    selectedHabitIdsByDay:{'2026-11-10':['habit-a']},
+    orderByDay:{'2026-11-09':['old-task','new-task']},
+    extra:{legacyCustom:'preserved'}});
+  const snapshot=a.localStorage.getItem(V1);
+  const result=await a.api.rehearsePreviewCooperativeTodaySave(
+    proposed,a.token());
+  assert.equal(result.reason,'preview_today_saved',JSON.stringify(result));
+  assert.equal(result.todaySaved,true);
+  assert.equal(result.confirmedDurable,true);
+  assert.equal(result.committed,true);
+  assert.equal(result.cooperativeTaskFreezeLockUsed,true);
+  assert.equal(result.productionWritersFenced,false);
+  assert.equal(result.dayCount,2);
+  assert.equal(result.entryCount,6);
+  assert.equal(a.localStorage.getItem('taskpoints_today_view_v1'),proposed);
+  assert.equal(a.localStorage.getItem(V1),snapshot);
+  assert.equal(a.localStorage.getItem(TASK_JOURNAL),null);
+  assert.equal(a.commits,0);
+});
+
+test('cooperative Today writer refuses stale source, malformed existing source and malformed JSON',async()=>{
+  const a=await bootRealTaskAdapter();
+  const raw=JSON.stringify({version:1,tasksByDay:{
+    '2026-11-09':[{id:'task-today'}]}});
+  const stale=a.token();
+  a.localStorage.setItem('tp_projects_v1','[{"id":"external-project"}]');
+  const denied=await a.api.rehearsePreviewCooperativeTodaySave(raw,stale);
+  assert.equal(denied.reason,'full_origin_changed',JSON.stringify(denied));
+  assert.equal(a.localStorage.getItem('taskpoints_today_view_v1'),null);
+  a.localStorage.setItem('taskpoints_today_view_v1','{"version":');
+  const corrupted=await a.api.rehearsePreviewCooperativeTodaySave(raw,a.token());
+  assert.equal(corrupted.reason,'today_existing_source_invalid');
+  assert.equal(corrupted.confirmedDurable,false);
+  assert.equal(a.localStorage.getItem('taskpoints_today_view_v1'),'{"version":');
+  for(const invalid of [
+    '[]','{"version":2}',JSON.stringify({tasksByDay:[]}),
+    JSON.stringify({tasksByDay:{'not-a-date':[]}}),
+    '{"tasksByDay":{}} ', '{"notesByDay":{"2026-11-09":{}}}'
+  ]){
+    const result=await a.api.rehearsePreviewCooperativeTodaySave(
+      invalid,a.token());
+    assert.equal(result.todaySaved,false,JSON.stringify(result));
+    assert.equal(result.confirmedDurable,false);
+    assert.equal(a.localStorage.getItem('taskpoints_today_view_v1'),
+      '{"version":');
+  }
+});
+
+test('cooperative Today writer is blocked by a frozen preview fence',async()=>{
+  const a=await bootRealTaskAdapter();
+  const freeze=await a.api.rehearsePreviewCooperativeWriterFreeze({
+    expectedEpoch:0});
+  assert.equal(freeze.reason,'preview_fence_frozen');
+  const result=await a.api.rehearsePreviewCooperativeTodaySave(
+    '{"version":1}',a.token());
+  assert.equal(result.reason,'preview_fence_frozen',JSON.stringify(result));
+  assert.equal(result.committed,false);
+  assert.equal(result.todaySaved,false);
+  assert.equal(a.localStorage.getItem('taskpoints_today_view_v1'),null);
+});
+
+test('cooperative Today writer is excluded while Task adapter holds shared lock',async()=>{
+  let a,opponent=null,once=false;
+  const navigator={locks:sharedFakeWebLocks(async name=>{
+    if(name===TASK_ATOMIC_LOCK&&!once){
+      once=true;
+      opponent=await a.api.rehearsePreviewCooperativeTodaySave(
+        '{"version":1}',a.token());
+    }
+  })};
+  a=await bootRealTaskAdapter({navigator});
+  const wrote=await a.api.rehearsePreviewFenceCheckedTaskCompletionBatch(
+    [{id:'task-holds-lock-for-today',taskId:'task-a'}],a.token());
+  assert.equal(wrote.reason,'preview_task_batch_admitted',JSON.stringify(wrote));
+  assert.equal(opponent.reason,'cooperative_today_lock_held_elsewhere');
+  assert.equal(a.localStorage.getItem('taskpoints_today_view_v1'),null);
+  const next=await a.api.rehearsePreviewCooperativeTodaySave(
+    '{"version":1}',a.token());
+  assert.equal(next.reason,'preview_today_saved',JSON.stringify(next));
+  assert.equal(a.commits,1);
+});
+
+test('Today old-tab source edit during preview write reports uncertainty and preserves both sources',async()=>{
+  const a=await bootRealTaskAdapter();
+  const real=a.localStorage.setItem.bind(a.localStorage);
+  let injected=false;
+  a.localStorage.setItem=(key,value)=>{
+    real(key,value);
+    if(key==='taskpoints_today_view_v1'&&!injected){
+      injected=true;
+      real('tp_projects_v1','[{"id":"other-tab-project"}]');
+    }
+  };
+  const result=await a.api.rehearsePreviewCooperativeTodaySave(
+    '{"version":1,"notesByDay":{"2026-11-09":["test"]}}',a.token());
+  assert.equal(injected,true);
+  assert.equal(result.reason,'other_origin_changed_during_today_write',
+    JSON.stringify(result));
+  assert.equal(result.committed,true);
+  assert.equal(result.writeOutcomeUncertain,true);
+  assert.equal(result.confirmedDurable,false);
+  assert.equal(a.localStorage.getItem('taskpoints_today_view_v1'),
+    '{"version":1,"notesByDay":{"2026-11-09":["test"]}}');
+  assert.equal(a.localStorage.getItem('tp_projects_v1'),
+    '[{"id":"other-tab-project"}]');
+});
+
+test('Today postwrite exception reports uncertain durability without rewriting V1',async()=>{
+  const a=await bootRealTaskAdapter();
+  const real=a.localStorage.setItem.bind(a.localStorage);
+  a.localStorage.setItem=(key,value)=>{
+    real(key,value);
+    if(key==='taskpoints_today_view_v1')throw Error('postwrite-error');
+  };
+  const result=await a.api.rehearsePreviewCooperativeTodaySave(
+    '{"version":1}',a.token());
+  assert.equal(result.reason,'today_write_failed');
+  assert.equal(result.writeOutcomeUncertain,true);
+  assert.equal(result.confirmedDurable,false);
+  assert.equal(a.localStorage.getItem('taskpoints_today_view_v1'),
+    '{"version":1}');
+});
+
 test('strict synthetic freeze requires all nine historical writer families',async()=>{
   const a=await boot();
   const before=await a.api.rehearsePreviewDurableWriterFence('freeze',{
