@@ -1511,3 +1511,32 @@ test('First-edit cooperative record and preview freeze cannot interleave',async(
   assert.equal((await a.api.inspectPreviewNotesFirstEditIntent())
     .intentEvidenceVerified,true);
 });
+
+
+test('First-edit intent enforces actual UTF-8 storage quota before any write',async()=>{
+  const a=await bootRealTaskAdapter();
+  setupUnmarkedFirstNotesEdit(a);
+  const before=a.token();
+  const multiByte='☀'.repeat(24000);
+  assert.ok(multiByte.length<65536);
+  const denied=await a.api.rehearsePreviewNotesFirstEditIntent(
+    multiByte,before,'multibyte-overflow');
+  assert.equal(denied.reason,'notes_first_edit_intent_text_invalid_or_oversized',
+    JSON.stringify(denied));
+  assert.equal(denied.intentRecorded,false);
+  assert.equal(a.localStorage.getItem(FIRST_NOTES_INTENT),null);
+  assert.equal(a.token(),before);
+  const rawOverhead='A'.repeat(65400);
+  const overhead=await a.api.rehearsePreviewNotesFirstEditIntent(
+    rawOverhead,before,'record-overhead');
+  assert.equal(overhead.reason,'notes_first_edit_intent_record_oversized',
+    JSON.stringify(overhead));
+  assert.equal(overhead.intentRecorded,false);
+  assert.equal(a.localStorage.getItem(FIRST_NOTES_INTENT),null);
+  assert.equal(a.token(),before);
+  const safe=await a.api.rehearsePreviewNotesFirstEditIntent(
+    'small bounded intent',before,'small');
+  assert.equal(safe.intentRecorded,true,JSON.stringify(safe));
+  assert.equal((await a.api.inspectPreviewNotesFirstEditIntent())
+    .intentEvidenceVerified,true);
+});
