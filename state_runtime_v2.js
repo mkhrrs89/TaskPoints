@@ -15766,6 +15766,48 @@
       const dirty=global.localStorage.getItem('taskpoints_notes_dirty_v1');
       const authority=global.localStorage.getItem(
         'taskpoints_notes_authoritative_v1');
+      // Diagnose the observed crash stage using the same V1 Notes selection
+      // rules, without repairing any data. An intact sealed intent remains
+      // independently inspectable even when the current snapshot is corrupt.
+      let snapshotValid=false,snapshotNotes='';
+      try{
+        const snapshotRaw=global.localStorage.getItem(
+          core.STORAGE_KEY||'taskpoints_v1');
+        if(typeof snapshotRaw==='string'&&snapshotRaw
+          &&typeof core.parseTaskPointsStorageJson==='function'){
+          const decoded=core.parseTaskPointsStorageJson(snapshotRaw);
+          if(decoded&&typeof decoded==='object'&&!Array.isArray(decoded)
+            &&(decoded.notes===undefined
+              ||typeof decoded.notes==='string')){
+            snapshotNotes=decoded.notes||'';
+            snapshotValid=true;
+          }
+        }
+      }catch(_){}
+      const markerValid=[null,'0','1'].includes(dirty)
+        &&[null,'0','1'].includes(authority);
+      const cacheMatches=cache===record.text;
+      const snapshotMatches=snapshotValid&&snapshotNotes===record.text;
+      const cacheMarked=dirty==='1'||authority==='1';
+      const stage=!snapshotValid?'snapshot_unavailable_or_invalid'
+        :!markerValid?'notes_markers_invalid'
+        :cache===null&&cacheMarked?'marked_cache_missing'
+        :!cacheMatches?initialMatches?'intent_recorded_source_unchanged'
+          :'intent_not_in_current_cache'
+        :!cacheMarked?snapshotMatches?'unmarked_cache_snapshot_equal'
+          :'unmarked_cache_snapshot_diverged'
+        :dirty==='1'&&authority!=='1'?'dirty_without_authority'
+        :dirty==='1'?snapshotMatches?'snapshot_synced_dirty_pending'
+          :'dirty_cache_snapshot_pending'
+        :snapshotMatches?'snapshot_and_cache_match_dirty_cleared'
+          :'authority_marker_snapshot_pending';
+      const legacySelection=(!snapshotValid||!markerValid)
+        ?null
+        :cache!==null&&cacheMarked?cache
+        :cache===null?snapshotNotes
+        :cache.trim()&&!snapshotNotes.trim()?cache
+        :snapshotNotes.trim()&&!cache.trim()?snapshotNotes
+        :cache.length>=snapshotNotes.length?cache:snapshotNotes;
       if(!isWalTestPreviewHost()||!isDarkEnabled()
         ||currentGeneration({create:false})!==generation
         ||captureReadOnlyFullStorageInventory()!==first
@@ -15777,8 +15819,16 @@
         ...refuse('preview_notes_first_edit_intent_verified'),
         intentEvidenceVerified:true,
         sourceInventoryMatchesAdmission:initialMatches,
-        notesCacheMatchesIntent:cache===record.text,
-        notesCacheAuthorityEstablished:dirty==='1'||authority==='1',
+        notesCacheMatchesIntent:cacheMatches,
+        notesCacheAuthorityEstablished:cacheMarked,
+        currentSnapshotReadable:snapshotValid,
+        currentMarkersValid:markerValid,
+        snapshotMatchesIntent:snapshotMatches,
+        legacySelectsIntendedText:legacySelection===record.text,
+        observedRecoveryStage:stage,
+        // These are point-in-time facts, not authority to replay intent,
+        // clear dirty state, or exclude an older suspended Notes tab.
+        canAutomaticallyResume:false,safeToClearDirtyMarker:false,
         savedLength:record.text.length,
         // The intent is an independent diagnostic copy, NOT a complete
         // app backup, a new Notes read path or authorized rescue.
