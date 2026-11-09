@@ -17438,6 +17438,599 @@
     }catch(_){return deny('followup_intent_evidence_unavailable');}
   }
 
+
+  // Bounded append-only *preview* Notes edit journal. The first two
+  // separately signed intents are preserved. This journal can admit several
+  // additional strictly sequential edits without discarding recovery data.
+  // All three writers below are opt-in and NEVER called by live Notes UI.
+  const PREVIEW_NOTES_REPEAT_JOURNAL_KEY =
+    'taskpoints_v2_preview_notes_repeat_journal_v1';
+  const PREVIEW_NOTES_REPEAT_LIMIT=16;
+  const PREVIEW_NOTES_REPEAT_MAX_BYTES=262144;
+  const previewNotesRepeatDeny=(reason,details={})=>({
+    checked:true,previewOnly:true,repeatNotesOnly:true,
+    intentRecorded:false,cacheReadbackVerified:false,
+    notesSnapshotSynchronized:false,writeAttempted:false,
+    writeOutcomeUncertain:false,inspectIntentBeforeRetry:false,
+    safeToClearDirtyMarker:false,notesMultiKeySyncVerified:false,
+    confirmedNotesDurable:false,oldTabsExcluded:false,
+    productionWritersFenced:false,safeToRestore:false,
+    canAutomaticallyResume:false,canPromote:false,
+    readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+    reason,...details
+  });
+  function previewNotesRepeatOriginWithoutJournal(token,cacheOverride) {
+    const entries=JSON.parse(token);
+    if(!Array.isArray(entries))throw Error('origin_inventory_invalid');
+    const rows=entries.filter(row=>Array.isArray(row)
+      &&row.length===2
+      &&row[0]!==PREVIEW_NOTES_REPEAT_JOURNAL_KEY)
+      .map(row=>cacheOverride!==undefined
+        &&row[0]==='taskpoints_notes_v1'
+        ?[row[0],cacheOverride]:row);
+    return stableJson(rows);
+  }
+  async function readPreviewNotesRepeatJournal(generation){
+    const raw=global.localStorage.getItem(
+      PREVIEW_NOTES_REPEAT_JOURNAL_KEY);
+    if(raw===null)return {raw:null,journal:null,last:null};
+    if(typeof raw!=='string'
+      ||new global.TextEncoder().encode(raw).byteLength>
+        PREVIEW_NOTES_REPEAT_MAX_BYTES)
+      throw Error('repeat_journal_oversized');
+    const record=JSON.parse(raw);
+    if(!record||typeof record!=='object'||Array.isArray(record)
+      ||Object.keys(record).length!==7
+      ||record.id!=='notes-repeat-journal'
+      ||record.schemaVersion!==1
+      ||record.resetGeneration!==generation
+      ||typeof record.firstActionId!=='string'
+      ||typeof record.followupActionId!=='string'
+      ||!Array.isArray(record.entries)
+      ||record.entries.length<1
+      ||record.entries.length>PREVIEW_NOTES_REPEAT_LIMIT)
+      throw Error('repeat_journal_schema_invalid');
+    const {integrityFingerprint,...signed}=record;
+    if(await previewRecoveryFingerprint(signed)!==integrityFingerprint)
+      throw Error('repeat_journal_integrity_mismatch');
+    const first=JSON.parse(global.localStorage.getItem(
+      PREVIEW_NOTES_FIRST_EDIT_INTENT_KEY));
+    const second=JSON.parse(global.localStorage.getItem(
+      PREVIEW_NOTES_FOLLOWUP_INTENT_KEY));
+    const {integrityFingerprint:firstHash,...firstFields}=first;
+    const {integrityFingerprint:secondHash,...secondFields}=second;
+    if(await previewRecoveryFingerprint(firstFields)!==firstHash
+      ||await previewRecoveryFingerprint(secondFields)!==secondHash
+      ||first.actionId!==record.firstActionId
+      ||second.actionId!==record.followupActionId
+      ||second.firstActionId!==first.actionId)
+      throw Error('repeat_journal_ancestor_intents_invalid');
+    const unique=new Set([record.firstActionId,record.followupActionId]);
+    let prior=record.followupActionId;
+    for(const item of record.entries){
+      if(!item||typeof item!=='object'||Array.isArray(item)
+        ||Object.keys(item).length!==7
+        ||typeof item.actionId!=='string'
+        ||!/^[a-zA-Z0-9_:.\-]{1,96}$/.test(item.actionId)
+        ||unique.has(item.actionId)
+        ||item.previousActionId!==prior
+        ||typeof item.previousText!=='string'
+        ||typeof item.text!=='string'
+        ||item.text.length>PREVIEW_NOTES_FIRST_EDIT_LIMIT
+        ||item.previousText===item.text
+        ||typeof item.sourceOriginFingerprint!=='string'
+        ||typeof item.sourceSnapshotFingerprint!=='string'
+        ||typeof item.sourceCacheFingerprint!=='string')
+        throw Error('repeat_journal_action_invalid');
+      for(const digest of [item.sourceOriginFingerprint,
+        item.sourceSnapshotFingerprint,item.sourceCacheFingerprint]){
+        if(!/^sha256:[a-f0-9]{64}:\d+$/.test(digest))
+          throw Error('repeat_journal_action_digest_invalid');
+      }
+      prior=item.actionId;unique.add(prior);
+    }
+    return {raw,journal:record,last:record.entries.at(-1)};
+  }
+  async function rehearsePreviewNotesRepeatEditIntent(
+    text,expectedInventoryToken,actionId){
+    const deny=previewNotesRepeatDeny;
+    if(!isWalTestPreviewHost())return deny('preview_host_required');
+    if(!isDarkEnabled())return deny('dark_disabled');
+    if(typeof expectedInventoryToken!=='string'||!expectedInventoryToken)
+      return deny('full_origin_token_required');
+    if(typeof actionId!=='string'
+      ||!/^[a-zA-Z0-9_:.\-]{1,96}$/.test(actionId))
+      return deny('repeat_action_id_invalid');
+    if(typeof text!=='string'
+      ||text.length>PREVIEW_NOTES_FIRST_EDIT_LIMIT
+      ||typeof global.TextEncoder!=='function'
+      ||new global.TextEncoder().encode(text).byteLength>
+        PREVIEW_NOTES_FIRST_EDIT_LIMIT)
+      return deny('repeat_text_invalid_or_oversized');
+    const locks=global.navigator?.locks;
+    if(typeof locks?.request!=='function')
+      return deny('lock_manager_unavailable');
+    const generation=currentGeneration({create:false});
+    if(!generation)return deny('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    const stableMode=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&currentGeneration({create:false})===generation
+      &&darkMirrorModeEpoch===epoch;
+    let touched=false,result=deny('repeat_intent_lock_unavailable');
+    try{
+      await locks.request(PREVIEW_COOPERATIVE_TASK_FREEZE_LOCK,
+        {mode:'exclusive',ifAvailable:true},async lock=>{
+          if(!lock){result=deny('repeat_intent_lock_held_elsewhere');return;}
+          let before,previous,cache,rawSnapshot,ancestors;
+          try{
+            before=captureReadOnlyFullStorageInventory();
+            if(!stableMode()||before!==expectedInventoryToken){
+              result=deny('repeat_intent_origin_changed');return;
+            }
+            previous=await readPreviewNotesRepeatJournal(generation);
+            if(previous.journal
+              &&previous.journal.entries.length>=PREVIEW_NOTES_REPEAT_LIMIT){
+              result=deny('repeat_journal_capacity_reached');return;
+            }
+            cache=global.localStorage.getItem('taskpoints_notes_v1');
+            rawSnapshot=global.localStorage.getItem(
+              core.STORAGE_KEY||'taskpoints_v1');
+            if(cache===null||!rawSnapshot
+              ||global.localStorage.getItem(
+                'taskpoints_notes_authoritative_v1')!=='1'
+              ||global.localStorage.getItem(
+                'taskpoints_notes_dirty_v1')!=='1'){
+              result=deny('repeat_intent_notes_markers_missing');return;
+            }
+            const state=core.parseTaskPointsStorageJson(rawSnapshot);
+            if(!state||typeof state!=='object'||Array.isArray(state)
+              ||state.notes!==cache){
+              result=deny('repeat_intent_snapshot_cache_diverged');return;
+            }
+            if(previous.last){
+              if(previous.last.text!==cache){
+                result=deny('repeat_previous_edit_not_synchronized');return;
+              }
+              ancestors={firstActionId:previous.journal.firstActionId,
+                followupActionId:previous.journal.followupActionId};
+            }else{
+              const original=await inspectPreviewNotesFollowupIntent();
+              if(!original.intentEvidenceVerified
+                ||original.observedRecoveryStage!==
+                  'followup_snapshot_synced_dirty_pending'
+                ||!original.legacySelectsIntendedText){
+                result=deny('repeat_second_edit_not_synchronized');return;
+              }
+              const first=JSON.parse(global.localStorage.getItem(
+                PREVIEW_NOTES_FIRST_EDIT_INTENT_KEY));
+              const followup=JSON.parse(global.localStorage.getItem(
+                PREVIEW_NOTES_FOLLOWUP_INTENT_KEY));
+              if(!first||!followup
+                ||followup.firstActionId!==first.actionId){
+                result=deny('repeat_ancestor_actions_invalid');return;
+              }
+              ancestors={firstActionId:first.actionId,
+                followupActionId:followup.actionId};
+            }
+            if(cache===text){
+              result=deny('repeat_text_unchanged');return;
+            }
+          }catch(_){
+            result=deny('repeat_intent_source_unavailable_or_invalid');return;
+          }
+          const fence=await rehearsePreviewDurableWriterFence('audit');
+          if(!stableMode()
+            ||fence.reason!=='preview_writer_inventory_consistent'
+            ||fence.fence?.generation!==generation||fence.fence?.frozen){
+            result=deny('repeat_intent_fence_unverified_or_frozen');return;
+          }
+          let sealed;
+          try{
+            const action={
+              actionId,
+              previousActionId:previous.last?.actionId
+                ||ancestors.followupActionId,
+              previousText:cache,text,
+              sourceOriginFingerprint:await previewRecoveryFingerprint(
+                previewNotesRepeatOriginWithoutJournal(before)),
+              sourceSnapshotFingerprint:await previewRecoveryFingerprint(
+                rawSnapshot),
+              sourceCacheFingerprint:await previewRecoveryFingerprint(cache)
+            };
+            const signed={id:'notes-repeat-journal',schemaVersion:1,
+              resetGeneration:generation,...ancestors,
+              entries:[...(previous.journal?.entries||[]),action]};
+            sealed=JSON.stringify({...signed,
+              integrityFingerprint:await previewRecoveryFingerprint(signed)});
+            if(new global.TextEncoder().encode(sealed).byteLength>
+                PREVIEW_NOTES_REPEAT_MAX_BYTES){
+              result=deny('repeat_journal_size_limit_reached');return;
+            }
+            if(!stableMode()
+              ||previewNotesWitnessObservedExternalChange(generation,epoch)
+              ||captureReadOnlyFullStorageInventory()!==before
+              ||global.localStorage.getItem(
+                PREVIEW_NOTES_REPEAT_JOURNAL_KEY)!==previous.raw){
+              result=deny('repeat_intent_origin_or_witness_changed');
+              return;
+            }
+          }catch(_){result=deny('repeat_intent_seal_unavailable');return;}
+          touched=true;
+          try{
+            global.localStorage.setItem(
+              PREVIEW_NOTES_REPEAT_JOURNAL_KEY,sealed);
+            if(global.localStorage.getItem(
+              PREVIEW_NOTES_REPEAT_JOURNAL_KEY)!==sealed)
+              throw Error('repeat_intent_readback_mismatch');
+            const after=captureReadOnlyFullStorageInventory();
+            if(previewNotesRepeatOriginWithoutJournal(after)
+              !==previewNotesRepeatOriginWithoutJournal(before))
+              throw Error('repeat_origin_changed');
+            const finalFence=await rehearsePreviewDurableWriterFence('audit');
+            if(!stableMode()
+              ||finalFence.reason!=='preview_writer_inventory_consistent'
+              ||finalFence.fence?.generation!==generation
+              ||finalFence.fence?.epoch!==fence.fence.epoch
+              ||finalFence.fence?.frozen
+              ||previewNotesWitnessObservedExternalChange(generation,epoch)
+              ||captureReadOnlyFullStorageInventory()!==after)
+              throw Error('repeat_intent_postaudit_changed');
+          }catch(_){
+            result=deny('repeat_intent_write_uncertain',{
+              writeAttempted:true,writeOutcomeUncertain:true,
+              inspectIntentBeforeRetry:true});return;
+          }
+          result=deny('preview_notes_repeat_intent_recorded',{
+            intentRecorded:true,writeAttempted:true,
+            journalEntryCount:(previous.journal?.entries.length||0)+1,
+            cooperativeLockUsed:true,readbackVerified:true});
+        });
+    }catch(_){
+      return deny('repeat_intent_lock_request_failed',{
+        writeAttempted:touched,writeOutcomeUncertain:touched,
+        inspectIntentBeforeRetry:touched});
+    }
+    return result;
+  }
+
+  async function rehearsePreviewAdmittedNotesRepeatCacheWrite(
+    expectedInventoryToken,actionId){
+    const deny=previewNotesRepeatDeny;
+    if(!isWalTestPreviewHost())return deny('preview_host_required');
+    if(!isDarkEnabled())return deny('dark_disabled');
+    if(typeof expectedInventoryToken!=='string'||!expectedInventoryToken)
+      return deny('full_origin_token_required');
+    if(typeof actionId!=='string'
+      ||!/^[a-zA-Z0-9_:.\-]{1,96}$/.test(actionId))
+      return deny('repeat_action_id_invalid');
+    const locks=global.navigator?.locks;
+    if(typeof locks?.request!=='function')
+      return deny('lock_manager_unavailable');
+    const generation=currentGeneration({create:false});
+    if(!generation)return deny('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    const stableMode=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&currentGeneration({create:false})===generation
+      &&darkMirrorModeEpoch===epoch;
+    const cacheKey='taskpoints_notes_v1';
+    const withoutCache=token=>stableJson(JSON.parse(token)
+      .filter(row=>Array.isArray(row)&&row[0]!==cacheKey));
+    let touched=false,result=deny('repeat_cache_lock_unavailable');
+    try{
+      await locks.request(PREVIEW_COOPERATIVE_TASK_FREEZE_LOCK,
+        {mode:'exclusive',ifAvailable:true},async lock=>{
+          if(!lock){result=deny('repeat_cache_lock_held_elsewhere');return;}
+          let before,journal,entry,snapshotRaw;
+          try{
+            before=captureReadOnlyFullStorageInventory();
+            if(!stableMode()||before!==expectedInventoryToken){
+              result=deny('repeat_cache_origin_changed');return;
+            }
+            journal=await readPreviewNotesRepeatJournal(generation);
+            entry=journal.last;
+            if(!entry||entry.actionId!==actionId){
+              result=deny('repeat_cache_action_not_current');return;
+            }
+            if(await previewRecoveryFingerprint(
+              previewNotesRepeatOriginWithoutJournal(before))
+                !==entry.sourceOriginFingerprint){
+              result=deny('repeat_cache_original_origin_changed');return;
+            }
+            snapshotRaw=global.localStorage.getItem(
+              core.STORAGE_KEY||'taskpoints_v1');
+            const cache=global.localStorage.getItem(cacheKey);
+            if(!snapshotRaw||cache!==entry.previousText
+              ||await previewRecoveryFingerprint(snapshotRaw)
+                !==entry.sourceSnapshotFingerprint
+              ||await previewRecoveryFingerprint(cache)
+                !==entry.sourceCacheFingerprint
+              ||global.localStorage.getItem(
+                'taskpoints_notes_authoritative_v1')!=='1'
+              ||global.localStorage.getItem(
+                'taskpoints_notes_dirty_v1')!=='1'){
+              result=deny('repeat_cache_source_diverged');return;
+            }
+          }catch(_){
+            result=deny('repeat_cache_intent_or_origin_invalid');return;
+          }
+          const fence=await rehearsePreviewDurableWriterFence('audit');
+          if(!stableMode()
+            ||fence.reason!=='preview_writer_inventory_consistent'
+            ||fence.fence?.generation!==generation||fence.fence?.frozen){
+            result=deny('repeat_cache_fence_unverified_or_frozen');return;
+          }
+          try{
+            const snapshot=core.parseTaskPointsStorageJson(snapshotRaw);
+            if(!snapshot||typeof snapshot!=='object'
+              ||Array.isArray(snapshot)
+              ||snapshot.notes!==entry.previousText
+              ||previewNotesWitnessObservedExternalChange(generation,epoch)
+              ||captureReadOnlyFullStorageInventory()!==before
+              ||global.localStorage.getItem(
+                PREVIEW_NOTES_REPEAT_JOURNAL_KEY)!==journal.raw){
+              result=deny('repeat_cache_source_changed_before_write');
+              return;
+            }
+          }catch(_){result=deny('repeat_cache_source_unreadable');return;}
+          touched=true;
+          try{global.localStorage.setItem(cacheKey,entry.text);}
+          catch(_){
+            result=deny('repeat_cache_write_uncertain',{
+              writeAttempted:true,writeOutcomeUncertain:true,
+              inspectIntentBeforeRetry:true});return;
+          }
+          let after;
+          try{
+            after=captureReadOnlyFullStorageInventory();
+            if(!stableMode()
+              ||global.localStorage.getItem(cacheKey)!==entry.text
+              ||global.localStorage.getItem(
+                'taskpoints_notes_authoritative_v1')!=='1'
+              ||global.localStorage.getItem(
+                'taskpoints_notes_dirty_v1')!=='1'
+              ||withoutCache(after)!==withoutCache(before)){
+              result=deny('repeat_cache_readback_or_origin_changed',{
+                writeAttempted:true,writeOutcomeUncertain:true,
+                inspectIntentBeforeRetry:true});return;
+            }
+          }catch(_){
+            result=deny('repeat_cache_readback_unavailable',{
+              writeAttempted:true,writeOutcomeUncertain:true,
+              inspectIntentBeforeRetry:true});return;
+          }
+          const finalFence=await rehearsePreviewDurableWriterFence('audit');
+          try{
+            if(!stableMode()
+              ||finalFence.reason!=='preview_writer_inventory_consistent'
+              ||finalFence.fence?.generation!==generation
+              ||finalFence.fence?.epoch!==fence.fence.epoch
+              ||finalFence.fence?.frozen
+              ||previewNotesWitnessObservedExternalChange(generation,epoch)
+              ||captureReadOnlyFullStorageInventory()!==after){
+              result=deny('repeat_cache_postwrite_evidence_changed',{
+                writeAttempted:true,writeOutcomeUncertain:true,
+                inspectIntentBeforeRetry:true});return;
+            }
+          }catch(_){
+            result=deny('repeat_cache_postaudit_unavailable',{
+              writeAttempted:true,writeOutcomeUncertain:true,
+              inspectIntentBeforeRetry:true});return;
+          }
+          result=deny('preview_notes_repeat_cache_written_dirty_retained',{
+            cacheReadbackVerified:true,writeAttempted:true,
+            dirtyMarkerPreserved:true,cooperativeLockUsed:true});
+        });
+    }catch(_){
+      return deny('repeat_cache_lock_request_failed',{
+        writeAttempted:touched,writeOutcomeUncertain:touched,
+        inspectIntentBeforeRetry:touched});
+    }
+    return result;
+  }
+
+  async function rehearsePreviewAdmittedNotesRepeatSnapshotSync(
+    expectedInventoryToken,actionId){
+    const deny=previewNotesRepeatDeny;
+    if(!isWalTestPreviewHost())return deny('preview_host_required');
+    if(!isDarkEnabled())return deny('dark_disabled');
+    if(typeof expectedInventoryToken!=='string'||!expectedInventoryToken)
+      return deny('full_origin_token_required');
+    if(typeof actionId!=='string'
+      ||!/^[a-zA-Z0-9_:.\-]{1,96}$/.test(actionId))
+      return deny('repeat_action_id_invalid');
+    const locks=global.navigator?.locks;
+    if(typeof locks?.request!=='function')
+      return deny('lock_manager_unavailable');
+    const generation=currentGeneration({create:false});
+    if(!generation)return deny('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    const stableMode=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&currentGeneration({create:false})===generation
+      &&darkMirrorModeEpoch===epoch;
+    const snapshotKey=core.STORAGE_KEY||'taskpoints_v1';
+    const cacheKey='taskpoints_notes_v1';
+    const withoutSnapshot=token=>stableJson(JSON.parse(token)
+      .filter(row=>Array.isArray(row)&&row[0]!==snapshotKey));
+    let touched=false,result=deny('repeat_snapshot_lock_unavailable');
+    try{
+      await locks.request(PREVIEW_COOPERATIVE_TASK_FREEZE_LOCK,
+        {mode:'exclusive',ifAvailable:true},async lock=>{
+          if(!lock){result=deny('repeat_snapshot_lock_held_elsewhere');return;}
+          let before,journal,entry,snapshotRaw,proposedRaw;
+          try{
+            before=captureReadOnlyFullStorageInventory();
+            if(!stableMode()||before!==expectedInventoryToken){
+              result=deny('repeat_snapshot_origin_changed');return;
+            }
+            journal=await readPreviewNotesRepeatJournal(generation);
+            entry=journal.last;
+            if(!entry||entry.actionId!==actionId){
+              result=deny('repeat_snapshot_action_not_current');return;
+            }
+            if(await previewRecoveryFingerprint(
+              previewNotesRepeatOriginWithoutJournal(
+                before,entry.previousText))
+                !==entry.sourceOriginFingerprint){
+              result=deny('repeat_snapshot_original_origin_changed');return;
+            }
+            snapshotRaw=global.localStorage.getItem(snapshotKey);
+            if(!snapshotRaw
+              ||await previewRecoveryFingerprint(snapshotRaw)
+                !==entry.sourceSnapshotFingerprint
+              ||global.localStorage.getItem(cacheKey)!==entry.text
+              ||global.localStorage.getItem(
+                'taskpoints_notes_authoritative_v1')!=='1'
+              ||global.localStorage.getItem(
+                'taskpoints_notes_dirty_v1')!=='1'){
+              result=deny('repeat_snapshot_source_diverged');return;
+            }
+          }catch(_){
+            result=deny('repeat_snapshot_intent_or_source_invalid');return;
+          }
+          const fence=await rehearsePreviewDurableWriterFence('audit');
+          if(!stableMode()
+            ||fence.reason!=='preview_writer_inventory_consistent'
+            ||fence.fence?.generation!==generation||fence.fence?.frozen){
+            result=deny('repeat_snapshot_fence_unverified_or_frozen');
+            return;
+          }
+          try{
+            const source=JSON.parse(snapshotRaw);
+            if(!source||typeof source!=='object'
+              ||Array.isArray(source)
+              ||typeof source.notes!=='string'
+              ||source.notes!==entry.previousText)
+              throw Error('repeat_snapshot_source_state_incompatible');
+            if(JSON.stringify(source)!==snapshotRaw){
+              result=deny('repeat_snapshot_noncanonical_legacy_json');
+              return;
+            }
+            if(typeof core.parseTaskPointsStorageJson!=='function'
+              ||stableJson(core.parseTaskPointsStorageJson(snapshotRaw))
+                !==stableJson(source))
+              throw Error('repeat_snapshot_codec_incompatible');
+            const next={...source,notes:entry.text};
+            proposedRaw=JSON.stringify(next);
+            if(stableJson(core.parseTaskPointsStorageJson(proposedRaw))
+              !==stableJson(next))
+              throw Error('repeat_snapshot_codec_roundtrip_mismatch');
+            if(!stableMode()
+              ||previewNotesWitnessObservedExternalChange(generation,epoch)
+              ||captureReadOnlyFullStorageInventory()!==before
+              ||global.localStorage.getItem(
+                PREVIEW_NOTES_REPEAT_JOURNAL_KEY)!==journal.raw){
+              result=deny('repeat_snapshot_origin_or_witness_changed');
+              return;
+            }
+          }catch(_){
+            result=deny('repeat_snapshot_codec_or_source_invalid');return;
+          }
+          touched=true;
+          try{global.localStorage.setItem(snapshotKey,proposedRaw);}
+          catch(_){
+            result=deny('repeat_snapshot_write_uncertain',{
+              writeAttempted:true,writeOutcomeUncertain:true,
+              inspectIntentBeforeRetry:true});return;
+          }
+          let after;
+          try{
+            after=captureReadOnlyFullStorageInventory();
+            if(!stableMode()
+              ||global.localStorage.getItem(snapshotKey)!==proposedRaw
+              ||global.localStorage.getItem(cacheKey)!==entry.text
+              ||global.localStorage.getItem(
+                'taskpoints_notes_authoritative_v1')!=='1'
+              ||global.localStorage.getItem(
+                'taskpoints_notes_dirty_v1')!=='1'
+              ||withoutSnapshot(after)!==withoutSnapshot(before)){
+              result=deny('repeat_snapshot_readback_or_origin_changed',{
+                writeAttempted:true,writeOutcomeUncertain:true,
+                inspectIntentBeforeRetry:true});return;
+            }
+          }catch(_){
+            result=deny('repeat_snapshot_readback_unavailable',{
+              writeAttempted:true,writeOutcomeUncertain:true,
+              inspectIntentBeforeRetry:true});return;
+          }
+          const finalFence=await rehearsePreviewDurableWriterFence('audit');
+          try{
+            if(!stableMode()
+              ||finalFence.reason!=='preview_writer_inventory_consistent'
+              ||finalFence.fence?.generation!==generation
+              ||finalFence.fence?.epoch!==fence.fence.epoch
+              ||finalFence.fence?.frozen
+              ||previewNotesWitnessObservedExternalChange(generation,epoch)
+              ||captureReadOnlyFullStorageInventory()!==after){
+              result=deny('repeat_snapshot_postwrite_evidence_changed',{
+                writeAttempted:true,writeOutcomeUncertain:true,
+                inspectIntentBeforeRetry:true});return;
+            }
+          }catch(_){
+            result=deny('repeat_snapshot_postaudit_unavailable',{
+              writeAttempted:true,writeOutcomeUncertain:true,
+              inspectIntentBeforeRetry:true});return;
+          }
+          result=deny('preview_notes_repeat_snapshot_written_dirty_retained',{
+            writeAttempted:true,notesSnapshotSynchronized:true,
+            dirtyMarkerPreserved:true,cooperativeLockUsed:true,
+            readbackVerified:true});
+        });
+    }catch(_){
+      return deny('repeat_snapshot_lock_request_failed',{
+        writeAttempted:touched,writeOutcomeUncertain:touched,
+        inspectIntentBeforeRetry:touched});
+    }
+    return result;
+  }
+
+  async function inspectPreviewNotesRepeatEditJournal(){
+    const deny=previewNotesRepeatDeny;
+    if(!isWalTestPreviewHost())return deny('preview_host_required');
+    if(!isDarkEnabled())return deny('dark_disabled');
+    const generation=currentGeneration({create:false});
+    if(!generation)return deny('generation_unavailable');
+    try{
+      const before=captureReadOnlyFullStorageInventory();
+      const read=await readPreviewNotesRepeatJournal(generation);
+      if(!read.journal)return deny('repeat_journal_absent');
+      const entry=read.last;
+      const cache=global.localStorage.getItem('taskpoints_notes_v1');
+      const rawSnapshot=global.localStorage.getItem(
+        core.STORAGE_KEY||'taskpoints_v1');
+      const decoded=core.parseTaskPointsStorageJson(rawSnapshot);
+      if(!decoded||typeof decoded!=='object'||Array.isArray(decoded)
+        ||typeof decoded.notes!=='string')
+        return deny('repeat_snapshot_unreadable');
+      const dirty=global.localStorage.getItem(
+        'taskpoints_notes_dirty_v1');
+      const authority=global.localStorage.getItem(
+        'taskpoints_notes_authoritative_v1');
+      const cacheMatches=cache===entry.text;
+      const snapshotMatches=decoded.notes===entry.text;
+      const markersValid=dirty==='1'&&authority==='1';
+      const stage=!markersValid?'repeat_recovery_markers_missing'
+        :cacheMatches
+          ?snapshotMatches?'repeat_snapshot_synced_dirty_pending'
+            :'repeat_cache_written_snapshot_pending'
+          :'repeat_intent_recorded_cache_pending';
+      if(!isWalTestPreviewHost()||!isDarkEnabled()
+        ||currentGeneration({create:false})!==generation
+        ||captureReadOnlyFullStorageInventory()!==before
+        ||global.localStorage.getItem(
+          PREVIEW_NOTES_REPEAT_JOURNAL_KEY)!==read.raw)
+        return deny('repeat_origin_changed_during_inspection');
+      return {...deny('preview_notes_repeat_journal_verified'),
+        journalEvidenceVerified:true,
+        journalEntryCount:read.journal.entries.length,
+        lastActionId:entry.actionId,
+        cacheMatchesLastAction:cacheMatches,
+        snapshotMatchesLastAction:snapshotMatches,
+        dirtyMarkerPreserved:dirty==='1',
+        notesCacheAuthorityEstablished:authority==='1',
+        observedRecoveryStage:stage};
+    }catch(_){return deny('repeat_journal_unreadable_or_invalid');}
+  }
+
   // V2-only Notes keystroke rehearsal: participate in the same preview Web
   // Lock as Task / Projects / Today / freeze, but mutate ONLY the existing
   // V1 Notes cache after BOTH durable authority/dirty markers already equal
@@ -17706,6 +18299,10 @@
     rehearsePreviewAdmittedNotesFollowupCacheWrite,
     rehearsePreviewAdmittedNotesFollowupSnapshotSync,
     inspectPreviewNotesFollowupIntent,
+    rehearsePreviewNotesRepeatEditIntent,
+    rehearsePreviewAdmittedNotesRepeatCacheWrite,
+    rehearsePreviewAdmittedNotesRepeatSnapshotSync,
+    inspectPreviewNotesRepeatEditJournal,
     inspectPreviewNotesSnapshotCompletionEvidence,
     inspectPreviewNotesFirstEditIntent,
     inspectPreviewCooperativeNotesFirstEditConflict,
