@@ -1830,3 +1830,139 @@ test('Baseline-first rehearsal refuses stale intent, stale origin, damaged marke
   assert.equal((await a.api.inspectPreviewNotesBaselineFirstProtocol(a.token()))
     .reason,'dark_disabled');
 });
+
+
+function installSyntheticRemoteStorageEvents(app){
+  const callbacks=new Set();
+  app.ctx.addEventListener=(event,callback)=>{
+    if(event==='storage')callbacks.add(callback);
+  };
+  app.ctx.removeEventListener=(event,callback)=>{
+    if(event==='storage')callbacks.delete(callback);
+  };
+  return {emit(key){for(const fn of callbacks)fn({key});},
+    count(){return callbacks.size;}};
+}
+
+test('Opt-in old-tab event witness detects Notes A-B-A despite a matching final origin',async()=>{
+  const a=await bootRealTaskAdapter();
+  setupUnmarkedFirstNotesEdit(a);
+  const events=installSyntheticRemoteStorageEvents(a);
+  const before=a.token(),v1=a.localStorage.getItem(V1);
+  const started=await a.api.beginPreviewLegacyStorageEventWitness(before);
+  assert.equal(started.reason,'preview_legacy_storage_event_witness_started',
+    JSON.stringify(started));
+  assert.equal(started.observing,true);
+  assert.equal(events.count(),1);
+  const quiet=await a.api.inspectPreviewLegacyStorageEventWitness();
+  assert.equal(quiet.reason,'origin_matches_no_events_observed');
+  assert.equal(quiet.originMatchesStart,true);
+  assert.equal(quiet.missedEventsRuledOut,false);
+  assert.equal(quiet.oldTabsExcluded,false);
+  const cache=a.localStorage.getItem('taskpoints_notes_v1');
+  a.localStorage.setItem('taskpoints_notes_v1','intermediate old-tab note');
+  events.emit('taskpoints_notes_v1');
+  a.localStorage.setItem('taskpoints_notes_v1',cache);
+  events.emit('taskpoints_notes_v1');
+  assert.equal(a.token(),before);
+  const rollback=await a.api.inspectPreviewLegacyStorageEventWitness();
+  assert.equal(rollback.reason,'origin_matches_but_cross_tab_events_observed',
+    JSON.stringify(rollback));
+  assert.equal(rollback.originMatchesStart,true);
+  assert.equal(rollback.transientCrossTabChangeObserved,true);
+  assert.equal(rollback.observedStorageEvents,2);
+  assert.equal(rollback.notesRelatedEvents,2);
+  assert.equal(rollback.otherOriginEvents,0);
+  assert.equal(rollback.missedEventsRuledOut,false);
+  assert.equal(rollback.productionWritersFenced,false);
+  assert.equal(rollback.canPromote,false);
+  assert.equal(a.localStorage.getItem(V1),v1);
+  assert.equal(a.token(),before);
+  assert.equal((await a.api.beginPreviewLegacyStorageEventWitness(before))
+    .reason,'storage_event_witness_already_active');
+  const stopped=a.api.stopPreviewLegacyStorageEventWitness();
+  assert.equal(stopped.stopped,true);
+  assert.equal(events.count(),0);
+  assert.equal((await a.api.inspectPreviewLegacyStorageEventWitness())
+    .reason,'storage_event_witness_not_active');
+});
+
+test('Opt-in witness counts other origin changes without retaining event contents',async()=>{
+  const a=await bootRealTaskAdapter();
+  const events=installSyntheticRemoteStorageEvents(a);
+  const token=a.token();
+  assert.equal((await a.api.beginPreviewLegacyStorageEventWitness(token))
+    .observing,true);
+  const original=a.localStorage.getItem('tp_projects_v1');
+  a.localStorage.setItem('tp_projects_v1','a private project');
+  events.emit('tp_projects_v1');
+  let observed=await a.api.inspectPreviewLegacyStorageEventWitness();
+  assert.equal(observed.reason,'origin_changed_since_witness_started');
+  assert.equal(observed.otherOriginEvents,1);
+  assert.equal(observed.notesRelatedEvents,0);
+  assert.equal(observed.originMatchesStart,false);
+  if(original===null)a.localStorage.removeItem('tp_projects_v1');
+  else a.localStorage.setItem('tp_projects_v1',original);
+  events.emit('tp_projects_v1');
+  observed=await a.api.inspectPreviewLegacyStorageEventWitness();
+  assert.equal(observed.originMatchesStart,true);
+  assert.equal(observed.transientCrossTabChangeObserved,true);
+  assert.equal(observed.otherOriginEvents,2);
+  events.emit(null);
+  observed=await a.api.inspectPreviewLegacyStorageEventWitness();
+  assert.equal(observed.originClearEvents,1);
+  assert.equal(observed.observedStorageEvents,3);
+  assert.equal(JSON.stringify(observed).includes('private project'),false);
+  assert.equal(JSON.stringify(observed).includes('tp_projects_v1'),false);
+  a.api.stopPreviewLegacyStorageEventWitness();
+  assert.equal(events.count(),0);
+});
+
+test('Storage-event witness refuses unsupported hosts, missing listeners and generation changes',async()=>{
+  const a=await bootRealTaskAdapter();
+  assert.equal((await a.api.beginPreviewLegacyStorageEventWitness(a.token()))
+    .reason,'storage_event_listener_unavailable');
+  const events=installSyntheticRemoteStorageEvents(a);
+  a.ctx.location.hostname='taskpoints.pages.dev';
+  assert.equal((await a.api.beginPreviewLegacyStorageEventWitness(a.token()))
+    .reason,'preview_host_required');
+  a.ctx.location.hostname='localhost';
+  const before=a.token();
+  a.localStorage.setItem('taskpoints_notes_v1','newer old-tab edit');
+  assert.equal((await a.api.beginPreviewLegacyStorageEventWitness(before))
+    .reason,'full_origin_changed');
+  assert.equal(events.count(),0);
+  assert.equal((await a.api.beginPreviewLegacyStorageEventWitness(a.token()))
+    .observing,true);
+  a.localStorage.setItem('taskpoints_state_v2_generation_v1','rotated');
+  const bad=await a.api.inspectPreviewLegacyStorageEventWitness();
+  assert.equal(bad.reason,'storage_event_witness_generation_changed');
+  assert.equal(bad.canPromote,false);
+  a.api.stopPreviewLegacyStorageEventWitness();
+  assert.equal(events.count(),0);
+});
+
+test('Storage-event witness fails closed when a remote edit arrives during SHA inspection',async()=>{
+  const a=await bootRealTaskAdapter();
+  const events=installSyntheticRemoteStorageEvents(a);
+  assert.equal((await a.api.beginPreviewLegacyStorageEventWitness(a.token()))
+    .observing,true);
+  const digest=a.ctx.crypto.subtle.digest.bind(a.ctx.crypto.subtle);
+  let fired=false;
+  a.ctx.crypto.subtle={digest:async(...args)=>{
+    const hash=await digest(...args);
+    if(!fired){fired=true;events.emit('taskpoints_notes_v1');}
+    return hash;
+  }};
+  const raced=await a.api.inspectPreviewLegacyStorageEventWitness();
+  assert.equal(raced.reason,'storage_event_witness_changed_during_inspection',
+    JSON.stringify(raced));
+  assert.equal(raced.canPromote,false);
+  a.ctx.crypto.subtle={digest};
+  const after=await a.api.inspectPreviewLegacyStorageEventWitness();
+  assert.equal(after.reason,'origin_matches_but_cross_tab_events_observed');
+  assert.equal(after.observedStorageEvents,1);
+  assert.equal(after.oldTabsExcluded,false);
+  a.api.stopPreviewLegacyStorageEventWitness();
+  assert.equal(events.count(),0);
+});
