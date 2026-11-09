@@ -5531,6 +5531,162 @@ try {
       dirtyMarkerStillProtected:true,noAutomaticReplayOrCutover:true};
   });
 
+  await run('Reusable Notes repeat journal survives three extra browser edits and old-tab changes',async context=>{
+    const page=await open(context);
+    const old=await context.newPage();
+    await old.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const prepared=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const state=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      state.notes='A much longer original Notes entry';
+      state.tasks=[{id:'keep-original-task',title:'Keep this task'}];
+      localStorage.setItem('taskpoints_v1',JSON.stringify(state));
+      localStorage.removeItem('taskpoints_notes_v1');
+      localStorage.removeItem('taskpoints_notes_dirty_v1');
+      localStorage.removeItem('taskpoints_notes_authoritative_v1');
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const first=await api.rehearsePreviewNotesFirstEditIntent(
+        'first',token(),'browser-repeat-first');
+      if(!first.intentRecorded)return {first};
+      const firstCache=await api.rehearsePreviewAdmittedNotesFirstEditCacheWrite(
+        token(),'browser-repeat-first');
+      const firstSnapshot=await api.rehearsePreviewAdmittedNotesSnapshotSync(
+        token(),'browser-repeat-first');
+      const second=await api.rehearsePreviewNotesFollowupIntent(
+        'second',token(),'browser-repeat-second');
+      const secondCache=await api.rehearsePreviewAdmittedNotesFollowupCacheWrite(
+        token(),'browser-repeat-second');
+      const secondSnapshot=await api.rehearsePreviewAdmittedNotesFollowupSnapshotSync(
+        token(),'browser-repeat-second');
+      return {first,firstCache,firstSnapshot,
+        second,secondCache,secondSnapshot};
+    });
+    if(prepared.first.reason==='lock_manager_unavailable'){
+      assert.equal(prepared.first.intentRecorded,false);
+      return {missingWebLocksRefused:true};
+    }
+    assert.equal(prepared.first.intentRecorded,true,JSON.stringify(prepared.first));
+    assert.equal(prepared.firstCache.firstEditApplied,true,
+      JSON.stringify(prepared.firstCache));
+    assert.equal(prepared.firstSnapshot.notesSnapshotSynchronized,true,
+      JSON.stringify(prepared.firstSnapshot));
+    assert.equal(prepared.second.intentRecorded,true,
+      JSON.stringify(prepared.second));
+    assert.equal(prepared.secondCache.cacheReadbackVerified,true,
+      JSON.stringify(prepared.secondCache));
+    assert.equal(prepared.secondSnapshot.notesSnapshotSynchronized,true,
+      JSON.stringify(prepared.secondSnapshot));
+    for(const [id,nextText,index] of [
+      ['browser-repeat-third','third',1],
+      ['browser-repeat-fourth','fourth',2]
+    ]){
+      const attempt=await page.evaluate(async({id,nextText})=>{
+        const api=window.TaskPointsStateRuntimeV2;
+        const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+          (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+        const intent=await api.rehearsePreviewNotesRepeatEditIntent(
+          nextText,token(),id);
+        const cache=await api.rehearsePreviewAdmittedNotesRepeatCacheWrite(
+          token(),id);
+        const pending=await api.inspectPreviewNotesRepeatEditJournal();
+        return {intent,cache,pending,
+          snapshot:JSON.parse(localStorage.getItem('taskpoints_v1')),
+          dirty:localStorage.getItem('taskpoints_notes_dirty_v1')};
+      },{id,nextText});
+      assert.equal(attempt.intent.intentRecorded,true,
+        JSON.stringify(attempt.intent));
+      assert.equal(attempt.intent.journalEntryCount,index);
+      assert.equal(attempt.cache.cacheReadbackVerified,true,
+        JSON.stringify(attempt.cache));
+      assert.equal(attempt.pending.observedRecoveryStage,
+        'repeat_cache_written_snapshot_pending',
+        JSON.stringify(attempt.pending));
+      assert.equal(attempt.pending.canPromote,false);
+      assert.equal(attempt.dirty,'1');
+      await page.reload({waitUntil:'load'});
+      const completed=await page.evaluate(async id=>{
+        const api=window.TaskPointsStateRuntimeV2;
+        const token=JSON.stringify(Array.from({length:localStorage.length},
+          (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+        const sync=await api.rehearsePreviewAdmittedNotesRepeatSnapshotSync(
+          token,id);
+        const inspected=await api.inspectPreviewNotesRepeatEditJournal();
+        return {sync,inspected,
+          snapshot:JSON.parse(localStorage.getItem('taskpoints_v1')),
+          cache:localStorage.getItem('taskpoints_notes_v1'),
+          dirty:localStorage.getItem('taskpoints_notes_dirty_v1'),
+          journal:JSON.parse(localStorage.getItem(
+            'taskpoints_v2_preview_notes_repeat_journal_v1'))};
+      },id);
+      assert.equal(completed.sync.notesSnapshotSynchronized,true,
+        JSON.stringify(completed.sync));
+      assert.equal(completed.sync.safeToClearDirtyMarker,false);
+      assert.equal(completed.sync.oldTabsExcluded,false);
+      assert.equal(completed.sync.canPromote,false);
+      assert.equal(completed.inspected.journalEvidenceVerified,true);
+      assert.equal(completed.inspected.observedRecoveryStage,
+        'repeat_snapshot_synced_dirty_pending');
+      assert.equal(completed.snapshot.notes,nextText);
+      assert.equal(completed.snapshot.tasks[0].id,'keep-original-task');
+      assert.equal(completed.cache,nextText);
+      assert.equal(completed.dirty,'1');
+      assert.equal(completed.journal.entries.length,index);
+    }
+    const staged=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const intent=await api.rehearsePreviewNotesRepeatEditIntent(
+        'fifth',token(),'browser-repeat-fifth');
+      const cache=await api.rehearsePreviewAdmittedNotesRepeatCacheWrite(
+        token(),'browser-repeat-fifth');
+      return {intent,cache};
+    });
+    assert.equal(staged.intent.intentRecorded,true,JSON.stringify(staged.intent));
+    assert.equal(staged.intent.journalEntryCount,3);
+    assert.equal(staged.cache.cacheReadbackVerified,true,
+      JSON.stringify(staged.cache));
+    await old.evaluate(()=>{
+      const state=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      state.tasks.push({id:'old-tab-new-task',title:'Must survive V2'});
+      localStorage.setItem('taskpoints_v1',JSON.stringify(state));
+    });
+    const denied=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const result=await api.rehearsePreviewAdmittedNotesRepeatSnapshotSync(
+        token,'browser-repeat-fifth');
+      return {result,dirty:localStorage.getItem('taskpoints_notes_dirty_v1'),
+        cache:localStorage.getItem('taskpoints_notes_v1'),
+        snapshot:JSON.parse(localStorage.getItem('taskpoints_v1'))};
+    });
+    assert.equal(denied.result.reason,'repeat_snapshot_original_origin_changed',
+      JSON.stringify(denied.result));
+    assert.equal(denied.result.writeAttempted,false);
+    assert.equal(denied.result.canPromote,false);
+    assert.equal(denied.snapshot.tasks[1].id,'old-tab-new-task');
+    assert.equal(denied.snapshot.notes,'fourth');
+    assert.equal(denied.cache,'fifth');
+    assert.equal(denied.dirty,'1');
+    await page.reload({waitUntil:'load'});
+    const inspected=await page.evaluate(async()=>window.TaskPointsStateRuntimeV2
+      .inspectPreviewNotesRepeatEditJournal());
+    assert.equal(inspected.journalEvidenceVerified,true,
+      JSON.stringify(inspected));
+    assert.equal(inspected.observedRecoveryStage,
+      'repeat_cache_written_snapshot_pending');
+    assert.equal(inspected.canPromote,false);
+    return {repeatJournalSurvivesReload:true,
+      threeSequentialActionsPreserved:true,
+      originalAndSecondIntentsRemainUntouched:true,
+      staleOldTabTaskNeverOverwritten:true,
+      dirtyMarkerNeverCleared:true};
+  });
+
   await run('Notes sync refuses noncanonical V1 snapshot bytes rather than normalize imported data',async context=>{
     const page=await open(context);
     const result=await page.evaluate(async()=>{
