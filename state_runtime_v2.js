@@ -16556,6 +16556,17 @@
             // limited preview prototype. The real V1 codec must be used for
             // the eventual production handoff.
             const source=JSON.parse(sourceRaw);
+            // A JSON.parse/stringify round-trip can silently collapse
+            // duplicate keys, normalize numeric and escaped-string bytes,
+            // or discard original formatting. The preview-only writer is
+            // allowed to edit Notes, NOT normalize other legacy fields.
+            // Require the exact canonical V1 JSON.stringify representation;
+            // noncanonical imports must remain V1-owned until the actual
+            // production serializer can safely update them.
+            if(JSON.stringify(source)!==sourceRaw){
+              result=deny('snapshot_sync_noncanonical_legacy_json');
+              return;
+            }
             if(!source||typeof source!=='object'||Array.isArray(source)
               ||(source.notes!==undefined&&typeof source.notes!=='string')
               ||typeof core.parseTaskPointsStorageJson!=='function'
