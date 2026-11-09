@@ -5391,6 +5391,108 @@ try {
       sealedNotesStillInspectable:true,dirtyNotCleared:true};
   });
 
+  await run('Sealed second Notes edit survives browser restart and preserves the first recovery intent',async context=>{
+    const page=await open(context);
+    const first=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const old=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      old.notes='Earlier long notes must not resurface after shortening';
+      old.tasks=[{id:'retain-older-task',title:'Never erase this task'}];
+      localStorage.setItem('taskpoints_v1',JSON.stringify(old));
+      localStorage.removeItem('taskpoints_notes_v1');
+      localStorage.removeItem('taskpoints_notes_dirty_v1');
+      localStorage.removeItem('taskpoints_notes_authoritative_v1');
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const intent=await api.rehearsePreviewNotesFirstEditIntent(
+        'first',token(),'browser-first-of-two');
+      if(!intent.intentRecorded)return {intent};
+      const cache=await api.rehearsePreviewAdmittedNotesFirstEditCacheWrite(
+        token(),'browser-first-of-two');
+      const sync=await api.rehearsePreviewAdmittedNotesSnapshotSync(
+        token(),'browser-first-of-two');
+      const snapshotBeforeSecond=localStorage.getItem('taskpoints_v1');
+      const sealedFirst=localStorage.getItem(
+        'taskpoints_v2_preview_notes_first_edit_intent_v1');
+      const followup=await api.rehearsePreviewNotesFollowupIntent(
+        'second',token(),'browser-second-of-two');
+      const sealedSecond=localStorage.getItem(
+        'taskpoints_v2_preview_notes_followup_intent_v1');
+      const beforeSecondWrite=await api.inspectPreviewNotesFollowupIntent();
+      const write=await api.rehearsePreviewAdmittedNotesFollowupCacheWrite(
+        token(),'browser-second-of-two');
+      const pending=await api.inspectPreviewNotesFollowupIntent();
+      return {intent,cache,sync,followup,write,pending,
+        beforeSecondWrite,sealedFirstPresent:!!sealedFirst,
+        sealedSecondPresent:!!sealedSecond,
+        firstUnchanged:localStorage.getItem(
+          'taskpoints_v2_preview_notes_first_edit_intent_v1')===sealedFirst,
+        secondUnchanged:localStorage.getItem(
+          'taskpoints_v2_preview_notes_followup_intent_v1')===sealedSecond,
+        snapshotUnchanged:localStorage.getItem('taskpoints_v1')===snapshotBeforeSecond,
+        cacheText:localStorage.getItem('taskpoints_notes_v1'),
+        dirty:localStorage.getItem('taskpoints_notes_dirty_v1'),
+        persistedTask:JSON.parse(
+          localStorage.getItem('taskpoints_v1')).tasks[0].id};
+    });
+    if(first.intent.reason==='lock_manager_unavailable'){
+      assert.equal(first.intent.intentRecorded,false);
+      return {noLockFailsClosed:true};
+    }
+    assert.equal(first.intent.intentRecorded,true,JSON.stringify(first.intent));
+    assert.equal(first.cache.firstEditApplied,true,JSON.stringify(first.cache));
+    assert.equal(first.sync.notesSnapshotSynchronized,true,JSON.stringify(first.sync));
+    assert.equal(first.followup.intentRecorded,true,JSON.stringify(first.followup));
+    assert.equal(first.beforeSecondWrite.observedRecoveryStage,
+      'followup_intent_recorded_cache_pending');
+    assert.equal(first.write.reason,
+      'preview_notes_followup_cache_written_dirty_retained',
+      JSON.stringify(first.write));
+    assert.equal(first.write.cacheReadbackVerified,true);
+    assert.equal(first.write.safeToClearDirtyMarker,false);
+    assert.equal(first.write.canPromote,false);
+    assert.equal(first.pending.intentEvidenceVerified,true,
+      JSON.stringify(first.pending));
+    assert.equal(first.pending.observedRecoveryStage,
+      'followup_cache_written_snapshot_pending');
+    assert.equal(first.pending.legacySelectsIntendedText,true);
+    assert.equal(first.sealedFirstPresent,true);
+    assert.equal(first.sealedSecondPresent,true);
+    assert.equal(first.firstUnchanged,true);
+    assert.equal(first.secondUnchanged,true);
+    assert.equal(first.snapshotUnchanged,true);
+    assert.equal(first.cacheText,'second');
+    assert.equal(first.dirty,'1');
+    assert.equal(first.persistedTask,'retain-older-task');
+    await page.reload({waitUntil:'load'});
+    const restored=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const inspected=await api.inspectPreviewNotesFollowupIntent();
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const duplicate=await api.rehearsePreviewAdmittedNotesFollowupCacheWrite(
+        token(),'browser-second-of-two');
+      return {inspected,duplicate,
+        snapshot:JSON.parse(localStorage.getItem('taskpoints_v1')),
+        cache:localStorage.getItem('taskpoints_notes_v1'),
+        dirty:localStorage.getItem('taskpoints_notes_dirty_v1')};
+    });
+    assert.equal(restored.inspected.intentEvidenceVerified,true);
+    assert.equal(restored.inspected.observedRecoveryStage,
+      'followup_cache_written_snapshot_pending');
+    assert.equal(restored.inspected.safeToClearDirtyMarker,false);
+    assert.equal(restored.duplicate.cacheReadbackVerified,false);
+    assert.equal(restored.snapshot.notes,'first');
+    assert.equal(restored.snapshot.tasks[0].id,'retain-older-task');
+    assert.equal(restored.cache,'second');
+    assert.equal(restored.dirty,'1');
+    return {firstAndSecondIntentsRemainSealed:true,
+      secondCacheSelectedAfterRestart:true,
+      snapshotAndUnrelatedTasksPreserved:true,
+      noAutomaticReplayOrCutover:true};
+  });
+
   await run('Notes sync refuses noncanonical V1 snapshot bytes rather than normalize imported data',async context=>{
     const page=await open(context);
     const result=await page.evaluate(async()=>{
