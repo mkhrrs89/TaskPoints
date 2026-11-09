@@ -18396,6 +18396,49 @@
             result=deny('backup_coverage_database_scan_unavailable');
             return;
           }
+          // A catalog can stay unchanged while an older tab adds or
+          // deletes records during this scan. Recount each existing store
+          // before reporting the inventory, without reading payload bytes.
+          // This detects count drift, NOT same-count edits or safe backups.
+          try{
+            for(const prior of databases){
+              const db=await new Promise((resolve,reject)=>{
+                const request=idb.open(prior.name);
+                request.onupgradeneeded=()=>{
+                  try{request.transaction?.abort?.();}catch(_){}
+                  reject(Error('backup_coverage_database_recreated'));
+                };
+                request.onerror=()=>reject(request.error||Error('db_reopen_failed'));
+                request.onblocked=()=>reject(Error('db_reopen_blocked'));
+                request.onsuccess=()=>resolve(request.result);
+              });
+              try{
+                if(db.version!==prior.version)
+                  throw Error('backup_coverage_database_version_changed');
+                const stores=Array.from(db.objectStoreNames);
+                if(stores.length!==prior.stores.length
+                  ||stores.some((name,i)=>name!==prior.stores[i].name))
+                  throw Error('backup_coverage_store_structure_changed');
+                if(stores.length){
+                  const tx=db.transaction(stores,'readonly');
+                  const completed=transactionPromise(tx);
+                  // Queue requests before awaiting so WebKit cannot
+                  // deactivate the transaction between store counts.
+                  const requests=stores.map(name=>
+                    requestPromise(tx.objectStore(name).count()));
+                  const values=await Promise.all([...requests,completed]);
+                  if(stores.some((_,i)=>
+                    values[i]!==prior.stores[i].recordCount))
+                    throw Error('backup_coverage_record_count_changed');
+                }
+              }finally{try{db.close();}catch(_){}}
+            }
+          }catch(error){
+            result=deny(error?.message==='backup_coverage_record_count_changed'
+              ?'backup_coverage_record_count_changed'
+              :'backup_coverage_recount_unavailable');
+            return;
+          }
           let catalogAfter;
           try{
             catalogAfter=normalizedCatalog(await idb.databases());
@@ -18421,6 +18464,9 @@
           result=deny('backup_coverage_inventory_readonly_observed',{
             localStorageInventoryStable:true,
             indexedDbCatalogStable:true,
+            indexedDbRecordCountsRechecked:true,
+            // A same-count mutation can still escape this census.
+            indexedDbRecordContentStable:false,
             cooperativeLockUsed:true,
             localStorage:inventory,
             originFingerprint,
