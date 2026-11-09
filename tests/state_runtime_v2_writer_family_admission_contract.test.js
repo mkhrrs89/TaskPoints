@@ -1327,3 +1327,187 @@ test('corrupted family source digest fails closed instead of admitting another f
   assert.equal((await writer(a,FAMILIES[1],'next')).reason,
     'fence_writer_inventory_inconsistent');
 });
+
+
+const FIRST_NOTES_INTENT='taskpoints_v2_preview_notes_first_edit_intent_v1';
+function setupUnmarkedFirstNotesEdit(app){
+  const state=JSON.parse(app.localStorage.getItem(V1));
+  state.notes='The long original document must remain untouched';
+  app.localStorage.setItem(V1,JSON.stringify(state));
+  app.localStorage.setItem('taskpoints_notes_v1',state.notes);
+  app.localStorage.removeItem('taskpoints_notes_authoritative_v1');
+  app.localStorage.removeItem('taskpoints_notes_dirty_v1');
+}
+
+test('V2 preview first-edit intent records a single sealed draft before touching any V1 Notes key',async()=>{
+  const a=await bootRealTaskAdapter();
+  setupUnmarkedFirstNotesEdit(a);
+  const before=a.token(),v1=a.localStorage.getItem(V1);
+  const r=await a.api.rehearsePreviewNotesFirstEditIntent('',
+    before,'notes-first-clear-1');
+  assert.equal(r.reason,'preview_notes_first_edit_intent_recorded',JSON.stringify(r));
+  assert.equal(r.intentRecorded,true);
+  assert.equal(r.verifiedIntentReadback,true);
+  assert.equal(r.cooperativeLockUsed,true);
+  assert.equal(r.confirmedNotesDurable,false);
+  assert.equal(r.notesFullySynchronized,false);
+  assert.equal(r.canPromote,false);
+  assert.equal(a.localStorage.getItem(V1),v1);
+  assert.equal(a.localStorage.getItem('taskpoints_notes_v1'),
+    'The long original document must remain untouched');
+  assert.equal(a.localStorage.getItem('taskpoints_notes_authoritative_v1'),null);
+  assert.equal(a.localStorage.getItem('taskpoints_notes_dirty_v1'),null);
+  assert.equal(a.commits,0);
+  const observed=await a.api.inspectPreviewNotesFirstEditIntent();
+  assert.equal(observed.reason,'preview_notes_first_edit_intent_verified',JSON.stringify(observed));
+  assert.equal(observed.intentEvidenceVerified,true);
+  assert.equal(observed.sourceInventoryMatchesAdmission,true);
+  assert.equal(observed.notesCacheMatchesIntent,false);
+  assert.equal(observed.notesCacheAuthorityEstablished,false);
+  assert.equal(observed.safeToApply,false);
+  assert.equal(observed.safeToRestore,false);
+  assert.equal(observed.canPromote,false);
+  assert.equal(JSON.stringify(observed).includes('long original document'),false);
+});
+
+test('First-edit intent survives truncated Notes cache, restart and old marker states without auto-restoring',async()=>{
+  const a=await bootRealTaskAdapter();
+  setupUnmarkedFirstNotesEdit(a);
+  assert.equal((await a.api.rehearsePreviewNotesFirstEditIntent('short',
+    a.token(),'first-short')).intentRecorded,true);
+  const snapshot=a.localStorage.getItem(V1);
+  a.localStorage.setItem('taskpoints_notes_v1','short');
+  const same=await a.api.inspectPreviewNotesFirstEditIntent();
+  assert.equal(same.intentEvidenceVerified,true);
+  assert.equal(same.sourceInventoryMatchesAdmission,false);
+  assert.equal(same.notesCacheMatchesIntent,true);
+  assert.equal(same.notesCacheAuthorityEstablished,false);
+  assert.equal(same.safeToApply,false);
+  assert.equal(a.localStorage.getItem(V1),snapshot);
+  const other=await boot({indexedDB:a.indexedDB,localStorage:a.localStorage});
+  const restarted=await other.api.inspectPreviewNotesFirstEditIntent();
+  assert.equal(restarted.intentEvidenceVerified,true);
+  assert.equal(restarted.notesCacheMatchesIntent,true);
+  assert.equal(restarted.confirmedNotesDurable,false);
+  assert.equal(restarted.canPromote,false);
+  assert.equal(other.localStorage.getItem('taskpoints_notes_authoritative_v1'),null);
+  assert.equal(other.localStorage.getItem('taskpoints_notes_dirty_v1'),null);
+  assert.equal(other.localStorage.getItem(V1),snapshot);
+  const second=await a.api.rehearsePreviewNotesFirstEditIntent('another edit',
+    a.token(),'second');
+  assert.equal(second.reason,'existing_first_edit_intent_must_be_inspected');
+  assert.equal(JSON.parse(a.localStorage.getItem(FIRST_NOTES_INTENT)).text,'short');
+});
+
+test('First-edit intent denies already-marked Notes, old tokens, invalid data and frozen cooperative fence',async()=>{
+  const invalid=await bootRealTaskAdapter();
+  setupUnmarkedFirstNotesEdit(invalid);
+  const token=invalid.token();
+  assert.equal((await invalid.api.rehearsePreviewNotesFirstEditIntent('x',token,'bad id !'))
+    .reason,'notes_first_edit_action_id_invalid');
+  assert.equal((await invalid.api.rehearsePreviewNotesFirstEditIntent(
+    'x'.repeat(65537),token,'large')).reason,
+    'notes_first_edit_intent_text_invalid_or_oversized');
+  invalid.localStorage.setItem('tp_projects_v1','[{"id":"old-tab"}]');
+  assert.equal((await invalid.api.rehearsePreviewNotesFirstEditIntent('x',token,'stale'))
+    .reason,'full_origin_changed');
+  assert.equal(invalid.localStorage.getItem(FIRST_NOTES_INTENT),null);
+
+  const marked=await bootRealTaskAdapter();
+  setupUnmarkedFirstNotesEdit(marked);
+  marked.localStorage.setItem('taskpoints_notes_authoritative_v1','1');
+  assert.equal((await marked.api.rehearsePreviewNotesFirstEditIntent('x',
+    marked.token(),'marked')).reason,'notes_authority_already_established');
+  assert.equal(marked.localStorage.getItem(FIRST_NOTES_INTENT),null);
+
+  const frozen=await bootRealTaskAdapter();
+  setupUnmarkedFirstNotesEdit(frozen);
+  assert.equal((await frozen.api.rehearsePreviewCooperativeWriterFreeze(
+    {expectedEpoch:0})).reason,'preview_fence_frozen');
+  const blocked=await frozen.api.rehearsePreviewNotesFirstEditIntent('x',
+    frozen.token(),'frozen');
+  assert.equal(blocked.reason,'notes_first_edit_fence_unverified_or_frozen',
+    JSON.stringify(blocked));
+  assert.equal(frozen.localStorage.getItem(FIRST_NOTES_INTENT),null);
+});
+
+test('First-edit quota and postwrite exceptions fail closed and preserve any written intent',async()=>{
+  const a=await bootRealTaskAdapter();
+  setupUnmarkedFirstNotesEdit(a);
+  const original=a.localStorage.setItem.bind(a.localStorage);
+  a.localStorage.setItem=(key,value)=>{
+    if(key===FIRST_NOTES_INTENT)throw Error('QuotaExceededError');
+    return original(key,value);
+  };
+  const denied=await a.api.rehearsePreviewNotesFirstEditIntent(
+    'new text',a.token(),'quota');
+  assert.equal(denied.reason,'notes_first_edit_intent_write_uncertain');
+  assert.equal(denied.intentRecorded,false);
+  assert.equal(denied.inspectIntentBeforeRetry,true);
+  assert.equal(a.localStorage.getItem(FIRST_NOTES_INTENT),null);
+  a.localStorage.setItem=(key,value)=>{
+    const outcome=original(key,value);
+    if(key===FIRST_NOTES_INTENT)throw Error('simulated-postwrite-crash');
+    return outcome;
+  };
+  const survived=await a.api.rehearsePreviewNotesFirstEditIntent(
+    'new text',a.token(),'postwrite');
+  assert.equal(survived.intentRecorded,false);
+  assert.equal(survived.writeOutcomeUncertain,true);
+  assert.equal(survived.inspectIntentBeforeRetry,true);
+  a.localStorage.setItem=original;
+  assert.equal((await a.api.inspectPreviewNotesFirstEditIntent())
+    .intentEvidenceVerified,true);
+  assert.equal(JSON.parse(a.localStorage.getItem(FIRST_NOTES_INTENT)).text,'new text');
+  assert.equal((await a.api.rehearsePreviewNotesFirstEditIntent(
+    'different',a.token(),'no-overwrite')).reason,
+    'existing_first_edit_intent_must_be_inspected');
+});
+
+test('First-edit intent refuses tampered evidence, reset generation and production hosts',async()=>{
+  const a=await bootRealTaskAdapter();
+  setupUnmarkedFirstNotesEdit(a);
+  assert.equal((await a.api.rehearsePreviewNotesFirstEditIntent('new text',
+    a.token(),'sealed')).intentRecorded,true);
+  const raw=a.localStorage.getItem(FIRST_NOTES_INTENT);
+  const altered=JSON.parse(raw);
+  altered.text='forged';
+  a.localStorage.setItem(FIRST_NOTES_INTENT,JSON.stringify(altered));
+  const bad=await a.api.inspectPreviewNotesFirstEditIntent();
+  assert.equal(bad.reason,'notes_first_edit_intent_integrity_mismatch',JSON.stringify(bad));
+  assert.equal(bad.safeToRestore,false);
+  assert.equal(a.localStorage.getItem(FIRST_NOTES_INTENT),JSON.stringify(altered));
+  a.localStorage.setItem(FIRST_NOTES_INTENT,raw);
+  assert.equal((await a.api.inspectPreviewNotesFirstEditIntent())
+    .intentEvidenceVerified,true);
+  a.localStorage.setItem('taskpoints_state_v2_generation_v1','reset-other-epoch');
+  assert.equal((await a.api.inspectPreviewNotesFirstEditIntent())
+    .reason,'notes_first_edit_intent_generation_mismatch');
+  a.ctx.location.hostname='taskpoints.pages.dev';
+  assert.equal((await a.api.inspectPreviewNotesFirstEditIntent())
+    .reason,'preview_host_required');
+  assert.equal((await a.api.rehearsePreviewNotesFirstEditIntent(
+    'should-not-save',a.token(),'prod')).reason,'preview_host_required');
+  assert.equal(a.localStorage.getItem(FIRST_NOTES_INTENT),raw);
+});
+
+test('First-edit cooperative record and preview freeze cannot interleave',async()=>{
+  let a,freezeResult=null,seen=false;
+  const navigator={locks:sharedFakeWebLocks(async name=>{
+    if(name===TASK_BRIDGE_LOCK&&!seen){
+      seen=true;
+      freezeResult=await a.api.rehearsePreviewCooperativeWriterFreeze(
+        {expectedEpoch:0});
+    }
+  })};
+  a=await bootRealTaskAdapter({navigator});
+  setupUnmarkedFirstNotesEdit(a);
+  const result=await a.api.rehearsePreviewNotesFirstEditIntent(
+    'first edit',a.token(),'locked');
+  assert.equal(result.intentRecorded,true,JSON.stringify(result));
+  assert.equal(freezeResult.reason,'cooperative_freeze_lock_held_elsewhere');
+  assert.equal((await a.api.rehearsePreviewDurableWriterFence('read'))
+    .fence.frozen,false);
+  assert.equal((await a.api.inspectPreviewNotesFirstEditIntent())
+    .intentEvidenceVerified,true);
+});
