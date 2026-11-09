@@ -15164,6 +15164,173 @@
   }
 
 
+
+  // Explicit preview-host-only Today view writer for the INDEPENDENT V1
+  // day-map key. This uses the same cooperative Web Lock as preview Task,
+  // Projects and freeze, but NEVER changes the production Today save path.
+  // Exact JSON bytes are written: no implicit normalization or lossy rewrite.
+  async function rehearsePreviewCooperativeTodaySave(nextTodayRaw, expectedInventoryToken) {
+    const deny=(reason,details={})=>({
+      checked:true,previewOnly:true,cooperativeTaskFreezeLockUsed:false,
+      todaySaved:false,committed:false,confirmedDurable:false,
+      canPromote:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...details
+    });
+    if(!isWalTestPreviewHost())return deny('preview_host_required');
+    if(!isDarkEnabled())return deny('dark_disabled');
+    if(typeof expectedInventoryToken!=='string'||!expectedInventoryToken.length)
+      return deny('full_origin_token_required');
+    const locks=global.navigator?.locks;
+    if(typeof locks?.request!=='function')return deny('lock_manager_unavailable');
+    if(typeof nextTodayRaw!=='string'||nextTodayRaw.length<2
+      ||nextTodayRaw.length>1048576)return deny('today_json_required_or_oversized');
+    const fields=['tasksByDay','notesByDay','selectedHabitIdsByDay','orderByDay'];
+    function validTodayPayload(raw) {
+      if(typeof raw!=='string'||raw.length<2||raw.length>1048576)
+        return {reason:'today_source_oversized_or_invalid'};
+      let value;
+      try{value=JSON.parse(raw);}catch(_){return {reason:'today_json_invalid'};}
+      if(!value||typeof value!=='object'||Array.isArray(value))
+        return {reason:'today_object_required'};
+      if(Object.prototype.hasOwnProperty.call(value,'version')
+        &&value.version!==1)return {reason:'today_schema_unrecognized'};
+      let entries=0;
+      const days=new Set();
+      for(const field of fields){
+        if(!Object.prototype.hasOwnProperty.call(value,field))continue;
+        const map=value[field];
+        if(!map||typeof map!=='object'||Array.isArray(map))
+          return {reason:'today_day_map_invalid'};
+        for(const [day,items] of Object.entries(map)){
+          if(!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Array.isArray(items))
+            return {reason:'today_day_entries_invalid'};
+          days.add(day);
+          entries+=items.length;
+          if(entries>100000||days.size>4096)
+            return {reason:'today_day_map_too_large'};
+        }
+      }
+      return {payload:value,dayCount:days.size,entryCount:entries};
+    }
+    const proposed=validTodayPayload(nextTodayRaw);
+    if(proposed.reason)return deny('invalid_today_payload',{
+      prerequisiteReason:proposed.reason});
+    // Raw canonicality prevents an input with duplicate JSON keys or
+    // whitespace padding from being silently reinterpreted in the preview.
+    if(JSON.stringify(proposed.payload)!==nextTodayRaw)
+      return deny('today_json_noncanonical');
+    const generation=currentGeneration({create:false});
+    if(!generation)return deny('generation_unavailable');
+    const modeEpoch=darkMirrorModeEpoch;
+    let result=deny('cooperative_today_lock_not_available');
+    let attempted=false;
+    try{
+      await locks.request(PREVIEW_COOPERATIVE_TASK_FREEZE_LOCK,
+        {mode:'exclusive',ifAvailable:true},async lock=>{
+          if(!lock){result=deny('cooperative_today_lock_held_elsewhere');return;}
+          if(!isDarkEnabled()||darkMirrorModeEpoch!==modeEpoch
+            ||currentGeneration({create:false})!==generation){
+            result=deny('generation_changed_under_cooperative_lock');return;
+          }
+          const fence=await rehearsePreviewDurableWriterFence('audit');
+          if(fence.reason!=='preview_writer_inventory_consistent'){
+            result=deny('preview_fence_inventory_unverified',{
+              prerequisiteReason:fence.reason});return;
+          }
+          if(fence.fence?.generation!==generation
+            ||!isDarkEnabled()||darkMirrorModeEpoch!==modeEpoch){
+            result=deny('preview_generation_changed_before_today_write');return;
+          }
+          if(fence.fence.frozen){
+            result=deny('preview_fence_frozen',{
+              cooperativeTaskFreezeLockUsed:true,
+              fenceEpoch:fence.fence.epoch});return;
+          }
+          let observed;
+          try{observed=captureReadOnlyFullStorageInventory();}
+          catch(_){result=deny('full_origin_unreadable');return;}
+          if(observed!==expectedInventoryToken){
+            result=deny('full_origin_changed');return;
+          }
+          const key='taskpoints_today_view_v1';
+          let priorRaw;
+          try{priorRaw=global.localStorage.getItem(key);}
+          catch(_){result=deny('today_source_unreadable');return;}
+          if(priorRaw!==null){
+            const existing=validTodayPayload(priorRaw);
+            if(existing.reason){
+              result=deny('today_existing_source_invalid',{
+                prerequisiteReason:existing.reason});return;
+            }
+          }
+          // A competing old tab is outside Web Locks; the final inventory
+          // check narrows, but cannot eliminate, the prewrite race.
+          try{
+            if(captureReadOnlyFullStorageInventory()!==expectedInventoryToken){
+              result=deny('full_origin_changed_before_today_write');return;
+            }
+          }catch(_){result=deny('full_origin_unreadable_before_today_write');return;}
+          if(!isDarkEnabled()||darkMirrorModeEpoch!==modeEpoch
+            ||currentGeneration({create:false})!==generation){
+            result=deny('generation_changed_before_today_write');return;
+          }
+          if(priorRaw===nextTodayRaw){
+            result=deny('today_source_already_identical',{
+              cooperativeTaskFreezeLockUsed:true,todaySaved:true,
+              confirmedDurable:true,committed:false});return;
+          }
+          attempted=true;
+          try{global.localStorage.setItem(key,nextTodayRaw);}
+          catch(_){result=deny('today_write_failed',{
+            writeOutcomeUncertain:true});return;}
+          let savedInventory;
+          try{
+            if(global.localStorage.getItem(key)!==nextTodayRaw){
+              result=deny('today_readback_mismatch',{
+                committed:true,writeOutcomeUncertain:true});return;
+            }
+            savedInventory=captureReadOnlyFullStorageInventory();
+            const unrelated=token=>JSON.parse(token)
+              .filter(entry=>Array.isArray(entry)&&entry[0]!==key);
+            if(stableJson(unrelated(savedInventory))!==
+              stableJson(unrelated(expectedInventoryToken))){
+              result=deny('other_origin_changed_during_today_write',{
+                committed:true,writeOutcomeUncertain:true});return;
+            }
+          }catch(_){result=deny('today_readback_unreadable',{
+            committed:true,writeOutcomeUncertain:true});return;}
+          const finalFence=await rehearsePreviewDurableWriterFence('audit');
+          if(finalFence.reason!=='preview_writer_inventory_consistent'
+            ||finalFence.fence?.generation!==generation
+            ||finalFence.fence.epoch!==fence.fence.epoch
+            ||finalFence.fence.frozen
+            ||!isDarkEnabled()||darkMirrorModeEpoch!==modeEpoch
+            ||currentGeneration({create:false})!==generation){
+            result=deny('today_fence_changed_after_write',{
+              committed:true,writeOutcomeUncertain:true,
+              inspectV1BeforeRetry:true});return;
+          }
+          try{
+            if(global.localStorage.getItem(key)!==nextTodayRaw
+              ||captureReadOnlyFullStorageInventory()!==savedInventory){
+              result=deny('today_origin_changed_after_write',{
+                committed:true,writeOutcomeUncertain:true});return;
+            }
+          }catch(_){result=deny('today_origin_unreadable_after_write',{
+            committed:true,writeOutcomeUncertain:true});return;}
+          result=deny('preview_today_saved',{
+            todaySaved:true,committed:true,confirmedDurable:true,
+            cooperativeTaskFreezeLockUsed:true,
+            dayCount:proposed.dayCount,entryCount:proposed.entryCount,
+            fenceEpoch:finalFence.fence.epoch});
+        });
+    }catch(_){return deny('cooperative_today_lock_request_failed',{
+      writeOutcomeUncertain:attempted,
+      inspectV1BeforeRetry:attempted});}
+    return result;
+  }
+
   const api = {
     __installedModule: true,
     DB_NAME,
@@ -15260,6 +15427,7 @@
     rehearsePreviewFenceCheckedTaskCompletionBatch,
     rehearsePreviewCooperativeWriterFreeze,
     rehearsePreviewCooperativeProjectsSave,
+    rehearsePreviewCooperativeTodaySave,
     inspectPreviewTaskBatchJournalEvidence,
     inspectPreviewTaskBatchEffectiveEvidence,
     inspectPreviewNotesSource,
