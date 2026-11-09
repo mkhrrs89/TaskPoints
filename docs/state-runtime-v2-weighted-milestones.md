@@ -2137,3 +2137,51 @@ source fingerprint does not prove old tabs cannot write a moment later.
 V1 remains authoritative and every existing safeguard/back-up remains.
 Production writer-fencing credit stays **0/11**; overall weighted V2
 readiness stays **67/100**. Main is untouched.
+
+
+## Cooperative Notes dirty-cache keystroke rehearsal — November 9 (V2 only)
+
+Notes is **not a single-key save**: \`notes.html\` uses
+\`taskpoints_notes_v1\`, \`taskpoints_notes_authoritative_v1\`,
+\`taskpoints_notes_dirty_v1\`, and \`taskpoints_v1.notes\`. The first
+keystroke can establish two authority markers, and final synchronization
+writes the V1 snapshot and clears the dirty marker. Those changes cannot
+be made atomically with a localStorage multi-key operation, so claiming
+a fully fenced Notes writer would risk partial or stale recovery.
+
+The additive, **developer-preview-only**
+\`rehearsePreviewCooperativeDirtyNotesCacheSave(text, fullOriginToken)\`
+therefore handles the narrow safe single-key case: authority and dirty
+markers must **both already be \`"1"\`**, a Notes cache must already
+exist, and the V1 snapshot must be readable and valid. It only writes
+the existing Notes cache key, under the same cooperative native Web Lock
+used for Task, Projects, Today and preview freeze. It requires an exact
+full-origin token before writing, validates the frozen preview fence and
+generation, checks unchanged unrelated keys and exact cache readback
+immediately afterward, and audits fence/complete inventory again before
+acknowledging the cache observation.
+
+A stale source, missing markers, absent cache, invalid snapshot, frozen
+fence or competing cooperative lock prevents the write. Post-write
+errors and old-tab interleavings report **uncertain** outcomes rather
+than retrying or restoring potentially stale data. Empty/shortened Notes
+are preserved exactly. The new result explicitly says
+\`cacheReadbackVerified:true\` where applicable, but
+\`notesFullySynchronized:false\` and \`confirmedDurable:false\`:
+**it is not a complete Notes multi-key save or independent backup**.
+Normal Notes event listeners, marker initialization, snapshot sync and
+recovery paths are unchanged.
+
+Node tests cover empty/shortened text, preserved source/markers, an
+uninitialized editing session, stale source, malformed V1 snapshot,
+native lock competition, freeze refusal, an older-tab write and a
+simulated exception *after* localStorage commits. Browser tests cover
+the live storage key across reload, old-version Notes edits after a
+preview freeze, missing marker refusal and cross-tab Web Lock behavior.
+
+This is the **fourth narrow preview participant**, not production
+protection. Remaining Notes marker transitions, snapshot updates,
+other writers, and dormant legacy tabs still bypass this cooperative
+protocol. V1 remains authoritative; Main is untouched; all existing
+features, backups and safeguards remain. Writer-fencing credit is
+still **0/11** and overall weighted readiness remains **67/100**.
