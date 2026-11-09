@@ -5023,6 +5023,149 @@ try {
       sameCooperativeLockForTaskTodayFreeze:true,noCutover:true};
   });
 
+  await run('preview Notes dirty-cache guard preserves authority and old-tab edits',async context=>{
+    const page=await open(context);
+    const legacy=await context.newPage();
+    await legacy.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const ready=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      // Fixture-only setup: these already established markers are not
+      // created by the preview Notes writer itself.
+      localStorage.setItem('taskpoints_notes_v1','old cache notes');
+      localStorage.setItem('taskpoints_notes_authoritative_v1','1');
+      localStorage.setItem('taskpoints_notes_dirty_v1','1');
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      return {token:token(),snapshot:localStorage.getItem('taskpoints_v1')};
+    });
+    const changed=await legacy.evaluate(()=>{
+      const key='tp_projects_v1';
+      const prior=localStorage.getItem(key);
+      const projects=prior===null?[]:JSON.parse(prior);
+      projects.push({id:'legacy-notes-race-project'});
+      const raw=JSON.stringify(projects);
+      localStorage.setItem(key,raw);
+      return raw;
+    });
+    await requireCrossTabStorageValue(page,'tp_projects_v1',changed);
+    const stale=await page.evaluate(token=>
+      window.TaskPointsStateRuntimeV2
+        .rehearsePreviewCooperativeDirtyNotesCacheSave('new Notes',token),
+      ready.token);
+    if(stale.reason==='lock_manager_unavailable'){
+      assert.equal(stale.committed,false);
+      return {unsupportedWebLockFailsClosed:true};
+    }
+    assert.equal(stale.reason,'full_origin_changed',JSON.stringify(stale));
+    const first=await page.evaluate(async()=>{
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const api=window.TaskPointsStateRuntimeV2;
+      const result=await api.rehearsePreviewCooperativeDirtyNotesCacheSave(
+        'New tiny note',token);
+      return {result,cache:localStorage.getItem('taskpoints_notes_v1'),
+        snapshot:localStorage.getItem('taskpoints_v1'),
+        dirty:localStorage.getItem('taskpoints_notes_dirty_v1'),
+        authority:localStorage.getItem('taskpoints_notes_authoritative_v1')};
+    });
+    assert.equal(first.result.reason,'preview_notes_dirty_cache_saved',
+      JSON.stringify(first));
+    assert.equal(first.result.committed,true);
+    assert.equal(first.result.cacheReadbackVerified,true);
+    assert.equal(first.result.confirmedDurable,false);
+    assert.equal(first.result.canPromote,false);
+    assert.equal(first.cache,'New tiny note');
+    assert.equal(first.snapshot,ready.snapshot);
+    assert.equal(first.dirty,'1');
+    assert.equal(first.authority,'1');
+    await page.reload({waitUntil:'load'});
+    const reloaded=await page.evaluate(async()=>{
+      const audit=await window.TaskPointsStateRuntimeV2.inspectPreviewNotesSource();
+      return {audit,cache:localStorage.getItem('taskpoints_notes_v1')};
+    });
+    assert.equal(reloaded.audit.sourceVerified,true,
+      JSON.stringify(reloaded.audit));
+    assert.equal(reloaded.audit.selectedSource,'marked_cache');
+    assert.equal(reloaded.audit.selectedLength,'New tiny note'.length);
+    assert.equal(reloaded.cache,'New tiny note');
+    const freeze=await page.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewCooperativeWriterFreeze({
+        expectedEpoch:0}));
+    assert.equal(freeze.reason,'preview_fence_frozen',JSON.stringify(freeze));
+    const blocked=await page.evaluate(async()=>{
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const api=window.TaskPointsStateRuntimeV2;
+      const result=await api.rehearsePreviewCooperativeDirtyNotesCacheSave(
+        'blocked after freeze',token);
+      return {result,cache:localStorage.getItem('taskpoints_notes_v1')};
+    });
+    assert.equal(blocked.result.reason,'preview_fence_frozen');
+    assert.equal(blocked.cache,'New tiny note');
+    const bypass=await legacy.evaluate(()=>{
+      localStorage.setItem('taskpoints_notes_v1','older-version-tab-note');
+      return localStorage.getItem('taskpoints_notes_v1');
+    });
+    await requireCrossTabStorageValue(page,'taskpoints_notes_v1',bypass);
+    const after=await page.evaluate(async()=>
+      window.TaskPointsStateRuntimeV2.inspectPreviewNotesSource());
+    assert.equal(after.sourceVerified,true,JSON.stringify(after));
+    assert.equal(after.selectedSource,'marked_cache');
+    assert.equal(after.selectedLength,bypass.length);
+    assert.equal(after.canPromote,false);
+    return {staleNotesSourceRejected:true,realCachePersistedAfterReload:true,
+      dirtyFlagsUntouched:true,freezeBlocksCooperator:true,
+      oldVersionTabStillWrites:true,noAuthorityCutover:true};
+  });
+
+  await run('preview Notes refuses marker initialization and respects native shared lock',async context=>{
+    const first=await open(context),second=await open(context);
+    const missing=await second.evaluate(async()=>{
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      return window.TaskPointsStateRuntimeV2
+        .rehearsePreviewCooperativeDirtyNotesCacheSave('first-notes-edit',token);
+    });
+    if(missing.reason==='lock_manager_unavailable'){
+      assert.equal(missing.committed,false);
+      return {unsupportedWebLockFailsClosed:true};
+    }
+    assert.equal(missing.reason,'notes_dirty_authority_not_established',
+      JSON.stringify(missing));
+    if(!await first.evaluate(()=>typeof navigator.locks?.request==='function'))
+      return {nativeLocksUnavailableFailsClosed:true};
+    await first.evaluate(()=>{
+      window.__notesLockHeld=false;
+      window.__notesLock=navigator.locks.request(
+        'taskpoints_v2_preview_task_freeze_cooperative_v1',
+        {mode:'exclusive'},async()=>{
+          window.__notesLockHeld=true;
+          await new Promise(resolve=>{window.__releaseNotesLock=resolve;});
+          window.__notesLockHeld=false;
+        });
+    });
+    await first.waitForFunction(()=>window.__notesLockHeld===true);
+    const denied=await second.evaluate(async()=>{
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      return window.TaskPointsStateRuntimeV2
+        .rehearsePreviewCooperativeDirtyNotesCacheSave('blocked by lock',token);
+    });
+    assert.equal(denied.reason,'cooperative_notes_lock_held_elsewhere',
+      JSON.stringify(denied));
+    assert.equal(denied.committed,false);
+    await first.evaluate(async()=>{
+      window.__releaseNotesLock();await window.__notesLock;
+    });
+    const unchanged=await second.evaluate(()=>
+      localStorage.getItem('taskpoints_notes_v1'));
+    assert.equal(unchanged,null);
+    return {firstEditMarkerSetupRefused:true,
+      competingCrossTabNotesWriteBlocked:true,noImplicitNotesMutation:true};
+  });
+
   await run('Projects real V1 writer honors source tokens, cooperative freeze and older-tab changes',async context=>{
     const page=await open(context);
     const legacy=await context.newPage();
