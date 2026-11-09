@@ -5391,6 +5391,70 @@ try {
       sealedNotesStillInspectable:true,dirtyNotCleared:true};
   });
 
+  await run('Notes sync refuses noncanonical V1 snapshot bytes rather than normalize imported data',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const state=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      state.notes='A longer original note';
+      state.tasks=[{id:'preserve',title:'Do not rewrite me'}];
+      state.unknownFutureField={nested:[1,2,3],text:'preserve'};
+      const raw=JSON.stringify(state,null,2);
+      localStorage.setItem('taskpoints_v1',raw);
+      localStorage.removeItem('taskpoints_notes_v1');
+      localStorage.removeItem('taskpoints_notes_dirty_v1');
+      localStorage.removeItem('taskpoints_notes_authoritative_v1');
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const intent=await api.rehearsePreviewNotesFirstEditIntent(
+        'short',token(),'browser-noncanonical');
+      if(!intent.intentRecorded)return {intent};
+      const cached=await api.rehearsePreviewAdmittedNotesFirstEditCacheWrite(
+        token(),'browser-noncanonical');
+      const before=token(),sealed=localStorage.getItem(
+        'taskpoints_v2_preview_notes_first_edit_intent_v1');
+      const denied=await api.rehearsePreviewAdmittedNotesSnapshotSync(
+        token(),'browser-noncanonical');
+      return {intent,cached,denied,sourceUnchanged:
+        localStorage.getItem('taskpoints_v1')===raw,
+        originUnchanged:token()===before,
+        sealedUnchanged:localStorage.getItem(
+          'taskpoints_v2_preview_notes_first_edit_intent_v1')===sealed,
+        dirty:localStorage.getItem('taskpoints_notes_dirty_v1')};
+    });
+    if(result.intent.reason==='lock_manager_unavailable'){
+      assert.equal(result.intent.intentRecorded,false);
+      return {lockManagerUnavailableFailsClosed:true};
+    }
+    assert.equal(result.intent.intentRecorded,true,JSON.stringify(result.intent));
+    assert.equal(result.cached.firstEditApplied,true,JSON.stringify(result.cached));
+    assert.equal(result.denied.reason,'snapshot_sync_noncanonical_legacy_json',
+      JSON.stringify(result.denied));
+    assert.equal(result.denied.snapshotWriteAttempted,false);
+    assert.equal(result.denied.canPromote,false);
+    assert.equal(result.sourceUnchanged,true);
+    assert.equal(result.originUnchanged,true);
+    assert.equal(result.sealedUnchanged,true);
+    assert.equal(result.dirty,'1');
+    await page.reload({waitUntil:'load'});
+    const inspected=await page.evaluate(async()=>({
+      intent:await window.TaskPointsStateRuntimeV2
+        .inspectPreviewNotesFirstEditIntent(),
+      dirty:localStorage.getItem('taskpoints_notes_dirty_v1'),
+      originalStillFormatted:localStorage.getItem('taskpoints_v1')
+        .includes('\n  "notes"')
+    }));
+    assert.equal(inspected.intent.intentEvidenceVerified,true);
+    assert.equal(inspected.intent.observedRecoveryStage,
+      'dirty_cache_snapshot_pending');
+    assert.equal(inspected.intent.canPromote,false);
+    assert.equal(inspected.dirty,'1');
+    assert.equal(inspected.originalStillFormatted,true);
+    return {noncanonicalJsonPreserved:true,notesIntentSurvivesReload:true,
+      dirtyMarkerRetained:true,noSilentLegacyNormalization:true};
+  });
+
   await run('Notes completion read-only audit detects transient cross-tab and post-sync overwrite',async context=>{
     const page=await open(context);
     const old=await context.newPage();
