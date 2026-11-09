@@ -5168,6 +5168,84 @@ try {
 
 
 
+
+  await run('Preview Notes first-edit intent survives legacy-tab crash without ever restoring Notes',async context=>{
+    const page=await open(context);
+    const legacy=await context.newPage();
+    await legacy.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const intent=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const state=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      state.notes='Original long Notes that must remain in the V1 snapshot';
+      localStorage.setItem('taskpoints_v1',JSON.stringify(state));
+      localStorage.setItem('taskpoints_notes_v1',state.notes);
+      localStorage.removeItem('taskpoints_notes_authoritative_v1');
+      localStorage.removeItem('taskpoints_notes_dirty_v1');
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const before=token();
+      const result=await api.rehearsePreviewNotesFirstEditIntent(
+        '',before,'browser-first-clear');
+      const inspected=await api.inspectPreviewNotesFirstEditIntent();
+      return {result,inspected,original:state.notes,
+        currentSnapshot:localStorage.getItem('taskpoints_v1'),
+        cached:localStorage.getItem('taskpoints_notes_v1'),
+        dirty:localStorage.getItem('taskpoints_notes_dirty_v1'),
+        authority:localStorage.getItem('taskpoints_notes_authoritative_v1'),
+        sidecar:localStorage.getItem('taskpoints_v2_preview_notes_first_edit_intent_v1')};
+    });
+    if(intent.result.reason==='lock_manager_unavailable'){
+      assert.equal(intent.result.intentRecorded,false);
+      return {unsupportedLocksFailClosed:true};
+    }
+    assert.equal(intent.result.reason,'preview_notes_first_edit_intent_recorded',
+      JSON.stringify(intent.result));
+    assert.equal(intent.result.intentRecorded,true);
+    assert.equal(intent.result.confirmedNotesDurable,false);
+    assert.equal(intent.inspected.intentEvidenceVerified,true,
+      JSON.stringify(intent.inspected));
+    assert.equal(intent.inspected.notesCacheMatchesIntent,false);
+    assert.equal(intent.inspected.sourceInventoryMatchesAdmission,true);
+    assert.equal(intent.cached,intent.original);
+    assert.equal(intent.dirty,null);
+    assert.equal(intent.authority,null);
+    assert.equal(JSON.parse(intent.currentSnapshot).notes,intent.original);
+    assert.equal(JSON.parse(intent.sidecar).text,'');
+
+    // The separate old-code page imitates an immediate kill between the
+    // cache write and marker initialization. The new preview never rewrites
+    // those canonical V1 keys or chooses an automatic rescue.
+    await legacy.evaluate(()=>localStorage.setItem('taskpoints_notes_v1',''));
+    await requireCrossTabStorageValue(page,'taskpoints_notes_v1','');
+    await page.reload({waitUntil:'load'});
+    const recovered=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const proof=await api.inspectPreviewNotesFirstEditIntent();
+      const legacyAudit=await api.inspectPreviewNotesSource();
+      return {proof,legacyAudit,
+        cache:localStorage.getItem('taskpoints_notes_v1'),
+        snapshot:JSON.parse(localStorage.getItem('taskpoints_v1')).notes,
+        sidecar:localStorage.getItem('taskpoints_v2_preview_notes_first_edit_intent_v1'),
+        dirty:localStorage.getItem('taskpoints_notes_dirty_v1')};
+    });
+    assert.equal(recovered.proof.intentEvidenceVerified,true,
+      JSON.stringify(recovered.proof));
+    assert.equal(recovered.proof.notesCacheMatchesIntent,true);
+    assert.equal(recovered.proof.sourceInventoryMatchesAdmission,false);
+    assert.equal(recovered.proof.safeToRestore,false);
+    assert.equal(recovered.legacyAudit.selectedSource,'unmarked_snapshot_only');
+    assert.equal(recovered.cache,'');
+    assert.equal(recovered.snapshot,intent.original);
+    assert.equal(recovered.dirty,null);
+    assert.equal(recovered.sidecar,intent.sidecar);
+    return {firstEditIntentPersistedAfterRestart:true,
+      oldCodeCacheOnlyCrashDetected:true,noUnapprovedNotesRestore:true,
+      unchangedLegacySnapshot:true,unfencedOldTabStillRecognized:true,
+      noCutover:true};
+  });
+
   await run('Notes first-edit cache-before-marker interruption is diagnosed without V1 repair',async context=>{
     const page=await open(context);
     const legacy=await context.newPage();
