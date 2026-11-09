@@ -2208,3 +2208,34 @@ and an old-tab marker change during digest that invalidates the report.
 This does not alter Notes selection/synchronization, cache-only preview
 writes, V1 recovery, imports/exports, or main. Both production writer fencing
 and weighted V2 readiness remain uncredited at **67/100**.
+
+
+## Sealed Notes crash-window recovery comparison — November 9 (V2 only)
+
+The explicit, preview-host-only `inspectPreviewNotesTransitionSafety(token)`
+compares the **current V1 Notes snapshot, cache, and authority/dirty markers**
+against the independently sealed latest V2 Notes preview bundle and its
+validated receipt lineage. It distinguishes an unchanged Notes source, an
+unrelated origin-key edit, and a change to Notes itself. Separate flags show
+whether the cache, snapshot Notes or authority markers changed since the
+sealed observation, and identify the current Notes save phase.
+
+Both the current full-origin source token and the entire sealed preview
+lineage are rechecked around asynchronous operations. Damaged/missing
+sources, tampered receipts, stale tokens and concurrent older-tab writes
+fail closed. Responses expose only diagnostic flags, not Notes text.
+**No V1 or V2 storage is modified by the inspector.**
+
+Node tests cover dirty drafts, shortening, matching copies, interrupted
+marker transitions, unrelated writes, stale tokens, tampering and reload.
+Chromium/WebKit browser checks cover real older-tab Notes edits, sealed
+preview reconciliation and reload. Even if the copies match, the report
+always says `notesMultiKeySyncVerified:false`,
+`safeToAutoReconcile:false`, `safeToClearDirtyMarker:false`,
+`safeToRestore:false` and `canPromote:false`: same-device equality
+cannot establish atomic multi-key storage or old-tab exclusion.
+
+Production Notes handlers, Main, exports, recovery and all existing
+safeguards remain unchanged. Official V2 readiness remains **67/100**
+until the independent production writer-fencing, recovery and physical
+iOS gates can be verified.
