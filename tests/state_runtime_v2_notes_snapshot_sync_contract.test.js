@@ -537,3 +537,177 @@ test('event observed during Notes snapshot write remains uncertain, not green',a
   assert.equal(a.localStorage.getItem(DIRTY),'1');
   a.api.stopPreviewLegacyStorageEventWitness();
 });
+
+
+const FOLLOWUP_INTENT='taskpoints_v2_preview_notes_followup_intent_v1';
+async function syncedFirstEdit(a,id='first-sealed'){
+  await stage(a,id,'initial');
+  const result=await a.api.rehearsePreviewAdmittedNotesSnapshotSync(
+    a.token(),id);
+  assert.equal(result.notesSnapshotSynchronized,true,JSON.stringify(result));
+}
+
+test('sealed Notes follow-up intent safely stages a second edit after first snapshot sync',async()=>{
+  const a=await boot();
+  await syncedFirstEdit(a);
+  const previous=a.localStorage.getItem(V1);
+  const firstIntent=a.localStorage.getItem(INTENT);
+  const priorDb=a.indexedDB.dump('taskpoints_state_v2');
+  const proposed=await a.api.rehearsePreviewNotesFollowupIntent(
+    'another text',a.token(),'followup-save-1');
+  assert.equal(proposed.reason,'preview_notes_followup_intent_recorded',
+    JSON.stringify(proposed));
+  assert.equal(proposed.intentRecorded,true);
+  assert.equal(proposed.canPromote,false);
+  assert.equal(a.localStorage.getItem(CACHE),'initial');
+  assert.equal(a.localStorage.getItem(V1),previous);
+  assert.equal(a.localStorage.getItem(INTENT),firstIntent);
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+  const sealed=a.localStorage.getItem(FOLLOWUP_INTENT);
+  const record=JSON.parse(sealed);
+  assert.equal(record.schemaVersion,1);
+  assert.equal(record.actionId,'followup-save-1');
+  assert.equal(record.firstActionId,'first-sealed');
+  assert.equal(record.snapshotFingerprint,
+    await signedFingerprint(previous));
+  assert.equal(record.cacheFingerprint,
+    await signedFingerprint('initial'));
+  const observed=await a.api.inspectPreviewNotesFollowupIntent();
+  assert.equal(observed.intentEvidenceVerified,true,JSON.stringify(observed));
+  assert.equal(observed.observedRecoveryStage,
+    'followup_intent_recorded_cache_pending');
+  const cache=await a.api.rehearsePreviewAdmittedNotesFollowupCacheWrite(
+    a.token(),'followup-save-1');
+  assert.equal(cache.reason,
+    'preview_notes_followup_cache_written_dirty_retained',
+    JSON.stringify(cache));
+  assert.equal(cache.cacheReadbackVerified,true);
+  assert.equal(cache.dirtyMarkerPreserved,true);
+  assert.equal(cache.confirmedNotesDurable,false);
+  assert.equal(cache.safeToClearDirtyMarker,false);
+  assert.equal(cache.canPromote,false);
+  assert.equal(a.localStorage.getItem(V1),previous);
+  assert.equal(a.localStorage.getItem(CACHE),'another text');
+  assert.equal(a.localStorage.getItem(AUTH),'1');
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+  assert.equal(a.localStorage.getItem(INTENT),firstIntent);
+  assert.equal(a.localStorage.getItem(FOLLOWUP_INTENT),sealed);
+  assert.deepEqual(a.indexedDB.dump('taskpoints_state_v2'),priorDb);
+  const pending=await a.api.inspectPreviewNotesFollowupIntent();
+  assert.equal(pending.intentEvidenceVerified,true);
+  assert.equal(pending.cacheMatchesIntent,true);
+  assert.equal(pending.snapshotMatchesIntent,false);
+  assert.equal(pending.legacySelectsIntendedText,true);
+  assert.equal(pending.observedRecoveryStage,
+    'followup_cache_written_snapshot_pending');
+  assert.equal(pending.canPromote,false);
+  const restarted=await boot({
+    localStorage:a.localStorage,indexedDB:a.indexedDB});
+  const afterRestart=await restarted.api.inspectPreviewNotesFollowupIntent();
+  assert.equal(afterRestart.intentEvidenceVerified,true);
+  assert.equal(afterRestart.observedRecoveryStage,
+    'followup_cache_written_snapshot_pending');
+  assert.equal(restarted.localStorage.getItem(DIRTY),'1');
+  const repeated=await a.api.rehearsePreviewAdmittedNotesFollowupCacheWrite(
+    a.token(),'followup-save-1');
+  assert.equal(repeated.cacheReadbackVerified,false);
+  assert.equal(a.localStorage.getItem(V1),previous);
+});
+
+test('follow-up cannot begin before initial Notes snapshot sync or overwrite a pending follow-up',async()=>{
+  const a=await boot();
+  await stage(a,'pre-sync','first');
+  const premature=await a.api.rehearsePreviewNotesFollowupIntent(
+    'second',a.token(),'second-early');
+  assert.equal(premature.reason,'followup_first_edit_not_synchronized',
+    JSON.stringify(premature));
+  assert.equal(a.localStorage.getItem(FOLLOWUP_INTENT),null);
+  assert.equal((await a.api.rehearsePreviewAdmittedNotesSnapshotSync(
+    a.token(),'pre-sync')).notesSnapshotSynchronized,true);
+  assert.equal((await a.api.rehearsePreviewNotesFollowupIntent(
+    'second',a.token(),'second-admitted')).intentRecorded,true);
+  const signed=a.localStorage.getItem(FOLLOWUP_INTENT);
+  const duplicate=await a.api.rehearsePreviewNotesFollowupIntent(
+    'third',a.token(),'new-action');
+  assert.equal(duplicate.reason,
+    'existing_followup_intent_requires_inspection');
+  assert.equal(a.localStorage.getItem(FOLLOWUP_INTENT),signed);
+  const wrong=await a.api.rehearsePreviewAdmittedNotesFollowupCacheWrite(
+    a.token(),'not-the-signed-action');
+  assert.equal(wrong.cacheWriteAttempted,false);
+  assert.equal(a.localStorage.getItem(CACHE),'first');
+});
+
+test('older tab task write or forged intent blocks follow-up cache without losing Notes',async()=>{
+  const a=await boot();
+  await syncedFirstEdit(a,'first-a');
+  assert.equal((await a.api.rehearsePreviewNotesFollowupIntent(
+    'newer',a.token(),'followup-a')).intentRecorded,true);
+  const signed=a.localStorage.getItem(FOLLOWUP_INTENT);
+  const state=JSON.parse(a.localStorage.getItem(V1));
+  state.tasks.push({id:'older-tab-keep',title:'Do not clobber'});
+  a.localStorage.setItem(V1,JSON.stringify(state));
+  const old=await a.api.rehearsePreviewAdmittedNotesFollowupCacheWrite(
+    a.token(),'followup-a');
+  assert.equal(old.cacheWriteAttempted,false);
+  assert.equal(old.canPromote,false);
+  assert.equal(a.localStorage.getItem(CACHE),'initial');
+  assert.equal(JSON.parse(a.localStorage.getItem(V1)).tasks[1].id,
+    'older-tab-keep');
+  a.localStorage.setItem(FOLLOWUP_INTENT,
+    signed.replace('"text":"newer"','"text":"forged"'));
+  const forged=await a.api.inspectPreviewNotesFollowupIntent();
+  assert.equal(forged.reason,'followup_intent_integrity_mismatch');
+  assert.equal(forged.safeToApply,false);
+  assert.equal(forged.canPromote,false);
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+});
+
+test('follow-up quota denial keeps both sealed intents and dirty recovery flag',async()=>{
+  const a=await boot();
+  await syncedFirstEdit(a,'first-quota');
+  assert.equal((await a.api.rehearsePreviewNotesFollowupIntent(
+    'next',a.token(),'followup-quota')).intentRecorded,true);
+  const prior=a.localStorage.getItem(V1);
+  const followup=a.localStorage.getItem(FOLLOWUP_INTENT);
+  const first=a.localStorage.getItem(INTENT);
+  const original=a.localStorage.setItem.bind(a.localStorage);
+  a.localStorage.setItem=(key,value)=>{
+    if(key===CACHE)throw Error('QuotaExceededError');
+    return original(key,value);
+  };
+  const result=await a.api.rehearsePreviewAdmittedNotesFollowupCacheWrite(
+    a.token(),'followup-quota');
+  assert.equal(result.reason,'followup_cache_write_uncertain',JSON.stringify(result));
+  assert.equal(result.writeOutcomeUncertain,true);
+  assert.equal(result.inspectIntentBeforeRetry,true);
+  assert.equal(result.canPromote,false);
+  assert.equal(a.localStorage.getItem(CACHE),'initial');
+  assert.equal(a.localStorage.getItem(V1),prior);
+  assert.equal(a.localStorage.getItem(INTENT),first);
+  assert.equal(a.localStorage.getItem(FOLLOWUP_INTENT),followup);
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+});
+
+test('follow-up refuses observed transient old-tab storage event and production origin',async()=>{
+  const a=await witnessBoot();
+  await syncedFirstEdit(a,'witness-first');
+  const result=await a.api.rehearsePreviewNotesFollowupIntent(
+    'later',a.token(),'witness-followup');
+  assert.equal(result.intentRecorded,true);
+  assert.equal((await a.api.beginPreviewLegacyStorageEventWitness(
+    a.token())).observing,true);
+  const before=a.token();
+  a.signal();
+  const denied=await a.api.rehearsePreviewAdmittedNotesFollowupCacheWrite(
+    a.token(),'witness-followup');
+  assert.equal(denied.reason,'followup_cache_source_changed_before_write',
+    JSON.stringify(denied));
+  assert.equal(denied.cacheWriteAttempted,false);
+  assert.equal(a.token(),before);
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+  a.api.stopPreviewLegacyStorageEventWitness();
+  a.ctx.location.hostname='taskpoints.pages.dev';
+  assert.equal((await a.api.rehearsePreviewAdmittedNotesFollowupCacheWrite(
+    a.token(),'witness-followup')).reason,'preview_host_required');
+});
