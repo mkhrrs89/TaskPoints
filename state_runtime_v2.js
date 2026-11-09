@@ -17146,6 +17146,216 @@
     return result;
   }
 
+  // Explicit second-edit snapshot continuation. Cache has already been
+  // written and remains dirty + authoritative. This writes only V1 Notes.
+  // Reconstruct the signed original inventory using the intact first
+  // intent's text, so a newly captured token CANNOT bless older-tab edits
+  // to unrelated Tasks, Projects or Habits since admission.
+  async function rehearsePreviewAdmittedNotesFollowupSnapshotSync(
+    expectedInventoryToken,actionId) {
+    const deny=(reason,detail={})=>({
+      checked:true,previewOnly:true,followupSnapshotOnly:true,
+      snapshotWriteAttempted:false,notesSnapshotSynchronized:false,
+      writeOutcomeUncertain:false,inspectIntentBeforeRetry:false,
+      dirtyMarkerPreserved:false,notesMultiKeySyncVerified:false,
+      confirmedNotesDurable:false,oldTabsExcluded:false,
+      productionWritersFenced:false,safeToClearDirtyMarker:false,
+      safeToRestore:false,canPromote:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...detail
+    });
+    if(!isWalTestPreviewHost())return deny('preview_host_required');
+    if(!isDarkEnabled())return deny('dark_disabled');
+    if(typeof expectedInventoryToken!=='string'||!expectedInventoryToken)
+      return deny('full_origin_token_required');
+    if(typeof actionId!=='string'
+      ||!/^[a-zA-Z0-9_:.\-]{1,96}$/.test(actionId))
+      return deny('followup_action_id_invalid');
+    const locks=global.navigator?.locks;
+    if(typeof locks?.request!=='function')
+      return deny('lock_manager_unavailable');
+    const generation=currentGeneration({create:false});
+    if(!generation)return deny('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    const cacheKey='taskpoints_notes_v1';
+    const snapshotKey=core.STORAGE_KEY||'taskpoints_v1';
+    const stableMode=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&currentGeneration({create:false})===generation
+      &&darkMirrorModeEpoch===epoch;
+    const withoutSnapshot=token=>stableJson(JSON.parse(token)
+      .filter(row=>Array.isArray(row)&&row[0]!==snapshotKey));
+    let attempted=false,result=deny('followup_snapshot_lock_unavailable');
+    try{
+      await locks.request(PREVIEW_COOPERATIVE_TASK_FREEZE_LOCK,
+        {mode:'exclusive',ifAvailable:true},async lock=>{
+          if(!lock){result=deny('followup_snapshot_lock_held_elsewhere');return;}
+          let before,rawIntent,sealed,firstRaw,first,
+            snapshotRaw,proposedRaw;
+          try{
+            before=captureReadOnlyFullStorageInventory();
+            if(!stableMode()||before!==expectedInventoryToken){
+              result=deny('followup_snapshot_origin_changed');return;
+            }
+            rawIntent=global.localStorage.getItem(
+              PREVIEW_NOTES_FOLLOWUP_INTENT_KEY);
+            sealed=JSON.parse(rawIntent);
+            firstRaw=global.localStorage.getItem(
+              PREVIEW_NOTES_FIRST_EDIT_INTENT_KEY);
+            first=JSON.parse(firstRaw);
+            if(!sealed||sealed.id!=='notes-followup-intent'
+              ||sealed.schemaVersion!==1
+              ||Object.keys(sealed).length!==10
+              ||sealed.actionId!==actionId
+              ||sealed.resetGeneration!==generation
+              ||typeof sealed.text!=='string'
+              ||sealed.text.length>PREVIEW_NOTES_FIRST_EDIT_LIMIT
+              ||!first||first.actionId!==sealed.firstActionId
+              ||typeof first.text!=='string')
+              throw Error('followup_intents_invalid');
+            const {integrityFingerprint,...signed}=sealed;
+            const {integrityFingerprint:firstDigest,...firstSigned}=first;
+            if(await previewRecoveryFingerprint(signed)!==integrityFingerprint
+              ||await previewRecoveryFingerprint(firstSigned)!==firstDigest)
+              throw Error('followup_intent_digest_invalid');
+            // The follow-up cache is the ONLY key permitted to change
+            // after the follow-up intent was admitted.
+            const reconstructed=stableJson(JSON.parse(before)
+              .filter(row=>Array.isArray(row)
+                &&row[0]!==PREVIEW_NOTES_FOLLOWUP_INTENT_KEY)
+              .map(row=>row[0]===cacheKey?[cacheKey,first.text]:row));
+            if(await previewRecoveryFingerprint(reconstructed)!==
+              sealed.originFingerprint){
+              result=deny('followup_snapshot_original_origin_changed');
+              return;
+            }
+            snapshotRaw=global.localStorage.getItem(snapshotKey);
+            if(!snapshotRaw
+              ||await previewRecoveryFingerprint(snapshotRaw)!==
+                sealed.snapshotFingerprint
+              ||global.localStorage.getItem(cacheKey)!==sealed.text
+              ||global.localStorage.getItem('taskpoints_notes_dirty_v1')!=='1'
+              ||global.localStorage.getItem(
+                'taskpoints_notes_authoritative_v1')!=='1'){
+              result=deny('followup_snapshot_source_diverged');
+              return;
+            }
+          }catch(_){
+            result=deny('followup_snapshot_intent_or_source_invalid');
+            return;
+          }
+          const fence=await rehearsePreviewDurableWriterFence('audit');
+          if(!stableMode()||fence.reason!=='preview_writer_inventory_consistent'
+            ||fence.fence?.generation!==generation||fence.fence?.frozen){
+            result=deny('followup_snapshot_fence_unverified_or_frozen');
+            return;
+          }
+          const evidence=await inspectPreviewNotesFollowupIntent();
+          if(!evidence.intentEvidenceVerified
+            ||!evidence.cacheMatchesIntent
+            ||!evidence.legacySelectsIntendedText
+            ||evidence.observedRecoveryStage!==
+              'followup_cache_written_snapshot_pending'){
+            result=deny('followup_snapshot_cache_stage_unverified');
+            return;
+          }
+          try{
+            const source=JSON.parse(snapshotRaw);
+            if(!source||typeof source!=='object'||Array.isArray(source)
+              ||typeof source.notes!=='string'
+              ||source.notes!==first.text)
+              throw Error('followup_source_state_incompatible');
+            if(JSON.stringify(source)!==snapshotRaw){
+              result=deny('followup_snapshot_noncanonical_legacy_json');
+              return;
+            }
+            if(typeof core.parseTaskPointsStorageJson!=='function'
+              ||stableJson(core.parseTaskPointsStorageJson(snapshotRaw))
+                !==stableJson(source))
+              throw Error('followup_codec_incompatible');
+            const next={...source,notes:sealed.text};
+            proposedRaw=JSON.stringify(next);
+            if(stableJson(core.parseTaskPointsStorageJson(proposedRaw))
+              !==stableJson(next))
+              throw Error('followup_codec_roundtrip_mismatch');
+            if(!stableMode()
+              ||previewNotesWitnessObservedExternalChange(generation,epoch)
+              ||captureReadOnlyFullStorageInventory()!==before
+              ||global.localStorage.getItem(
+                PREVIEW_NOTES_FOLLOWUP_INTENT_KEY)!==rawIntent
+              ||global.localStorage.getItem(
+                PREVIEW_NOTES_FIRST_EDIT_INTENT_KEY)!==firstRaw){
+              result=deny('followup_snapshot_origin_or_witness_changed');
+              return;
+            }
+          }catch(_){
+            result=deny('followup_snapshot_codec_or_source_invalid');
+            return;
+          }
+          attempted=true;
+          try{global.localStorage.setItem(snapshotKey,proposedRaw);}
+          catch(_){
+            result=deny('followup_snapshot_write_uncertain',{
+              snapshotWriteAttempted:true,writeOutcomeUncertain:true,
+              inspectIntentBeforeRetry:true});
+            return;
+          }
+          let after;
+          try{
+            after=captureReadOnlyFullStorageInventory();
+            if(!stableMode()
+              ||global.localStorage.getItem(snapshotKey)!==proposedRaw
+              ||global.localStorage.getItem(cacheKey)!==sealed.text
+              ||global.localStorage.getItem(
+                'taskpoints_notes_dirty_v1')!=='1'
+              ||global.localStorage.getItem(
+                'taskpoints_notes_authoritative_v1')!=='1'
+              ||withoutSnapshot(after)!==withoutSnapshot(before)){
+              result=deny('followup_snapshot_readback_or_origin_changed',{
+                snapshotWriteAttempted:true,writeOutcomeUncertain:true,
+                inspectIntentBeforeRetry:true});
+              return;
+            }
+          }catch(_){
+            result=deny('followup_snapshot_readback_unavailable',{
+              snapshotWriteAttempted:true,writeOutcomeUncertain:true,
+              inspectIntentBeforeRetry:true});
+            return;
+          }
+          const finalFence=await rehearsePreviewDurableWriterFence('audit');
+          try{
+            if(!stableMode()
+              ||finalFence.reason!=='preview_writer_inventory_consistent'
+              ||finalFence.fence?.generation!==generation
+              ||finalFence.fence?.epoch!==fence.fence.epoch
+              ||finalFence.fence?.frozen
+              ||previewNotesWitnessObservedExternalChange(generation,epoch)
+              ||captureReadOnlyFullStorageInventory()!==after){
+              result=deny('followup_snapshot_postwrite_evidence_changed',{
+                snapshotWriteAttempted:true,writeOutcomeUncertain:true,
+                inspectIntentBeforeRetry:true});
+              return;
+            }
+          }catch(_){
+            result=deny('followup_snapshot_postaudit_unavailable',{
+              snapshotWriteAttempted:true,writeOutcomeUncertain:true,
+              inspectIntentBeforeRetry:true});
+            return;
+          }
+          result=deny('preview_notes_followup_snapshot_written_dirty_retained',{
+            snapshotWriteAttempted:true,notesSnapshotSynchronized:true,
+            readbackVerified:true,dirtyMarkerPreserved:true,
+            cooperativeLockUsed:true,safeToClearDirtyMarker:false,
+            confirmedNotesDurable:false,canPromote:false
+          });
+        });
+    }catch(_){
+      return deny('followup_snapshot_lock_request_failed',{
+        snapshotWriteAttempted:attempted,writeOutcomeUncertain:attempted,
+        inspectIntentBeforeRetry:attempted});
+    }
+    return result;
+  }
+
   // Read-only diagnosis of the follow-up cache stage, surviving reload.
   // Never apply saved text or replace an earlier first-edit intent.
   async function inspectPreviewNotesFollowupIntent(){
@@ -17490,6 +17700,7 @@
     rehearsePreviewAdmittedNotesSnapshotSync,
     rehearsePreviewNotesFollowupIntent,
     rehearsePreviewAdmittedNotesFollowupCacheWrite,
+    rehearsePreviewAdmittedNotesFollowupSnapshotSync,
     inspectPreviewNotesFollowupIntent,
     inspectPreviewNotesSnapshotCompletionEvidence,
     inspectPreviewNotesFirstEditIntent,
