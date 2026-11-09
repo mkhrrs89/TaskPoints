@@ -5455,6 +5455,85 @@ try {
       dirtyMarkerRetained:true,noSilentLegacyNormalization:true};
   });
 
+  await run('Notes writer refuses transient old-tab storage events before snapshot',async context=>{
+    const page=await open(context);
+    const old=await context.newPage();
+    await old.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const prepared=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const state=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      state.notes='Longer original Notes stay intact';
+      localStorage.setItem('taskpoints_v1',JSON.stringify(state));
+      localStorage.removeItem('taskpoints_notes_v1');
+      localStorage.removeItem('taskpoints_notes_authoritative_v1');
+      localStorage.removeItem('taskpoints_notes_dirty_v1');
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const intent=await api.rehearsePreviewNotesFirstEditIntent(
+        'tiny',token(),'transient-notes-save');
+      if(!intent.intentRecorded)return {intent};
+      const cache=await api.rehearsePreviewAdmittedNotesFirstEditCacheWrite(
+        token(),'transient-notes-save');
+      const original=localStorage.getItem('taskpoints_v1');
+      const before=token();
+      const witness=await api.beginPreviewLegacyStorageEventWitness(before);
+      return {intent,cache,witness,before,original};
+    });
+    if(prepared.intent.reason==='lock_manager_unavailable'){
+      assert.equal(prepared.intent.intentRecorded,false);
+      return {missingNativeLockFailsClosed:true};
+    }
+    assert.equal(prepared.intent.intentRecorded,true,JSON.stringify(prepared.intent));
+    assert.equal(prepared.cache.firstEditApplied,true,JSON.stringify(prepared.cache));
+    assert.equal(prepared.witness.observing,true,JSON.stringify(prepared.witness));
+    await old.evaluate(()=>{
+      localStorage.setItem('tp_v2_transient_notes_test','present briefly');
+      localStorage.removeItem('tp_v2_transient_notes_test');
+    });
+    await page.waitForFunction(async()=>{
+      const audit=await window.TaskPointsStateRuntimeV2
+        .inspectPreviewLegacyStorageEventWitness();
+      return audit.observedStorageEvents>=2;
+    },null,{timeout:10000});
+    const refused=await page.evaluate(async savedToken=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const outcome=await api.rehearsePreviewAdmittedNotesSnapshotSync(
+        token,'transient-notes-save');
+      const stop=api.stopPreviewLegacyStorageEventWitness();
+      return {outcome,stop,token,
+        snapshot:localStorage.getItem('taskpoints_v1'),
+        dirty:localStorage.getItem('taskpoints_notes_dirty_v1'),
+        cache:localStorage.getItem('taskpoints_notes_v1')};
+    },prepared.before);
+    assert.equal(refused.token,prepared.before);
+    assert.equal(refused.outcome.reason,'snapshot_sync_external_tab_event_observed',
+      JSON.stringify(refused.outcome));
+    assert.equal(refused.outcome.snapshotWriteAttempted,false);
+    assert.equal(refused.outcome.notesSnapshotSynchronized,false);
+    assert.equal(refused.outcome.canPromote,false);
+    assert.equal(refused.stop.stopped,true);
+    assert.equal(refused.snapshot,prepared.original);
+    assert.equal(refused.dirty,'1');
+    assert.equal(refused.cache,'tiny');
+    await page.reload({waitUntil:'load'});
+    const restart=await page.evaluate(async()=>({
+      evidence:await window.TaskPointsStateRuntimeV2
+        .inspectPreviewNotesFirstEditIntent(),
+      dirty:localStorage.getItem('taskpoints_notes_dirty_v1')
+    }));
+    assert.equal(restart.evidence.intentEvidenceVerified,true);
+    assert.equal(restart.evidence.observedRecoveryStage,
+      'dirty_cache_snapshot_pending');
+    assert.equal(restart.evidence.canPromote,false);
+    assert.equal(restart.dirty,'1');
+    return {transientOldTabEventBlocksWrite:true,
+      originalSnapshotIntact:true,dirtyIntentSurvivesRestart:true};
+  });
+
   await run('Notes completion read-only audit detects transient cross-tab and post-sync overwrite',async context=>{
     const page=await open(context);
     const old=await context.newPage();
