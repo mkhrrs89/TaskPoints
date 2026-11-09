@@ -2390,3 +2390,48 @@ cutover blocker rather than claiming production-wide exclusion.
 All safety flags stay restrictive: no automatic resume, marker clearing,
 restore, live Notes writer migration or cutover. Main remains unchanged.
 The weighted V2 readiness gate remains **67/100**.
+
+
+## Baseline-preserving first Notes edit protocol (in-memory rehearsal) — November 9
+
+The preview-only `inspectPreviewNotesBaselineFirstProtocol(token)` now models a
+safer **first-edit ordering** using a previously sealed, generation-bound
+first-edit intent. The precise candidate sequence is: (1) sealed intent,
+(2) seed the current *effective* V1 Notes into the cache, (3) mark that
+baseline cache authoritative, (4) write the new intended cache value,
+(5) set the dirty marker, (6) synchronize the V1 snapshot, and finally
+(7) clear the dirty marker. It simulates every interruption prefix and
+checks what the actual current V1 Notes selection rules would return.
+
+Why the extra cache-baseline step matters: on legacy unmarked Notes, an
+older longer snapshot may be preferred over a shorter stale cache. Writing
+the authority marker **before first matching the cache to the effective
+baseline** can accidentally make that stale cache win. Writing the new,
+shorter cache before the marker has the opposite vulnerability: an
+interruption can hide the new intended shorter edit behind the old snapshot.
+The baseline-first sequence preserves the previous effective Notes until
+the intended cache value is installed under an already-established marker;
+a separate verified intent keeps evidence of the proposed edit during
+earlier interruption steps. This is a *logical ordering improvement*,
+not yet a proven safe production transaction.
+
+The rehearsed sequence requires an independently verified first-edit
+intent, unchanged complete origin inventory, valid unmarked V1 Notes,
+correct generation, exact SHA integrity and developer-preview context.
+It returns only per-stage booleans and labels, never original/proposed
+Notes text. It writes no V1 or V2 keys and always leaves
+`liveWriterActivated:false`, `canApply:false`,
+`oldTabsExcluded:false`, `safeToRestore:false` and
+`canPromote:false`. No real Notes handler uses the candidate sequence.
+
+Node contracts cross-check **49 interruption states** against the actual
+`notes.html` Notes reader, including missing cache, stale shorter cache,
+longer cached content, empty edits, unchanged content and stale-source
+rejection. Real Chromium/WebKit tests exercise each state transition in
+disposable browser storage, plus reload and read-only intent inspection.
+
+The protocol still cannot prevent a pre-V2 tab from bypassing Web Locks,
+a write racing between synchronous localStorage instructions, or storage
+quota/eviction. It is **not** an atomic multi-key commit, a background
+recovery process, an independent backup or an authority migration. Main
+and live Notes storage remain unchanged; official readiness stays **67/100**.
