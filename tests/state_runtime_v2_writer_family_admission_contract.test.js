@@ -1540,3 +1540,75 @@ test('First-edit intent enforces actual UTF-8 storage quota before any write',as
   assert.equal((await a.api.inspectPreviewNotesFirstEditIntent())
     .intentEvidenceVerified,true);
 });
+
+
+test('Sealed Notes intent identifies every first-edit recovery stage without changing V1',async()=>{
+  const a=await bootRealTaskAdapter();
+  setupUnmarkedFirstNotesEdit(a);
+  const snapshot=a.localStorage.getItem(V1);
+  assert.equal((await a.api.rehearsePreviewNotesFirstEditIntent(
+    'short',a.token(),'stages')).intentRecorded,true);
+  const audit=async(stage,selected)=>{
+    const before=a.token();
+    const report=await a.api.inspectPreviewNotesFirstEditIntent();
+    assert.equal(report.intentEvidenceVerified,true,JSON.stringify(report));
+    assert.equal(report.observedRecoveryStage,stage,JSON.stringify(report));
+    assert.equal(report.legacySelectsIntendedText,selected);
+    assert.equal(report.currentSnapshotReadable,true);
+    assert.equal(report.currentMarkersValid,true);
+    assert.equal(report.safeToClearDirtyMarker,false);
+    assert.equal(report.canAutomaticallyResume,false);
+    assert.equal(report.safeToRestore,false);
+    assert.equal(report.confirmedNotesDurable,false);
+    assert.equal(report.canPromote,false);
+    assert.equal(JSON.stringify(report).includes('short'),false);
+    assert.equal(JSON.stringify(report).includes('long original document'),false);
+    assert.equal(a.token(),before);
+  };
+  await audit('intent_recorded_source_unchanged',false);
+  a.localStorage.setItem('taskpoints_notes_v1','short');
+  await audit('unmarked_cache_snapshot_diverged',false);
+  a.localStorage.setItem('taskpoints_notes_authoritative_v1','1');
+  await audit('authority_marker_snapshot_pending',true);
+  a.localStorage.setItem('taskpoints_notes_dirty_v1','1');
+  await audit('dirty_cache_snapshot_pending',true);
+  const state=JSON.parse(snapshot);state.notes='short';
+  a.localStorage.setItem(V1,JSON.stringify(state));
+  await audit('snapshot_synced_dirty_pending',true);
+  a.localStorage.removeItem('taskpoints_notes_dirty_v1');
+  await audit('snapshot_and_cache_match_dirty_cleared',true);
+  const reload=await boot({indexedDB:a.indexedDB,localStorage:a.localStorage});
+  const recovered=await reload.api.inspectPreviewNotesFirstEditIntent();
+  assert.equal(recovered.observedRecoveryStage,'snapshot_and_cache_match_dirty_cleared');
+  assert.equal(recovered.canAutomaticallyResume,false);
+});
+
+test('Notes intent inspection preserves its independent proof when source or markers are damaged',async()=>{
+  const a=await bootRealTaskAdapter();
+  setupUnmarkedFirstNotesEdit(a);
+  assert.equal((await a.api.rehearsePreviewNotesFirstEditIntent(
+    '',a.token(),'damaged')).intentRecorded,true);
+  a.localStorage.setItem('taskpoints_notes_v1','');
+  a.localStorage.setItem('taskpoints_notes_dirty_v1','1');
+  let r=await a.api.inspectPreviewNotesFirstEditIntent();
+  assert.equal(r.observedRecoveryStage,'dirty_without_authority');
+  assert.equal(r.legacySelectsIntendedText,true);
+  a.localStorage.setItem('taskpoints_notes_v1','other-tab-override');
+  r=await a.api.inspectPreviewNotesFirstEditIntent();
+  assert.equal(r.observedRecoveryStage,'intent_not_in_current_cache');
+  assert.equal(r.legacySelectsIntendedText,false);
+  a.localStorage.setItem('taskpoints_notes_dirty_v1','broken');
+  r=await a.api.inspectPreviewNotesFirstEditIntent();
+  assert.equal(r.intentEvidenceVerified,true);
+  assert.equal(r.observedRecoveryStage,'notes_markers_invalid');
+  assert.equal(r.currentMarkersValid,false);
+  a.localStorage.setItem(V1,'{broken');
+  r=await a.api.inspectPreviewNotesFirstEditIntent();
+  assert.equal(r.intentEvidenceVerified,true);
+  assert.equal(r.observedRecoveryStage,'snapshot_unavailable_or_invalid');
+  assert.equal(r.currentSnapshotReadable,false);
+  assert.equal(r.legacySelectsIntendedText,false);
+  assert.equal(r.canAutomaticallyResume,false);
+  assert.equal(r.safeToRestore,false);
+  assert.equal(a.localStorage.getItem(V1),'{broken');
+});
