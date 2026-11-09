@@ -208,3 +208,62 @@ test('Notes source inspection is unavailable on real production hosts or dark di
   assert.equal((await app.api.inspectPreviewNotesSource()).reason,
     'dark_disabled');
 });
+
+
+test('Notes crash-window phase audit distinguishes partial markers and stale snapshots without trusting equality',async()=>{
+  const cases=[
+    [{cache:'new draft',dirty:'1',authority:'1'},
+      'dirty_cache_pending_snapshot_sync',false],
+    [{cache:'new draft',dirty:'1',authority:'0'},
+      'dirty_marker_without_authority',true],
+    [{cache:'new draft',dirty:'0',authority:'1'},
+      'authoritative_cache_snapshot_diverged',false],
+    [{cache:'snapshot general notes',dirty:'0',authority:'1'},
+      'authoritative_cache_matches_snapshot',false],
+    [{cache:'new draft',dirty:'0',authority:'1',state:null},
+      'authoritative_cache_without_snapshot',false],
+    [{cache:'new draft',authority:'0'},
+      'unmarked_legacy_bootstrap',false]
+  ];
+  for(const [options,phase,partial] of cases){
+    const app=await boot(options);
+    const before=JSON.stringify(Array.from({length:app.localStorage.length},
+      (_,i)=>app.localStorage.key(i)).sort()
+      .map(key=>[key,app.localStorage.getItem(key)]));
+    const dbBefore=app.indexedDB.dump(DB);
+    const result=await app.api.inspectPreviewNotesSource();
+    assert.equal(result.sourceVerified,true,JSON.stringify(result));
+    assert.equal(result.notesSavePhase,phase,JSON.stringify(result));
+    assert.equal(result.markerTransitionMayBeIncomplete,partial);
+    assert.equal(result.notesMultiKeySyncVerified,false);
+    assert.equal(result.readyForNotesAuthorityHandoff,false);
+    assert.equal(result.canPromote,false);
+    assert.equal(JSON.stringify(result).includes('new draft'),false);
+    const after=JSON.stringify(Array.from({length:app.localStorage.length},
+      (_,i)=>app.localStorage.key(i)).sort()
+      .map(key=>[key,app.localStorage.getItem(key)]));
+    assert.equal(after,before);
+    assert.deepEqual(app.indexedDB.dump(DB),dbBefore);
+  }
+});
+
+test('Notes phase cannot be verified when an older tab flips a marker during digest',async()=>{
+  let app,armed=false;
+  const crypto={randomUUID(){return 'notes-phase-race'},subtle:{
+    digest:async(...args)=>{
+      const hash=await webcrypto.subtle.digest(...args);
+      if(armed){
+        armed=false;
+        app.localStorage.removeItem(DIRTY);
+      }
+      return hash;
+    }
+  }};
+  app=await boot({cache:'new draft',dirty:'1',authority:'1',crypto});
+  armed=true;
+  const result=await app.api.inspectPreviewNotesSource();
+  assert.equal(result.sourceVerified,false,JSON.stringify(result));
+  assert.equal(result.reason,'legacy_notes_changed_after_digest');
+  assert.equal(Object.hasOwn(result,'notesSavePhase'),false);
+  assert.equal(app.localStorage.getItem(NOTES),'new draft');
+});

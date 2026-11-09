@@ -2185,3 +2185,26 @@ other writers, and dormant legacy tabs still bypass this cooperative
 protocol. V1 remains authoritative; Main is untouched; all existing
 features, backups and safeguards remain. Writer-fencing credit is
 still **0/11** and overall weighted readiness remains **67/100**.
+
+
+## Read-only Notes multi-key crash-window classification — November 9
+
+The V2-only `inspectPreviewNotesSource()` now reports a **point-in-time**
+`notesSavePhase` for six distinct Notes marker/cache states: unmarked
+bootstrap, a dirty authoritative cache, a dirty marker without authority,
+an authoritative cache diverging from the snapshot, matching copies, and an
+authoritative cache with a missing snapshot. This distinguishes interrupted
+marker transitions and still-pending snapshot reconciliation without
+displaying Notes text or mutating any V1 key.
+
+`markerTransitionMayBeIncomplete` highlights a dirty-without-authority
+state. `notesMultiKeySyncVerified:false` and
+`readyForNotesAuthorityHandoff:false` remain explicit for **every** phase,
+including equal copies: no localStorage marker sequence proves an atomic
+save, old-tab exclusion, independent backup, or physical iPhone durability.
+Node tests check all six cases, byte-identical V1 and V2 after inspection,
+and an old-tab marker change during digest that invalidates the report.
+
+This does not alter Notes selection/synchronization, cache-only preview
+writes, V1 recovery, imports/exports, or main. Both production writer fencing
+and weighted V2 readiness remain uncredited at **67/100**.

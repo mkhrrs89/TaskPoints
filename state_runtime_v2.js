@@ -5186,11 +5186,30 @@
       if (!sourceCurrent(inventory))
         return refuse('legacy_notes_changed_after_digest');
     } catch (_) { return refuse('legacy_notes_snapshot_or_cache_unreadable'); }
+    // A Notes editing session changes multiple independent V1 keys. Report
+    // the observed recovery phase without treating matching copies or a
+    // cleared dirty flag as proof of an atomic, durable synchronization.
+    // This is a diagnostic ONLY; it does not change Notes selection rules.
+    const dirty=dirtyRaw==='1',authoritative=authorityRaw==='1';
+    const notesSavePhase=dirty
+      ? (authoritative?'dirty_cache_pending_snapshot_sync'
+        :'dirty_marker_without_authority')
+      : authoritative
+        ? (!statePresent?'authoritative_cache_without_snapshot'
+          : stateNotes===cacheNotes?'authoritative_cache_matches_snapshot'
+          :'authoritative_cache_snapshot_diverged')
+        : 'unmarked_legacy_bootstrap';
     return {
       checked:true,previewOnly:true,sourceVerified:true,
       notesMigrated:false,hasSnapshot:statePresent,hasCache:cachePresent,
-      cacheDirty:dirtyRaw==='1',cacheAuthoritative:authorityRaw==='1',
+      cacheDirty:dirty,cacheAuthoritative:authoritative,
       copiesAgree:stateNotes===cacheNotes,
+      notesSavePhase,
+      markerTransitionMayBeIncomplete:dirty&&!authoritative,
+      // Even equal Notes copies cannot exclude a suspended legacy writer,
+      // interrupted marker clearing, or a later unsynchronized write.
+      notesMultiKeySyncVerified:false,
+      readyForNotesAuthorityHandoff:false,
       selectedSource:effectiveSource,
       stateLength:stateNotes.length,cacheLength:cacheNotes.length,
       selectedLength:effectiveNotes.length,sourceFingerprint:fingerprint,
