@@ -2604,3 +2604,29 @@ escapes and unsafe-precision numbers. Real Chromium/WebKit scenarios cover
 noncanonical data surviving refusal and reload. The preview-only guard does
 not resolve uncooperative old tabs or establish production cutover authority.
 The weighted readiness gate remains **67/100**. No change to Main.
+
+## Cross-tab event witness checked by Notes preview writers — November 9
+
+The opt-in, page-lifetime legacy `storage` event witness is now consulted by
+the **actual preview Notes writers**, not only by read-only completion
+inspection. When the witness is active, an observed external storage event
+(including a temporary A → B → A change with identical before/after
+inventories), invalidated generation, or invalidated dark-mode epoch refuses
+the preview Notes first-edit intent, cache/authority/dirty writer, or snapshot
+continuation **before any new write**. If an event is observed while a writer
+is completing its post-write fence audit, the operation reports an uncertain
+result rather than acknowledging success. The dirty recovery marker remains
+set after a started Notes edit.
+
+The witness is not mandatory and its silence cannot rule out dormant older
+tabs, missed/suppressed storage events or non-cooperating legacy writers. This
+does **not** constitute cross-tab authority fencing, atomic Notes multi-key
+storage or a green light to clear the dirty marker or promote V2.
+
+Node regressions cover intent, cache, snapshot and midwrite event failures.
+Chromium/WebKit safety tests exercise a real second tab changing another
+localStorage key and restoring it before snapshot admission, while the
+signed Notes edit and recovery flag remain inspectable after reload.
+
+This remains an uncredited migration/fencing increment. Weighted milestone
+readiness is **67/100**, with V1 authoritative and Main untouched.
