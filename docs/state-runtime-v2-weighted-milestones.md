@@ -2506,3 +2506,27 @@ old-tab mutation; browser tests exercise real cache/marker writes and reload.
 
 Weighted milestone gate stays **67/100** until end-to-end nonpilot writer
 admission and collection parity are proven.
+
+## Preview-only Notes snapshot synchronization continuation — November 9
+
+The explicit developer-only `rehearsePreviewAdmittedNotesSnapshotSync(token, actionId)`
+continues **after** an independently verified first Notes cache edit.
+It acquires the same cooperative preview lock, checks the nonfrozen
+generation-bound writer fence and sealed action intent, and verifies the
+dirty cache is still authoritative. It then writes only the Notes field
+of a plain-JSON V1 snapshot. All unrelated snapshot fields and the intact
+signed intent, cache and authority marker are checked again afterward.
+The dirty marker **stays set**. Unsupported legacy encodings are refused
+instead of silently converted or overwritten.
+
+This makes crash/reload inspection distinguish `dirty_cache_snapshot_pending`
+from `snapshot_synced_dirty_pending`. It does **not** clear the dirty flag,
+automatically retry an uncertain write, prove multi-key atomicity, prevent
+silent old-tab writes, enable live Notes inputs or migrate production
+read/write authority. V1 remains primary; Main is unchanged.
+
+Node regressions cover cache-to-snapshot continuity, intent preservation,
+stale origin, wrong action, quota denial, competing old-tab writes,
+frozen fence, production-host refusal and unsupported snapshot codec.
+This is progress within the uncredited nonpilot migration gate, not
+evidence to raise the weighted **67/100** readiness score.
