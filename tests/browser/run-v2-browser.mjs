@@ -5691,6 +5691,105 @@ try {
       dirtyMarkerNeverCleared:true};
   });
 
+  await run('Read-only whole-origin backup census identifies image database and never exports bytes',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const name=window.TaskPointsCore?.IMAGE_DB_NAME||'taskpoints';
+      const storeName=window.TaskPointsCore?.IMAGE_STORE_NAME||'images';
+      // This isolated fixture creates one real Blob-backed image. The
+      // preview census must only count it; never read/export the Blob.
+      const imageDb=await new Promise((resolve,reject)=>{
+        const request=indexedDB.open(name,1);
+        request.onupgradeneeded=()=>{
+          if(!request.result.objectStoreNames.contains(storeName))
+            request.result.createObjectStore(storeName);
+        };
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      const tx=imageDb.transaction(storeName,'readwrite');
+      const completed=new Promise((resolve,reject)=>{
+        tx.oncomplete=resolve;
+        tx.onerror=()=>reject(tx.error);
+        tx.onabort=()=>reject(tx.error);
+      });
+      tx.objectStore(storeName).put(
+        new Blob(['fixture image byte content'],{type:'image/png'}),
+        'fixture-img-01');
+      await completed;
+      imageDb.close();
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const originalSnapshot=localStorage.getItem('taskpoints_v1');
+      const originalToken=token();
+      const known=typeof indexedDB.databases==='function'
+        ?(await indexedDB.databases()).map(x=>x.name).sort():null;
+      const census=await api.inspectPreviewIndependentBackupCoverage(
+        originalToken);
+      const after=typeof indexedDB.databases==='function'
+        ?(await indexedDB.databases()).map(x=>x.name).sort():null;
+      const imageDbAfter=await new Promise((resolve,reject)=>{
+        const request=indexedDB.open(name);
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      const readTx=imageDbAfter.transaction(storeName,'readonly');
+      const imageCount=await new Promise((resolve,reject)=>{
+        const request=readTx.objectStore(storeName).count();
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      });
+      imageDbAfter.close();
+      return {census,known,after,imageCount,
+        snapshotUnchanged:localStorage.getItem('taskpoints_v1')===
+          originalSnapshot,
+        originUnchanged:token()===originalToken};
+    });
+    if(!result.known){
+      assert.equal(result.census.reason,
+        'indexeddb_database_catalog_unavailable');
+      assert.equal(result.census.canPromote,false);
+      assert.equal(result.snapshotUnchanged,true);
+      assert.equal(result.imageCount,1);
+      return {unsupportedCatalogFailsClosed:true};
+    }
+    assert.equal(result.census.reason,
+      'backup_coverage_inventory_readonly_observed',
+      JSON.stringify(result.census));
+    assert.equal(result.census.localStorageInventoryStable,true);
+    assert.equal(result.census.indexedDbCatalogStable,true);
+    assert.equal(result.census.imageDatabasePresent,true);
+    assert.equal(result.census.imageStorePresent,true);
+    assert.equal(result.census.imageRecordCount,1);
+    assert.equal(result.census.binaryImageBytesVerified,false);
+    assert.equal(result.census.recordContentVerified,false);
+    assert.equal(result.census.offDeviceBackupVerified,false);
+    assert.equal(result.census.backupPackageCreated,false);
+    assert.equal(result.census.backupComplete,false);
+    assert.equal(result.census.canRestore,false);
+    assert.equal(result.census.canPromote,false);
+    assert.deepEqual(result.after,result.known);
+    assert.equal(result.imageCount,1);
+    assert.equal(result.snapshotUnchanged,true);
+    assert.equal(result.originUnchanged,true);
+    await page.reload({waitUntil:'load'});
+    const restart=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      return api.inspectPreviewIndependentBackupCoverage(token);
+    });
+    assert.equal(restart.localStorageInventoryStable,true,
+      JSON.stringify(restart));
+    assert.equal(restart.imageRecordCount,1);
+    assert.equal(restart.canPromote,false);
+    return {imageDatabaseInventoried:true,
+      allOriginStoreCountsObserved:true,noRecordsOrImagesExported:true,
+      originAndImageStillIntactAfterReload:true};
+  });
+
   await run('Notes sync refuses noncanonical V1 snapshot bytes rather than normalize imported data',async context=>{
     const page=await open(context);
     const result=await page.evaluate(async()=>{
