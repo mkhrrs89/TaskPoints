@@ -724,3 +724,20 @@ test('Notes transition audit refuses old-tab mutations during asynchronous hashi
   assert.equal((await app.api.inspectPreviewNotesTransitionSafety(app.token()))
     .reason,'dark_disabled');
 });
+
+
+test('Read-only Notes transition audit cannot create an absent preview database',async()=>{
+  const app=await boot({cache:'first edit',dirty:'1',authority:'1'});
+  const before=app.token();
+  assert.equal(app.indexedDB.dump(DB),null);
+  const result=await app.api.inspectPreviewNotesTransitionSafety(app.token());
+  assert.equal(result.reason,'notes_preview_seed_required',JSON.stringify(result));
+  assert.equal(result.canPromote,false);
+  assert.equal(result.sourceCompared,false);
+  assert.equal(app.token(),before);
+  assert.equal(app.indexedDB.dump(DB),null);
+  assert.equal((await app.api.rehearsePreviewNotesBundleSeed(
+    app.token(),'seed-after-read')).collectionParityVerified,true);
+  assert.equal((await app.api.inspectPreviewNotesTransitionSafety(
+    app.token())).notesSourceMatchesPreview,true);
+});
