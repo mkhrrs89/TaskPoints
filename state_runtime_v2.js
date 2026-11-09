@@ -17612,6 +17612,14 @@
               ancestors={firstActionId:first.actionId,
                 followupActionId:followup.actionId};
             }
+            // A reused ID would make the newly sealed append-only journal
+            // fail its own ancestry validation. Reject before touching it.
+            if(actionId===ancestors.firstActionId
+              ||actionId===ancestors.followupActionId
+              ||(previous.journal?.entries||[]).some(
+                item=>item.actionId===actionId)){
+              result=deny('repeat_action_id_already_recorded');return;
+            }
             if(cache===text){
               result=deny('repeat_text_unchanged');return;
             }
