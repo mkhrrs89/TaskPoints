@@ -711,3 +711,139 @@ test('follow-up refuses observed transient old-tab storage event and production 
   assert.equal((await a.api.rehearsePreviewAdmittedNotesFollowupCacheWrite(
     a.token(),'witness-followup')).reason,'preview_host_required');
 });
+
+
+async function stagedFollowup(a,firstId='first-second-sync',secondId='second-sync'){
+  await syncedFirstEdit(a,firstId);
+  const signed=await a.api.rehearsePreviewNotesFollowupIntent(
+    'second',a.token(),secondId);
+  assert.equal(signed.intentRecorded,true,JSON.stringify(signed));
+  const cached=await a.api.rehearsePreviewAdmittedNotesFollowupCacheWrite(
+    a.token(),secondId);
+  assert.equal(cached.cacheReadbackVerified,true,JSON.stringify(cached));
+}
+
+test('second sealed Notes edit synchronizes snapshot while retaining both intents and dirty marker',async()=>{
+  const a=await boot();
+  await stagedFollowup(a);
+  const first=a.localStorage.getItem(INTENT);
+  const followup=a.localStorage.getItem(FOLLOWUP_INTENT);
+  const source=a.localStorage.getItem(V1);
+  const original=JSON.parse(source);
+  const beforeDb=a.indexedDB.dump('taskpoints_state_v2');
+  const verdict=await a.api.rehearsePreviewAdmittedNotesFollowupSnapshotSync(
+    a.token(),'second-sync');
+  assert.equal(verdict.reason,
+    'preview_notes_followup_snapshot_written_dirty_retained',
+    JSON.stringify(verdict));
+  assert.equal(verdict.notesSnapshotSynchronized,true);
+  assert.equal(verdict.dirtyMarkerPreserved,true);
+  assert.equal(verdict.confirmedNotesDurable,false);
+  assert.equal(verdict.oldTabsExcluded,false);
+  assert.equal(verdict.safeToClearDirtyMarker,false);
+  assert.equal(verdict.canPromote,false);
+  const after=JSON.parse(a.localStorage.getItem(V1));
+  assert.equal(after.notes,'second');
+  assert.deepEqual({...after,notes:original.notes},original);
+  assert.equal(a.localStorage.getItem(CACHE),'second');
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+  assert.equal(a.localStorage.getItem(AUTH),'1');
+  assert.equal(a.localStorage.getItem(INTENT),first);
+  assert.equal(a.localStorage.getItem(FOLLOWUP_INTENT),followup);
+  assert.deepEqual(a.indexedDB.dump('taskpoints_state_v2'),beforeDb);
+  const inspected=await a.api.inspectPreviewNotesFollowupIntent();
+  assert.equal(inspected.intentEvidenceVerified,true);
+  assert.equal(inspected.observedRecoveryStage,
+    'followup_snapshot_synced_dirty_pending');
+  const reloaded=await boot({
+    indexedDB:a.indexedDB,localStorage:a.localStorage});
+  assert.equal((await reloaded.api.inspectPreviewNotesFollowupIntent())
+    .observedRecoveryStage,'followup_snapshot_synced_dirty_pending');
+  const duplicate=await reloaded.api.rehearsePreviewAdmittedNotesFollowupSnapshotSync(
+    reloaded.token(),'second-sync');
+  assert.equal(duplicate.notesSnapshotSynchronized,false);
+  assert.equal(reloaded.localStorage.getItem(DIRTY),'1');
+});
+
+test('older tab task changes cannot be blessed with a freshly recaptured token for second snapshot',async()=>{
+  const a=await boot();
+  await stagedFollowup(a,'first-old','second-old');
+  const next=JSON.parse(a.localStorage.getItem(V1));
+  next.tasks.push({id:'oldtab-later',title:'Must not lose'});
+  a.localStorage.setItem(V1,JSON.stringify(next));
+  const signed=a.localStorage.getItem(FOLLOWUP_INTENT);
+  const denied=await a.api.rehearsePreviewAdmittedNotesFollowupSnapshotSync(
+    a.token(),'second-old');
+  assert.equal(denied.reason,'followup_snapshot_original_origin_changed',
+    JSON.stringify(denied));
+  assert.equal(denied.snapshotWriteAttempted,false);
+  assert.equal(denied.canPromote,false);
+  assert.equal(JSON.parse(a.localStorage.getItem(V1)).tasks[1].id,
+    'oldtab-later');
+  assert.equal(a.localStorage.getItem(FOLLOWUP_INTENT),signed);
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+  assert.equal(a.localStorage.getItem(CACHE),'second');
+});
+
+test('second Notes snapshot write quota denial never clears dirty or sealed evidence',async()=>{
+  const a=await boot();
+  await stagedFollowup(a,'quota-first','quota-second');
+  const snapshot=a.localStorage.getItem(V1);
+  const first=a.localStorage.getItem(INTENT);
+  const second=a.localStorage.getItem(FOLLOWUP_INTENT);
+  const original=a.localStorage.setItem.bind(a.localStorage);
+  a.localStorage.setItem=(key,value)=>{
+    if(key===V1)throw Error('QuotaExceededError');
+    return original(key,value);
+  };
+  const refused=await a.api.rehearsePreviewAdmittedNotesFollowupSnapshotSync(
+    a.token(),'quota-second');
+  assert.equal(refused.reason,'followup_snapshot_write_uncertain',
+    JSON.stringify(refused));
+  assert.equal(refused.snapshotWriteAttempted,true);
+  assert.equal(refused.writeOutcomeUncertain,true);
+  assert.equal(refused.confirmedNotesDurable,false);
+  assert.equal(refused.canPromote,false);
+  assert.equal(a.localStorage.getItem(V1),snapshot);
+  assert.equal(a.localStorage.getItem(INTENT),first);
+  assert.equal(a.localStorage.getItem(FOLLOWUP_INTENT),second);
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+  assert.equal(a.localStorage.getItem(CACHE),'second');
+});
+
+test('second snapshot refuses witnessed cross-tab event and frozen fence',async()=>{
+  const a=await witnessBoot();
+  await stagedFollowup(a,'witness-first-sync','witness-second-sync');
+  assert.equal((await a.api.beginPreviewLegacyStorageEventWitness(
+    a.token())).observing,true);
+  const before=a.localStorage.getItem(V1);
+  a.signal('tp_projects_v1');
+  const denied=await a.api.rehearsePreviewAdmittedNotesFollowupSnapshotSync(
+    a.token(),'witness-second-sync');
+  assert.equal(denied.reason,'followup_snapshot_origin_or_witness_changed',
+    JSON.stringify(denied));
+  assert.equal(denied.snapshotWriteAttempted,false);
+  assert.equal(a.localStorage.getItem(V1),before);
+  a.api.stopPreviewLegacyStorageEventWitness();
+  const frozen=await a.api.rehearsePreviewDurableWriterFence(
+    'freeze',{expectedEpoch:0});
+  assert.equal(frozen.reason,'preview_fence_frozen');
+  const again=await a.api.rehearsePreviewAdmittedNotesFollowupSnapshotSync(
+    a.token(),'witness-second-sync');
+  assert.equal(again.reason,'followup_snapshot_fence_unverified_or_frozen');
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+});
+
+test('second snapshot refuses noncanonical source without modifying legacy fields',async()=>{
+  const a=await boot();
+  await stagedFollowup(a,'noncanonical-first','noncanonical-second');
+  const state=JSON.parse(a.localStorage.getItem(V1));
+  const raw=JSON.stringify(state,null,2);
+  a.localStorage.setItem(V1,raw);
+  const refused=await a.api.rehearsePreviewAdmittedNotesFollowupSnapshotSync(
+    a.token(),'noncanonical-second');
+  assert.equal(refused.snapshotWriteAttempted,false);
+  assert.equal(refused.canPromote,false);
+  assert.equal(a.localStorage.getItem(V1),raw);
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+});
