@@ -5842,6 +5842,29 @@
 
 
 
+
+  // Open only a PREEXISTING Notes preview database. Unlike a normal IDB
+  // open(), this refuses an upgrade, so a missing preview cannot create an
+  // empty database merely because a read-only diagnostic was invoked.
+  function openExistingNotesPreviewDb() {
+    return new Promise((resolve,reject)=>{
+      if(typeof global.indexedDB?.open!=='function'){
+        reject(Error('notes_preview_indexeddb_unavailable'));return;
+      }
+      let request,missing=false;
+      try{request=global.indexedDB.open(NOTES_PREVIEW_DB);}
+      catch(error){reject(error);return;}
+      request.onupgradeneeded=()=>{
+        missing=true;
+        try{request.transaction?.abort();}catch(_){}
+      };
+      request.onsuccess=()=>resolve(request.result);
+      request.onerror=()=>reject(Error(missing
+        ?'notes_preview_seed_required':'notes_preview_read_failed'));
+      request.onblocked=()=>reject(Error('notes_preview_read_blocked'));
+    });
+  }
+
   // Read-only Notes handoff evidence. A sealed V2 copy is a point-in-time
   // observation, not authority to rewrite V1's multi-key Notes save.
   async function inspectPreviewNotesTransitionSafety(expectedInventoryToken) {
@@ -5869,7 +5892,7 @@
         expectedInventoryToken,generation,epoch);
       if(captured.reason)return refuse('notes_source_preflight_failed',{
         prerequisiteReason:captured.reason});
-      db=await openNotesPreviewDb(generation,epoch);
+      db=await openExistingNotesPreviewDb();
       const initial=await readNotesPreviewRows(db);
       const proof=await validateNotesPreviewLineage(initial,generation);
       if(!proof.verified)return refuse('notes_preview_evidence_unverified',{
@@ -5936,7 +5959,8 @@
         notesMultiKeySyncVerified:false,safeToAutoReconcile:false,
         safeToClearDirtyMarker:false,safeToRestore:false
       };
-    }catch(_){return refuse('notes_transition_audit_unavailable');}
+    }catch(error){return refuse(error?.message==='notes_preview_seed_required'
+      ?'notes_preview_seed_required':'notes_transition_audit_unavailable');}
     finally{try{db?.close();}catch(_){}}
   }
 
