@@ -5693,7 +5693,7 @@ try {
 
   await run('Read-only whole-origin backup census identifies image database and never exports bytes',async context=>{
     const page=await open(context);
-    const result=await page.evaluate(async()=>{
+    const result=await page.evaluate(async({engine})=>{
       let stage='begin';
       try{
       const api=window.TaskPointsStateRuntimeV2;
@@ -5713,16 +5713,37 @@ try {
         request.onerror=()=>reject(request.error);
       });
       stage='image_db_opened';
-      const tx=imageDb.transaction(storeName,'readwrite');
-      const completed=new Promise((resolve,reject)=>{
-        tx.oncomplete=resolve;
-        tx.onerror=()=>reject(tx.error);
-        tx.onabort=()=>reject(tx.error);
+      const writeImageFixture=payload=>new Promise((resolve,reject)=>{
+        let tx;
+        try{
+          tx=imageDb.transaction(storeName,'readwrite');
+          const request=tx.objectStore(storeName).put(
+            payload,'fixture-img-01');
+          request.onerror=()=>reject(request.error||new Error(
+            'fixture_image_put_failed'));
+          tx.oncomplete=()=>resolve();
+          tx.onerror=()=>reject(tx.error||new Error(
+            'fixture_image_transaction_failed'));
+          tx.onabort=()=>reject(tx.error||new Error(
+            'fixture_image_transaction_aborted'));
+        }catch(error){reject(error);}
       });
-      tx.objectStore(storeName).put(
-        new Blob(['fixture image byte content'],{type:'image/png'}),
-        'fixture-img-01');
-      await completed;
+      let imageFixtureFormat='blob';
+      try{
+        await writeImageFixture(new Blob(
+          ['fixture image byte content'],{type:'image/png'}));
+      }catch(error){
+        // The Linux WebKit harness can reject Blob persistence before
+        // our backup preflight starts. Do not mistake that harness issue
+        // for a failure of the read-only inventory. Retain the Blob
+        // attempt, then verify the *same store census* using binary
+        // bytes; explicitly report the reduced fixture scope.
+        if(engine!=='webkit')throw error;
+        imageFixtureFormat='webkit_binary_fallback_after_blob_abort';
+        stage='webkit_blob_write_failed';
+        await writeImageFixture(new TextEncoder().encode(
+          'fixture image byte content'));
+      }
       stage='image_written';
       imageDb.close();
       const token=()=>JSON.stringify(Array.from({length:localStorage.length},
@@ -5751,15 +5772,18 @@ try {
       });
       imageDbAfter.close();
       stage='complete';
-      return {census,known,after,imageCount,
+      return {census,known,after,imageCount,imageFixtureFormat,
         snapshotUnchanged:localStorage.getItem('taskpoints_v1')===
           originalSnapshot,
         originUnchanged:token()===originalToken};
       }catch(error){return {__backupBrowserError:true,stage,
         name:String(error?.name||''),message:String(error?.message||error),
         stack:String(error?.stack||'')};}
-    });
+    },{engine});
     assert.equal(result?.__backupBrowserError,undefined,JSON.stringify(result));
+    assert.ok(['blob','webkit_binary_fallback_after_blob_abort']
+      .includes(result.imageFixtureFormat),JSON.stringify(result));
+    if(engine==='chromium')assert.equal(result.imageFixtureFormat,'blob');
     if(!result.known){
       assert.equal(result.census.reason,
         'indexeddb_database_catalog_unavailable');
@@ -5799,6 +5823,7 @@ try {
     assert.equal(restart.imageRecordCount,1);
     assert.equal(restart.canPromote,false);
     return {imageDatabaseInventoried:true,
+      imageFixtureFormat:result.imageFixtureFormat,
       allOriginStoreCountsObserved:true,noRecordsOrImagesExported:true,
       originAndImageStillIntactAfterReload:true};
   });
