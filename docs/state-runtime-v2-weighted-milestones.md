@@ -2760,3 +2760,30 @@ restored old-tab Task is recognized as source divergence, not safe sync.
 This is diagnostic hardening **inside** the uncredited nonpilot migration
 gate. The cutover estimate stays **67/100**, with V1 authoritative, V2
 preview-only, and Main unchanged.
+
+## Full-origin backup census: second-pass IndexedDB count validation — November 9
+
+The read-only developer-preview backup coverage audit now recounts **every
+already-known IndexedDB object store** before finalizing its origin
+inventory. If a legacy tab adds or removes a record between the first and
+second scan, the audit fails closed with
+`backup_coverage_record_count_changed`, instead of reporting a stable
+count census. Store-name/version drift and transaction failures also refuse
+the result. No record, image byte, database, localStorage key, or V1
+recovery marker is rewritten by the audit.
+
+The second scan queues its counts synchronously in a single readonly
+transaction per database, and rechecks the catalog and origin after that
+pass. This specifically addresses a *same-catalog, changed-record-count*
+race. It **does not** detect an overwrite where the count stays identical,
+prove image bytes unchanged, capture any actual data for export, or verify
+an independent restorable off-device backup. Successful diagnostics expose
+`indexedDbRecordCountsRechecked:true` and deliberately keep
+`indexedDbRecordContentStable:false`, `recordContentVerified:false`,
+`backupComplete:false`, and `canPromote:false`.
+
+Node regression tests simulate an old tab adding an image record during
+the count scan, and verify that the census refuses success without
+erasing the external write. The 5-point independent recovery gate remains
+uncredited; V1 is authoritative, V2 stays preview-only and Main is
+unchanged. **Overall readiness: 67/100.**
