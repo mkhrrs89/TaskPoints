@@ -5357,6 +5357,24 @@ try {
     assert.equal(observed.state.tasks[0].id,'old-tab-added-task');
     assert.equal(observed.dirty,'1');
     assert.equal(observed.cache,'new');
+    // A stale token is not the only defense: even if the caller recaptures
+    // current origin state after an uncooperative older tab changed Tasks,
+    // the immutable initial-snapshot digest must still reject the write.
+    const retokened=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const result=await api.rehearsePreviewAdmittedNotesSnapshotSync(
+        token,'browser-old-tab-snapshot');
+      return {result,state:JSON.parse(localStorage.getItem('taskpoints_v1')),
+        dirty:localStorage.getItem('taskpoints_notes_dirty_v1')};
+    });
+    assert.equal(retokened.result.reason,'snapshot_sync_original_snapshot_changed',
+      JSON.stringify(retokened.result));
+    assert.equal(retokened.result.snapshotWriteAttempted,false);
+    assert.equal(retokened.result.notesSnapshotSynchronized,false);
+    assert.equal(retokened.state.tasks[0].id,'old-tab-added-task');
+    assert.equal(retokened.dirty,'1');
     await page.reload({waitUntil:'load'});
     const afterReload=await page.evaluate(async()=>({
       evidence:await window.TaskPointsStateRuntimeV2
