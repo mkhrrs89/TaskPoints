@@ -1140,3 +1140,79 @@ test('repeat journal is bounded at sixteen extra sequential edits',async()=>{
   assert.equal(a.localStorage.getItem(DIRTY),'1');
   assert.equal(JSON.parse(a.localStorage.getItem(V1)).notes,'value-16');
 });
+
+
+test('repeat journal refuses reused action IDs without corrupting ancestry',async()=>{
+  const a=await boot();
+  await completedTwoNotesEdits(a);
+  const before=a.token();
+  for(const id of ['repeat-first','repeat-second']){
+    const denied=await a.api.rehearsePreviewNotesRepeatEditIntent(
+      'third',a.token(),id);
+    assert.equal(denied.reason,'repeat_action_id_already_recorded',
+      id+': '+JSON.stringify(denied));
+    assert.equal(a.token(),before);
+    assert.equal(a.localStorage.getItem(REPEAT_JOURNAL),null);
+  }
+  await repeatSequence(a,'repeat-third','third');
+  const signed=a.localStorage.getItem(REPEAT_JOURNAL);
+  const duplicate=await a.api.rehearsePreviewNotesRepeatEditIntent(
+    'fourth',a.token(),'repeat-third');
+  assert.equal(duplicate.reason,'repeat_action_id_already_recorded',
+    JSON.stringify(duplicate));
+  assert.equal(a.localStorage.getItem(REPEAT_JOURNAL),signed);
+  const proof=await a.api.inspectPreviewNotesRepeatEditJournal();
+  assert.equal(proof.journalEvidenceVerified,true,JSON.stringify(proof));
+  assert.equal(proof.journalEntryCount,1);
+});
+
+test('repeat intent quota failure never edits Notes or replaces older journal entries',async()=>{
+  const a=await boot();
+  await completedTwoNotesEdits(a);
+  await repeatSequence(a,'repeat-safe','third');
+  const priorJournal=a.localStorage.getItem(REPEAT_JOURNAL);
+  const priorSnapshot=a.localStorage.getItem(V1);
+  const priorCache=a.localStorage.getItem(CACHE);
+  const originalSet=a.localStorage.setItem.bind(a.localStorage);
+  a.localStorage.setItem=(key,value)=>{
+    if(key===REPEAT_JOURNAL)throw Error('QuotaExceededError');
+    return originalSet(key,value);
+  };
+  const denied=await a.api.rehearsePreviewNotesRepeatEditIntent(
+    'fourth',a.token(),'repeat-quota-intent');
+  assert.equal(denied.reason,'repeat_intent_write_uncertain',
+    JSON.stringify(denied));
+  assert.equal(denied.writeOutcomeUncertain,true);
+  assert.equal(denied.inspectIntentBeforeRetry,true);
+  assert.equal(denied.canPromote,false);
+  assert.equal(a.localStorage.getItem(REPEAT_JOURNAL),priorJournal);
+  assert.equal(a.localStorage.getItem(V1),priorSnapshot);
+  assert.equal(a.localStorage.getItem(CACHE),priorCache);
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+});
+
+test('repeat snapshot readback detects independent old tab update after its write',async()=>{
+  const a=await boot();
+  await completedTwoNotesEdits(a);
+  const step=await a.api.rehearsePreviewNotesRepeatEditIntent(
+    'third',a.token(),'repeat-midwrite');
+  assert.equal(step.intentRecorded,true,JSON.stringify(step));
+  assert.equal((await a.api.rehearsePreviewAdmittedNotesRepeatCacheWrite(
+    a.token(),'repeat-midwrite')).cacheReadbackVerified,true);
+  const originalSet=a.localStorage.setItem.bind(a.localStorage);
+  a.localStorage.setItem=(key,value)=>{
+    const result=originalSet(key,value);
+    if(key===V1)originalSet('tp_projects_v1','old-tab-new-project');
+    return result;
+  };
+  const denied=await a.api.rehearsePreviewAdmittedNotesRepeatSnapshotSync(
+    a.token(),'repeat-midwrite');
+  assert.equal(denied.reason,'repeat_snapshot_readback_or_origin_changed',
+    JSON.stringify(denied));
+  assert.equal(denied.writeOutcomeUncertain,true);
+  assert.equal(denied.notesSnapshotSynchronized,false);
+  assert.equal(denied.canPromote,false);
+  assert.equal(a.localStorage.getItem('tp_projects_v1'),
+    'old-tab-new-project');
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+});
