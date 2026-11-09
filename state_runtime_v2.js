@@ -15837,6 +15837,133 @@
     }catch(_){return refuse('notes_first_edit_intent_inspection_unavailable');}
   }
 
+
+  // Cooperative cross-tab FIRST Notes edit inspection. This shares the
+  // preview freeze's Web Lock, but old V1 pages may ignore Web Locks entirely.
+  // The result is a bounded diagnostic, NEVER an exclusive writer lease,
+  // proof of a quiet browser origin, or permission to resume/restore Notes.
+  async function inspectPreviewCooperativeNotesFirstEditConflict(
+    expectedInventoryToken) {
+    const refuse=(reason,detail={})=>({
+      checked:true,previewOnly:true,cooperativeLockUsed:false,
+      intentEvidenceVerified:false,stableOriginObserved:false,
+      oldTabsExcluded:false,productionWritersFenced:false,
+      notesMultiKeySyncVerified:false,canAutomaticallyResume:false,
+      safeToRestore:false,safeToClearDirtyMarker:false,
+      canPromote:false,readAuthority:'legacy_only',
+      mutationAuthority:'legacy_only',reason,...detail
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    if(typeof expectedInventoryToken!=='string'||!expectedInventoryToken)
+      return refuse('full_origin_token_required');
+    const locks=global.navigator?.locks;
+    if(typeof locks?.request!=='function')
+      return refuse('lock_manager_unavailable');
+    const generation=currentGeneration({create:false});
+    if(!generation)return refuse('generation_unavailable');
+    const modeEpoch=darkMirrorModeEpoch;
+    let result=refuse('cooperative_notes_conflict_lock_unavailable');
+    try{
+      await locks.request(PREVIEW_COOPERATIVE_TASK_FREEZE_LOCK,
+        {mode:'exclusive',ifAvailable:true},async lock=>{
+          if(!lock){
+            result=refuse('cooperative_notes_conflict_lock_held_elsewhere');
+            return;
+          }
+          const current=()=>isWalTestPreviewHost()&&isDarkEnabled()
+            &&modeEpoch===darkMirrorModeEpoch
+            &&currentGeneration({create:false})===generation;
+          if(!current()){
+            result=refuse('notes_conflict_generation_changed_under_lock');
+            return;
+          }
+          let before;
+          try{
+            before=captureReadOnlyFullStorageInventory();
+            if(before!==expectedInventoryToken){
+              result=refuse('full_origin_changed_under_cooperative_lock');
+              return;
+            }
+          }catch(_){
+            result=refuse('notes_conflict_origin_unreadable');
+            return;
+          }
+          // The V2 preview freeze is separate from the live Notes writer.
+          // Honor its state, and never mistake the successful audit for
+          // proof that a suspended pre-V2 tab has been fenced.
+          const fence=await rehearsePreviewDurableWriterFence('audit');
+          if(!current()||fence.reason!=='preview_writer_inventory_consistent'
+            ||fence.fence?.generation!==generation||fence.fence.frozen){
+            result=refuse('notes_conflict_preview_fence_unverified_or_frozen');
+            return;
+          }
+          try{
+            if(captureReadOnlyFullStorageInventory()!==before){
+              result=refuse('notes_conflict_origin_changed_during_fence');
+              return;
+            }
+          }catch(_){
+            result=refuse('notes_conflict_origin_unreadable');
+            return;
+          }
+          const evidence=await inspectPreviewNotesFirstEditIntent();
+          if(!evidence.intentEvidenceVerified){
+            result=refuse('notes_conflict_intent_unverified',{
+              prerequisiteReason:evidence.reason});
+            return;
+          }
+          let after;
+          try{after=captureReadOnlyFullStorageInventory();}
+          catch(_){
+            result=refuse('notes_conflict_origin_unreadable_after_evidence');
+            return;
+          }
+          if(!current()||after!==before){
+            result=refuse('notes_conflict_origin_changed_during_evidence');
+            return;
+          }
+          const afterFence=await rehearsePreviewDurableWriterFence('audit');
+          if(!current()
+            ||afterFence.reason!=='preview_writer_inventory_consistent'
+            ||afterFence.fence?.generation!==generation
+            ||afterFence.fence?.epoch!==fence.fence.epoch
+            ||afterFence.fence.frozen){
+            result=refuse('notes_conflict_fence_changed_during_evidence');
+            return;
+          }
+          try{
+            if(captureReadOnlyFullStorageInventory()!==after){
+              result=refuse('notes_conflict_origin_changed_after_evidence');
+              return;
+            }
+          }catch(_){
+            result=refuse('notes_conflict_origin_unreadable_after_evidence');
+            return;
+          }
+          const originSame=evidence.sourceInventoryMatchesAdmission;
+          const cacheSame=evidence.notesCacheMatchesIntent;
+          // Source divergence is an observation, not attribution: it may be
+          // the intended first edit, an older tab, an import or a reset.
+          const conflictSignal=originSame?'no_current_origin_change'
+            :cacheSame?'origin_changed_intent_cache_matches'
+            :'origin_changed_intent_cache_mismatch';
+          result=refuse('notes_cooperative_conflict_evidence_observed',{
+            cooperativeLockUsed:true,intentEvidenceVerified:true,
+            stableOriginObserved:true,previewFenceEpoch:afterFence.fence.epoch,
+            conflictSignal,sourceInventoryMatchesAdmission:originSame,
+            notesCacheMatchesIntent:cacheSame,
+            observedRecoveryStage:evidence.observedRecoveryStage,
+            // A successful preview lock does not fence the actual V1 writer.
+            oldTabsExcluded:false,productionWritersFenced:false,
+            canAutomaticallyResume:false,safeToRestore:false,
+            safeToClearDirtyMarker:false,canPromote:false
+          });
+        });
+    }catch(_){return refuse('notes_conflict_lock_request_failed');}
+    return result;
+  }
+
   // V2-only Notes keystroke rehearsal: participate in the same preview Web
   // Lock as Task / Projects / Today / freeze, but mutate ONLY the existing
   // V1 Notes cache after BOTH durable authority/dirty markers already equal
@@ -16100,6 +16227,7 @@
     rehearsePreviewCooperativeDirtyNotesCacheSave,
     rehearsePreviewNotesFirstEditIntent,
     inspectPreviewNotesFirstEditIntent,
+    inspectPreviewCooperativeNotesFirstEditConflict,
     inspectPreviewTaskBatchJournalEvidence,
     inspectPreviewTaskBatchEffectiveEvidence,
     inspectPreviewNotesSource,
