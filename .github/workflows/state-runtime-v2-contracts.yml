@@ -88,6 +88,7 @@ jobs:
           tests/state_runtime_v2_today_collection_contract.test.js
           tests/state_runtime_v2_notes_source_contract.test.js
           tests/state_runtime_v2_notes_bundle_contract.test.js
+          tests/state_runtime_v2_notes_snapshot_sync_contract.test.js
           tests/state_runtime_v2_game_preferences_source_contract.test.js
           tests/state_runtime_v2_game_collection_contract.test.js
           tests/state_runtime_v2_task_reconcile_scenarios_contract.test.js
