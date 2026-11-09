@@ -18371,8 +18371,10 @@
                   const completed=transactionPromise(tx);
                   const requests=stores.map(name=>
                     requestPromise(tx.objectStore(name).count()));
-                  const values=await Promise.all(requests);
-                  await completed;
+                  // Observe request AND transaction failures together.
+                  // A rejected count aborts the transaction and must never
+                  // leave its completion rejection unhandled.
+                  const values=await Promise.all([...requests,completed]);
                   for(let i=0;i<stores.length;i++){
                     if(!Number.isSafeInteger(values[i])||values[i]<0)
                       throw Error('backup_coverage_count_invalid');
