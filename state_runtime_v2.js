@@ -18023,11 +18023,51 @@
       const cacheMatches=cache===entry.text;
       const snapshotMatches=decoded.notes===entry.text;
       const markersValid=dirty==='1'&&authority==='1';
+      const snapshotKey=core.STORAGE_KEY||'taskpoints_v1';
+      const cacheKey='taskpoints_notes_v1';
+      // The journal digest authenticates recorded history but cannot by
+      // itself prove the CURRENT origin still corresponds to that history.
+      // Reconstruct the latest admission inventory for all three stages.
+      // In the synced stage the real writer changed Notes inside the V1
+      // snapshot, so undo only that field *in memory* for its SHA check.
+      const atIntent=cache===entry.previousText
+        &&decoded.notes===entry.previousText;
+      const atCache=cacheMatches
+        &&decoded.notes===entry.previousText;
+      const atSnapshot=cacheMatches&&snapshotMatches;
+      let sourceOriginMatchesAdmission=false;
+      if(atIntent||atCache||atSnapshot){
+        let originalSnapshot=rawSnapshot;
+        if(atSnapshot){
+          const snapshot=JSON.parse(rawSnapshot);
+          // Only the canonical plain-JSON codec qualifies for the
+          // synthetic snapshot continuation. Other legacy representations
+          // remain intact, with no source-consistency claim.
+          if(JSON.stringify(snapshot)===rawSnapshot)
+            originalSnapshot=JSON.stringify({
+              ...snapshot,notes:entry.previousText});
+          else originalSnapshot=null;
+        }
+        if(typeof originalSnapshot==='string'){
+          const reconstructed=stableJson(JSON.parse(before)
+            .filter(row=>Array.isArray(row)
+              &&row[0]!==PREVIEW_NOTES_REPEAT_JOURNAL_KEY)
+            .map(row=>row[0]===cacheKey
+              ?[cacheKey,entry.previousText]
+              :row[0]===snapshotKey
+                ?[snapshotKey,originalSnapshot]:row));
+          sourceOriginMatchesAdmission=
+            await previewRecoveryFingerprint(originalSnapshot)
+              ===entry.sourceSnapshotFingerprint
+            &&await previewRecoveryFingerprint(reconstructed)
+              ===entry.sourceOriginFingerprint;
+        }
+      }
       const stage=!markersValid?'repeat_recovery_markers_missing'
-        :cacheMatches
-          ?snapshotMatches?'repeat_snapshot_synced_dirty_pending'
-            :'repeat_cache_written_snapshot_pending'
-          :'repeat_intent_recorded_cache_pending';
+        :!sourceOriginMatchesAdmission?'repeat_source_diverged'
+        :atSnapshot?'repeat_snapshot_synced_dirty_pending'
+        :atCache?'repeat_cache_written_snapshot_pending'
+        :'repeat_intent_recorded_cache_pending';
       if(!isWalTestPreviewHost()||!isDarkEnabled()
         ||currentGeneration({create:false})!==generation
         ||captureReadOnlyFullStorageInventory()!==before
@@ -18040,6 +18080,9 @@
         lastActionId:entry.actionId,
         cacheMatchesLastAction:cacheMatches,
         snapshotMatchesLastAction:snapshotMatches,
+        sourceOriginMatchesAdmission,
+        lastActionProvenanceVerified:markersValid
+          &&sourceOriginMatchesAdmission,
         dirtyMarkerPreserved:dirty==='1',
         notesCacheAuthorityEstablished:authority==='1',
         observedRecoveryStage:stage};
