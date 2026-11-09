@@ -315,3 +315,83 @@ test('page-lifetime storage witness denies clean completion after observed exter
   assert.equal(a.localStorage.getItem(DIRTY),'1');
   a.api.stopPreviewLegacyStorageEventWitness();
 });
+
+
+async function signedFingerprint(value){
+  const bytes=new TextEncoder().encode(JSON.stringify(value));
+  const raw=await webcrypto.subtle.digest('SHA-256',bytes);
+  return 'sha256:'+Array.from(new Uint8Array(raw),b=>
+    b.toString(16).padStart(2,'0')).join('')+':'+bytes.byteLength;
+}
+
+test('Notes first-edit intent seals exact original V1 snapshot bytes',async()=>{
+  const a=await boot();
+  const original=a.localStorage.getItem(V1);
+  const intent=await a.api.rehearsePreviewNotesFirstEditIntent(
+    'tiny',a.token(),'snapshot-bound');
+  assert.equal(intent.intentRecorded,true,JSON.stringify(intent));
+  const sealed=JSON.parse(a.localStorage.getItem(INTENT));
+  assert.equal(sealed.schemaVersion,2);
+  assert.equal(sealed.snapshotFingerprint,await signedFingerprint(original));
+  assert.equal((await a.api.inspectPreviewNotesFirstEditIntent())
+    .intentEvidenceVerified,true);
+  assert.equal(a.localStorage.getItem(V1),original);
+});
+
+test('old tab cannot overwrite a newly changed Task with a refreshed snapshot token',async()=>{
+  const a=await boot();
+  await stage(a,'older-tab-task','short');
+  const sealed=a.localStorage.getItem(INTENT);
+  const updated=JSON.parse(a.localStorage.getItem(V1));
+  updated.tasks.push({id:'newer-task',title:'Changed in old tab'});
+  a.localStorage.setItem(V1,JSON.stringify(updated));
+  const denied=await a.api.rehearsePreviewAdmittedNotesSnapshotSync(
+    a.token(),'older-tab-task');
+  assert.equal(denied.reason,'snapshot_sync_original_snapshot_changed',
+    JSON.stringify(denied));
+  assert.equal(denied.notesSnapshotSynchronized,false);
+  assert.equal(denied.snapshotWriteAttempted,false);
+  assert.equal(denied.safeToClearDirtyMarker,false);
+  assert.equal(denied.canPromote,false);
+  assert.equal(a.localStorage.getItem(INTENT),sealed);
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+  assert.equal(a.localStorage.getItem(CACHE),'short');
+  assert.equal(JSON.parse(a.localStorage.getItem(V1)).tasks[1].id,'newer-task');
+});
+
+test('old tab changing Notes snapshot cannot be hidden by a freshly recaptured token',async()=>{
+  const a=await boot();
+  await stage(a,'older-tab-notes','tiny');
+  const other=JSON.parse(a.localStorage.getItem(V1));
+  other.notes='Someone else edited the snapshot';
+  a.localStorage.setItem(V1,JSON.stringify(other));
+  const denied=await a.api.rehearsePreviewAdmittedNotesSnapshotSync(
+    a.token(),'older-tab-notes');
+  assert.equal(denied.reason,'snapshot_sync_original_snapshot_changed');
+  assert.equal(denied.notesSnapshotSynchronized,false);
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+  assert.equal(JSON.parse(a.localStorage.getItem(V1)).notes,other.notes);
+});
+
+test('legacy v1 signed intent remains inspectable but cannot sync without baseline attestation',async()=>{
+  const a=await boot();
+  await stage(a,'old-seal','tiny');
+  const original=JSON.parse(a.localStorage.getItem(INTENT));
+  const {integrityFingerprint,snapshotFingerprint,...v1}=original;
+  v1.schemaVersion=1;
+  const legacySeal=JSON.stringify({...v1,
+    integrityFingerprint:await signedFingerprint(v1)});
+  a.localStorage.setItem(INTENT,legacySeal);
+  const observed=await a.api.inspectPreviewNotesFirstEditIntent();
+  assert.equal(observed.intentEvidenceVerified,true,JSON.stringify(observed));
+  assert.equal(observed.notesCacheMatchesIntent,true);
+  const previous=a.localStorage.getItem(V1);
+  const denied=await a.api.rehearsePreviewAdmittedNotesSnapshotSync(
+    a.token(),'old-seal');
+  assert.equal(denied.reason,'snapshot_sync_baseline_attestation_required',
+    JSON.stringify(denied));
+  assert.equal(denied.snapshotWriteAttempted,false);
+  assert.equal(denied.canPromote,false);
+  assert.equal(a.localStorage.getItem(V1),previous);
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+});
