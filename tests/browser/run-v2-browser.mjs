@@ -5267,6 +5267,90 @@ try {
       productionWriterUnchanged:true,noAuthorityCutover:true};
   });
 
+
+  await run('Preview witness sees old Notes tab A-B-A changes despite matching final storage',async context=>{
+    const page=await open(context);
+    const legacy=await context.newPage();
+    await legacy.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const setup=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      localStorage.setItem('taskpoints_notes_v1','original longer Notes content');
+      localStorage.setItem('taskpoints_notes_authoritative_v1','1');
+      localStorage.setItem('taskpoints_notes_dirty_v1','1');
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const original=localStorage.getItem('taskpoints_notes_v1');
+      const baseline=token();
+      const started=await api.beginPreviewLegacyStorageEventWitness(baseline);
+      const idle=await api.inspectPreviewLegacyStorageEventWitness();
+      return {original,baseline,started,idle};
+    });
+    assert.equal(setup.started.reason,'preview_legacy_storage_event_witness_started',
+      JSON.stringify(setup.started));
+    assert.equal(setup.started.observing,true);
+    assert.equal(setup.idle.originMatchesStart,true);
+    assert.equal(setup.idle.observedStorageEvents,0);
+    assert.equal(setup.idle.oldTabsExcluded,false);
+    assert.equal(setup.idle.missedEventsRuledOut,false);
+    const intermediate=await legacy.evaluate(()=>{
+      localStorage.setItem('taskpoints_notes_v1','a transient old-tab replacement');
+      return localStorage.getItem('taskpoints_notes_v1');
+    });
+    await requireCrossTabStorageValue(page,'taskpoints_notes_v1',intermediate);
+    await page.waitForFunction(async()=>{
+      const result=await window.TaskPointsStateRuntimeV2
+        .inspectPreviewLegacyStorageEventWitness();
+      return result.notesRelatedEvents>=1;
+    },null,{timeout:12000});
+    await legacy.evaluate(original=>localStorage.setItem('taskpoints_notes_v1',original),
+      setup.original);
+    await requireCrossTabStorageValue(page,'taskpoints_notes_v1',setup.original);
+    await page.waitForFunction(async()=>{
+      const result=await window.TaskPointsStateRuntimeV2
+        .inspectPreviewLegacyStorageEventWitness();
+      return result.notesRelatedEvents>=2 && result.originMatchesStart===true;
+    },null,{timeout:12000});
+    const evidence=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const inspect=await api.inspectPreviewLegacyStorageEventWitness();
+      return {inspect,token:token(),
+        cache:localStorage.getItem('taskpoints_notes_v1'),
+        authority:localStorage.getItem('taskpoints_notes_authoritative_v1'),
+        dirty:localStorage.getItem('taskpoints_notes_dirty_v1')};
+    });
+    assert.equal(evidence.token,setup.baseline,
+      'entire origin must return to identical bytes after A-B-A');
+    assert.equal(evidence.inspect.reason,
+      'origin_matches_but_cross_tab_events_observed',JSON.stringify(evidence.inspect));
+    assert.equal(evidence.inspect.originMatchesStart,true);
+    assert.equal(evidence.inspect.transientCrossTabChangeObserved,true);
+    assert.ok(evidence.inspect.notesRelatedEvents>=2);
+    assert.equal(evidence.inspect.canPromote,false);
+    assert.equal(evidence.inspect.oldTabsExcluded,false);
+    assert.equal(evidence.inspect.missedEventsRuledOut,false);
+    assert.equal(JSON.stringify(evidence.inspect).includes(intermediate),false);
+    assert.equal(evidence.cache,setup.original);
+    assert.equal(evidence.authority,'1');
+    assert.equal(evidence.dirty,'1');
+    const stopped=await page.evaluate(()=>window.TaskPointsStateRuntimeV2
+      .stopPreviewLegacyStorageEventWitness());
+    assert.equal(stopped.stopped,true);
+    await page.reload({waitUntil:'load'});
+    const after=await page.evaluate(()=>window.TaskPointsStateRuntimeV2
+      .inspectPreviewLegacyStorageEventWitness());
+    assert.equal(after.reason,'storage_event_witness_not_active',
+      JSON.stringify(after));
+    assert.equal(after.oldTabsExcluded,false);
+    return {transientOldTabWriteDetected:true,
+      fullOriginReturnedToExactBaseline:true,
+      noPlaintextRetained:true,doesNotFalselyExcludeOlderTabs:true,
+      witnessCleanlyStops:true,noProductionMutation:true};
+  });
+
   await run('Notes shared-lock conflict audit sees old-tab bypass and rejects overlapping preview tab',async context=>{
     const page=await open(context);
     const legacy=await context.newPage();
