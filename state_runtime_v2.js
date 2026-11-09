@@ -15838,6 +15838,144 @@
   }
 
 
+
+  // Opt-in, page-lifetime witness of cross-tab storage *events*. A legacy
+  // tab can change V1 Notes and change them back (A -> B -> A) while a
+  // before/after origin checksum still matches. Unlike stored plaintext
+  // snapshots, this witness retains only a digest and event counters.
+  // Old pages are NOT obliged to notify us, and suspended pages may miss
+  // events. This evidence NEVER grants writer admission or authority.
+  let previewLegacyStorageEventWitness=null;
+  async function beginPreviewLegacyStorageEventWitness(expectedOriginToken){
+    const refuse=(reason,detail={})=>({
+      checked:true,previewOnly:true,observing:false,
+      productionWritersFenced:false,oldTabsExcluded:false,
+      canPromote:false,readAuthority:'legacy_only',
+      mutationAuthority:'legacy_only',reason,...detail
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    if(typeof expectedOriginToken!=='string'||!expectedOriginToken)
+      return refuse('full_origin_token_required');
+    if(previewLegacyStorageEventWitness)
+      return refuse('storage_event_witness_already_active');
+    if(typeof global.addEventListener!=='function'
+      ||typeof global.removeEventListener!=='function')
+      return refuse('storage_event_listener_unavailable');
+    const generation=currentGeneration({create:false});
+    if(!generation)return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    try{
+      if(captureReadOnlyFullStorageInventory()!==expectedOriginToken)
+        return refuse('full_origin_changed');
+    }catch(_){return refuse('full_origin_unreadable');}
+    const witness={
+      generation,epoch,baselineFingerprint:null,
+      totalEvents:0,notesEvents:0,otherEvents:0,clearEvents:0,
+      invalidated:false,handler:null
+    };
+    witness.handler=event=>{
+      // No event values, keys or user content are copied or retained.
+      if(previewLegacyStorageEventWitness!==witness)return;
+      if(!isWalTestPreviewHost()||!isDarkEnabled()
+        ||darkMirrorModeEpoch!==epoch
+        ||currentGeneration({create:false})!==generation)
+        witness.invalidated=true;
+      witness.totalEvents=Math.min(1000000,witness.totalEvents+1);
+      const key=event?.key;
+      if(key===null)witness.clearEvents=Math.min(1000000,witness.clearEvents+1);
+      else if(key==='taskpoints_notes_v1'
+        ||key==='taskpoints_notes_dirty_v1'
+        ||key==='taskpoints_notes_authoritative_v1'
+        ||key===(core.STORAGE_KEY||'taskpoints_v1'))
+        witness.notesEvents=Math.min(1000000,witness.notesEvents+1);
+      else witness.otherEvents=Math.min(1000000,witness.otherEvents+1);
+      if(witness.totalEvents>=1000000)witness.invalidated=true;
+    };
+    try{global.addEventListener('storage',witness.handler);}
+    catch(_){return refuse('storage_event_listener_install_failed');}
+    previewLegacyStorageEventWitness=witness;
+    try{
+      witness.baselineFingerprint=await previewRecoveryFingerprint(expectedOriginToken);
+      if(!isWalTestPreviewHost()||!isDarkEnabled()
+        ||darkMirrorModeEpoch!==epoch
+        ||currentGeneration({create:false})!==generation
+        ||captureReadOnlyFullStorageInventory()!==expectedOriginToken
+        ||witness.invalidated||witness.totalEvents!==0){
+        global.removeEventListener('storage',witness.handler);
+        previewLegacyStorageEventWitness=null;
+        return refuse('storage_event_witness_source_changed_during_start');
+      }
+    }catch(_){
+      try{global.removeEventListener('storage',witness.handler);}catch(_){}
+      previewLegacyStorageEventWitness=null;
+      return refuse('storage_event_witness_digest_unavailable');
+    }
+    return {...refuse('preview_legacy_storage_event_witness_started'),
+      observing:true,storageEventsObserved:0,
+      oldTabsExcluded:false,canPromote:false};
+  }
+
+  async function inspectPreviewLegacyStorageEventWitness(){
+    const refuse=(reason,detail={})=>({
+      checked:true,previewOnly:true,observing:false,
+      observedStorageEvents:0,notesRelatedEvents:0,
+      otherOriginEvents:0,originClearEvents:0,
+      originMatchesStart:false,
+      transientCrossTabChangeObserved:false,
+      oldTabsExcluded:false,missedEventsRuledOut:false,
+      productionWritersFenced:false,canPromote:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...detail
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    const w=previewLegacyStorageEventWitness;
+    if(!w)return refuse('storage_event_witness_not_active');
+    if(w.invalidated||currentGeneration({create:false})!==w.generation
+      ||darkMirrorModeEpoch!==w.epoch)
+      return refuse('storage_event_witness_generation_changed');
+    try{
+      const before=captureReadOnlyFullStorageInventory();
+      const count=w.totalEvents;
+      const counters=[w.notesEvents,w.otherEvents,w.clearEvents];
+      const digest=await previewRecoveryFingerprint(before);
+      if(previewLegacyStorageEventWitness!==w||w.invalidated
+        ||!isWalTestPreviewHost()||!isDarkEnabled()
+        ||currentGeneration({create:false})!==w.generation
+        ||darkMirrorModeEpoch!==w.epoch
+        ||captureReadOnlyFullStorageInventory()!==before
+        ||w.totalEvents!==count
+        ||w.notesEvents!==counters[0]||w.otherEvents!==counters[1]
+        ||w.clearEvents!==counters[2])
+        return refuse('storage_event_witness_changed_during_inspection');
+      const matches=digest===w.baselineFingerprint;
+      return {...refuse(matches
+        ?count?'origin_matches_but_cross_tab_events_observed'
+          :'origin_matches_no_events_observed'
+        :'origin_changed_since_witness_started'),
+        observing:true,observedStorageEvents:count,
+        notesRelatedEvents:counters[0],otherOriginEvents:counters[1],
+        originClearEvents:counters[2],originMatchesStart:matches,
+        transientCrossTabChangeObserved:matches&&count>0,
+        // No event => no observed event, NOT a quiet-tab proof.
+        oldTabsExcluded:false,missedEventsRuledOut:false,
+        productionWritersFenced:false,canPromote:false};
+    }catch(_){return refuse('storage_event_witness_inspection_unavailable');}
+  }
+
+  function stopPreviewLegacyStorageEventWitness(){
+    const w=previewLegacyStorageEventWitness;
+    if(!w)return {checked:true,stopped:false,
+      reason:'storage_event_witness_not_active',canPromote:false};
+    previewLegacyStorageEventWitness=null;
+    try{global.removeEventListener('storage',w.handler);}
+    catch(_){return {checked:true,stopped:false,
+      reason:'storage_event_listener_removal_uncertain',canPromote:false};}
+    return {checked:true,stopped:true,reason:'storage_event_witness_stopped',
+      canPromote:false};
+  }
+
   // Cooperative cross-tab FIRST Notes edit inspection. This shares the
   // preview freeze's Web Lock, but old V1 pages may ignore Web Locks entirely.
   // The result is a bounded diagnostic, NEVER an exclusive writer lease,
@@ -16364,6 +16502,9 @@
     rehearsePreviewNotesFirstEditIntent,
     inspectPreviewNotesFirstEditIntent,
     inspectPreviewCooperativeNotesFirstEditConflict,
+    beginPreviewLegacyStorageEventWitness,
+    inspectPreviewLegacyStorageEventWitness,
+    stopPreviewLegacyStorageEventWitness,
     inspectPreviewNotesBaselineFirstProtocol,
     inspectPreviewTaskBatchJournalEvidence,
     inspectPreviewTaskBatchEffectiveEvidence,
