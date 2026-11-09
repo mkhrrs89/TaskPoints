@@ -5166,6 +5166,72 @@ try {
       competingCrossTabNotesWriteBlocked:true,noImplicitNotesMutation:true};
   });
 
+
+  await run('Notes multi-key recovery flags old-tab edits and preserves sealed lineage after reload',async context=>{
+    const page=await open(context);
+    const old=await context.newPage();
+    await old.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const seeded=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      localStorage.setItem('taskpoints_notes_v1','first Notes draft');
+      localStorage.setItem('taskpoints_notes_dirty_v1','1');
+      localStorage.setItem('taskpoints_notes_authoritative_v1','1');
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const seed=await api.rehearsePreviewNotesBundleSeed(token(),'initial');
+      const audit=await api.inspectPreviewNotesTransitionSafety(token());
+      return {seed,audit,prior:token()};
+    });
+    assert.equal(seeded.seed.collectionParityVerified,true,JSON.stringify(seeded.seed));
+    assert.equal(seeded.audit.notesSourceMatchesPreview,true);
+    assert.equal(seeded.audit.currentNotesSavePhase,'dirty_cache_pending_snapshot_sync');
+    assert.equal(seeded.audit.notesMultiKeySyncVerified,false);
+    const edited=await old.evaluate(()=>{
+      localStorage.setItem('taskpoints_notes_v1','second draft in old tab');
+      return localStorage.getItem('taskpoints_notes_v1');
+    });
+    await requireCrossTabStorageValue(page,'taskpoints_notes_v1',edited);
+    const stale=await page.evaluate(async token=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const old=await api.inspectPreviewNotesTransitionSafety(token);
+      const currentToken=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const current=await api.inspectPreviewNotesTransitionSafety(currentToken);
+      return {old,current,cache:localStorage.getItem('taskpoints_notes_v1')};
+    },seeded.prior);
+    assert.equal(stale.old.reason,'full_origin_changed');
+    assert.equal(stale.current.reason,'notes_transition_notes_source_changed',
+      JSON.stringify(stale.current));
+    assert.equal(stale.current.cacheChangedSincePreview,true);
+    assert.equal(stale.current.safeToRestore,false);
+    assert.equal(stale.current.safeToClearDirtyMarker,false);
+    assert.equal(stale.cache,edited);
+    const reconciled=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const result=await api.rehearsePreviewNotesBundleReconcile(token(),'new-draft');
+      return {result,audit:await api.inspectPreviewNotesTransitionSafety(token())};
+    });
+    assert.equal(reconciled.result.collectionParityVerified,true,
+      JSON.stringify(reconciled.result));
+    assert.equal(reconciled.audit.notesSourceMatchesPreview,true);
+    assert.equal(reconciled.audit.notesMultiKeySyncVerified,false);
+    await page.reload({waitUntil:'load'});
+    const replay=await page.evaluate(async()=>{
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      return window.TaskPointsStateRuntimeV2.inspectPreviewNotesTransitionSafety(token);
+    });
+    assert.equal(replay.notesSourceMatchesPreview,true,JSON.stringify(replay));
+    assert.equal(replay.canPromote,false);
+    assert.equal(replay.safeToRestore,false);
+    return {oldTabChangesDetected:true,staleTokensRefused:true,
+      receiptLineagePreservedAfterReload:true,noNotesAutoRestore:true,noCutover:true};
+  });
+
   await run('Projects real V1 writer honors source tokens, cooperative freeze and older-tab changes',async context=>{
     const page=await open(context);
     const legacy=await context.newPage();
