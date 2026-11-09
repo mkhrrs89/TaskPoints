@@ -15730,7 +15730,7 @@
       if(raw===null)return refuse('notes_first_edit_intent_absent');
       const record=JSON.parse(raw);
       if(!record||typeof record!=='object'||Array.isArray(record)
-        ||Object.keys(record).length!==7
+        ||Object.keys(record).length!==8
         ||record.id!=='notes-first-edit-intent'||record.schemaVersion!==1
         ||typeof record.actionId!=='string'
         ||!/^[a-zA-Z0-9_:.\-]{1,96}$/.test(record.actionId)
