@@ -2787,3 +2787,56 @@ the count scan, and verify that the census refuses success without
 erasing the external write. The 5-point independent recovery gate remains
 uncredited; V1 is authoritative, V2 stays preview-only and Main is
 unchanged. **Overall readiness: 67/100.**
+
+## iPhone-first V2 implementation order — November 9
+
+**User workflow:** TaskPoints is primarily used as one standalone local
+iPhone instance. The desktop browser has separate local storage and does
+not synchronize with the phone. Consequently, desktop-versus-phone
+overwrites are **not** a valid cross-device risk in this architecture.
+Potential writer conflicts are restricted to contexts sharing the *same
+browser origin and storage profile*, including a stale page on the iPhone
+or legacy callbacks within the active app.
+
+To focus engineering on the actual usage pattern while **retaining every
+existing safety requirement**, prioritize work in this order:
+
+1. **Single-device functional migration:** finish the authoritative
+   Tasks, Notes, Today/SCWM, Projects, Game, preference and import/export
+   families, including immediate durable readback and no duplicate or
+   missing records after a restart.
+2. **iPhone process interruption:** use the existing 390x844 WebKit
+   touch-emulation checks for one foreground app, navigation/reload,
+   pagehide/background and interrupted/quota-denied saves. Physical
+   Safari standalone-PWA tests remain a separate uncredited gate.
+3. **Independent recovery:** verify that a backup captures all
+   localStorage keys and IDB records, including image bytes, then prove
+   it can actually restore an entire app without destructively modifying
+   the source. A count-only census cannot satisfy this.
+4. **Measure real foreground performance:** keep testing latency and
+   memory overhead on the iPhone workflow; optimize only proven
+   bottlenecks.
+5. **Writer handoff and same-origin old-tab isolation:** preserve existing
+   guards and regression tests; finish the mandatory production-wide
+   fence before cutover, but do not add speculative cross-tab complexity
+   ahead of concrete single-device migration/recovery blockers.
+
+This reprioritization does **not** delete or weaken any milestone, test,
+feature, safety fallback, rollback guard or release requirement. The
+cross-context writer-admission gate remains uncredited, as does the
+physical-iPhone validation gate. V1 remains primary and V2 cannot
+auto-promote. Weighted readiness stays **67/100**; the informal
+near-term progress bar remains at **98%** and is not an evidence-based
+release percentage.
+
+### Linux WebKit image-fixture limitation
+
+The synthetic WebKit runner reported a transaction abort with a null
+error while *inserting the test Blob*, before the V2 read-only backup
+inventory function ran. The browser test now retains a real Blob insert
+attempt and, **only on WebKit after that attempt fails**, uses a byte-array
+fallback to test the same image-store enumeration and record counting.
+It reports which fixture path was used. Chromium still requires the
+Blob path to succeed. This fallback is **not** evidence of successful
+Blob persistence in real iOS Safari and is not counted as independent
+image backup or restore verification.
