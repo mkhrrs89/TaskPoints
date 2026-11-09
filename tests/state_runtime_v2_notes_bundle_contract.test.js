@@ -595,3 +595,132 @@ test('Independent Notes preview proof respects production and generation fences'
   assert.equal((await app.api.inspectPreviewNotesRecoveryEvidence()).evidenceVerified,false);
   assert.deepEqual(app.indexedDB.dump(DB),saved);
 });
+
+
+test('Notes transition audit observes unfinished and completed save phases without modifying source',async()=>{
+  const app=await boot({cache:'first draft',dirty:'1',authority:'1'});
+  const seed=await app.api.rehearsePreviewNotesBundleSeed(app.token(),'seed');
+  assert.equal(seed.committed,true,JSON.stringify(seed));
+  const dbBefore=app.indexedDB.dump(DB),tokenBefore=app.token();
+  const first=await app.api.inspectPreviewNotesTransitionSafety(app.token());
+  assert.equal(first.reason,'notes_transition_source_unchanged',JSON.stringify(first));
+  assert.equal(first.previewEvidenceVerified,true);
+  assert.equal(first.sourceCompared,true);
+  assert.equal(first.notesSourceMatchesPreview,true);
+  assert.equal(first.fullOriginMatchesPreview,true);
+  assert.equal(first.currentNotesSavePhase,'dirty_cache_pending_snapshot_sync');
+  assert.equal(first.currentCachePreferred,true);
+  assert.equal(first.currentSnapshotAndCacheDiffer,true);
+  assert.equal(first.notesMultiKeySyncVerified,false);
+  assert.equal(first.safeToAutoReconcile,false);
+  assert.equal(first.safeToClearDirtyMarker,false);
+  assert.equal(first.safeToRestore,false);
+  assert.equal(first.canPromote,false);
+  assert.equal(app.token(),tokenBefore);
+  assert.deepEqual(app.indexedDB.dump(DB),dbBefore);
+
+  app.localStorage.setItem(CACHE,'short');
+  const changed=await app.api.inspectPreviewNotesTransitionSafety(app.token());
+  assert.equal(changed.reason,'notes_transition_notes_source_changed',JSON.stringify(changed));
+  assert.equal(changed.notesSourceMatchesPreview,false);
+  assert.equal(changed.cacheChangedSincePreview,true);
+  assert.equal(changed.snapshotNotesChangedSincePreview,false);
+  assert.equal(changed.markersChangedSincePreview,false);
+  assert.equal(changed.currentCachePreferred,true);
+  assert.equal(JSON.stringify(changed).includes('first draft'),false);
+  assert.equal(JSON.stringify(changed).includes('snapshot secret'),false);
+  assert.deepEqual(app.indexedDB.dump(DB),dbBefore);
+
+  const reconciled=await app.api.rehearsePreviewNotesBundleReconcile(app.token(),'draft');
+  assert.equal(reconciled.collectionParityVerified,true,JSON.stringify(reconciled));
+  // Simulate the existing V1 sync sequence on an isolated test fixture.
+  const snapshot=JSON.parse(app.localStorage.getItem(V1));
+  snapshot.notes='short';
+  app.localStorage.setItem(V1,JSON.stringify(snapshot));
+  app.localStorage.removeItem(DIRTY);
+  const settled=await app.api.inspectPreviewNotesTransitionSafety(app.token());
+  assert.equal(settled.currentNotesSavePhase,'authoritative_cache_matches_snapshot');
+  assert.equal(settled.snapshotNotesChangedSincePreview,true);
+  assert.equal(settled.markersChangedSincePreview,true);
+  assert.equal(settled.currentSnapshotAndCacheDiffer,false);
+  assert.equal(settled.safeToClearDirtyMarker,false);
+  assert.equal(settled.notesSourceMatchesPreview,false);
+  assert.equal(settled.canPromote,false);
+  assert.equal((await app.api.rehearsePreviewNotesBundleReconcile(
+    app.token(),'synced')).collectionParityVerified,true);
+  const after=await app.api.inspectPreviewNotesTransitionSafety(app.token());
+  assert.equal(after.notesSourceMatchesPreview,true);
+  assert.equal(after.fullOriginMatchesPreview,true);
+  assert.equal(after.notesMultiKeySyncVerified,false);
+  const reloaded=await boot({indexedDB:app.indexedDB,localStorage:app.localStorage});
+  assert.equal((await reloaded.api.inspectPreviewNotesTransitionSafety(
+    reloaded.token())).notesSourceMatchesPreview,true);
+});
+
+test('Notes transition audit separates unrelated old-tab updates and marker crash windows',async()=>{
+  const app=await boot({cache:'original',dirty:'1',authority:'1'});
+  await app.api.rehearsePreviewNotesBundleSeed(app.token(),'seed');
+  app.localStorage.setItem('tp_projects_v1','[{"id":"newer-tab"}]');
+  const unrelated=await app.api.inspectPreviewNotesTransitionSafety(app.token());
+  assert.equal(unrelated.reason,'notes_transition_unrelated_origin_changed');
+  assert.equal(unrelated.notesSourceMatchesPreview,true);
+  assert.equal(unrelated.fullOriginMatchesPreview,false);
+  app.localStorage.setItem(AUTH,'0');
+  const markers=await app.api.inspectPreviewNotesTransitionSafety(app.token());
+  assert.equal(markers.reason,'notes_transition_notes_source_changed');
+  assert.equal(markers.currentNotesSavePhase,'dirty_marker_without_authority');
+  assert.equal(markers.markersChangedSincePreview,true);
+  assert.equal(markers.cacheChangedSincePreview,false);
+  assert.equal(markers.canPromote,false);
+});
+
+test('Notes transition audit refuses stale token, tampered receipt and damaged primary data',async()=>{
+  const app=await boot({cache:'original',dirty:'1',authority:'1'});
+  await app.api.rehearsePreviewNotesBundleSeed(app.token(),'seed');
+  const prior=app.token();
+  app.localStorage.setItem(CACHE,'newer old-tab note');
+  assert.equal((await app.api.inspectPreviewNotesTransitionSafety(prior))
+    .reason,'full_origin_changed');
+  const original=app.indexedDB.dump(DB);
+  const rows=app.indexedDB._databases.get(DB)._stores;
+  const receipt=rows.get('receipts').get('notes-preview-seed:seed');
+  receipt.bundleFingerprint='sha256:invalid:0';
+  const broken=await app.api.inspectPreviewNotesTransitionSafety(app.token());
+  assert.equal(broken.previewEvidenceVerified,false);
+  assert.equal(broken.reason,'notes_preview_evidence_unverified');
+  assert.equal(broken.canPromote,false);
+  assert.deepEqual(app.indexedDB.dump(DB).bundles,original.bundles);
+  app.localStorage.setItem(V1,'{damaged');
+  const damaged=await app.api.inspectPreviewNotesTransitionSafety(app.token());
+  assert.equal(damaged.currentSourceVerified,false);
+  assert.equal(damaged.reason,'notes_source_preflight_failed');
+  assert.equal(app.localStorage.getItem(CACHE),'newer old-tab note');
+});
+
+test('Notes transition audit refuses old-tab mutations during asynchronous hashing',async()=>{
+  let app,armed=false;
+  const crypto={randomUUID(){return 'notes-transition-race'},subtle:{
+    digest:async(...args)=>{
+      const result=await webcrypto.subtle.digest(...args);
+      if(armed){armed=false;app.localStorage.setItem(CACHE,'old-tab-race');}
+      return result;
+    }
+  }};
+  app=await boot({cache:'original',dirty:'1',authority:'1',crypto});
+  await app.api.rehearsePreviewNotesBundleSeed(app.token(),'seed');
+  const before=app.indexedDB.dump(DB);
+  armed=true;
+  const raced=await app.api.inspectPreviewNotesTransitionSafety(app.token());
+  assert.equal(raced.sourceCompared,false,JSON.stringify(raced));
+  assert.equal(raced.previewEvidenceVerified,false);
+  assert.equal(raced.canPromote,false);
+  assert.equal(app.localStorage.getItem(CACHE),'old-tab-race');
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+  app.ctx.location.hostname='taskpoints.pages.dev';
+  assert.equal((await app.api.inspectPreviewNotesTransitionSafety(app.token()))
+    .reason,'preview_host_required');
+  app.ctx.location.hostname='localhost';
+  app.localStorage.removeItem(DARK);
+  assert.equal((await app.api.inspectPreviewNotesTransitionSafety(app.token()))
+    .reason,'dark_disabled');
+});
