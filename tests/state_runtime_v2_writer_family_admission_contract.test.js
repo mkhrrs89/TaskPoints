@@ -1612,3 +1612,114 @@ test('Notes intent inspection preserves its independent proof when source or mar
   assert.equal(r.safeToRestore,false);
   assert.equal(a.localStorage.getItem(V1),'{broken');
 });
+
+
+test('Cooperative Notes conflict inspection observes each source state but never clears intent',async()=>{
+  const a=await bootRealTaskAdapter();
+  setupUnmarkedFirstNotesEdit(a);
+  assert.equal((await a.api.rehearsePreviewNotesFirstEditIntent('short',
+    a.token(),'cross-tab')).intentRecorded,true);
+  const intent=a.localStorage.getItem(FIRST_NOTES_INTENT);
+  const check=async(signal,originSame,cacheSame)=>{
+    const token=a.token();
+    const result=await a.api.inspectPreviewCooperativeNotesFirstEditConflict(token);
+    assert.equal(result.reason,'notes_cooperative_conflict_evidence_observed',
+      JSON.stringify(result));
+    assert.equal(result.conflictSignal,signal);
+    assert.equal(result.cooperativeLockUsed,true);
+    assert.equal(result.intentEvidenceVerified,true);
+    assert.equal(result.stableOriginObserved,true);
+    assert.equal(result.sourceInventoryMatchesAdmission,originSame);
+    assert.equal(result.notesCacheMatchesIntent,cacheSame);
+    assert.equal(result.oldTabsExcluded,false);
+    assert.equal(result.productionWritersFenced,false);
+    assert.equal(result.notesMultiKeySyncVerified,false);
+    assert.equal(result.canAutomaticallyResume,false);
+    assert.equal(result.safeToRestore,false);
+    assert.equal(result.safeToClearDirtyMarker,false);
+    assert.equal(result.canPromote,false);
+    assert.equal(a.token(),token);
+    assert.equal(a.localStorage.getItem(FIRST_NOTES_INTENT),intent);
+  };
+  await check('no_current_origin_change',true,false);
+  a.localStorage.setItem('taskpoints_notes_v1','short');
+  await check('origin_changed_intent_cache_matches',false,true);
+  a.localStorage.setItem('taskpoints_notes_v1','old-tab-clobber');
+  await check('origin_changed_intent_cache_mismatch',false,false);
+  const restarted=await boot({indexedDB:a.indexedDB,localStorage:a.localStorage,
+    navigator:a.ctx.navigator});
+  const reopened=await restarted.api.inspectPreviewCooperativeNotesFirstEditConflict(
+    restarted.token());
+  assert.equal(reopened.conflictSignal,'origin_changed_intent_cache_mismatch');
+  assert.equal(reopened.canPromote,false);
+});
+
+test('Cooperative Notes conflict audit refuses frozen preview or competing tab lock',async()=>{
+  const a=await bootRealTaskAdapter();
+  setupUnmarkedFirstNotesEdit(a);
+  assert.equal((await a.api.rehearsePreviewNotesFirstEditIntent(
+    '',a.token(),'freeze-test')).intentRecorded,true);
+  // A competing cooperative Task/Today/Notes tab holds the shared lock.
+  a.ctx.navigator={locks:{request:async(_name,_opts,callback)=>callback(null)}};
+  const blocked=await a.api.inspectPreviewCooperativeNotesFirstEditConflict(a.token());
+  assert.equal(blocked.reason,'cooperative_notes_conflict_lock_held_elsewhere');
+  assert.equal(blocked.stableOriginObserved,false);
+  assert.equal(blocked.canPromote,false);
+  a.ctx.navigator={locks:sharedFakeWebLocks()};
+  const freeze=await a.api.rehearsePreviewCooperativeWriterFreeze({expectedEpoch:0});
+  assert.equal(freeze.reason,'preview_fence_frozen',JSON.stringify(freeze));
+  const denied=await a.api.inspectPreviewCooperativeNotesFirstEditConflict(a.token());
+  assert.equal(denied.reason,'notes_conflict_preview_fence_unverified_or_frozen',
+    JSON.stringify(denied));
+  assert.equal(denied.canPromote,false);
+  assert.equal(a.localStorage.getItem('taskpoints_notes_dirty_v1'),null);
+});
+
+test('Older Notes tab bypassing preview Web Lock invalidates conflict inspection',async()=>{
+  let a,armed=false;
+  const navigator={locks:sharedFakeWebLocks(name=>{
+    if(name===TASK_BRIDGE_LOCK&&armed){
+      armed=false;
+      a.localStorage.setItem('taskpoints_notes_v1','older-tab-change');
+    }
+  })};
+  a=await bootRealTaskAdapter({navigator});
+  setupUnmarkedFirstNotesEdit(a);
+  assert.equal((await a.api.rehearsePreviewNotesFirstEditIntent(
+    'short',a.token(),'old-version')).intentRecorded,true);
+  const token=a.token();
+  armed=true;
+  const denied=await a.api.inspectPreviewCooperativeNotesFirstEditConflict(token);
+  assert.equal(denied.reason,'full_origin_changed_under_cooperative_lock',
+    JSON.stringify(denied));
+  assert.equal(denied.stableOriginObserved,false);
+  assert.equal(denied.canPromote,false);
+  assert.equal(a.localStorage.getItem('taskpoints_notes_v1'),'older-tab-change');
+  assert.equal((await a.api.inspectPreviewNotesFirstEditIntent())
+    .intentEvidenceVerified,true);
+});
+
+test('Older-tab write during asynchronous Notes conflict evidence is rejected',async()=>{
+  const a=await bootRealTaskAdapter();
+  setupUnmarkedFirstNotesEdit(a);
+  await a.api.rehearsePreviewNotesFirstEditIntent('short',a.token(),'digest');
+  const token=a.token(),stable=a.ctx.crypto.subtle;
+  let fired=false;
+  a.ctx.crypto.subtle={digest:async(...args)=>{
+    const hash=await stable.digest(...args);
+    if(!fired){
+      fired=true;
+      a.localStorage.setItem('taskpoints_notes_v1','older-tab-mid-digest');
+    }
+    return hash;
+  }};
+  const denied=await a.api.inspectPreviewCooperativeNotesFirstEditConflict(token);
+  assert.equal(denied.stableOriginObserved,false,JSON.stringify(denied));
+  assert.notEqual(denied.reason,'notes_cooperative_conflict_evidence_observed');
+  assert.equal(denied.canPromote,false);
+  assert.equal(a.localStorage.getItem('taskpoints_notes_v1'),
+    'older-tab-mid-digest');
+  a.ctx.crypto.subtle=stable;
+  assert.equal((await a.api.inspectPreviewNotesFirstEditIntent())
+    .intentEvidenceVerified,true);
+});
