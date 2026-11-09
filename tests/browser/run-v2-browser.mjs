@@ -5169,6 +5169,112 @@ try {
 
 
 
+
+  await run('Notes shared-lock conflict audit sees old-tab bypass and rejects overlapping preview tab',async context=>{
+    const page=await open(context);
+    const legacy=await context.newPage();
+    await legacy.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const setup=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const original=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      original.notes='A long original note must survive the old tab';
+      localStorage.setItem('taskpoints_v1',JSON.stringify(original));
+      localStorage.setItem('taskpoints_notes_v1',original.notes);
+      localStorage.removeItem('taskpoints_notes_authoritative_v1');
+      localStorage.removeItem('taskpoints_notes_dirty_v1');
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const result=await api.rehearsePreviewNotesFirstEditIntent(
+        'short',token(),'cooperative-browser');
+      return {result,token:token(),snapshot:localStorage.getItem('taskpoints_v1')};
+    });
+    if(setup.result.reason==='lock_manager_unavailable'){
+      assert.equal(setup.result.intentRecorded,false);
+      return {noWebLocksFailsClosed:true};
+    }
+    assert.equal(setup.result.intentRecorded,true,JSON.stringify(setup.result));
+    const first=await page.evaluate(async token=>
+      window.TaskPointsStateRuntimeV2
+        .inspectPreviewCooperativeNotesFirstEditConflict(token),setup.token);
+    assert.equal(first.reason,'notes_cooperative_conflict_evidence_observed',
+      JSON.stringify(first));
+    assert.equal(first.conflictSignal,'no_current_origin_change');
+    assert.equal(first.oldTabsExcluded,false);
+    assert.equal(first.canPromote,false);
+    // One cooperative preview tab acquires its shared native lock.
+    await page.evaluate(()=>{
+      window.__notesConflictHeld=false;
+      window.__notesConflictHold=navigator.locks.request(
+        'taskpoints_v2_preview_task_freeze_cooperative_v1',
+        {mode:'exclusive'},async()=>{
+          window.__notesConflictHeld=true;
+          await new Promise(resolve=>{window.__releaseNotesConflict=resolve;});
+          window.__notesConflictHeld=false;
+        });
+    });
+    await page.waitForFunction(()=>window.__notesConflictHeld===true);
+    const denied=await page.evaluate(async()=>{
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      return window.TaskPointsStateRuntimeV2
+        .inspectPreviewCooperativeNotesFirstEditConflict(token);
+    });
+    assert.equal(denied.reason,'cooperative_notes_conflict_lock_held_elsewhere',
+      JSON.stringify(denied));
+    assert.equal(denied.stableOriginObserved,false);
+    // An old-code tab does NOT participate in the cooperative lock and can
+    // change live Notes while the new preview has this lock.
+    const changed=await legacy.evaluate(()=>{
+      localStorage.setItem('taskpoints_notes_v1','old-tab-conflicting-note');
+      return localStorage.getItem('taskpoints_notes_v1');
+    });
+    await requireCrossTabStorageValue(page,'taskpoints_notes_v1',changed);
+    await page.evaluate(async()=>{
+      window.__releaseNotesConflict();
+      await window.__notesConflictHold;
+    });
+    const stale=await page.evaluate(async token=>
+      window.TaskPointsStateRuntimeV2
+        .inspectPreviewCooperativeNotesFirstEditConflict(token),setup.token);
+    assert.equal(stale.reason,'full_origin_changed_under_cooperative_lock',
+      JSON.stringify(stale));
+    const observed=await page.evaluate(async()=>{
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const report=await window.TaskPointsStateRuntimeV2
+        .inspectPreviewCooperativeNotesFirstEditConflict(token);
+      return {report,snapshot:localStorage.getItem('taskpoints_v1'),
+        cache:localStorage.getItem('taskpoints_notes_v1'),
+        dirty:localStorage.getItem('taskpoints_notes_dirty_v1')};
+    });
+    assert.equal(observed.report.reason,'notes_cooperative_conflict_evidence_observed',
+      JSON.stringify(observed.report));
+    assert.equal(observed.report.conflictSignal,
+      'origin_changed_intent_cache_mismatch');
+    assert.equal(observed.report.oldTabsExcluded,false);
+    assert.equal(observed.report.safeToRestore,false);
+    assert.equal(observed.report.canPromote,false);
+    assert.equal(observed.cache,changed);
+    assert.equal(observed.snapshot,setup.snapshot);
+    assert.equal(observed.dirty,null);
+    await page.reload({waitUntil:'load'});
+    const reloaded=await page.evaluate(async()=>{
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      return window.TaskPointsStateRuntimeV2
+        .inspectPreviewCooperativeNotesFirstEditConflict(token);
+    });
+    assert.equal(reloaded.conflictSignal,'origin_changed_intent_cache_mismatch',
+      JSON.stringify(reloaded));
+    assert.equal(reloaded.canAutomaticallyResume,false);
+    return {nativeCooperativeLockHonored:true,
+      oldTabCanBypassLock:true,staleOriginRejected:true,
+      conflictClassificationPersistsAfterReload:true,
+      noUnapprovedNotesWrites:true,noCutover:true};
+  });
+
   await run('Preview Notes first-edit intent survives legacy-tab crash without ever restoring Notes',async context=>{
     const page=await open(context);
     const legacy=await context.newPage();
