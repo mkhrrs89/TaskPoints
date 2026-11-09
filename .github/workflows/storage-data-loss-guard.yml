@@ -8,6 +8,7 @@ on:
       - 'mobile_boot_gate.js'
       - 'tests/home_worker_route_contract.test.js'
       - 'tests/home_weekly_work_hours.test.js'
+      - 'tests/habit_manual_streak_freezes.test.js'
       - 'tests/mobile_boot_recovery_notice.test.js'
       - 'tests/shared_read_cache_clone_failure.test.js'
       - 'tests/load_state_decode_fail_closed.test.js'
@@ -83,6 +84,9 @@ jobs:
 
       - name: Verify Sunday Work Hours visibility and Monday restoration
         run: node --test tests/home_weekly_work_hours.test.js
+
+      - name: Verify the Habits Week / This toggle without the Older button
+        run: node --test tests/habit_manual_streak_freezes.test.js
 
       - name: Run full TaskPoints suite
         run: npm test
