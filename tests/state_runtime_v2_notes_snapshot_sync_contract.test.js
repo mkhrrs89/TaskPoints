@@ -871,3 +871,272 @@ test('follow-up audit never reports synced dirty after marker loss',async()=>{
     'followup_recovery_markers_missing');
   assert.equal(noAuthority.canPromote,false);
 });
+
+
+const REPEAT_JOURNAL='taskpoints_v2_preview_notes_repeat_journal_v1';
+async function completedTwoNotesEdits(a){
+  await stagedFollowup(a,'repeat-first','repeat-second');
+  const second=await a.api.rehearsePreviewAdmittedNotesFollowupSnapshotSync(
+    a.token(),'repeat-second');
+  assert.equal(second.notesSnapshotSynchronized,true,JSON.stringify(second));
+  assert.equal(JSON.parse(a.localStorage.getItem(V1)).notes,'second');
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+}
+async function repeatSequence(a,id,text){
+  const intent=await a.api.rehearsePreviewNotesRepeatEditIntent(
+    text,a.token(),id);
+  assert.equal(intent.intentRecorded,true,JSON.stringify(intent));
+  const cached=await a.api.rehearsePreviewAdmittedNotesRepeatCacheWrite(
+    a.token(),id);
+  assert.equal(cached.cacheReadbackVerified,true,JSON.stringify(cached));
+  const synced=await a.api.rehearsePreviewAdmittedNotesRepeatSnapshotSync(
+    a.token(),id);
+  assert.equal(synced.notesSnapshotSynchronized,true,JSON.stringify(synced));
+  return {intent,cached,synced};
+}
+
+test('bounded repeat journal handles three sequential Notes edits with sealed previous history',async()=>{
+  const a=await boot();
+  await completedTwoNotesEdits(a);
+  const originals={first:a.localStorage.getItem(INTENT),
+    second:a.localStorage.getItem(FOLLOWUP_INTENT)};
+  const originalState=JSON.parse(a.localStorage.getItem(V1));
+  const idbBefore=a.indexedDB.dump('taskpoints_state_v2');
+  let expected=0;
+  for(const [id,text] of [['repeat-3','third'],
+    ['repeat-4','fourth'],['repeat-5','fifth']]){
+    const saved=await repeatSequence(a,id,text);
+    expected++;
+    assert.equal(saved.intent.journalEntryCount,expected);
+    assert.equal(saved.synced.canPromote,false);
+    assert.equal(saved.synced.safeToClearDirtyMarker,false);
+    assert.equal(saved.synced.confirmedNotesDurable,false);
+    assert.equal(saved.synced.oldTabsExcluded,false);
+    assert.equal(a.localStorage.getItem(INTENT),originals.first);
+    assert.equal(a.localStorage.getItem(FOLLOWUP_INTENT),originals.second);
+    assert.equal(a.localStorage.getItem(CACHE),text);
+    assert.equal(a.localStorage.getItem(DIRTY),'1');
+    const data=JSON.parse(a.localStorage.getItem(V1));
+    assert.equal(data.notes,text);
+    assert.deepEqual({...data,notes:originalState.notes},originalState);
+    const evidence=await a.api.inspectPreviewNotesRepeatEditJournal();
+    assert.equal(evidence.journalEvidenceVerified,true,JSON.stringify(evidence));
+    assert.equal(evidence.journalEntryCount,expected);
+    assert.equal(evidence.lastActionId,id);
+    assert.equal(evidence.observedRecoveryStage,
+      'repeat_snapshot_synced_dirty_pending');
+  }
+  const journal=JSON.parse(a.localStorage.getItem(REPEAT_JOURNAL));
+  assert.equal(journal.entries.length,3);
+  assert.deepEqual(journal.entries.map(x=>x.actionId),
+    ['repeat-3','repeat-4','repeat-5']);
+  assert.deepEqual(journal.entries.map(x=>x.previousActionId),
+    ['repeat-second','repeat-3','repeat-4']);
+  assert.deepEqual(a.indexedDB.dump('taskpoints_state_v2'),idbBefore);
+  const reload=await boot({localStorage:a.localStorage,indexedDB:a.indexedDB});
+  const evidence=await reload.api.inspectPreviewNotesRepeatEditJournal();
+  assert.equal(evidence.journalEvidenceVerified,true,JSON.stringify(evidence));
+  assert.equal(evidence.observedRecoveryStage,
+    'repeat_snapshot_synced_dirty_pending');
+  assert.equal(reload.localStorage.getItem(DIRTY),'1');
+});
+
+test('repeat admission refuses incomplete second edit and never appends over an unfinished action',async()=>{
+  const a=await boot();
+  await stagedFollowup(a,'pending-first','pending-second');
+  const denied=await a.api.rehearsePreviewNotesRepeatEditIntent(
+    'third',a.token(),'premature-third');
+  assert.equal(denied.intentRecorded,false);
+  assert.equal(a.localStorage.getItem(REPEAT_JOURNAL),null);
+  await a.api.rehearsePreviewAdmittedNotesFollowupSnapshotSync(
+    a.token(),'pending-second');
+  const first=await a.api.rehearsePreviewNotesRepeatEditIntent(
+    'third',a.token(),'first-repeat');
+  assert.equal(first.intentRecorded,true,JSON.stringify(first));
+  const sealed=a.localStorage.getItem(REPEAT_JOURNAL);
+  const second=await a.api.rehearsePreviewNotesRepeatEditIntent(
+    'fourth',a.token(),'too-early');
+  assert.equal(second.intentRecorded,false);
+  assert.equal(a.localStorage.getItem(REPEAT_JOURNAL),sealed);
+  const wrong=await a.api.rehearsePreviewAdmittedNotesRepeatCacheWrite(
+    a.token(),'different-action');
+  assert.equal(wrong.cacheReadbackVerified,false);
+  assert.equal(a.localStorage.getItem(CACHE),'second');
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+});
+
+test('repeat journal reports crash stage after cache write and restart without replay',async()=>{
+  const a=await boot();
+  await completedTwoNotesEdits(a);
+  const baseline=a.localStorage.getItem(V1);
+  const stored=await a.api.rehearsePreviewNotesRepeatEditIntent(
+    'third after crash',a.token(),'restarted-repeat');
+  assert.equal(stored.intentRecorded,true);
+  const intentOnly=await a.api.inspectPreviewNotesRepeatEditJournal();
+  assert.equal(intentOnly.observedRecoveryStage,
+    'repeat_intent_recorded_cache_pending',JSON.stringify(intentOnly));
+  const cached=await a.api.rehearsePreviewAdmittedNotesRepeatCacheWrite(
+    a.token(),'restarted-repeat');
+  assert.equal(cached.cacheReadbackVerified,true);
+  const pending=await a.api.inspectPreviewNotesRepeatEditJournal();
+  assert.equal(pending.observedRecoveryStage,
+    'repeat_cache_written_snapshot_pending',JSON.stringify(pending));
+  assert.equal(a.localStorage.getItem(V1),baseline);
+  const copy=await boot({localStorage:a.localStorage,indexedDB:a.indexedDB});
+  const recovered=await copy.api.inspectPreviewNotesRepeatEditJournal();
+  assert.equal(recovered.journalEvidenceVerified,true);
+  assert.equal(recovered.observedRecoveryStage,
+    'repeat_cache_written_snapshot_pending');
+  assert.equal(recovered.canAutomaticallyResume,false);
+  const duplicate=await copy.api.rehearsePreviewAdmittedNotesRepeatCacheWrite(
+    copy.token(),'restarted-repeat');
+  assert.equal(duplicate.cacheReadbackVerified,false);
+  assert.equal(copy.localStorage.getItem(DIRTY),'1');
+  const synced=await copy.api.rehearsePreviewAdmittedNotesRepeatSnapshotSync(
+    copy.token(),'restarted-repeat');
+  assert.equal(synced.notesSnapshotSynchronized,true,JSON.stringify(synced));
+  assert.equal(JSON.parse(copy.localStorage.getItem(V1)).notes,
+    'third after crash');
+});
+
+test('repeat journal refuses old tab edits even with fresh full origin token',async()=>{
+  const a=await boot();
+  await completedTwoNotesEdits(a);
+  await a.api.rehearsePreviewNotesRepeatEditIntent(
+    'third',a.token(),'repeat-stale');
+  const prior=JSON.parse(a.localStorage.getItem(V1));
+  prior.tasks.push({id:'t-old-tab',title:'Preserve old tab task'});
+  a.localStorage.setItem(V1,JSON.stringify(prior));
+  const blocked=await a.api.rehearsePreviewAdmittedNotesRepeatCacheWrite(
+    a.token(),'repeat-stale');
+  assert.equal(blocked.reason,'repeat_cache_original_origin_changed',
+    JSON.stringify(blocked));
+  assert.equal(blocked.writeAttempted,false);
+  assert.equal(a.localStorage.getItem(CACHE),'second');
+  assert.equal(JSON.parse(a.localStorage.getItem(V1)).tasks[1].id,'t-old-tab');
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+});
+
+test('repeat snapshot refuses stale origin even if old tab change is retokened after cache write',async()=>{
+  const a=await boot();
+  await completedTwoNotesEdits(a);
+  await a.api.rehearsePreviewNotesRepeatEditIntent(
+    'third',a.token(),'repeat-snap-stale');
+  await a.api.rehearsePreviewAdmittedNotesRepeatCacheWrite(
+    a.token(),'repeat-snap-stale');
+  const prior=JSON.parse(a.localStorage.getItem(V1));
+  prior.tasks.push({id:'old-tab-later',title:'Never overwrite'});
+  a.localStorage.setItem(V1,JSON.stringify(prior));
+  const result=await a.api.rehearsePreviewAdmittedNotesRepeatSnapshotSync(
+    a.token(),'repeat-snap-stale');
+  assert.equal(result.reason,'repeat_snapshot_original_origin_changed',
+    JSON.stringify(result));
+  assert.equal(result.writeAttempted,false);
+  assert.equal(result.canPromote,false);
+  assert.equal(JSON.parse(a.localStorage.getItem(V1)).tasks[1].id,'old-tab-later');
+  assert.equal(a.localStorage.getItem(CACHE),'third');
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+});
+
+test('repeat journal corruption refuses new writes; existing sealed first and second intents survive',async()=>{
+  const a=await boot();
+  await completedTwoNotesEdits(a);
+  const before={first:a.localStorage.getItem(INTENT),
+    second:a.localStorage.getItem(FOLLOWUP_INTENT)};
+  await a.api.rehearsePreviewNotesRepeatEditIntent(
+    'third',a.token(),'repeat-tamper');
+  const record=JSON.parse(a.localStorage.getItem(REPEAT_JOURNAL));
+  record.entries[0].text='forged';
+  a.localStorage.setItem(REPEAT_JOURNAL,JSON.stringify(record));
+  const evidence=await a.api.inspectPreviewNotesRepeatEditJournal();
+  assert.equal(evidence.journalEvidenceVerified,undefined,
+    JSON.stringify(evidence));
+  assert.equal(evidence.canPromote,false);
+  const refused=await a.api.rehearsePreviewAdmittedNotesRepeatCacheWrite(
+    a.token(),'repeat-tamper');
+  assert.equal(refused.cacheReadbackVerified,false);
+  assert.equal(refused.writeAttempted,false);
+  assert.equal(a.localStorage.getItem(INTENT),before.first);
+  assert.equal(a.localStorage.getItem(FOLLOWUP_INTENT),before.second);
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+});
+
+test('repeat cache quota and snapshot quota failures retain signed journal and dirty marker',async()=>{
+  for(const failKey of [CACHE,V1]){
+    const a=await boot();
+    await completedTwoNotesEdits(a);
+    await a.api.rehearsePreviewNotesRepeatEditIntent(
+      'third',a.token(),'repeat-quota');
+    const seal=a.localStorage.getItem(REPEAT_JOURNAL);
+    const originalSet=a.localStorage.setItem.bind(a.localStorage);
+    a.localStorage.setItem=(key,value)=>{
+      if(key===failKey)throw Error('QuotaExceededError');
+      return originalSet(key,value);
+    };
+    let result;
+    if(failKey===CACHE){
+      result=await a.api.rehearsePreviewAdmittedNotesRepeatCacheWrite(
+        a.token(),'repeat-quota');
+      assert.equal(result.reason,'repeat_cache_write_uncertain',
+        JSON.stringify(result));
+    }else{
+      // Only the snapshot call is quota-denied; let cache write succeed first.
+      a.localStorage.setItem=originalSet;
+      await a.api.rehearsePreviewAdmittedNotesRepeatCacheWrite(
+        a.token(),'repeat-quota');
+      a.localStorage.setItem=(key,value)=>{
+        if(key===V1)throw Error('QuotaExceededError');
+        return originalSet(key,value);
+      };
+      result=await a.api.rehearsePreviewAdmittedNotesRepeatSnapshotSync(
+        a.token(),'repeat-quota');
+      assert.equal(result.reason,'repeat_snapshot_write_uncertain',
+        JSON.stringify(result));
+    }
+    assert.equal(result.writeOutcomeUncertain,true);
+    assert.equal(result.inspectIntentBeforeRetry,true);
+    assert.equal(result.canPromote,false);
+    assert.equal(a.localStorage.getItem(REPEAT_JOURNAL),seal);
+    assert.equal(a.localStorage.getItem(DIRTY),'1');
+  }
+});
+
+test('repeat journal rejects observed transient old tab storage event and refuses production hosts',async()=>{
+  const a=await witnessBoot();
+  await completedTwoNotesEdits(a);
+  const good=await a.api.rehearsePreviewNotesRepeatEditIntent(
+    'third',a.token(),'repeat-event');
+  assert.equal(good.intentRecorded,true,JSON.stringify(good));
+  const start=await a.api.beginPreviewLegacyStorageEventWitness(a.token());
+  assert.equal(start.observing,true);
+  a.signal();
+  const denied=await a.api.rehearsePreviewAdmittedNotesRepeatCacheWrite(
+    a.token(),'repeat-event');
+  assert.equal(denied.reason,'repeat_cache_source_changed_before_write',
+    JSON.stringify(denied));
+  assert.equal(denied.cacheReadbackVerified,false);
+  assert.equal(a.localStorage.getItem(CACHE),'second');
+  a.api.stopPreviewLegacyStorageEventWitness();
+  a.ctx.location.hostname='taskpoints.pages.dev';
+  const forbidden=await a.api.rehearsePreviewAdmittedNotesRepeatCacheWrite(
+    a.token(),'repeat-event');
+  assert.equal(forbidden.reason,'preview_host_required');
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+});
+
+test('repeat journal is bounded at sixteen extra sequential edits',async()=>{
+  const a=await boot();
+  await completedTwoNotesEdits(a);
+  for(let i=1;i<=16;i++){
+    const id='repeat-cap-'+i;
+    await repeatSequence(a,id,'value-'+i);
+  }
+  const previous=a.localStorage.getItem(REPEAT_JOURNAL);
+  const blocked=await a.api.rehearsePreviewNotesRepeatEditIntent(
+    'one-too-many',a.token(),'repeat-cap-17');
+  assert.equal(blocked.reason,'repeat_journal_capacity_reached',
+    JSON.stringify(blocked));
+  assert.equal(a.localStorage.getItem(REPEAT_JOURNAL),previous);
+  assert.equal(a.localStorage.getItem(DIRTY),'1');
+  assert.equal(JSON.parse(a.localStorage.getItem(V1)).notes,'value-16');
+});
