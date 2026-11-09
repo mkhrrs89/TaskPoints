@@ -2557,3 +2557,28 @@ preserving the independent task and the dirty marker.
 
 This is still progress within an uncredited cutover gate. The weighted
 completion score stays **67/100**; Main has not been changed.
+
+## Original-snapshot-bound Notes admission — November 9
+
+V2 preview first-edit intent schema 2 now signs the SHA-256 fingerprint
+of the **exact original raw V1 snapshot**, including non-Notes fields.
+The guarded Notes snapshot continuation requires that original snapshot
+to still match before replacing only Notes. If an older V1 tab has edited
+a Task, Habit, or Notes field in the snapshot, a newly recaptured origin
+token is **not** sufficient to authorize overwriting it. The operation
+refuses before its first snapshot write and retains the immutable intent
+and dirty marker. This closes a previously uncovered re-tokening race.
+
+Existing signed schema-1 preview intents remain read-only inspectable
+for diagnosis and recovery evidence, but cannot acquire this stronger
+snapshot-write admission without the original snapshot attestation.
+No automatic replay, marker clearing, hidden format conversion, or live
+Notes integration is introduced. This protection is limited to disposable
+preview origins; old browsers remain able to bypass cooperative Web Locks
+and independently mutate V1 after inspection.
+
+Node and Chromium/WebKit browser contracts cover retokened old-tab
+snapshot changes. The change improves an **uncredited gate** and does
+not establish production-wide writer fencing, full Notes migration,
+physical device durability or permission to promote. Overall remains
+**67/100**, and Main is unchanged.
