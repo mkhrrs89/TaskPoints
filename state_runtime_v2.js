@@ -5964,6 +5964,111 @@
     finally{try{db?.close();}catch(_){}}
   }
 
+
+  // PREVIEW-ONLY, READ-ONLY Notes interruption model. The existing Notes
+  // page performs synchronous cache, authority and dirty-marker writes in
+  // sequence. If a first edit is shortened or cleared and the page dies
+  // between cache and authority marker writes, V1's unmarked bootstrap can
+  // select the older (longer) snapshot. Rehearse every prefix IN MEMORY
+  // without ever changing a V1 key or creating a V2 database.
+  async function inspectPreviewNotesInterruptedSaveWindows(nextText,
+    expectedInventoryToken) {
+    const refuse=(reason,extra={})=>({
+      checked:true,previewOnly:true,sourceVerified:false,
+      firstEditWindowVerified:false,finalSaveWindowVerified:false,
+      notesMultiKeySyncVerified:false,
+      safeToBeginNotesWrite:false,safeToClearDirtyMarker:false,
+      safeToRestore:false,notesMigrated:false,
+      productionWritersFenced:false,canPromote:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...extra
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    if(typeof nextText!=='string'||nextText.length>1048576)
+      return refuse('notes_text_invalid_or_oversized');
+    if(typeof expectedInventoryToken!=='string'||!expectedInventoryToken)
+      return refuse('full_origin_token_required');
+    const generation=currentGeneration({create:false});
+    if(!generation)return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    let source;
+    try {
+      if(captureReadOnlyFullStorageInventory()!==expectedInventoryToken)
+        return refuse('full_origin_changed');
+      source=await capturePreviewNotesBundle(expectedInventoryToken,
+        generation,epoch);
+      if(source.reason)return refuse('notes_source_preflight_failed',{
+        prerequisiteReason:source.reason});
+      const original=source.bundle;
+      const pick=(cache,cachePresent,dirty,authority,snapshot)=>{
+        if(cachePresent&&(dirty==='1'||authority==='1'))
+          return {from:'marked_cache',text:cache};
+        if(cache.trim()&&!snapshot.trim())
+          return {from:'unmarked_cache_only',text:cache};
+        if(snapshot.trim()&&!cache.trim())
+          return {from:'unmarked_snapshot_only',text:snapshot};
+        if(cache===snapshot)
+          return {from:'unmarked_equal',text:cache};
+        return cache.length>=snapshot.length
+          ?{from:'unmarked_cache_longer',text:cache}
+          :{from:'unmarked_snapshot_longer',text:snapshot};
+      };
+      const prior=pick(original.cacheNotes,original.cachePresent,
+        original.dirtyRaw,original.authorityRaw,original.stateNotes);
+      // This is a hypothetical next edit; do not expose original/proposed
+      // Notes text, and do not mistake a point-in-time match for durability.
+      const stages=[
+        {stage:'after_cache_write_before_authority_marker',
+          cache:nextText,authority:original.authorityRaw,
+          dirty:original.dirtyRaw,snapshot:original.stateNotes},
+        {stage:'after_authority_marker_before_dirty_marker',
+          cache:nextText,authority:'1',dirty:original.dirtyRaw,
+          snapshot:original.stateNotes},
+        {stage:'after_dirty_marker_before_snapshot_sync',
+          cache:nextText,authority:'1',dirty:'1',
+          snapshot:original.stateNotes},
+        {stage:'after_snapshot_sync_before_dirty_clear',
+          cache:nextText,authority:'1',dirty:'1',
+          snapshot:nextText},
+        {stage:'after_dirty_marker_clear',
+          cache:nextText,authority:'1',dirty:null,
+          snapshot:nextText}
+      ];
+      const proposedIsChange=prior.text!==nextText;
+      const windows=stages.map(({stage,cache,authority,dirty,snapshot})=>{
+        const chosen=pick(cache,true,dirty,authority,snapshot);
+        return {
+          stage,selectedSource:chosen.from,
+          proposedEditWouldBeSelected:chosen.text===nextText,
+          proposedEditMayBeHidden:
+            proposedIsChange&&chosen.text!==nextText,
+          cacheAuthorityMarked:authority==='1'||dirty==='1',
+          snapshotContainsProposedEdit:snapshot===nextText
+        };
+      });
+      if(!source.current())
+        return refuse('notes_source_changed_during_interruption_audit');
+      return {
+        ...refuse('notes_interruption_windows_inspected'),
+        sourceVerified:true,firstEditWindowVerified:true,
+        finalSaveWindowVerified:true,
+        proposedEditIsChange:proposedIsChange,
+        cacheMarkerBootstrapRequired:
+          original.dirtyRaw!=='1'&&original.authorityRaw!=='1',
+        hasUnprotectedFirstEditWindow:
+          windows[0].proposedEditMayBeHidden,
+        scenarios:windows,
+        comparisonScope:'hypothetical_v1_notes_cache_and_marker_prefixes',
+        // No old-tab exclusion, atomic multi-key save or actual physical
+        // crash durability has been proven. NEVER auto-replay these steps.
+        notesMultiKeySyncVerified:false,
+        safeToBeginNotesWrite:false,safeToClearDirtyMarker:false,
+        safeToRestore:false,canPromote:false
+      };
+    }catch(_){return refuse('notes_interruption_audit_unavailable');}
+  }
+
   // PREVIEW-ONLY, NONMUTATING Game preferences inventory. The Players page
   // keeps three independent raw localStorage keys outside the V1 snapshot.
   // Never substitute its forgiving UI defaults for missing/corrupt source
@@ -15744,6 +15849,7 @@
     inspectPreviewNotesRecoveryEvidence,
     inspectPreviewNotesCheckpointCoverage,
     inspectPreviewNotesTransitionSafety,
+    inspectPreviewNotesInterruptedSaveWindows,
     inspectPreviewGamePreferencesSource,
     rehearsePreviewHabitOrderSidecarSeed,
     rehearsePreviewHabitOrderSidecarReconcile,
