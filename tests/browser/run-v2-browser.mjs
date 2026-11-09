@@ -5170,6 +5170,103 @@ try {
 
 
 
+
+  await run('Baseline-first Notes protocol protects prior text across every simulated interruption',async context=>{
+    const page=await open(context);
+    const old=await context.newPage();
+    await old.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const initial=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const state=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      state.notes='A much longer previous Notes document';
+      localStorage.setItem('taskpoints_v1',JSON.stringify(state));
+      localStorage.setItem('taskpoints_notes_v1','old');
+      localStorage.removeItem('taskpoints_notes_authoritative_v1');
+      localStorage.removeItem('taskpoints_notes_dirty_v1');
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const intent=await api.rehearsePreviewNotesFirstEditIntent(
+        '',token(),'baseline-browser');
+      const after=token();
+      const plan=await api.inspectPreviewNotesBaselineFirstProtocol(after);
+      return {intent,plan,token:after,prior:state.notes};
+    });
+    if(initial.intent.reason==='lock_manager_unavailable'){
+      assert.equal(initial.intent.intentRecorded,false);
+      return {noNativeWebLocksFailsClosed:true};
+    }
+    assert.equal(initial.intent.intentRecorded,true,JSON.stringify(initial.intent));
+    assert.equal(initial.plan.reason,'notes_baseline_first_protocol_inspected',
+      JSON.stringify(initial.plan));
+    assert.equal(initial.plan.allCrashPrefixesPreserveExpectedSelection,true);
+    assert.equal(initial.plan.shortcutAuthorityFirstWouldHideBaseline,true);
+    assert.equal(initial.plan.canApply,false);
+    assert.equal(initial.plan.oldTabsExcluded,false);
+    const check=async(expectedLength,expectedSource)=>{
+      const r=await page.evaluate(()=>window.TaskPointsStateRuntimeV2
+        .inspectPreviewNotesSource());
+      assert.equal(r.sourceVerified,true,JSON.stringify(r));
+      assert.equal(r.selectedLength,expectedLength);
+      assert.equal(r.selectedSource,expectedSource);
+      assert.equal(r.canPromote,false);
+    };
+    await check(initial.prior.length,'unmarked_snapshot_longer');
+    // Stage 1: write the CURRENT effective Notes into cache (not the edit).
+    await old.evaluate(prior=>localStorage.setItem('taskpoints_notes_v1',prior),
+      initial.prior);
+    await requireCrossTabStorageValue(page,'taskpoints_notes_v1',initial.prior);
+    await check(initial.prior.length,'unmarked_equal');
+    // Stage 2: mark the existing effective cache authoritative first.
+    await old.evaluate(()=>localStorage.setItem('taskpoints_notes_authoritative_v1','1'));
+    await requireCrossTabStorageValue(page,'taskpoints_notes_authoritative_v1','1');
+    await check(initial.prior.length,'marked_cache');
+    // Stage 3: only now write the intentional shorter/empty new Notes.
+    await old.evaluate(()=>localStorage.setItem('taskpoints_notes_v1',''));
+    await requireCrossTabStorageValue(page,'taskpoints_notes_v1','');
+    await check(0,'marked_cache');
+    // Stage 4: record dirty state.
+    await old.evaluate(()=>localStorage.setItem('taskpoints_notes_dirty_v1','1'));
+    await requireCrossTabStorageValue(page,'taskpoints_notes_dirty_v1','1');
+    await check(0,'marked_cache');
+    // Stage 5: synchronize the V1 snapshot with the new Notes.
+    const updated=await old.evaluate(()=>{
+      const state=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      state.notes='';
+      const raw=JSON.stringify(state);
+      localStorage.setItem('taskpoints_v1',raw);
+      return raw;
+    });
+    await requireCrossTabStorageValue(page,'taskpoints_v1',updated);
+    await check(0,'marked_cache');
+    // Stage 6: clear the dirty flag after the full V1 snapshot update.
+    await old.evaluate(()=>localStorage.removeItem('taskpoints_notes_dirty_v1'));
+    await requireCrossTabStorageValue(page,'taskpoints_notes_dirty_v1',null);
+    await check(0,'marked_cache');
+    await page.reload({waitUntil:'load'});
+    const final=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const evidence=await api.inspectPreviewNotesFirstEditIntent();
+      return {evidence,cache:localStorage.getItem('taskpoints_notes_v1'),
+        snapshot:JSON.parse(localStorage.getItem('taskpoints_v1')).notes,
+        authority:localStorage.getItem('taskpoints_notes_authoritative_v1'),
+        dirty:localStorage.getItem('taskpoints_notes_dirty_v1')};
+    });
+    assert.equal(final.evidence.intentEvidenceVerified,true);
+    assert.equal(final.evidence.observedRecoveryStage,
+      'snapshot_and_cache_match_dirty_cleared');
+    assert.equal(final.evidence.canAutomaticallyResume,false);
+    assert.equal(final.cache,'');
+    assert.equal(final.snapshot,'');
+    assert.equal(final.authority,'1');
+    assert.equal(final.dirty,null);
+    return {baselinePreservedUntilEdit:true,
+      emptyFirstEditSelectedAfterAuthorityMarker:true,
+      allSevenStagesVerified:true,crashIntentStillInspectable:true,
+      productionWriterUnchanged:true,noAuthorityCutover:true};
+  });
+
   await run('Notes shared-lock conflict audit sees old-tab bypass and rejects overlapping preview tab',async context=>{
     const page=await open(context);
     const legacy=await context.newPage();
