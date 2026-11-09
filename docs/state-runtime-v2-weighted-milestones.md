@@ -2530,3 +2530,30 @@ stale origin, wrong action, quota denial, competing old-tab writes,
 frozen fence, production-host refusal and unsupported snapshot codec.
 This is progress within the uncredited nonpilot migration gate, not
 evidence to raise the weighted **67/100** readiness score.
+
+## Notes completion proof — read-only final-stage verification (November 9)
+
+The developer-only `inspectPreviewNotesSnapshotCompletionEvidence(token, actionId)`
+now checks the *post-snapshot* Notes state without changing any storage.
+It requires a matching signed first-edit intent, both V1 Notes locations
+selecting that text, valid authoritative and still-dirty markers, a
+stable whole-origin inventory, a nonfrozen preview writer fence and
+the cooperative Web Lock. It rechecks the origin and fence after async
+verification and rejects any observed external storage events from
+an optionally active page-lifetime witness.
+
+A passing result proves only that the cache and snapshot match **at the
+time of inspection**; it does not prove the old V1 tabs are excluded,
+storage events were not missed, the prior app state was transactionally
+protected, the dirty marker can be safely removed, or a physical iOS
+process kill is durable. `safeToClearDirtyMarker:false`,
+`oldTabsExcluded:false`, `canPromote:false` and V1 authority remain fixed.
+
+Node tests cover snapshot-not-yet-synced, positive replay after reload,
+older-tab post-sync overwrite, wrong action, tampered intent, frozen fence,
+production-host refusal and observed external event. Browser tests check
+reload, a transient old-tab change and a later snapshot overwrite while
+preserving the independent task and the dirty marker.
+
+This is still progress within an uncredited cutover gate. The weighted
+completion score stays **67/100**; Main has not been changed.
