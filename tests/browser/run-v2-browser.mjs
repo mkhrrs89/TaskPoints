@@ -5230,6 +5230,149 @@ try {
       noProductionHookOrCutover:true};
   });
 
+  await run('Preview-only Notes snapshot continuation survives real browser reload',async context=>{
+    const page=await open(context);
+    const staged=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const legacy=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      legacy.notes='Previous longer Notes content to preserve';
+      legacy.tasks=[{id:'preserve-task',title:'Keep unrelated task'}];
+      localStorage.setItem('taskpoints_v1',JSON.stringify(legacy));
+      localStorage.setItem('taskpoints_notes_v1','stale');
+      localStorage.removeItem('taskpoints_notes_authoritative_v1');
+      localStorage.removeItem('taskpoints_notes_dirty_v1');
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const original=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      const intent=await api.rehearsePreviewNotesFirstEditIntent(
+        '',token(),'browser-first-snapshot');
+      if(!intent.intentRecorded)return {intent};
+      const cache=await api.rehearsePreviewAdmittedNotesFirstEditCacheWrite(
+        token(),'browser-first-snapshot');
+      const beforeSync=await api.inspectPreviewNotesFirstEditIntent();
+      const snapshot=await api.rehearsePreviewAdmittedNotesSnapshotSync(
+        token(),'browser-first-snapshot');
+      const afterSync=await api.inspectPreviewNotesFirstEditIntent();
+      return {intent,cache,snapshot,beforeSync,afterSync,original,
+        stored:JSON.parse(localStorage.getItem('taskpoints_v1')),
+        dirty:localStorage.getItem('taskpoints_notes_dirty_v1'),
+        authority:localStorage.getItem('taskpoints_notes_authoritative_v1')};
+    });
+    if(staged.intent.reason==='lock_manager_unavailable'){
+      assert.equal(staged.intent.intentRecorded,false);
+      return {missingLockFailsClosed:true};
+    }
+    assert.equal(staged.intent.intentRecorded,true,JSON.stringify(staged.intent));
+    assert.equal(staged.cache.firstEditApplied,true,JSON.stringify(staged.cache));
+    assert.equal(staged.beforeSync.observedRecoveryStage,
+      'dirty_cache_snapshot_pending',JSON.stringify(staged.beforeSync));
+    assert.equal(staged.snapshot.reason,
+      'preview_notes_snapshot_written_dirty_retained',
+      JSON.stringify(staged.snapshot));
+    assert.equal(staged.snapshot.notesSnapshotSynchronized,true);
+    assert.equal(staged.snapshot.dirtyMarkerPreserved,true);
+    assert.equal(staged.snapshot.notesMultiKeySyncVerified,false);
+    assert.equal(staged.snapshot.oldTabsExcluded,false);
+    assert.equal(staged.snapshot.canPromote,false);
+    assert.equal(staged.stored.notes,'');
+    assert.deepEqual(staged.stored.tasks,staged.original.tasks);
+    assert.equal(staged.dirty,'1');
+    assert.equal(staged.authority,'1');
+    assert.equal(staged.afterSync.observedRecoveryStage,
+      'snapshot_synced_dirty_pending',JSON.stringify(staged.afterSync));
+    await page.reload({waitUntil:'load'});
+    const restarted=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const audit=await api.inspectPreviewNotesFirstEditIntent();
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const repeat=await api.rehearsePreviewAdmittedNotesSnapshotSync(
+        token(),'browser-first-snapshot');
+      return {audit,repeat,
+        snapshot:JSON.parse(localStorage.getItem('taskpoints_v1')),
+        dirty:localStorage.getItem('taskpoints_notes_dirty_v1'),
+        intent:localStorage.getItem(
+          'taskpoints_v2_preview_notes_first_edit_intent_v1')!==null};
+    });
+    assert.equal(restarted.audit.intentEvidenceVerified,true);
+    assert.equal(restarted.audit.observedRecoveryStage,
+      'snapshot_synced_dirty_pending');
+    assert.equal(restarted.audit.legacySelectsIntendedText,true);
+    assert.equal(restarted.audit.canAutomaticallyResume,false);
+    assert.equal(restarted.repeat.notesSnapshotSynchronized,false);
+    assert.equal(restarted.snapshot.notes,'');
+    assert.equal(restarted.dirty,'1');
+    assert.equal(restarted.intent,true);
+    return {browserSnapshotSyncVerified:true,unrelatedTaskRetained:true,
+      reloadStillRecognizesDirty:true,noAutomaticRetryOrCutover:true};
+  });
+
+  await run('Older V1 browser tab invalidates Notes snapshot admission without erasing dirty intent',async context=>{
+    const page=await open(context);
+    const old=await context.newPage();
+    await old.goto(url.replace('v2-storage-fixture.html','v2-upgrade-seed.html'),
+      {waitUntil:'load'});
+    const start=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const state=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      state.notes='Prior longer Notes from original tab';
+      localStorage.setItem('taskpoints_v1',JSON.stringify(state));
+      localStorage.removeItem('taskpoints_notes_v1');
+      localStorage.removeItem('taskpoints_notes_authoritative_v1');
+      localStorage.removeItem('taskpoints_notes_dirty_v1');
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const intent=await api.rehearsePreviewNotesFirstEditIntent(
+        'new',token(),'browser-old-tab-snapshot');
+      if(!intent.intentRecorded)return {intent};
+      const cache=await api.rehearsePreviewAdmittedNotesFirstEditCacheWrite(
+        token(),'browser-old-tab-snapshot');
+      return {intent,cache,savedToken:token()};
+    });
+    if(start.intent.reason==='lock_manager_unavailable'){
+      assert.equal(start.intent.intentRecorded,false);
+      return {missingLockFailsClosed:true};
+    }
+    assert.equal(start.cache.firstEditApplied,true,JSON.stringify(start.cache));
+    await old.evaluate(()=>{
+      const state=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      state.tasks=[{id:'old-tab-added-task',title:'Independent legacy edit'}];
+      localStorage.setItem('taskpoints_v1',JSON.stringify(state));
+    });
+    const observed=await page.evaluate(async savedToken=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const result=await api.rehearsePreviewAdmittedNotesSnapshotSync(
+        savedToken,'browser-old-tab-snapshot');
+      return {result,
+        state:JSON.parse(localStorage.getItem('taskpoints_v1')),
+        dirty:localStorage.getItem('taskpoints_notes_dirty_v1'),
+        cache:localStorage.getItem('taskpoints_notes_v1')};
+    },start.savedToken);
+    assert.equal(observed.result.reason,'snapshot_sync_origin_changed',
+      JSON.stringify(observed.result));
+    assert.equal(observed.result.notesSnapshotSynchronized,false);
+    assert.equal(observed.result.canPromote,false);
+    assert.equal(observed.state.tasks[0].id,'old-tab-added-task');
+    assert.equal(observed.dirty,'1');
+    assert.equal(observed.cache,'new');
+    await page.reload({waitUntil:'load'});
+    const afterReload=await page.evaluate(async()=>({
+      evidence:await window.TaskPointsStateRuntimeV2
+        .inspectPreviewNotesFirstEditIntent(),
+      dirty:localStorage.getItem('taskpoints_notes_dirty_v1')
+    }));
+    assert.equal(afterReload.evidence.intentEvidenceVerified,true);
+    assert.equal(afterReload.evidence.observedRecoveryStage,
+      'dirty_cache_snapshot_pending');
+    assert.equal(afterReload.evidence.sourceInventoryMatchesAdmission,false);
+    assert.equal(afterReload.evidence.canPromote,false);
+    assert.equal(afterReload.dirty,'1');
+    return {staleTokenRejected:true,oldTabTaskPreserved:true,
+      sealedNotesStillInspectable:true,dirtyNotCleared:true};
+  });
+
   await run('Baseline-first Notes protocol protects prior text across every simulated interruption',async context=>{
     const page=await open(context);
     const old=await context.newPage();
