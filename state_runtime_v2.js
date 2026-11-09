@@ -16445,6 +16445,172 @@
     return result;
   }
 
+  // Explicit developer-preview continuation AFTER an admitted first Notes
+  // cache edit. Write only taskpoints_v1.notes, leaving the dirty marker
+  // SET. A separate future protocol must prove safe marker clearing.
+  // This cannot authorize a live Notes listener or exclude pre-V2 tabs.
+  async function rehearsePreviewAdmittedNotesSnapshotSync(
+    expectedInventoryToken,actionId) {
+    const deny=(reason,extra={})=>({
+      checked:true,previewOnly:true,snapshotOnly:true,
+      snapshotWriteAttempted:false,notesSnapshotSynchronized:false,
+      notesMultiKeySyncVerified:false,dirtyMarkerPreserved:false,
+      confirmedNotesDurable:false,writeOutcomeUncertain:false,
+      inspectIntentBeforeRetry:false,oldTabsExcluded:false,
+      productionWritersFenced:false,canAutomaticallyResume:false,
+      safeToClearDirtyMarker:false,safeToRestore:false,
+      canPromote:false,readAuthority:'legacy_only',
+      mutationAuthority:'legacy_only',reason,...extra
+    });
+    if(!isWalTestPreviewHost())return deny('preview_host_required');
+    if(!isDarkEnabled())return deny('dark_disabled');
+    if(typeof expectedInventoryToken!=='string'||!expectedInventoryToken)
+      return deny('full_origin_token_required');
+    if(typeof actionId!=='string'
+      ||!/^[a-zA-Z0-9_:.-]{1,96}$/.test(actionId))
+      return deny('snapshot_sync_action_id_invalid');
+    const locks=global.navigator?.locks;
+    if(typeof locks?.request!=='function')
+      return deny('lock_manager_unavailable');
+    const generation=currentGeneration({create:false});
+    if(!generation)return deny('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    const snapshotKey=core.STORAGE_KEY||'taskpoints_v1';
+    const cacheKey='taskpoints_notes_v1';
+    const authorityKey='taskpoints_notes_authoritative_v1';
+    const dirtyKey='taskpoints_notes_dirty_v1';
+    let attempted=false,result=deny('snapshot_sync_lock_unavailable');
+    const stableMode=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&epoch===darkMirrorModeEpoch
+      &&currentGeneration({create:false})===generation;
+    const withoutSnapshot=token=>stableJson(JSON.parse(token)
+      .filter(row=>Array.isArray(row)&&row[0]!==snapshotKey));
+    const uncertain=(reason)=>deny(reason,{
+      snapshotWriteAttempted:attempted,writeOutcomeUncertain:attempted,
+      inspectIntentBeforeRetry:attempted
+    });
+    try {
+      await locks.request(PREVIEW_COOPERATIVE_TASK_FREEZE_LOCK,
+        {mode:'exclusive',ifAvailable:true},async lock=>{
+          if(!lock){result=deny('snapshot_sync_lock_held_elsewhere');return;}
+          let before;
+          try{
+            before=captureReadOnlyFullStorageInventory();
+            if(!stableMode()||before!==expectedInventoryToken){
+              result=deny('snapshot_sync_origin_changed');return;
+            }
+          }catch(_){result=deny('snapshot_sync_origin_unreadable');return;}
+          const fence=await rehearsePreviewDurableWriterFence('audit');
+          if(!stableMode()
+            ||fence.reason!=='preview_writer_inventory_consistent'
+            ||fence.fence?.generation!==generation||fence.fence.frozen){
+            result=deny('snapshot_sync_fence_unverified_or_frozen');return;
+          }
+          const evidence=await inspectPreviewNotesFirstEditIntent();
+          if(!evidence.intentEvidenceVerified
+            ||!evidence.notesCacheMatchesIntent
+            ||!evidence.currentMarkersValid
+            ||!evidence.currentSnapshotReadable
+            ||!evidence.legacySelectsIntendedText
+            ||evidence.observedRecoveryStage!=='dirty_cache_snapshot_pending'){
+            result=deny('snapshot_sync_first_edit_not_verified',{
+              prerequisiteReason:evidence.reason,
+              observedRecoveryStage:evidence.observedRecoveryStage||null});
+            return;
+          }
+          let sealed,sourceRaw,proposedRaw;
+          try{
+            const rawIntent=global.localStorage.getItem(
+              PREVIEW_NOTES_FIRST_EDIT_INTENT_KEY);
+            sealed=JSON.parse(rawIntent);
+            if(sealed.actionId!==actionId
+              ||sealed.resetGeneration!==generation
+              ||typeof sealed.text!=='string'
+              ||sealed.text.length>PREVIEW_NOTES_FIRST_EDIT_LIMIT)
+              throw Error('invalid_intent');
+            const {integrityFingerprint,...signed}=sealed;
+            if(await previewRecoveryFingerprint(signed)!==integrityFingerprint)
+              throw Error('intent_integrity_changed');
+            sourceRaw=global.localStorage.getItem(snapshotKey);
+            // Never re-serialize an encoded/opaque legacy snapshot in this
+            // limited preview prototype. The real V1 codec must be used for
+            // the eventual production handoff.
+            const source=JSON.parse(sourceRaw);
+            if(!source||typeof source!=='object'||Array.isArray(source)
+              ||(source.notes!==undefined&&typeof source.notes!=='string')
+              ||typeof core.parseTaskPointsStorageJson!=='function'
+              ||stableJson(core.parseTaskPointsStorageJson(sourceRaw))
+                !==stableJson(source)
+              ||source.notes===sealed.text)
+              throw Error('snapshot_format_or_state_incompatible');
+            const next={...source,notes:sealed.text};
+            proposedRaw=JSON.stringify(next);
+            if(stableJson(core.parseTaskPointsStorageJson(proposedRaw))
+                !==stableJson(next))
+              throw Error('preview_codec_roundtrip_mismatch');
+            if(!stableMode()
+              ||captureReadOnlyFullStorageInventory()!==before
+              ||global.localStorage.getItem(cacheKey)!==sealed.text
+              ||global.localStorage.getItem(authorityKey)!=='1'
+              ||global.localStorage.getItem(dirtyKey)!=='1'
+              ||global.localStorage.getItem(snapshotKey)!==sourceRaw
+              ||global.localStorage.getItem(
+                PREVIEW_NOTES_FIRST_EDIT_INTENT_KEY)!==rawIntent){
+              result=deny('snapshot_sync_source_changed_before_write');
+              return;
+            }
+          }catch(_){
+            result=deny('snapshot_sync_unverified_or_incompatible_snapshot');
+            return;
+          }
+          // One synchronous snapshot write. Never clear dirty, rewrite
+          // the immutable intent, or automatically retry uncertain writes.
+          attempted=true;
+          try{global.localStorage.setItem(snapshotKey,proposedRaw);}
+          catch(_){result=uncertain('snapshot_sync_write_uncertain');return;}
+          let after;
+          try{
+            after=captureReadOnlyFullStorageInventory();
+            if(!stableMode()
+              ||global.localStorage.getItem(snapshotKey)!==proposedRaw
+              ||global.localStorage.getItem(cacheKey)!==sealed.text
+              ||global.localStorage.getItem(authorityKey)!=='1'
+              ||global.localStorage.getItem(dirtyKey)!=='1'
+              ||withoutSnapshot(after)!==withoutSnapshot(before)){
+              result=uncertain('snapshot_sync_readback_or_origin_changed');
+              return;
+            }
+          }catch(_){
+            result=uncertain('snapshot_sync_postwrite_unreadable');return;
+          }
+          const afterFence=await rehearsePreviewDurableWriterFence('audit');
+          try{
+            if(!stableMode()
+              ||afterFence.reason!=='preview_writer_inventory_consistent'
+              ||afterFence.fence?.generation!==generation
+              ||afterFence.fence?.epoch!==fence.fence.epoch
+              ||afterFence.fence?.frozen
+              ||captureReadOnlyFullStorageInventory()!==after){
+              result=uncertain('snapshot_sync_postwrite_fence_changed');
+              return;
+            }
+          }catch(_){
+            result=uncertain('snapshot_sync_postwrite_fence_unreadable');
+            return;
+          }
+          result=deny('preview_notes_snapshot_written_dirty_retained',{
+            snapshotWriteAttempted:true,notesSnapshotSynchronized:true,
+            dirtyMarkerPreserved:true,readbackVerified:true,
+            cooperativeLockUsed:true,notesMultiKeySyncVerified:false,
+            confirmedNotesDurable:false,oldTabsExcluded:false,
+            safeToClearDirtyMarker:false,canPromote:false
+          });
+        });
+    }catch(_){return uncertain('snapshot_sync_lock_request_failed');}
+    return result;
+  }
+
+
   // V2-only Notes keystroke rehearsal: participate in the same preview Web
   // Lock as Task / Projects / Today / freeze, but mutate ONLY the existing
   // V1 Notes cache after BOTH durable authority/dirty markers already equal
@@ -16708,6 +16874,7 @@
     rehearsePreviewCooperativeDirtyNotesCacheSave,
     rehearsePreviewNotesFirstEditIntent,
     rehearsePreviewAdmittedNotesFirstEditCacheWrite,
+    rehearsePreviewAdmittedNotesSnapshotSync,
     inspectPreviewNotesFirstEditIntent,
     inspectPreviewCooperativeNotesFirstEditConflict,
     beginPreviewLegacyStorageEventWitness,
