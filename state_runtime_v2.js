@@ -15672,6 +15672,10 @@
               return;
             }
           }catch(_){result=refuse('notes_first_edit_source_unreadable');return;}
+          if(previewNotesWitnessObservedExternalChange(generation,epoch)){
+            result=refuse('notes_first_edit_external_tab_event_observed');
+            return;
+          }
           // Exactly one synchronous write. On quota denial, preserve the
           // prior Notes and all existing recovery bytes; never retry blindly.
           touched=true;
@@ -15854,6 +15858,17 @@
   // Old pages are NOT obliged to notify us, and suspended pages may miss
   // events. This evidence NEVER grants writer admission or authority.
   let previewLegacyStorageEventWitness=null;
+  // A transient cross-tab A -> B -> A storage change may escape a final
+  // origin-token comparison. If a page-lifetime witness is active, treat
+  // *any* observed external event or invalidated witness as a hard denial.
+  // Absence of a witness/event is NOT proof that old tabs are excluded.
+  function previewNotesWitnessObservedExternalChange(generation,epoch){
+    const witness=previewLegacyStorageEventWitness;
+    return !!witness&&(witness.invalidated
+      ||witness.generation!==generation
+      ||witness.epoch!==epoch
+      ||witness.totalEvents!==0);
+  }
   async function beginPreviewLegacyStorageEventWitness(expectedOriginToken){
     const refuse=(reason,detail={})=>({
       checked:true,previewOnly:true,observing:false,
@@ -16370,6 +16385,10 @@
             result=refuse('first_edit_source_unreadable_before_write');
             return;
           }
+          if(previewNotesWitnessObservedExternalChange(generation,epoch)){
+            result=refuse('first_edit_external_tab_event_observed');
+            return;
+          }
           // There is deliberately NO await between these writes. A tab
           // stopped after any prefix still has the previous Notes or the
           // new cache marked authoritative. This is not cross-tab atomic:
@@ -16421,6 +16440,7 @@
               ||afterFence.fence?.generation!==generation
               ||afterFence.fence?.epoch!==fence.fence.epoch
               ||afterFence.fence?.frozen
+              ||previewNotesWitnessObservedExternalChange(generation,epoch)
               ||captureReadOnlyFullStorageInventory()!==saved){
               result=refuse('first_edit_postwrite_fence_or_origin_changed',{
                 committed:true,writeOutcomeUncertain:true,
@@ -16594,6 +16614,10 @@
             result=deny('snapshot_sync_unverified_or_incompatible_snapshot');
             return;
           }
+          if(previewNotesWitnessObservedExternalChange(generation,epoch)){
+            result=deny('snapshot_sync_external_tab_event_observed');
+            return;
+          }
           // One synchronous snapshot write. Never clear dirty, rewrite
           // the immutable intent, or automatically retry uncertain writes.
           attempted=true;
@@ -16621,6 +16645,7 @@
               ||afterFence.fence?.generation!==generation
               ||afterFence.fence?.epoch!==fence.fence.epoch
               ||afterFence.fence?.frozen
+              ||previewNotesWitnessObservedExternalChange(generation,epoch)
               ||captureReadOnlyFullStorageInventory()!==after){
               result=uncertain('snapshot_sync_postwrite_fence_changed');
               return;
