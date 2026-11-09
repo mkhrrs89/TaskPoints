@@ -15964,6 +15964,142 @@
     return result;
   }
 
+
+  // Prototype a safer FIRST Notes edit order without writing any V1 key.
+  // Independent intent -> seed cache with current EFFECTIVE V1 Notes ->
+  // authority marker -> proposed cache -> dirty marker -> snapshot ->
+  // clear dirty. Seeding the baseline before the authority marker matters:
+  // the unmarked legacy reader may prefer an older, longer snapshot over
+  // a shorter stale cache. Simply setting the marker first can regress.
+  async function inspectPreviewNotesBaselineFirstProtocol(expectedInventoryToken){
+    const refuse=(reason,detail={})=>({
+      checked:true,previewOnly:true,prototypeOnly:true,
+      intentEvidenceVerified:false,sourceVerified:false,
+      allCrashPrefixesPreserveExpectedSelection:false,
+      liveWriterActivated:false,canApply:false,
+      notesMultiKeySyncVerified:false,oldTabsExcluded:false,
+      productionWritersFenced:false,safeToRestore:false,
+      canPromote:false,readAuthority:'legacy_only',
+      mutationAuthority:'legacy_only',reason,...detail
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    if(typeof expectedInventoryToken!=='string'||!expectedInventoryToken)
+      return refuse('full_origin_token_required');
+    const generation=currentGeneration({create:false});
+    if(!generation)return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    try{
+      if(captureReadOnlyFullStorageInventory()!==expectedInventoryToken)
+        return refuse('full_origin_changed');
+      const proof=await inspectPreviewNotesFirstEditIntent();
+      if(!proof.intentEvidenceVerified)
+        return refuse('notes_first_edit_intent_unverified',{
+          prerequisiteReason:proof.reason});
+      if(!proof.sourceInventoryMatchesAdmission)
+        return refuse('notes_source_changed_since_intent');
+      if(captureReadOnlyFullStorageInventory()!==expectedInventoryToken)
+        return refuse('notes_source_changed_during_intent_validation');
+      const raw=global.localStorage.getItem(
+        PREVIEW_NOTES_FIRST_EDIT_INTENT_KEY);
+      const sealed=JSON.parse(raw);
+      if(!sealed||typeof sealed.text!=='string'
+        ||typeof sealed.integrityFingerprint!=='string')
+        return refuse('notes_first_edit_intent_unverified');
+      const {integrityFingerprint,...record}=sealed;
+      if(await previewRecoveryFingerprint(record)!==integrityFingerprint)
+        return refuse('notes_first_edit_intent_unverified');
+      const source=await capturePreviewNotesBundle(
+        expectedInventoryToken,generation,epoch);
+      if(source.reason)return refuse('notes_source_preflight_failed',{
+        prerequisiteReason:source.reason});
+      const original=source.bundle;
+      if(original.dirtyRaw==='1'||original.authorityRaw==='1')
+        return refuse('first_edit_already_marked');
+      const snapshot=original.stateNotes;
+      const cache=original.cacheNotes;
+      const proposed=sealed.text;
+      const pick=(cacheText,hasCache,dirty,authority,snapshotText)=>{
+        if(hasCache&&(dirty==='1'||authority==='1'))
+          return {value:cacheText,source:'marked_cache'};
+        if(cacheText.trim()&&!snapshotText.trim())
+          return {value:cacheText,source:'unmarked_cache_only'};
+        if(snapshotText.trim()&&!cacheText.trim())
+          return {value:snapshotText,source:'unmarked_snapshot_only'};
+        if(cacheText===snapshotText)
+          return {value:cacheText,source:'unmarked_equal'};
+        return cacheText.length>=snapshotText.length
+          ?{value:cacheText,source:'unmarked_cache_longer'}
+          :{value:snapshotText,source:'unmarked_snapshot_longer'};
+      };
+      const baseline=pick(cache,original.cachePresent,
+        original.dirtyRaw,original.authorityRaw,snapshot).value;
+      const prefix=[
+        {stage:'sealed_intent_before_v1_change',
+          cache,hasCache:original.cachePresent,
+          authority:original.authorityRaw,dirty:original.dirtyRaw,
+          snapshot,expected:baseline},
+        {stage:'baseline_seeded_in_cache',
+          cache:baseline,hasCache:true,
+          authority:original.authorityRaw,dirty:original.dirtyRaw,
+          snapshot,expected:baseline},
+        {stage:'authority_marker_before_new_cache',
+          cache:baseline,hasCache:true,authority:'1',
+          dirty:original.dirtyRaw,snapshot,expected:baseline},
+        {stage:'new_cache_after_authority_marker',
+          cache:proposed,hasCache:true,authority:'1',
+          dirty:original.dirtyRaw,snapshot,expected:proposed},
+        {stage:'dirty_marker_after_new_cache',
+          cache:proposed,hasCache:true,authority:'1',
+          dirty:'1',snapshot,expected:proposed},
+        {stage:'snapshot_synced_before_dirty_clear',
+          cache:proposed,hasCache:true,authority:'1',
+          dirty:'1',snapshot:proposed,expected:proposed},
+        {stage:'dirty_marker_cleared',
+          cache:proposed,hasCache:true,authority:'1',
+          dirty:null,snapshot:proposed,expected:proposed}
+      ];
+      const stages=prefix.map(p=>{
+        const chosen=pick(p.cache,p.hasCache,p.dirty,p.authority,p.snapshot);
+        return {
+          stage:p.stage,selectedSource:chosen.source,
+          expectedTextWouldBeSelected:chosen.value===p.expected,
+          proposedTextWouldBeSelected:chosen.value===proposed,
+          previousEffectiveNotesPreserved:chosen.value===baseline,
+          cacheMarked:p.authority==='1'||p.dirty==='1'
+        };
+      });
+      // A tempting but WRONG shortcut: authority='1' before seeding
+      // baseline cache. It may select stale cache and hide the old snapshot.
+      const unsafeShortcut=pick(cache,original.cachePresent,
+        original.dirtyRaw,'1',snapshot);
+      if(!source.current()
+        ||global.localStorage.getItem(
+          PREVIEW_NOTES_FIRST_EDIT_INTENT_KEY)!==raw)
+        return refuse('notes_source_changed_during_protocol_audit');
+      return {
+        ...refuse('notes_baseline_first_protocol_inspected'),
+        intentEvidenceVerified:true,sourceVerified:true,
+        allCrashPrefixesPreserveExpectedSelection:
+          stages.every(s=>s.expectedTextWouldBeSelected),
+        previousNotesPreservedUntilNewCache:
+          stages.slice(0,3).every(s=>s.previousEffectiveNotesPreserved),
+        proposedNotesSelectedAfterNewCache:
+          stages.slice(3).every(s=>s.proposedTextWouldBeSelected),
+        shortcutAuthorityFirstWouldHideBaseline:
+          unsafeShortcut.value!==baseline,
+        baselineCacheAlreadyCanonical:
+          original.cachePresent&&cache===baseline,
+        simulatedStages:stages,
+        // This is a model of the V1 reader, NOT a safe-to-apply
+        // authorization. Pre-V2 tabs can still overwrite any V1 key.
+        liveWriterActivated:false,canApply:false,oldTabsExcluded:false,
+        notesMultiKeySyncVerified:false,safeToRestore:false,
+        canPromote:false
+      };
+    }catch(_){return refuse('notes_baseline_first_audit_unavailable');}
+  }
+
   // V2-only Notes keystroke rehearsal: participate in the same preview Web
   // Lock as Task / Projects / Today / freeze, but mutate ONLY the existing
   // V1 Notes cache after BOTH durable authority/dirty markers already equal
@@ -16228,6 +16364,7 @@
     rehearsePreviewNotesFirstEditIntent,
     inspectPreviewNotesFirstEditIntent,
     inspectPreviewCooperativeNotesFirstEditConflict,
+    inspectPreviewNotesBaselineFirstProtocol,
     inspectPreviewTaskBatchJournalEvidence,
     inspectPreviewTaskBatchEffectiveEvidence,
     inspectPreviewNotesSource,
