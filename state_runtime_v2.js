@@ -15631,10 +15631,14 @@
       if(captured.bundle.dirtyRaw==='1'||captured.bundle.authorityRaw==='1')
         return refuse('notes_authority_already_established');
     }catch(_){return refuse('notes_first_edit_source_unavailable');}
-    const record={id:'notes-first-edit-intent',schemaVersion:1,
+    const record={id:'notes-first-edit-intent',schemaVersion:2,
       actionId,resetGeneration:generation,
       originFingerprint:captured.bundle.originFingerprint,
-      sourceFingerprint:captured.bundle.sourceFingerprint,text};
+      sourceFingerprint:captured.bundle.sourceFingerprint,
+      // Bind the exact original V1 snapshot bytes, including unrelated
+      // Tasks/Habits. A freshly recaptured token cannot authorize a save
+      // over a different old-tab snapshot.
+      snapshotFingerprint:captured.bundle.snapshotFingerprint,text};
     let sealed;
     try {
       sealed=JSON.stringify({...record,
@@ -15744,8 +15748,12 @@
           >PREVIEW_NOTES_FIRST_EDIT_LIMIT)
         return refuse('notes_first_edit_intent_invalid');
       if(!record||typeof record!=='object'||Array.isArray(record)
-        ||Object.keys(record).length!==8
-        ||record.id!=='notes-first-edit-intent'||record.schemaVersion!==1
+        ||![1,2].includes(record.schemaVersion)
+        ||Object.keys(record).length!==(record.schemaVersion===2?9:8)
+        ||record.id!=='notes-first-edit-intent'
+        ||(record.schemaVersion===2
+          &&record.snapshotFingerprint!==null
+          &&!/^sha256:[a-f0-9]{64}:\d+$/.test(record.snapshotFingerprint))
         ||typeof record.actionId!=='string'
         ||!/^[a-zA-Z0-9_:.\-]{1,96}$/.test(record.actionId)
         ||typeof record.resetGeneration!=='string'
@@ -16528,10 +16536,22 @@
               ||typeof sealed.text!=='string'
               ||sealed.text.length>PREVIEW_NOTES_FIRST_EDIT_LIMIT)
               throw Error('invalid_intent');
+            if(sealed.schemaVersion!==2
+              ||typeof sealed.snapshotFingerprint!=='string'
+              ||!/^sha256:[a-f0-9]{64}:\d+$/.test(
+                sealed.snapshotFingerprint)){
+              result=deny('snapshot_sync_baseline_attestation_required');
+              return;
+            }
             const {integrityFingerprint,...signed}=sealed;
             if(await previewRecoveryFingerprint(signed)!==integrityFingerprint)
               throw Error('intent_integrity_changed');
             sourceRaw=global.localStorage.getItem(snapshotKey);
+            if(await previewRecoveryFingerprint(sourceRaw)
+                !==sealed.snapshotFingerprint){
+              result=deny('snapshot_sync_original_snapshot_changed');
+              return;
+            }
             // Never re-serialize an encoded/opaque legacy snapshot in this
             // limited preview prototype. The real V1 codec must be used for
             // the eventual production handoff.
