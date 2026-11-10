@@ -114,6 +114,14 @@ The V2-only read-only `inspectAuthorityCutoverBarriers()` additionally observes 
 
 Current behavioral-witness metric: **3/78** known source-anchored routes (Task Delete + Inbox append + Inbox cleanup); **0/78** production owners verified. These are two separate measures. No nonpilot V2 writer admission, old-tab fencing, or primary migration has occurred.
 
+## November 10 eighth pass — both Flex journals and a cutover blocker
+
+The [M01 Flex behavior tests](../tests/state_runtime_v2_m01_flex_journal_behavior_contract.test.js) execute the **actual** `flex_action_fast_path.js` module against disposable memory storage. They cover both independent journals: `taskpoints_pending_flex_completions_v1` for completed Flex Actions and `taskpoints_pending_flex_order_v1` for reordering. The tests check combined replay, verified compaction, protection of malformed order records, recovery lock refusal, quota failure and retry, and suppression of a stale delayed save that might overwrite newer V1 data.
+
+The V2-only [read-only Flex cutover observer](../tests/state_runtime_v2_m01_flex_cutover_guard_contract.test.js) examines both keys **before and after** asynchronous peer inspection. It detects raw-byte changes and separately reports pending, malformed and unreadable evidence. Even a present empty journal remains unresolved, and the unconditional `flex_journal_compaction_handoff_not_validated` blocker prevents any authority handoff.
+
+The audit's behavior rehearsal count increased from **3 to 5 of 78** known source-anchored writer routes. **Zero of 78** writer owners have been certified for production, and no new checkpoint was verified. These are V1 behavioral tests and V2 inspection gates, not real multi-tab writer fencing or a V2 cutover.
+
 ## Specific next work to close M01
 
 1. Run the CI source scanner against all 170 files; triage which of the 98 uninspected files access or indirectly modify storage. Move from *inspected* to *writer ownership verified* only with a caller/writer trace, including indirect `TaskPointsCore` saves and dynamic key aliases.
