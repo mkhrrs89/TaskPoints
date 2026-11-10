@@ -2840,3 +2840,35 @@ It reports which fixture path was used. Chromium still requires the
 Blob path to succeed. This fallback is **not** evidence of successful
 Blob persistence in real iOS Safari and is not counted as independent
 image backup or restore verification.
+
+## One-day Today V2 record reader groundwork — November 10
+
+The explicit developer-preview-only `inspectPreviewTodayDayRecord(dayKey)`
+now looks up a **single** `day:YYYY-MM-DD` row in V2 IndexedDB,
+plus the root and necessary provenance metadata, with targeted `get()`
+requests. It does not call `todayDays.getAll()`. The inspector
+compares the exact target row (or verified absence) and root fields to
+the current, validated V1 Today source and rechecks generation, origin,
+receipt and readback. Empty day-map entries remain distinguishable from
+absent days; it rejects invalid dates, stale V1 changes, tampered rows,
+broken receipts and failed reads, without repairing or deleting anything.
+
+This specifically tests the *per-day IndexedDB access pattern* needed
+for future iPhone Today-page responsiveness. It **still parses and
+validates the whole V1 Today source**, so it is **not** a measured
+foreground speedup or an authorized V2 Today reader. An unexpected
+extra row elsewhere in V2 can escape a one-day lookup, so every result
+explicitly keeps `collectionParityVerified:false`,
+`todayMigrated:false`, `canPromote:false` and
+`readAuthority:'legacy_only'`. Complete collection parity and actual
+writer handoff require independent future evidence.
+
+Node tests cover populated and absent days, no whole-store read,
+invalid date, missing seed, current V1 edits, tampered root/day/receipt,
+read errors, and reconciliation after reload. The existing real-browser
+Today workflow now exercises targeted reads before and after a V1 edit,
+explicit V2 preview reconciliation, and reload in Chromium and WebKit.
+
+The existing single-iPhone-first priorities and every safety gate remain
+intact. Main is unchanged. Weighted readiness is **67/100**; the
+separate informal 98% bar is not certification of an unpassed gate.
