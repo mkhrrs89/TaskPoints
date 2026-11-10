@@ -8,12 +8,12 @@
 | Observable | Initial result | Meaning |
 | --- | ---: | --- |
 | Tracked root-level production JS/HTML/MJS files | **170** | Reproducible source-file baseline; tests and docs excluded |
-| Files inspected at the source level across both audit passes and Main sync | **42** | **128** other files still need independent review |
-| Key-to-source evidence entries | **53** | Source-linked references (one Notes key has two legitimate roles) — **not** all unique persistence keys |
+| Files inspected at the source level across three audits and Main sync | **72** | **98** other root files need independent review |
+| Key-to-source evidence entries | **76** | Source-linked references (one Notes key has two legitimate roles) — **not** all unique persistence keys |
 | Known IndexedDB database/store evidence examples | **4** | `taskpoints/images`, safety vault snapshots, and V2 preview DB |
 | Explicit primary snapshot fields in `normalizeState` | **30** | Reproducible named-field lower bound, NOT entire V1 schema |
 
-Reproducible manifest: [source inventory](state-runtime-v2-storage-source-inventory.json). Every tracked source filename and the 30 named `src.` fields are checked in V2 CI by [M01 inventory contracts](../tests/state_runtime_v2_m01_source_inventory_contract.test.js). CI also checks key/database evidence paths exist. A new root-level source file or a new explicitly normalized field **fails the CI inventory guard** until the manifest is consciously updated. The additional [writer-path anchor contract](../tests/state_runtime_v2_m01_writer_path_evidence_contract.test.js) now catches disappearance/movement of 17 reviewed writer entrypoints and six high-risk storage key/database anchors. It does NOT enumerate every dynamic writer inside an existing file or prove caller ownership; this is not a completed-callgraph proof.
+Reproducible manifest: [source inventory](state-runtime-v2-storage-source-inventory.json). Every tracked source filename and the 30 named `src.` fields are checked in V2 CI by [M01 inventory contracts](../tests/state_runtime_v2_m01_source_inventory_contract.test.js). CI also checks key/database evidence paths exist. A new root-level source file or a new explicitly normalized field **fails the CI inventory guard** until the manifest is consciously updated. The additional [writer-path anchor contract](../tests/state_runtime_v2_m01_writer_path_evidence_contract.test.js) now catches disappearance/movement of 33 reviewed writer entrypoints and 30 newly reviewed source anchors and six high-risk storage key/database anchors. It does NOT enumerate every dynamic writer inside an existing file or prove caller ownership; this is not a completed-callgraph proof.
 
 ## What is actually stored separately
 
@@ -53,9 +53,22 @@ Merged [Main head 017e456](https://github.com/mkhrrs89/TaskPoints/commit/017e456
 - Current inventory: **170 enumerated / 42 inspected**, **53 key/source entries**, 4 database/store examples and **17** guarded writer anchors. **128 root files** remain uninspected, plus indirect/dynamic call paths.
 - Existing M01 limitations, field-extension preservation, safety vault and recovery gates remain blocked. No new engineering checkpoint was verified by the synchronization.
 
+## November 10 third pass — Flex, recovery, image cleanup, and export side effects
+
+Thirty more root production files were inspected with source-specific anchors (now **72 of 170**). The manifest stores **76** source-linked key evidence entries, **33** writer-route anchors and **30** reviewed source anchors. The source evidence is guarded by the [M01 writer/inspection contract](../tests/state_runtime_v2_m01_writer_path_evidence_contract.test.js), which prevents losing the identified paths during future merges. This is still **not** complete writer ownership or permission to enable V2.
+
+- **Flex Actions** have **two independent synchronous pending journals**: `taskpoints_pending_flex_completions_v1` and `taskpoints_pending_flex_order_v1`. Completion/reorder operations and reset/flush can touch these keys independently of the primary snapshot. A future V2 migration must preserve both, including no-loss under interruption.
+- **Season integrity** may persist corrected V1 snapshots through `season_result_integrity_guard.js` even during a load, and **season image reference repair** can call the exact legacy writer `writeTaskPointsStoredState`. Both need stale-generation fences.
+- **Image cleanup** can delete binary player images from IndexedDB using a manual `readwrite` transaction. The reference-scanning helper and repair planner are separate code paths; state-only backups do not replace photo bytes.
+- **Export** on Home and secondary pages reads standalone Projects/Notes, and can trigger Notes synchronization or schedule-preparation snapshot writes; backup is not guaranteed read-only.
+- **IndexedDB requalification** uses separate localStorage gate/diagnostic/session markers, browser page locks and recovery-hold mode writes. Emergency/secondary recovery guards can replace or remove lock keys. These must stay preserved during any V2 conversion.
+- **Session caches** and **hot-state read guards** add auxiliary values and watch pending Player edits. These are distinct from the authoritative V1 snapshot.
+
+**Remaining:** 98 root files not individually reviewed, plus nested sources and computed/indirect writers, full key/field owner reconciliation, import/reset/recovery callgraphs, production writer fencing, off-device backups and physical Safari qualification. M01 stays **Working**; all 23 milestone statuses are unchanged.
+
 ## Specific next work to close M01
 
-1. Run the CI source scanner against all 170 files; triage which of the 128 uninspected files access or indirectly modify storage. Move from *inspected* to *writer ownership verified* only with a caller/writer trace, including indirect `TaskPointsCore` saves and dynamic key aliases.
+1. Run the CI source scanner against all 170 files; triage which of the 98 uninspected files access or indirectly modify storage. Move from *inspected* to *writer ownership verified* only with a caller/writer trace, including indirect `TaskPointsCore` saves and dynamic key aliases.
 2. Group all literal and computed localStorage keys by authoritative vs derived vs session-only vs recovery-only, and identify how each is imported/exported and reset. Preserve user-defined fields and unknown V1 properties.
 3. Audit every other IndexedDB database/version/store and each image read/write/delete and backup path. Include malformed schema and no-DB cases.
 4. Map all UI and maintenance entrypoints, including pages, service worker lifecycle, deferred compaction, Phase4/5 mirrors, restore and import, to the nine known legacy writer families; use negative tests where a stale writer must be refused.
