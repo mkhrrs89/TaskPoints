@@ -2966,3 +2966,37 @@ and explicitly approved cutover (2) remain uncredited.
 For future reports, give concrete implemented capabilities, tested results,
 and remaining gates. Do not claim a percent "toward the next percent" until
 a fully enumerated and independently testable acceptance checklist exists.
+
+## Detached Today signed package and isolated-browser restore rehearsal — November 10
+
+The developer-preview-only `preparePreviewTodayDetachedRestorePackage()`
+builds a JSON envelope from a verified V2-only Today recovery candidate.
+It preserves the `sourcePresent` bit (distinguishing a **missing** legacy
+key from an intentionally saved `{}` document) and seals both that bit and
+the serialized candidate with SHA-256. It reads and verifies the detached
+candidate twice, with reset generation and preview-mode checks between
+passes. It **never writes** a localStorage/IndexedDB source or destination
+key, performs a production restore, or grants authority to V2.
+
+A real-browser test on **two completely isolated Playwright contexts**
+exercises the boundary: create the source preview; remove its synthetic V1
+Today key; build the signed package; validate its checksum in the target
+context; reject a corrupted package; stage an intended restore in temporary
+tab storage; close that page before applying it; verify the destination's
+prior Today document and unrelated data remain intact; then explicitly
+write only the signed Today JSON into that separate **test-only** context
+and confirm survival after reopening. The source context remains unchanged.
+The same scenario runs in Chromium and WebKit, alongside Node contracts for
+signatures, source-key absence and corrupt V2 evidence.
+
+This is **not** proof of crash-atomic real production restore, physically
+independent/off-device backups, or whole-app recovery. The simulated
+interruption occurs before a single-key destination write and does not model
+a process kill halfway through a multi-key restore. The app itself still
+does not perform a restore; only the browser-test harness writes to a
+disposable target. It is one concrete rehearsal toward the *uncredited*
+recovery milestone.
+
+The former near-term 98% figure remains withdrawn. Official **weighted
+readiness is 67/100**, with all remaining gates and the V1-authoritative
+safety boundary preserved. Main is untouched.
