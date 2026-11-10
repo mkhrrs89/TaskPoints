@@ -145,6 +145,20 @@ The new [four-writer contract](../tests/state_runtime_v2_m01_four_cross_domain_w
 
 These four **V1 behavior tests** bring M01 behavior-witness coverage from **8 to 12 out of 78** known writer routes. They do **not** certify V2 writer generation fencing, complete nested source inventories, multi-tab authority transfer or real device backup/restore. **0/78 V2 production owners are certified; M01 remains Working and overall readiness 67/100.**
 
+## November 10 eleventh pass — five real user-facing page write routes
+
+The [M01 page-write behavior contract](../tests/state_runtime_v2_m01_badges_trash_ratings_writer_behavior_contract.test.js) executes the actual inline scripts from three separate production HTML pages, against disposable in-memory V1 storage. It covers **five different source-inventory routes**:
+
+1. **`achievements.html` protected save:** Badge add/remove calls `saveStateSnapshot` immediately and preserves unrelated Task/Gold/unknown imported fields.
+2. **`achievements.html` raw fallback:** On a thrown protected save, the page uses `writeTaskPointsStoredState` directly. A second raw-write failure does not change stored bytes.
+3. **`trash.html` protected save:** Restoring prior status and permanently deleting a Task route through `saveStateSnapshot`, with an explicit confirmation before deletion.
+4. **`trash.html` raw fallback:** If the page's `mergeAndSaveState` availability check fails, task mutations write directly via `writeTaskPointsStoredState`. Raw quota failures retain original canonical bytes.
+5. **`game_ratings.html` direct writer:** The Ratings editor validates input then writes edited non-YOU players directly via `writeTaskPointsStoredState`, preserving other V1 fields; errors do not persist a false update.
+
+**Most important finding:** Badge and Trash legacy fallbacks can bypass the ordinary protected save path, and Ratings unconditionally writes directly. These are **existing V1 behaviors, not new features**, and should not be removed without replacement and explicit approval. A future V2 handoff must account for them explicitly.
+
+This raises behavior-tested writer routes **12 → 17 of 78**. Still **0/78 V2 owner/fence proofs**, so the M01 milestone and 67/100 weighted readiness remain unchanged. Tests are synthetic VM rehearsals, not proof of cross-tab stale-write rejection, true device persistence, or safe V2 production authority.
+
 ## Specific next work to close M01
 
 1. Run the CI source scanner against all 170 files; triage which of the 98 uninspected files access or indirectly modify storage. Move from *inspected* to *writer ownership verified* only with a caller/writer trace, including indirect `TaskPointsCore` saves and dynamic key aliases.
