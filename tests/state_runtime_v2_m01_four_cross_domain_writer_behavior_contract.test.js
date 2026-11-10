@@ -321,3 +321,30 @@ test('Season integrity repair preserves original bytes if V1 save fails', () => 
   assert.equal(h.saves.length, 2, 'failed repair must be retried rather than marked clean');
   assert.deepEqual(h.saved(), integrityFixture());
 });
+
+test('M01 four cross-domain writer witnesses remain provisional', () => {
+  const inv=JSON.parse(fs.readFileSync(path.join(root,
+    'docs/state-runtime-v2-storage-source-inventory.json'),'utf8'));
+  const rows=inv.writerBehaviorWitnesses.filter(row=>
+    row.testPath==='tests/state_runtime_v2_m01_four_cross_domain_writer_behavior_contract.test.js');
+  assert.deepEqual(rows.map(row=>row.path).sort(),[
+    'gold_manual_adjustment.js',
+    'season2_missed_playin_recovery.js',
+    'season_result_integrity_guard.js',
+    'season_series_upset_notifications.js'
+  ]);
+  assert.equal(rows.length,4);
+  for(const row of rows) {
+    assert.ok(inv.writerPathEvidence.some(x=>x.path===row.path&&x.anchor===row.anchor));
+    assert.ok(row.observedBehaviors.length>=4);
+    assert.equal(row.productionOwnerVerified,false);
+    assert.equal(row.productionFenceVerified,false);
+    assert.equal(row.cutoverPermission,false);
+  }
+  assert.equal(inv.writerOwnershipAudit.behaviorRehearsedWriterRoutes,12);
+  assert.equal(inv.writerOwnershipAudit.verifiedOwnerAssignments,0);
+  assert.equal(inv.writerOwnershipAudit.productionWritersFenced,false);
+  assert.equal(inv.writerOwnershipAudit.status,'incomplete');
+  assert.equal(inv.writerOwnershipAudit.crossDomainWriterEvidence.productionOwnerCertified,false);
+  assert.equal(inv.writerOwnershipAudit.crossDomainWriterEvidence.liveCrossTabFencingVerified,false);
+});
