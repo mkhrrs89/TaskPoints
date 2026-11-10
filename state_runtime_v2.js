@@ -4104,6 +4104,53 @@
       pendingCount, tasks, completionUpserts, completionDeletes };
   }
 
+
+  // Read-only observation of the distinct Inbox journal used by the three
+  // background Inbox producers. Its raw bytes stay private and are compared
+  // twice around the asynchronous peer probe. Pending/malformed evidence must
+  // NEVER be silently interpreted as an empty canonical Inbox.
+  function inspectReadOnlyInboxJournalForCutover() {
+    const raw = global.localStorage.getItem('taskpoints_pending_inbox_state_v1');
+    const empty = () => ({ raw: null, reason: 'absent', pendingCount: 0,
+      messages: 0, processedEventIds: 0, dateMarkers: 0 });
+    const malformed = () => ({ raw, reason: 'malformed', pendingCount: null,
+      messages: null, processedEventIds: null, dateMarkers: null });
+    if (raw === null) return empty();
+    if (typeof raw !== 'string' || !raw) return malformed();
+    let record;
+    try { record = JSON.parse(raw); }
+    catch (_) { return malformed(); }
+    if (!record || typeof record !== 'object' || Array.isArray(record)
+      || ![1, 2].includes(Number(record.schemaVersion || 1))) return malformed();
+
+    const owns = key => Object.prototype.hasOwnProperty.call(record, key);
+    const fields = ['inboxMessages', 'inboxProcessedEventIds',
+      'inboxStartedDateKey', 'goldTheftTop50InboxStartedDateKey'];
+    if (!fields.some(owns)
+      || (owns('inboxMessages') && !Array.isArray(record.inboxMessages))
+      || (owns('inboxProcessedEventIds')
+        && (!record.inboxProcessedEventIds
+          || typeof record.inboxProcessedEventIds !== 'object'))
+      || (owns('inboxStartedDateKey') && record.inboxStartedDateKey !== null
+        && typeof record.inboxStartedDateKey !== 'string')
+      || (owns('goldTheftTop50InboxStartedDateKey')
+        && record.goldTheftTop50InboxStartedDateKey !== null
+        && typeof record.goldTheftTop50InboxStartedDateKey !== 'string')) {
+      return malformed();
+    }
+    const messages = owns('inboxMessages') ? record.inboxMessages.length : 0;
+    const events = owns('inboxProcessedEventIds')
+      ? (Array.isArray(record.inboxProcessedEventIds)
+        ? record.inboxProcessedEventIds.length
+        : Object.keys(record.inboxProcessedEventIds).length) : 0;
+    const dateMarkers = Number(owns('inboxStartedDateKey'))
+      + Number(owns('goldTheftTop50InboxStartedDateKey'));
+    // Even a valid record with empty arrays is unresolved writer evidence.
+    // Only a physically absent journal can satisfy inboxJournalEmpty.
+    return { raw, reason: 'pending', pendingCount: messages + events + dateMarkers,
+      messages, processedEventIds: events, dateMarkers };
+  }
+
   async function inspectAuthorityCutoverBarriers() {
     const hardBlockers = [
       'all_legacy_writers_not_fenced',
@@ -4114,12 +4161,13 @@
       'physical_safari_pwa_lifecycle_not_validated',
       'production_multi_context_handoff_not_validated',
       'task_journal_compaction_handoff_not_validated',
+      'inbox_journal_compaction_handoff_not_validated',
       // Work commit interception can journal several changed rows one by
       // one, or fall back to a full snapshot save. Neither path is fenced
       // by V2 or yet proven as one cross-context atomic logical action.
       'work_entry_multirecord_admission_not_validated'
     ];
-    const snapshot = (reason, pilot, rollback, peers, extra = [], taskJournal = null) => {
+    const snapshot = (reason, pilot, rollback, peers, extra = [], taskJournal = null, inboxJournal = null) => {
       // Even a completely green Habit pilot and all responsive V2 preview
       // peers say nothing about suspended or pre-V2 legacy-only tabs.
       const checks = {
@@ -4132,6 +4180,8 @@
         // Empty after verified compaction is necessary, NOT an admission
         // guarantee against a paused old tab or an idle callback resuming.
         taskJournalCompactionHandoffValidated: false,
+        inboxJournalEmpty: inboxJournal?.reason === 'absent',
+        inboxJournalCompactionHandoffValidated: false,
         workEntryAtomicAdmissionVerified: false,
         workEntryFallbackPathFenced: false,
         mirrorQueueStable: pilot?.checks?.mirrorQueueStable === true,
@@ -4158,6 +4208,8 @@
           ...(!checks.stableLegacyRollbackSource ? ['legacy_rollback_source_unverified'] : []),
           ...(taskJournal?.reason === 'pending' ? ['task_mutation_journal_pending'] : []),
           ...(taskJournal?.reason === 'malformed' ? ['task_mutation_journal_malformed'] : []),
+          ...(inboxJournal?.reason === 'pending' ? ['inbox_mutation_journal_pending'] : []),
+          ...(inboxJournal?.reason === 'malformed' ? ['inbox_mutation_journal_malformed'] : []),
           ...extra, ...hardBlockers
         ])],
         knownUnfencedWriterFamilies: [...AUTHORITY_CUTOVER_WRITER_FAMILIES],
@@ -4166,6 +4218,12 @@
           tasks: taskJournal.tasks,
           completionUpserts: taskJournal.completionUpserts,
           completionDeletes: taskJournal.completionDeletes
+        } : null,
+        inboxJournal: inboxJournal ? {
+          reason: inboxJournal.reason, pendingCount: inboxJournal.pendingCount,
+          messages: inboxJournal.messages,
+          processedEventIds: inboxJournal.processedEventIds,
+          dateMarkers: inboxJournal.dateMarkers
         } : null,
         pilot: pilot ? { reason: pilot.reason,
           generation: pilot.generation || null, revision: pilot.revision ?? null } : null,
@@ -4189,6 +4247,7 @@
       const pilot = await inspectMutationHandoffPrerequisites();
       const rollback = await inspectLegacyRollbackSource();
       const taskJournalBefore = inspectReadOnlyTaskJournalForCutover();
+      const inboxJournalBefore = inspectReadOnlyInboxJournalForCutover();
       // The preview writer inventory must include ALL current origin storage
       // keys, not merely taskpoints_* checkpoint keys or the Habit pilot.
       const fullStorageBefore = captureReadOnlyFullStorageInventory();
@@ -4196,6 +4255,7 @@
       const pilotAfter = await inspectMutationHandoffPrerequisites();
       const rollbackAfter = await inspectLegacyRollbackSource();
       const taskJournalAfter = inspectReadOnlyTaskJournalForCutover();
+      const inboxJournalAfter = inspectReadOnlyInboxJournalForCutover();
       const fullStorageAfter = captureReadOnlyFullStorageInventory();
       // The asynchronous peer observation is NOT a lock. Detect a new
       // generation or explicit preview switch during the report; never use
@@ -4207,11 +4267,12 @@
         || stableJson(pilot) !== stableJson(pilotAfter)
         || stableJson(rollback) !== stableJson(rollbackAfter)
         || stableJson(taskJournalBefore) !== stableJson(taskJournalAfter)
+        || stableJson(inboxJournalBefore) !== stableJson(inboxJournalAfter)
         || fullStorageBefore !== fullStorageAfter)
         return snapshot('inventory_changed_during_check', pilot, rollback, peers,
-          ['legacy_or_preview_inventory_changed_during_check'], taskJournalAfter);
+          ['legacy_or_preview_inventory_changed_during_check'], taskJournalAfter, inboxJournalAfter);
       return snapshot('authority_cutover_blocked', pilot, rollback, peers,
-        [], taskJournalAfter);
+        [], taskJournalAfter, inboxJournalAfter);
     } catch (_) {
       return snapshot('inspection_unreadable', null, null, null,
         ['authority_cutover_inventory_unreadable']);
