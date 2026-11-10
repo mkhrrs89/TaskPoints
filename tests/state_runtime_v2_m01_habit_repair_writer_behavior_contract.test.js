@@ -262,3 +262,28 @@ test('score reconciliation refuses a changed historical matchup after preview',(
   assert.equal(s.saveAttempts.length,0);
   assert.match(s.status.textContent,/Repair failed:/);
 });
+
+test('M01 certifies three Habit writer behavior rehearsals but zero production ownership',()=>{
+  const inv=JSON.parse(fs.readFileSync(path.join(root,
+    'docs/state-runtime-v2-storage-source-inventory.json'),'utf8'));
+  const routes=inv.writerBehaviorWitnesses.filter(r=>
+    r.testPath==='tests/state_runtime_v2_m01_habit_repair_writer_behavior_contract.test.js');
+  assert.deepEqual(routes.map(r=>r.path).sort(),[
+    'habit_ledger_completion_backed_repair.js',
+    'habit_ledger_repair_audit.js',
+    'habit_ledger_score_reconciliation.js'
+  ]);
+  for(const route of routes){
+    assert.ok(inv.writerPathEvidence.some(w=>w.path===route.path&&w.anchor===route.anchor));
+    assert.ok(route.observedBehaviors.length>=4);
+    assert.equal(route.productionOwnerVerified,false);
+    assert.equal(route.productionFenceVerified,false);
+    assert.equal(route.cutoverPermission,false);
+  }
+  assert.equal(inv.writerOwnershipAudit.behaviorRehearsedWriterRoutes,8);
+  assert.equal(inv.writerOwnershipAudit.verifiedOwnerAssignments,0);
+  assert.equal(inv.writerOwnershipAudit.productionWritersFenced,false);
+  assert.equal(inv.writerOwnershipAudit.status,'incomplete');
+  assert.equal(inv.writerOwnershipAudit.habitRepairEvidence.productionHandoffCertified,false);
+  assert.equal(inv.writerOwnershipAudit.habitRepairEvidence.legacyV1AuthorityUnchanged,true);
+});
