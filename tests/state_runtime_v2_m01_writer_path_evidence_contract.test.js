@@ -50,3 +50,54 @@ test('M01 preserves the separately journaled Inbox and recovery/mirror ownership
     db.store === 'snapshots' && db.state === 'live' &&
     db.evidencePath === 'phase5b_deferred_mirror.js'));
 });
+
+
+test('M01 second-pass source evidence anchors all 30 inspected recovery and writer files', () => {
+  const reviewed = inventory.reviewedSourceEvidence || [];
+  const seen = new Set();
+  const permitted = new Set(['read', 'write', 'bridge', 'entrypoint']);
+  const families = new Set(['habits', 'game', 'season', 'settings', 'backup', 'recovery', 'storage']);
+  assert.ok(reviewed.length >= 30, 'reviewed source evidence baseline regressed');
+  assert.ok(inventory.firstPassInspected.length >= 72, 'inspected source baseline regressed');
+  for (const row of reviewed) {
+    assert.ok(inventory.firstPassInspected.includes(row.path),
+      'review anchor not marked inspected: ' + row.path);
+    assert.ok(!seen.has(row.path), 'duplicate review for: ' + row.path);
+    seen.add(row.path);
+    assert.ok(permitted.has(row.behavior), 'unclassified review behavior: ' + row.path);
+    assert.ok(families.has(row.family), 'unclassified storage family: ' + row.path);
+    assert.ok(typeof row.anchor === 'string' && row.anchor.length >= 12);
+    const source = fs.readFileSync(path.join(root, row.path), 'utf8');
+    assert.ok(source.includes(row.anchor),
+      'reviewed source anchor moved or was removed: ' + row.path);
+  }
+  for (const file of [
+    'flex_action_fast_path.js', 'season_result_integrity_guard.js',
+    'storage_diagnostics_cleanup_controller.js',
+    'storage_diagnostics_season_image_repair_controller.js',
+    'inbox_count_badge.js', 'emergency_recovery_lock_authorization.js',
+    'indexeddb_requalification_session_compat.js'
+  ]) {
+    assert.ok(seen.has(file), 'high-risk writer lacks reviewed source evidence: ' + file);
+  }
+  assert.ok(inventory.limitations.some(s => /not complete ownership\/fencing/.test(s)),
+    'do not mistake anchors for comprehensive writer fencing');
+});
+
+test('M01 preserves both Flex journals and independent Season/photo repair writers', () => {
+  const keys = new Set(inventory.keyEvidence.map(e => e.key + '|' + e.evidencePath));
+  for (const key of [
+    'taskpoints_pending_flex_completions_v1',
+    'taskpoints_pending_flex_order_v1'
+  ]) assert.ok(keys.has(key + '|flex_action_fast_path.js'),
+    'untracked pending Flex journal ' + key);
+  const paths = new Map(inventory.writerPathEvidence.map(e => [e.path + '|' + e.anchor, e]));
+  for (const [file, anchor] of [
+    ['flex_action_fast_path.js', 'storage.setItem(JOURNAL_KEY, JSON.stringify(normalized));'],
+    ['flex_action_fast_path.js', 'storage.setItem(ORDER_JOURNAL_KEY, JSON.stringify(record));'],
+    ['season_result_integrity_guard.js', "original.saveStateSnapshot(state, { immediateWrite: true, savePath: 'season-result-integrity-repair'"],
+    ['storage_diagnostics_cleanup_controller.js', 'keys.forEach((key) => store.delete(key));'],
+    ['storage_diagnostics_season_image_repair_controller.js', 'core.writeTaskPointsStoredState(nextState, {']
+  ]) assert.ok(paths.has(file + '|' + anchor),
+    'previously located legacy writer requires ownership before V2 cutover: ' + file);
+});
