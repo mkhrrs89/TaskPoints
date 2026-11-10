@@ -174,26 +174,46 @@
     "you_score_alias_alignment.js"
   ],
   "firstPassInspected": [
+    "_worker.js",
+    "_worker_core.js",
+    "emergency_recovery.html",
     "game.html",
     "gamehub.html",
     "gold_ledger.html",
+    "gold_theft_top50_notifications.js",
     "greed_gold_economy.js",
     "habit_completion_backup_recovery.js",
+    "habit_fast_path_control.js",
     "home_indexeddb_bootstrap.js",
     "index.html",
+    "matchups.html",
     "notes.html",
     "phase2_dual_write.js",
     "phase2_reset_hook.js",
+    "phase3_read_path.js",
     "phase4_storage_coordinator.js",
     "phase5a_native_snapshot.js",
+    "phase5b_deferred_mirror.js",
     "projects.html",
     "save_pipeline_shared_work.js",
     "scoring_core.js",
     "season.js",
+    "season3_tournament_rollover.js",
+    "season_champion_gold_bonus.js",
     "settings.html",
     "state_runtime_v2.js",
+    "storage_diagnostics.js",
+    "storage_health_phase5c.js",
+    "storage_maintenance_idle.js",
+    "streaks.html",
+    "task_create_fast_path.js",
     "task_mutation_journal.js",
-    "today.html"
+    "today.html",
+    "toolbar.js",
+    "verified_secondary_recovery.html",
+    "verified_secondary_restore.js",
+    "week.html",
+    "work_entry_fast_path.js"
   ],
   "keyEvidence": [
     {
@@ -393,6 +413,108 @@
       "family": "season",
       "role": "season round UI preference",
       "evidencePath": "season.js"
+    },
+    {
+      "key": "taskpoints_pending_inbox_state_v1",
+      "family": "tasks",
+      "role": "independent synchronous Inbox pending-change journal",
+      "evidencePath": "task_create_fast_path.js"
+    },
+    {
+      "key": "taskpoints_inbox_scan_checkpoint_v1",
+      "family": "tasks",
+      "role": "Inbox auto-population maintenance checkpoint",
+      "evidencePath": "toolbar.js"
+    },
+    {
+      "key": "tp_audit_dupe_habits_last_run",
+      "family": "habits",
+      "role": "toolbar duplicate-completion audit throttle",
+      "evidencePath": "toolbar.js"
+    },
+    {
+      "key": "taskpoints_emergency_recovery_hold_v1",
+      "family": "recovery",
+      "role": "emergency restore synchronous hold marker",
+      "evidencePath": "emergency_recovery.html"
+    },
+    {
+      "key": "taskpoints_recovery_write_lock_v1",
+      "family": "recovery",
+      "role": "separate verified-secondary restore write lock",
+      "evidencePath": "verified_secondary_restore.js"
+    },
+    {
+      "key": "taskpoints_verified_secondary_restore_package",
+      "family": "recovery",
+      "role": "verified-secondary restore package type",
+      "evidencePath": "verified_secondary_restore.js"
+    },
+    {
+      "key": "taskpoints_emergency_quarantined_phase5b_journal_v1",
+      "family": "recovery",
+      "role": "emergency quarantine for deferred journal",
+      "evidencePath": "emergency_recovery.html"
+    },
+    {
+      "key": "taskpoints_emergency_pre_restore_mirror_v1",
+      "family": "recovery",
+      "role": "pre-restore emergency copy marker",
+      "evidencePath": "emergency_recovery.html"
+    },
+    {
+      "key": "taskpoints_phase3_read_mode_v1",
+      "family": "storage",
+      "role": "Phase3 read-mode auxiliary setting",
+      "evidencePath": "phase3_read_path.js"
+    },
+    {
+      "key": "taskpoints_phase3_read_diagnostics_v1",
+      "family": "storage",
+      "role": "Phase3 read-path diagnostic counters",
+      "evidencePath": "phase3_read_path.js"
+    },
+    {
+      "key": "taskpoints_state_revision_v1",
+      "family": "storage",
+      "role": "legacy revision guard and read marker",
+      "evidencePath": "phase5b_deferred_mirror.js"
+    },
+    {
+      "key": "taskpoints_storage_data_loss_guard_v1",
+      "family": "recovery",
+      "role": "verified-secondary data-loss guard diagnostics",
+      "evidencePath": "phase5b_deferred_mirror.js"
+    },
+    {
+      "key": "taskpoints_habit_fast_path_disabled_v1",
+      "family": "habits",
+      "role": "Habit fast-path safety disable toggle",
+      "evidencePath": "habit_fast_path_control.js"
+    },
+    {
+      "key": "taskpoints_v2_stale_habit_tap_v1",
+      "family": "session",
+      "role": "session-only stale Habit-tap diagnostic",
+      "evidencePath": "habit_fast_path_control.js"
+    },
+    {
+      "key": "taskpoints_pending_inbox_state_v1",
+      "family": "tasks",
+      "role": "Inbox fast-path journal compaction guard",
+      "evidencePath": "task_create_fast_path.js"
+    },
+    {
+      "key": "tp-nav-icon",
+      "family": "settings",
+      "role": "toolbar navigation appearance preference",
+      "evidencePath": "toolbar.js"
+    },
+    {
+      "key": "tp-nav-emoji",
+      "family": "settings",
+      "role": "toolbar navigation emoji preference",
+      "evidencePath": "toolbar.js"
     }
   ],
   "dbEvidence": [
@@ -416,6 +538,13 @@
       "owner": "V2 preview records and receipts",
       "evidencePath": "state_runtime_v2.js",
       "state": "preview"
+    },
+    {
+      "db": "taskpoints_verified_secondary_v1",
+      "store": "snapshots",
+      "owner": "V1 verified-secondary IndexedDB mirror, not V2 authority",
+      "evidencePath": "phase5b_deferred_mirror.js",
+      "state": "live"
     }
   ],
   "limitations": [
@@ -423,7 +552,8 @@
     "conditional/dynamic aliases and storage wrappers require manual callgraph review",
     "unknown keys, imported fields, generated script code, indirect writers and non-root sources remain M01 blockers",
     "missing physical iOS and disconnected off-device backups are separate cutover gates",
-    "the 30 named taskpoints_v1 fields are a lower bound; normalizeState spreads src and does not enumerate every possible field"
+    "the 30 named taskpoints_v1 fields are a lower bound; normalizeState spreads src and does not enumerate every possible field",
+    "writerPathEvidence anchors are reviewed direct or delegated entrypoints, not a complete callgraph or proof of production writer fencing"
   ],
   "primarySnapshotNamedFields": [
     "tasks",
@@ -461,5 +591,119 @@
     "path": "scoring_core.js",
     "function": "normalizeState",
     "limitation": "30 explicitly normalized src.* fields; spread of ...src preserves additional unknown fields and other writers may create more"
-  }
+  },
+  "writerPathEvidence": [
+    {
+      "path": "week.html",
+      "family": "core",
+      "kind": "live UI",
+      "description": "Week mutation saveMerged calls TaskPointsCore legacy snapshot writer",
+      "anchor": "TaskPointsCore.saveStateSnapshot("
+    },
+    {
+      "path": "matchups.html",
+      "family": "game",
+      "kind": "live UI",
+      "description": "Matchups edits pass full merged state to V1 core save",
+      "anchor": "TaskPointsCore.mergeAndSaveState(fullState"
+    },
+    {
+      "path": "toolbar.js",
+      "family": "tasks",
+      "kind": "startup/maintenance",
+      "description": "Inbox auto-population can write through core mergeAndSaveState",
+      "anchor": "TaskPointsCore.mergeAndSaveState({"
+    },
+    {
+      "path": "toolbar.js",
+      "family": "core",
+      "kind": "deferred wrapper",
+      "description": "Toolbar overrides core mergeAndSaveState with debounced writer",
+      "anchor": "core.mergeAndSaveState = debouncedMerge;"
+    },
+    {
+      "path": "toolbar.js",
+      "family": "game",
+      "kind": "IndexedDB images",
+      "description": "Toolbar has a direct image-blob deletion writer",
+      "anchor": "store.delete(imageId)"
+    },
+    {
+      "path": "task_create_fast_path.js",
+      "family": "tasks",
+      "kind": "synchronous journal",
+      "description": "Inbox changes commit to separate pending journal before idle compaction",
+      "anchor": "storage.setItem(JOURNAL_KEY, raw);"
+    },
+    {
+      "path": "task_create_fast_path.js",
+      "family": "tasks",
+      "kind": "idle compaction",
+      "description": "Inbox journal can be removed after compatible V1 save verification",
+      "anchor": "storage.removeItem(JOURNAL_KEY);"
+    },
+    {
+      "path": "emergency_recovery.html",
+      "family": "recovery",
+      "kind": "recovery entry",
+      "description": "Emergency page synchronously engages hold before loading normal code",
+      "anchor": "localStorage.setItem('taskpoints_emergency_recovery_hold_v1'"
+    },
+    {
+      "path": "verified_secondary_restore.js",
+      "family": "recovery",
+      "kind": "manual restore",
+      "description": "Restore locks out competing V1 writes before replacement",
+      "anchor": "localStorage.setItem(LOCK_KEY, JSON.stringify(lock));"
+    },
+    {
+      "path": "phase3_read_path.js",
+      "family": "storage",
+      "kind": "auxiliary setting",
+      "description": "Phase3 read mode persisted outside main snapshot",
+      "anchor": "global.localStorage?.setItem?.(MODE_KEY, nextMode);"
+    },
+    {
+      "path": "phase5b_deferred_mirror.js",
+      "family": "recovery",
+      "kind": "secondary mirror",
+      "description": "Secondary IndexedDB mirror writes while V1 remains authority",
+      "anchor": "global.indexedDB.open(DB, 1);"
+    },
+    {
+      "path": "storage_maintenance_idle.js",
+      "family": "core",
+      "kind": "deferred wrapper",
+      "description": "Storage maintenance wraps and delays core snapshot calls",
+      "anchor": "core.saveStateSnapshot = wrapped;"
+    },
+    {
+      "path": "habit_fast_path_control.js",
+      "family": "habits",
+      "kind": "auxiliary setting",
+      "description": "Habit fast path writes dynamic preference through generic storage helper",
+      "anchor": "global.localStorage?.setItem?.(key, value);"
+    },
+    {
+      "path": "gold_theft_top50_notifications.js",
+      "family": "game",
+      "kind": "deferred wrapper",
+      "description": "Retroactive Gold/Matchups path replaces snapshot save wrapper",
+      "anchor": "core.saveStateSnapshot = function saveStateSnapshotWithRetroactiveGoldAdjustments"
+    },
+    {
+      "path": "season3_tournament_rollover.js",
+      "family": "season",
+      "kind": "startup mutation",
+      "description": "Season rollover writes updated snapshot through V1 core",
+      "anchor": "savePath: 'season3-october-auto-rollover'"
+    },
+    {
+      "path": "storage_diagnostics.js",
+      "family": "recovery",
+      "kind": "manual maintenance",
+      "description": "Diagnostics can delete image records directly",
+      "anchor": "store.delete(key)"
+    }
+  ]
 }
