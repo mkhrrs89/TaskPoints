@@ -1237,3 +1237,70 @@ test('Today detached recovery is gated to previews and handles failed readonly f
   assert.deepEqual(app.indexedDB.dump(DB),before);
   assert.equal(app.localStorage.getItem(TODAY),source);
 });
+
+test('detached Today package preserves exact candidate and proves SHA without writing origin',async()=>{
+  const app=await seeded(),snapshot=app.indexedDB.dump(DB);
+  const v1=app.localStorage.getItem(V1);
+  const old=app.localStorage.getItem(TODAY);
+  app.localStorage.removeItem(TODAY);
+  const token=app.token();
+  const output=await app.api.preparePreviewTodayDetachedRestorePackage();
+  assert.equal(output.reason,'today_detached_restore_package_prepared',
+    JSON.stringify({...output,recoveryPackage:undefined}));
+  assert.equal(output.packagePrepared,true);
+  assert.equal(output.canApply,false);
+  assert.equal(output.canRestore,false);
+  assert.equal(output.canPromote,false);
+  assert.equal(output.readAuthority,'legacy_only');
+  assert.equal(output.offDeviceBackupVerified,false);
+  const pkg=output.recoveryPackage;
+  assert.equal(pkg.schemaVersion,1);
+  assert.equal(pkg.sourcePresent,true);
+  assert.deepEqual(JSON.parse(pkg.serialized),JSON.parse(old));
+  const data=JSON.stringify({schemaVersion:1,sourcePresent:true,
+    serialized:pkg.serialized});
+  const expected='sha256:'+require('node:crypto').createHash('sha256')
+    .update(data).digest('hex')+':'+Buffer.byteLength(data);
+  assert.equal(pkg.sha256,expected);
+  assert.equal(app.token(),token);
+  assert.equal(app.localStorage.getItem(V1),v1);
+  assert.equal(app.localStorage.getItem(TODAY),null);
+  assert.deepEqual(app.indexedDB.dump(DB),snapshot);
+});
+
+test('detached Today package distinguishes intentionally absent source',async()=>{
+  const app=await boot(null);
+  const seed=await app.api.rehearsePreviewTodayCollectionSeed(
+    app.token(),'missing-seed');
+  assert.equal(seed.collectionParityVerified,true,JSON.stringify(seed));
+  const output=await app.api.preparePreviewTodayDetachedRestorePackage();
+  assert.equal(output.packagePrepared,true,JSON.stringify(output));
+  assert.equal(output.recoveryPackage.sourcePresent,false);
+  assert.equal(output.recoveryPackage.serialized,'{}');
+  assert.equal(output.canRestore,false);
+  assert.equal(app.localStorage.getItem(TODAY),null);
+});
+
+test('detached Today package blocks damaged rows and never returns partial data',async()=>{
+  for(const kind of ['tamper','orphan','generation','disabled']){
+    const app=await seeded();
+    const db=app.indexedDB._databases.get(DB)._stores;
+    const origin=app.localStorage.getItem(V1);
+    app.localStorage.removeItem(TODAY);
+    if(kind==='tamper')db.get('todayDays').get('day:2026-11-04')
+      .value.notesByDay[0].text='mismatch';
+    if(kind==='orphan')db.get('mutations').delete('today-preview-seed:first');
+    if(kind==='generation')
+      app.localStorage.setItem('taskpoints_state_v2_generation_v1','rotated');
+    if(kind==='disabled')app.localStorage.removeItem(DARK);
+    const before=app.indexedDB.dump(DB);
+    const res=await app.api.preparePreviewTodayDetachedRestorePackage();
+    assert.equal(res.packagePrepared,false,JSON.stringify(res));
+    assert.equal(Object.hasOwn(res,'recoveryPackage'),false);
+    assert.equal(res.canRestore,false);
+    assert.equal(res.canPromote,false);
+    assert.equal(app.localStorage.getItem(V1),origin);
+    assert.equal(app.localStorage.getItem(TODAY),null);
+    assert.deepEqual(app.indexedDB.dump(DB),before);
+  }
+});
