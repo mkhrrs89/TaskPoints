@@ -2933,7 +2933,7 @@
     "proposedOwnerAssignments": 78,
     "verifiedOwnerAssignments": 0,
     "requiredClosure": "Complete per-key and per-writer ownership, live admission + generation fencing, export/import/restore and real device tests before M01 can verify",
-    "behaviorRehearsedWriterRoutes": 5,
+    "behaviorRehearsedWriterRoutes": 8,
     "behaviorRehearsalDenominator": 78,
     "inboxReadOnlyCutoverGate": {
       "checkFunction": "inspectReadOnlyInboxJournalForCutover",
@@ -2952,6 +2952,14 @@
       "comparesBeforeAndAfterPeerInspection": true,
       "canGrantProductionAuthority": false,
       "allowsCutover": false
+    },
+    "habitRepairEvidence": {
+      "testPath": "tests/state_runtime_v2_m01_habit_repair_writer_behavior_contract.test.js",
+      "behaviorTestedWriterRoutes": 3,
+      "requiresUserConfirmedBackup": true,
+      "protectsHistoricMatchupResults": true,
+      "productionHandoffCertified": false,
+      "legacyV1AuthorityUnchanged": true
     }
   },
   "proposedWriterHandoffs": [
@@ -3811,6 +3819,54 @@
         "malformed_order_preserved",
         "quota_and_recovery_lock_prevent_overwrite"
       ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "habit_ledger_repair_audit.js",
+      "anchor": "const saved = core.saveStateSnapshot(result.state, {",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_habit_repair_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "preview_then_fresh_backup_required",
+        "stale_row_does_not_rewrite_canonical_state",
+        "skipped_save_is_reported_as_failure",
+        "unrelated_gold_and_player_data_preserved"
+      ],
+      "behaviorName": "verified_source_label_repair",
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "habit_ledger_completion_backed_repair.js",
+      "anchor": "const saved = core.saveStateSnapshot(result.state, {",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_habit_repair_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "preview_then_fresh_backup_required",
+        "stale_preview_plan_rejected",
+        "quota_failure_preserves_original_ledger",
+        "points_game_history_and_gold_preserved"
+      ],
+      "behaviorName": "completion_backed_donekey_repair",
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "habit_ledger_score_reconciliation.js",
+      "anchor": "const saved = core.saveStateSnapshot(result.state, {",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_habit_repair_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "preview_then_fresh_backup_required",
+        "score_and_history_copies_reconciled_without_changing_winner",
+        "stale_matchup_rejected_before_storage_save",
+        "unrelated_gold_and_player_data_preserved"
+      ],
+      "behaviorName": "score_and_matchup_history_reconciliation",
       "productionOwnerVerified": false,
       "productionFenceVerified": false,
       "cutoverPermission": false
