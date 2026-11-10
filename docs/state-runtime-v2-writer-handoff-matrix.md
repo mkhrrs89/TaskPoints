@@ -988,3 +988,11 @@ The V1 Inbox fast-path module has two known storage writer routes: a synchronous
 The V2-only `inspectAuthorityCutoverBarriers()` now has an independent **read-only** Inbox journal observer, two-pass before/after comparison, explicit pending/malformed blockers, and a permanent `inbox_journal_compaction_handoff_not_validated` blocker. It never deletes or replays journal contents and does not confuse an empty count inside a present record with an absent journal.
 
 All this establishes **V1 behavior and conservative inspection only**: two additional known route witnesses, **three of 78 total**, but **zero certified production writer owners**. Dormant legacy-only tabs, the Inbox full-save fallback, independent Task/Habit/Flex journals, recovery and cross-tab generation fencing still prevent cutover. V1 and Main were not modified.
+
+## November 10 M01 Flex completions and ordering — two durable journals
+
+Existing V1 Flex Actions use **two independent keys**, one for completion history and another for UI order. The [actual-module M01 tests](../tests/state_runtime_v2_m01_flex_journal_behavior_contract.test.js) verify that both replay into the effective state and compact after an actual saved V1 snapshot; skipped or rejected saves keep the pending records. They also cover a corrupt/locked order journal, a quota error followed by retry, and delayed-save rejection after another tab has already drained the journal.
+
+V2's cutover inspection now makes **read-only two-pass observations** of both journals around peer checks and full-origin inventory capture. Present, malformed, changing or inaccessible evidence never authorizes promotion; `flex_journal_compaction_handoff_not_validated` remains a permanent blocker independent of snapshot parity.
+
+**Scope:** Two additional behavior-witnessed routes, raising the total to **5/78**. **0/78** production writer handoffs are owner/fence verified. Paused old tabs, cross-tab atomic admission, independent backups and real Safari lifecycle validation remain unresolved. This modification is strictly on V2; V1 is authoritative and Main is untouched.
