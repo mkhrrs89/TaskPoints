@@ -69,6 +69,9 @@ jobs:
       - name: Verify V2 progress tracker counts and evidence links
         run: node --test tests/state_runtime_v2_progress_tracker_contract.test.js
 
+      - name: Guard M01 production storage source and field inventory
+        run: node --test tests/state_runtime_v2_m01_source_inventory_contract.test.js
+
       - name: Run V2 core storage contracts
         run: >-
           node --test
