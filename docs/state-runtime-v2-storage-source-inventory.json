@@ -2933,7 +2933,7 @@
     "proposedOwnerAssignments": 78,
     "verifiedOwnerAssignments": 0,
     "requiredClosure": "Complete per-key and per-writer ownership, live admission + generation fencing, export/import/restore and real device tests before M01 can verify",
-    "behaviorRehearsedWriterRoutes": 12,
+    "behaviorRehearsedWriterRoutes": 17,
     "behaviorRehearsalDenominator": 78,
     "inboxReadOnlyCutoverGate": {
       "checkFunction": "inspectReadOnlyInboxJournalForCutover",
@@ -2972,6 +2972,14 @@
       "productionSourcesExecuted": true,
       "productionOwnerCertified": false,
       "liveCrossTabFencingVerified": false,
+      "v1AuthorityUnchanged": true
+    },
+    "directV1PageWriterEvidence": {
+      "testPath": "tests/state_runtime_v2_m01_badges_trash_ratings_writer_behavior_contract.test.js",
+      "behaviorTestedWriterRoutes": 5,
+      "rawFallbackRoutes": 3,
+      "productionWriterAdmissionVerified": false,
+      "oldTabGenerationFenceVerified": false,
       "v1AuthorityUnchanged": true
     }
   },
@@ -3943,6 +3951,86 @@
         "typed_canonical_results_retained",
         "clean_snapshot_reused_without_write",
         "save_failure_leaves_original_and_retries"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "achievements.html",
+      "anchor": "TaskPointsCore.saveStateSnapshot(nextState, {",
+      "kind": "v1_existing_behavior_synthetic",
+      "behaviorName": "badge_user_save_protected_v1",
+      "testPath": "tests/state_runtime_v2_m01_badges_trash_ratings_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "badge_add_and_remove_via_user_mutation",
+        "immediate_protected_save_with_source",
+        "other_task_and_unknown_fields_preserved",
+        "direct_fallback_not_called_if_protected_save_succeeds"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "achievements.html",
+      "anchor": "TaskPointsCore.writeTaskPointsStoredState(nextState, { storageKey: 'taskpoints_v1' });",
+      "kind": "v1_existing_behavior_synthetic",
+      "behaviorName": "badge_direct_snapshot_fallback",
+      "testPath": "tests/state_runtime_v2_m01_badges_trash_ratings_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "protected_save_exception_runs_direct_storage_fallback",
+        "badge_edits_persist_in_same_v1_snapshot",
+        "double_failed_save_does_not_claim_persistence",
+        "unknown_legacy_fields_remain"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "trash.html",
+      "anchor": "TaskPointsCore.saveStateSnapshot(nextState, { storageKey: STORAGE_KEY, immediateWrite: true });",
+      "kind": "v1_existing_behavior_synthetic",
+      "behaviorName": "trash_protected_restore_and_delete",
+      "testPath": "tests/state_runtime_v2_m01_badges_trash_ratings_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "restore_preserves_prior_task_status",
+        "delete_forever_requires_confirmation",
+        "other_tasks_and_game_history_remain",
+        "immediate_v1_snapshot_save"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "trash.html",
+      "anchor": "TaskPointsCore.writeTaskPointsStoredState(nextState, { storageKey: STORAGE_KEY });",
+      "kind": "v1_existing_behavior_synthetic",
+      "behaviorName": "trash_direct_snapshot_fallback",
+      "testPath": "tests/state_runtime_v2_m01_badges_trash_ratings_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "missing_merge_api_routes_to_raw_storage",
+        "restore_and_delete_forever_persist",
+        "failed_direct_writer_does_not_change_stored_bytes",
+        "unrelated_and_imported_fields_preserved"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "game_ratings.html",
+      "anchor": "TaskPointsCore.writeTaskPointsStoredState(parsed, { storageKey: STORAGE_KEY });",
+      "kind": "v1_existing_behavior_synthetic",
+      "behaviorName": "ratings_direct_player_snapshot_writer",
+      "testPath": "tests/state_runtime_v2_m01_badges_trash_ratings_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "player_edits_write_raw_v1_state",
+        "synthetic_you_player_not_persisted_as_npc",
+        "invalid_input_refused_before_write",
+        "raw_save_failure_preserves_original_snapshot"
       ],
       "productionOwnerVerified": false,
       "productionFenceVerified": false,
