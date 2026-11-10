@@ -66,6 +66,9 @@ jobs:
           tests/state_runtime_v2_legacy_writer_inventory_contract.test.js
           tests/state_runtime_v2_writer_handoff_matrix_contract.test.js
 
+      - name: Verify V2 progress tracker counts and evidence links
+        run: node --test tests/state_runtime_v2_progress_tracker_contract.test.js
+
       - name: Run V2 core storage contracts
         run: >-
           node --test
