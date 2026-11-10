@@ -179,6 +179,8 @@
     "_worker.js",
     "_worker_core.js",
     "emergency_recovery.html",
+    "emergency_recovery_lock_authorization.js",
+    "flex_action_fast_path.js",
     "game.html",
     "gamehub.html",
     "gold_circulation_total.js",
@@ -188,34 +190,62 @@
     "greed_gold_economy.js",
     "habit_completion_backup_recovery.js",
     "habit_fast_path_control.js",
+    "home_export_responsiveness.js",
     "home_indexeddb_bootstrap.js",
+    "home_rank_percentile_line.js",
+    "inbox_count_badge.js",
     "index.html",
+    "indexeddb_requalification.html",
+    "indexeddb_requalification.js",
+    "indexeddb_requalification_guard.js",
+    "indexeddb_requalification_hold_guard.js",
+    "indexeddb_requalification_loader.js",
+    "indexeddb_requalification_preflight_hold.js",
+    "indexeddb_requalification_readonly_guard.js",
+    "indexeddb_requalification_session_compat.js",
+    "indexeddb_requalification_vault_gate.js",
     "matchups.html",
+    "mobile_boot_gate.js",
     "notes.html",
     "phase2_dual_write.js",
     "phase2_reset_hook.js",
+    "phase3_navigation_cache.js",
     "phase3_read_path.js",
+    "phase3_session_codec.js",
+    "phase4_cache_guard.js",
+    "phase4_diagnostics.js",
+    "phase4_primary_read_path.js",
     "phase4_storage_coordinator.js",
     "phase5a_native_snapshot.js",
     "phase5b_deferred_mirror.js",
+    "player_profile.js",
     "projects.html",
     "save_pipeline_shared_work.js",
     "scoring_core.js",
     "season.js",
     "season3_tournament_rollover.js",
     "season_champion_gold_bonus.js",
+    "season_result_integrity_guard.js",
     "settings.html",
+    "state_hot_cache.js",
     "state_runtime_v2.js",
     "storage_diagnostics.js",
+    "storage_diagnostics_cleanup_controller.js",
+    "storage_diagnostics_season_image_repair_controller.js",
     "storage_health_phase5c.js",
+    "storage_image_cleanup.js",
     "storage_maintenance_idle.js",
+    "storage_season_image_reference_repair.js",
     "streaks.html",
     "task_create_fast_path.js",
     "task_mutation_journal.js",
     "today.html",
     "toolbar.js",
+    "verified_secondary_lock_split.js",
+    "verified_secondary_log_quiet_guard.js",
     "verified_secondary_recovery.html",
     "verified_secondary_restore.js",
+    "verified_secondary_restore_lock_guard.js",
     "week.html",
     "work_entry_fast_path.js"
   ],
@@ -537,6 +567,144 @@
       "family": "recovery",
       "role": "Manual Gold writer respects emergency recovery hold",
       "evidencePath": "gold_manual_adjustment.js"
+    },
+    {
+      "key": "taskpoints_pending_flex_completions_v1",
+      "family": "habits",
+      "role": "Live pending Flex completion journal",
+      "evidencePath": "flex_action_fast_path.js"
+    },
+    {
+      "key": "taskpoints_pending_flex_order_v1",
+      "family": "habits",
+      "role": "Live pending Flex order journal",
+      "evidencePath": "flex_action_fast_path.js"
+    },
+    {
+      "key": "taskpoints_indexeddb_requalification_v1",
+      "family": "recovery",
+      "role": "Legacy browser storage promotion gate",
+      "evidencePath": "indexeddb_requalification.js"
+    },
+    {
+      "key": "taskpoints_indexeddb_requalification_diagnostics_v1",
+      "family": "recovery",
+      "role": "Requalification guard diagnostic record",
+      "evidencePath": "indexeddb_requalification_guard.js"
+    },
+    {
+      "key": "taskpoints_indexeddb_browser_session_v1",
+      "family": "session",
+      "role": "Browser session requalification marker",
+      "evidencePath": "phase4_cache_guard.js"
+    },
+    {
+      "key": "taskpoints_active_page_v1",
+      "family": "session",
+      "role": "Active page requalification coordination",
+      "evidencePath": "indexeddb_requalification_session_compat.js"
+    },
+    {
+      "key": "taskpoints_pending_player_edits_v1",
+      "family": "game",
+      "role": "Pending Player journal monitored by hot cache",
+      "evidencePath": "state_hot_cache.js"
+    },
+    {
+      "key": "taskpoints_phase4_diagnostics_v1",
+      "family": "storage",
+      "role": "Primary read diagnostic document",
+      "evidencePath": "phase4_primary_read_path.js"
+    },
+    {
+      "key": "taskpoints_phase3_verified_session_cache_v1",
+      "family": "storage",
+      "role": "Session navigation cache record",
+      "evidencePath": "phase3_navigation_cache.js"
+    },
+    {
+      "key": "taskpoints_phase4_verified_primary_cache_v1",
+      "family": "storage",
+      "role": "Session primary cache codec record",
+      "evidencePath": "phase3_session_codec.js"
+    },
+    {
+      "key": "taskpoints_recovery_attempt_lock_v1",
+      "family": "recovery",
+      "role": "Recovery attempt lock used by emergency authorization",
+      "evidencePath": "emergency_recovery_lock_authorization.js"
+    },
+    {
+      "key": "taskpoints_recovery_write_lock_v1",
+      "family": "recovery",
+      "role": "Committed recovery lock split compatibility",
+      "evidencePath": "verified_secondary_lock_split.js"
+    },
+    {
+      "key": "taskpoints_full_backup",
+      "family": "backup",
+      "role": "Full backup export payload",
+      "evidencePath": "home_export_responsiveness.js"
+    },
+    {
+      "key": "tp_projects_v1",
+      "family": "projects",
+      "role": "Standalone Projects included during export",
+      "evidencePath": "home_export_responsiveness.js"
+    },
+    {
+      "key": "taskpoints_notes_v1",
+      "family": "notes",
+      "role": "Standalone Notes included during export",
+      "evidencePath": "home_export_responsiveness.js"
+    },
+    {
+      "key": "taskpoints_notes_dirty_v1",
+      "family": "notes",
+      "role": "Notes dirty marker included during export",
+      "evidencePath": "home_export_responsiveness.js"
+    },
+    {
+      "key": "taskpoints_notes_authoritative_v1",
+      "family": "notes",
+      "role": "Notes authority marker included during export",
+      "evidencePath": "home_export_responsiveness.js"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Exact V1 writer on Season image repair",
+      "evidencePath": "storage_diagnostics_season_image_repair_controller.js"
+    },
+    {
+      "key": "taskpoints_emergency_recovery_hold_v1",
+      "family": "recovery",
+      "role": "Requalification preflight recovery hold",
+      "evidencePath": "indexeddb_requalification_preflight_hold.js"
+    },
+    {
+      "key": "taskpoints_phase4_storage_mode_v1",
+      "family": "storage",
+      "role": "Hold guard forces safe mode",
+      "evidencePath": "indexeddb_requalification_hold_guard.js"
+    },
+    {
+      "key": "taskpoints_indexeddb_requalification_v1",
+      "family": "recovery",
+      "role": "Fresh browser session requalification witness",
+      "evidencePath": "indexeddb_requalification_session_compat.js"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Secondary export schedule preparation writer",
+      "evidencePath": "inbox_count_badge.js"
+    },
+    {
+      "key": "taskpoints_pending_player_edits_v1",
+      "family": "game",
+      "role": "Pending Player edits invalidate phase4 cache",
+      "evidencePath": "phase4_cache_guard.js"
     }
   ],
   "dbEvidence": [
@@ -575,7 +743,8 @@
     "unknown keys, imported fields, generated script code, indirect writers and non-root sources remain M01 blockers",
     "missing physical iOS and disconnected off-device backups are separate cutover gates",
     "the 30 named taskpoints_v1 fields are a lower bound; normalizeState spreads src and does not enumerate every possible field",
-    "writerPathEvidence anchors are reviewed direct or delegated entrypoints, not a complete callgraph or proof of production writer fencing"
+    "writerPathEvidence anchors are reviewed direct or delegated entrypoints, not a complete callgraph or proof of production writer fencing",
+    "reviewedSourceEvidence is static source inspection only, not complete ownership/fencing of indirect or stale-tab writers"
   ],
   "primarySnapshotNamedFields": [
     "tasks",
@@ -733,6 +902,300 @@
       "kind": "live UI",
       "description": "Manual Gold adjustments issue protected V1 snapshot saves after recovery and stale-snapshot guards",
       "anchor": "latest.core.saveValidatedSnapshot(candidate"
+    },
+    {
+      "path": "flex_action_fast_path.js",
+      "family": "habits",
+      "kind": "synchronous journal",
+      "description": "Flex completion writes separate pending journal",
+      "anchor": "storage.setItem(JOURNAL_KEY, JSON.stringify(normalized));"
+    },
+    {
+      "path": "flex_action_fast_path.js",
+      "family": "habits",
+      "kind": "synchronous journal",
+      "description": "Flex reorder writes distinct order journal",
+      "anchor": "storage.setItem(ORDER_JOURNAL_KEY, JSON.stringify(record));"
+    },
+    {
+      "path": "season_result_integrity_guard.js",
+      "family": "season",
+      "kind": "automatic repair",
+      "description": "Season result repair persists corrected snapshot",
+      "anchor": "original.saveStateSnapshot(state, { immediateWrite: true, savePath: 'season-result-integrity-repair'"
+    },
+    {
+      "path": "inbox_count_badge.js",
+      "family": "backup",
+      "kind": "export side effect",
+      "description": "Export can persist schedule preparation",
+      "anchor": "core.saveValidatedSnapshot(normalized, {"
+    },
+    {
+      "path": "indexeddb_requalification.js",
+      "family": "recovery",
+      "kind": "manual maintenance",
+      "description": "Requalification page writes mode and gate state",
+      "anchor": "const set = (key, value) => localStorage.setItem(key, value);"
+    },
+    {
+      "path": "indexeddb_requalification_guard.js",
+      "family": "recovery",
+      "kind": "auxiliary diagnostics",
+      "description": "Requalification guard writes diagnostic record",
+      "anchor": "storage.setItem(DIAG_KEY, JSON.stringify("
+    },
+    {
+      "path": "indexeddb_requalification_hold_guard.js",
+      "family": "recovery",
+      "kind": "recovery hold",
+      "description": "Recovery hold forces storage mode off",
+      "anchor": "storage.setItem(MODE_KEY, 'off');"
+    },
+    {
+      "path": "indexeddb_requalification_session_compat.js",
+      "family": "recovery",
+      "kind": "reopen witness",
+      "description": "Browser witness writes requalification marker",
+      "anchor": "storage.setItem(GATE_KEY, JSON.stringify({"
+    },
+    {
+      "path": "phase4_cache_guard.js",
+      "family": "recovery",
+      "kind": "startup witness",
+      "description": "Browser page lock witness persists marker",
+      "anchor": "storage.setItem(GATE_KEY, JSON.stringify({"
+    },
+    {
+      "path": "phase4_primary_read_path.js",
+      "family": "storage",
+      "kind": "auxiliary diagnostics",
+      "description": "Read fallback persists diagnostic counters",
+      "anchor": "global.localStorage?.setItem?.(DIAGNOSTICS_KEY, JSON.stringify(next));"
+    },
+    {
+      "path": "phase3_navigation_cache.js",
+      "family": "storage",
+      "kind": "session cache",
+      "description": "Navigation cache writes session projection",
+      "anchor": "global.sessionStorage?.setItem?.(SESSION_CACHE_KEY, JSON.stringify(record));"
+    },
+    {
+      "path": "storage_diagnostics_cleanup_controller.js",
+      "family": "recovery",
+      "kind": "destructive image cleanup",
+      "description": "Manual cleanup deletes IndexedDB image records",
+      "anchor": "keys.forEach((key) => store.delete(key));"
+    },
+    {
+      "path": "storage_diagnostics_season_image_repair_controller.js",
+      "family": "recovery",
+      "kind": "manual image repair",
+      "description": "Season image repair writes V1 snapshot directly",
+      "anchor": "core.writeTaskPointsStoredState(nextState, {"
+    },
+    {
+      "path": "verified_secondary_restore_lock_guard.js",
+      "family": "recovery",
+      "kind": "restore lock cleanup",
+      "description": "Restore guard removes authorized recovery lock",
+      "anchor": "storage.removeItem(LOCK_KEY);"
+    },
+    {
+      "path": "emergency_recovery_lock_authorization.js",
+      "family": "recovery",
+      "kind": "manual restore",
+      "description": "Emergency recovery commits restore lock",
+      "anchor": "storage.setItem(COMMITTED_LOCK_KEY, JSON.stringify(committed));"
+    },
+    {
+      "path": "home_export_responsiveness.js",
+      "family": "backup",
+      "kind": "export side effect",
+      "description": "Export invokes cross-location Notes synchronization",
+      "anchor": "global.syncNotesStorageLocations('responsive-export-sync')"
+    }
+  ],
+  "reviewedSourceEvidence": [
+    {
+      "path": "indexeddb_requalification.js",
+      "family": "recovery",
+      "behavior": "write",
+      "anchor": "const set = (key, value) => localStorage.setItem(key, value);"
+    },
+    {
+      "path": "indexeddb_requalification_guard.js",
+      "family": "recovery",
+      "behavior": "write",
+      "anchor": "storage.setItem(DIAG_KEY, JSON.stringify("
+    },
+    {
+      "path": "indexeddb_requalification_hold_guard.js",
+      "family": "recovery",
+      "behavior": "write",
+      "anchor": "storage.setItem(MODE_KEY, 'off');"
+    },
+    {
+      "path": "indexeddb_requalification_loader.js",
+      "family": "recovery",
+      "behavior": "read",
+      "anchor": "const get = (key)"
+    },
+    {
+      "path": "indexeddb_requalification_readonly_guard.js",
+      "family": "recovery",
+      "behavior": "read",
+      "anchor": "const get = (key)"
+    },
+    {
+      "path": "indexeddb_requalification_session_compat.js",
+      "family": "recovery",
+      "behavior": "write",
+      "anchor": "storage.setItem(GATE_KEY, JSON.stringify({"
+    },
+    {
+      "path": "indexeddb_requalification_vault_gate.js",
+      "family": "recovery",
+      "behavior": "bridge",
+      "anchor": "core.setPhase4StorageMode = function setModeWithVerifiedSafetyProof(mode) {"
+    },
+    {
+      "path": "indexeddb_requalification_preflight_hold.js",
+      "family": "recovery",
+      "behavior": "read",
+      "anchor": "const HOLD_KEY ="
+    },
+    {
+      "path": "indexeddb_requalification.html",
+      "family": "recovery",
+      "behavior": "entrypoint",
+      "anchor": "indexeddb_requalification_loader.js"
+    },
+    {
+      "path": "phase4_cache_guard.js",
+      "family": "recovery",
+      "behavior": "write",
+      "anchor": "storage.setItem(GATE_KEY, JSON.stringify({"
+    },
+    {
+      "path": "phase4_primary_read_path.js",
+      "family": "storage",
+      "behavior": "write",
+      "anchor": "global.localStorage?.setItem?.(DIAGNOSTICS_KEY, JSON.stringify(next));"
+    },
+    {
+      "path": "phase4_diagnostics.js",
+      "family": "storage",
+      "behavior": "bridge",
+      "anchor": "core.getPhase4StorageStatus = function phase4StorageStatus(options = {}) {"
+    },
+    {
+      "path": "phase3_navigation_cache.js",
+      "family": "storage",
+      "behavior": "write",
+      "anchor": "global.sessionStorage?.setItem?.(SESSION_CACHE_KEY, JSON.stringify(record));"
+    },
+    {
+      "path": "phase3_session_codec.js",
+      "family": "storage",
+      "behavior": "read",
+      "anchor": "const storage = global.sessionStorage;"
+    },
+    {
+      "path": "mobile_boot_gate.js",
+      "family": "storage",
+      "behavior": "entrypoint",
+      "anchor": "const COORDINATOR_SCRIPT ="
+    },
+    {
+      "path": "storage_diagnostics_cleanup_controller.js",
+      "family": "recovery",
+      "behavior": "write",
+      "anchor": "keys.forEach((key) => store.delete(key));"
+    },
+    {
+      "path": "storage_diagnostics_season_image_repair_controller.js",
+      "family": "recovery",
+      "behavior": "write",
+      "anchor": "core.writeTaskPointsStoredState(nextState, {"
+    },
+    {
+      "path": "storage_image_cleanup.js",
+      "family": "recovery",
+      "behavior": "read",
+      "anchor": "function collectReferencedImageIds(stateInput) {"
+    },
+    {
+      "path": "storage_season_image_reference_repair.js",
+      "family": "recovery",
+      "behavior": "bridge",
+      "anchor": "function isAllowedSeasonPath(pathInput) {"
+    },
+    {
+      "path": "verified_secondary_lock_split.js",
+      "family": "recovery",
+      "behavior": "bridge",
+      "anchor": "const wrappedGet = function splitRecoveryLockGetItem(key) {"
+    },
+    {
+      "path": "verified_secondary_restore_lock_guard.js",
+      "family": "recovery",
+      "behavior": "write",
+      "anchor": "storage.removeItem(LOCK_KEY);"
+    },
+    {
+      "path": "verified_secondary_log_quiet_guard.js",
+      "family": "recovery",
+      "behavior": "bridge",
+      "anchor": "function longMaintenanceKind(options) {"
+    },
+    {
+      "path": "emergency_recovery_lock_authorization.js",
+      "family": "recovery",
+      "behavior": "write",
+      "anchor": "storage.setItem(COMMITTED_LOCK_KEY, JSON.stringify(committed));"
+    },
+    {
+      "path": "home_export_responsiveness.js",
+      "family": "backup",
+      "behavior": "bridge",
+      "anchor": "global.syncNotesStorageLocations('responsive-export-sync')"
+    },
+    {
+      "path": "state_hot_cache.js",
+      "family": "storage",
+      "behavior": "read",
+      "anchor": "const TRACKED_KEYS = new Set"
+    },
+    {
+      "path": "season_result_integrity_guard.js",
+      "family": "season",
+      "behavior": "write",
+      "anchor": "original.saveStateSnapshot(state, { immediateWrite: true, savePath: 'season-result-integrity-repair'"
+    },
+    {
+      "path": "player_profile.js",
+      "family": "game",
+      "behavior": "entrypoint",
+      "anchor": "var ROUTE = '#player=';"
+    },
+    {
+      "path": "inbox_count_badge.js",
+      "family": "backup",
+      "behavior": "write",
+      "anchor": "core.saveValidatedSnapshot(normalized, {"
+    },
+    {
+      "path": "home_rank_percentile_line.js",
+      "family": "settings",
+      "behavior": "entrypoint",
+      "anchor": "const ROOT_ID = 'homeRankPercentileLine';"
+    },
+    {
+      "path": "flex_action_fast_path.js",
+      "family": "habits",
+      "behavior": "write",
+      "anchor": "storage.setItem(JOURNAL_KEY, JSON.stringify(normalized));"
     }
   ]
 }
