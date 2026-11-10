@@ -81,6 +81,7 @@ jobs:
           tests/state_runtime_v2_m01_flex_cutover_guard_contract.test.js
           tests/state_runtime_v2_m01_habit_repair_writer_behavior_contract.test.js
           tests/state_runtime_v2_m01_four_cross_domain_writer_behavior_contract.test.js
+          tests/state_runtime_v2_m01_badges_trash_ratings_writer_behavior_contract.test.js
 
       - name: Run V2 core storage contracts
         run: >-
