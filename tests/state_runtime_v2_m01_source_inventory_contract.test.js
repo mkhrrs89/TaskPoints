@@ -90,3 +90,21 @@ test('M01 reports discovered storage-use sites and unresolved inspection workloa
   assert.ok(unresolved.length>0,
     'M01 is not yet certified complete; update acceptance only with proof');
 });
+
+test('M01 tracks every explicitly normalized V1 snapshot field without claiming exhaustiveness',()=>{
+  const evidence=inventory.primarySnapshotFieldEvidence;
+  assert.equal(evidence.path,'scoring_core.js');
+  const core=fs.readFileSync(path.join(root,evidence.path),'utf8');
+  const start=core.indexOf('function normalizeState(s)');
+  const end=core.indexOf('\n  function ',start+10);
+  assert.ok(start>=0&&end>start);
+  const source=core.slice(start,end);
+  assert.match(source,/\.\.\.src/,
+    'source permits unknown keys: never treat explicit list as exhaustive');
+  const discovered=[...new Set([...source.matchAll(/\bsrc\.([a-zA-Z_$][\w$]*)/g)]
+    .map(m=>m[1]))].sort();
+  assert.deepEqual(inventory.primarySnapshotNamedFields.slice().sort(),discovered,
+    'normalizeState added/removed field: review M01 V1 field-owner inventory');
+  assert.ok(discovered.length>=30);
+  assert.match(evidence.limitation,/additional unknown fields/);
+});
