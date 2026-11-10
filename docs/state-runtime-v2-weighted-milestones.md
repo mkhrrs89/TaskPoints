@@ -2825,9 +2825,8 @@ This reprioritization does **not** delete or weaken any milestone, test,
 feature, safety fallback, rollback guard or release requirement. The
 cross-context writer-admission gate remains uncredited, as does the
 physical-iPhone validation gate. V1 remains primary and V2 cannot
-auto-promote. Weighted readiness stays **67/100**; the informal
-near-term progress bar remains at **98%** and is not an evidence-based
-release percentage.
+auto-promote. Weighted readiness stays **67/100**; the old near-term 98% estimate is withdrawn: it was not supported
+by a reproducible checklist or measured acceptance evidence.
 
 ### Linux WebKit image-fixture limitation
 
@@ -2871,7 +2870,7 @@ explicit V2 preview reconciliation, and reload in Chromium and WebKit.
 
 The existing single-iPhone-first priorities and every safety gate remain
 intact. Main is unchanged. Weighted readiness is **67/100**; the
-separate informal 98% bar is not certification of an unpassed gate.
+former 98% near-term estimate is withdrawn as unsupported.
 
 ## Rebuild a complete Today compatibility document from V2 records — November 10
 
@@ -2903,8 +2902,8 @@ Chromium/WebKit scenarios verify the rebuild before/after a deliberate V1
 change, explicit V2 preview reconciliation, and reload. Physical standalone
 Safari and all production writer gates remain outstanding.
 
-**Weight stays 67/100**, and the user's informal progress-toward-leaving-67
-bar remains at 98% until the next entire milestone is actually met.
+**Weight stays 67/100**, and the old near-term 98% figure is withdrawn because no defined
+milestone-specific checklist supported it.
 Main is untouched.
 
 ## Detached Today candidate from sealed V2 records — November 10
@@ -2939,6 +2938,31 @@ return `legacyTodaySourceRead:false`, `v1SourceCompared:false`,
 `canRestore:false`, `todayMigrated:false`, `canPromote:false` and
 `readAuthority:'legacy_only'`. Existing safety gates remain uncredited.
 
-**Weighted readiness 67/100**; user's separate informal
-progress-toward-leaving-67 remains **98%** until a complete gate has evidence.
+**Weighted readiness 67/100**; the former near-term 98% estimate is withdrawn as unsupported.
 Main is untouched.
+
+## Correction: former near-term 98% estimate withdrawn — November 10
+
+A review of the milestone rubric and the last series of V2 commits found
+**no reproducible numerator, denominator or acceptance checklist** for
+the claim that V2 was "98% of the way past 67%." Repeatedly showing that
+percentage while completing narrow previews was misleading. The value is
+**withdrawn, not replaced by an invented new estimate**.
+
+The documented **67/100** still represents weighted planning gates credited:
+20 points for the V2 runtime foundation, 15 for the pilot WAL, 15 for pilot
+parity/recovery mechanics, 10 for performance/coordination infrastructure,
+and 7 for legacy writer audit. It is *cutover readiness by milestones*, not
+an empirical percent of code or time remaining.
+
+The next 12-point **nonpilot migration** gate remains **0/12 credited**.
+It needs all authoritative sources and writes migrated/validated, real UI
+integration, interruption tests, and compatible export/import. Several
+record-level Today, Notes, Projects, Tasks, Game and sidecar previews do not
+complete the entire gate. The production writer-fencing (11 points),
+independent off-device recovery (5), physical standalone Safari (3),
+and explicitly approved cutover (2) remain uncredited.
+
+For future reports, give concrete implemented capabilities, tested results,
+and remaining gates. Do not claim a percent "toward the next percent" until
+a fully enumerated and independently testable acceptance checklist exists.
