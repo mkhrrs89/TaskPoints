@@ -174,7 +174,7 @@ test('an uncredited finished game settles once before the snapshot with identica
 test('leaving the batch or throwing away a scoring pass immediately restores live Gold reads', () => {
   const { api, core } = install();
   const state = makeState();
-  const npc = state.players[0], opponent = state.players[1];
+  const npc = state.players[7], opponent = state.players[8];
   function result() {
     let captured;
     const score = core.simulateAiScoreForPlayerCore(npc, '2026-11-10', {
@@ -189,7 +189,7 @@ test('leaving the batch or throwing away a scoring pass immediately restores liv
   assert.notDeepEqual(changed, first, 'manual Gold edits must be visible after the batch exits');
   assert.throws(() => api.withGoldNpcScoringBatch(state, () => { throw new Error('NPC scoring stopped'); }),
     /NPC scoring stopped/);
-  state.goldLedger.push({ id: 'gold:manual:second', playerId: npc.id, amount: 2000,
+  state.goldLedger.push({ id: 'gold:manual:second', playerId: opponent.id, amount: -4800,
     type: 'manual_adjustment', dateKey: '2026-11-10' });
   const newer = result();
   assert.notDeepEqual(newer, changed, 'an exception must not strand stale Gold balance caches');
