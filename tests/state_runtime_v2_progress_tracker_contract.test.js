@@ -42,9 +42,13 @@ test('tracker scoreboard is derived from actual statuses rather than guessed pro
   assert.equal(verified+working+open,rows.length);
   // Never forbid future M/C checkpoint completion: this guard must
   // validate progress, not freeze the baseline as the maximum achievable.
-  const gateMatch=source.match(/\\*\\*(\\d+) \\/ 12 points credited\\*\\*/);
-  assert.ok(gateMatch,'nonpilot weighted gate score missing');
-  const gatePoints=Number(gateMatch[1]);
+  const gateRow=source.split('\n').find(line=>
+    line.startsWith('| **Next weighted gate: nonpilot migration** |'));
+  const gateCell=gateRow?.split('|')[2]?.trim()||'';
+  assert.ok(gateCell.startsWith('**')&&
+    gateCell.endsWith(' / 12 points credited**'),
+    'nonpilot weighted gate score missing');
+  const gatePoints=Number(gateCell.slice(2).split(' / ')[0]);
   assert.ok(gatePoints===0||gatePoints===12,'gate credits only in full');
   if(gatePoints===12)
     assert.equal(verified,rows.length,
@@ -63,8 +67,8 @@ test('every verified checkpoint links to a real tracked test file',()=>{
 });
 
 test('tracker cannot silently treat preview successes as authority/cutover readiness',()=>{
-  assert.match(source,/\*\*0 \/ 12 points credited\*\*/);
-  assert.match(source,/\*\*67 \/ 100 points\*\*/);
+  assert.ok(source.includes(' / 12 points credited**'));
+  assert.ok(source.includes(' / 100 points**'));
   assert.match(source,/Former "98% to escaping 67%"/);
   assert.match(source,/Withdrawn/);
   assert.match(source,/V1 remains the only live storage authority/);
