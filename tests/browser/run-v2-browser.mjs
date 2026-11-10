@@ -1855,6 +1855,82 @@ try {
       noSilentNotesLoss:true,legacyAuthorityPreserved:true};
   });
 
+
+  await run('Today V2 reconstructs a detached recovery candidate after losing V1 Today key',async context=>{
+    const page=await open(context);
+    const before=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const initial={
+        version:1,
+        tasksByDay:{'2026-11-04':['fixture-task']},
+        notesByDay:{'2026-11-04':[
+          {id:'fixture-note',text:'original private note',done:false}],
+          '2026-11-05':[]},
+        orderByDay:{'2026-11-04':['task:fixture-task','note:fixture-note']},
+        futureMetadata:{custom:['keep','intact']}
+      };
+      localStorage.setItem('taskpoints_today_view_v1',JSON.stringify(initial));
+      const token=()=>JSON.stringify(
+        Array.from({length:localStorage.length},(_,i)=>localStorage.key(i))
+          .sort().map(k=>[k,localStorage.getItem(k)]));
+      const seeded=await api.rehearsePreviewTodayCollectionSeed(
+        token(),'detached-browser-seed');
+      const newer=structuredClone(initial);
+      newer.notesByDay['2026-11-04'][0].text='newest retained note';
+      newer.orderByDay['2026-11-04'].reverse();
+      localStorage.setItem('taskpoints_today_view_v1',JSON.stringify(newer));
+      const reconciled=await api.rehearsePreviewTodayCollectionReconcile(
+        token(),'detached-browser-reconcile');
+      const oldSnapshot=localStorage.getItem('taskpoints_v1');
+      localStorage.removeItem('taskpoints_today_view_v1');
+      const withoutToday=token();
+      const detached=await api.buildPreviewTodayDetachedRecoveryCandidate();
+      return {seeded,reconciled,detached,newer,oldSnapshot,
+        oldSnapshotUnchanged:localStorage.getItem('taskpoints_v1')===oldSnapshot,
+        stillMissing:localStorage.getItem('taskpoints_today_view_v1')===null,
+        unchangedAfterInspection:token()===withoutToday,
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(before.seeded.collectionParityVerified,true,
+      JSON.stringify(before.seeded));
+    assert.equal(before.reconciled.collectionParityVerified,true,
+      JSON.stringify(before.reconciled));
+    assert.equal(before.detached.candidateBuilt,true,
+      JSON.stringify(before.detached));
+    assert.equal(before.detached.v2ReceiptChainVerified,true);
+    assert.equal(before.detached.legacyTodaySourceRead,false);
+    assert.equal(before.detached.v1SourceCompared,false);
+    assert.equal(before.detached.canRestore,false);
+    assert.equal(before.detached.canPromote,false);
+    assert.deepEqual(before.detached.previewSnapshot,before.newer);
+    assert.equal(before.stillMissing,true);
+    assert.equal(before.unchangedAfterInspection,true);
+    assert.equal(before.oldSnapshotUnchanged,true);
+    assert.equal(before.authority,'legacy_only');
+    await page.reload({waitUntil:'load'});
+    const after=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const token=()=>JSON.stringify(
+        Array.from({length:localStorage.length},(_,i)=>localStorage.key(i))
+          .sort().map(k=>[k,localStorage.getItem(k)]));
+      const beforeToken=token();
+      const detached=await api.buildPreviewTodayDetachedRecoveryCandidate();
+      return {detached,missing:localStorage.getItem('taskpoints_today_view_v1')===null,
+        unchanged:token()===beforeToken,
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(after.detached.candidateBuilt,true,
+      JSON.stringify(after.detached));
+    assert.deepEqual(after.detached.previewSnapshot,before.newer);
+    assert.equal(after.missing,true);
+    assert.equal(after.unchanged,true);
+    assert.equal(after.authority,'legacy_only');
+    return {lostTodayKeyHandled:true,allNotesAndOrderingRebuilt:true,
+      reconciliationAndReloadVerified:true,noAutomaticRestore:true,
+      authorityPreserved:true};
+  });
+
   await run('Projects preview seeds atomic V2 records and receipts while V1 stays primary',async context=>{
     const page=await open(context);
     const result=await page.evaluate(async()=>{
