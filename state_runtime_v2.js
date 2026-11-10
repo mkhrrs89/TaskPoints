@@ -8371,7 +8371,7 @@
       ||evidence.recordCount!==source.records.length)
       return refuse('today_preview_source_stale');
     if(typeof evidence.recordsFingerprint!=='string'
-      ||!/^sha256:[0-9a-f]{64}:\\d+$/.test(evidence.recordsFingerprint))
+      ||!/^sha256:[0-9a-f]{64}:\d+$/.test(evidence.recordsFingerprint))
       return refuse('today_preview_row_seal_required');
     if(typeof evidence.receiptId!=='string'||!evidence.receiptId.startsWith('today-preview-'))
       return refuse('today_preview_receipt_invalid');
