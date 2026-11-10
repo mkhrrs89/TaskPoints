@@ -2933,13 +2933,22 @@
     "proposedOwnerAssignments": 78,
     "verifiedOwnerAssignments": 0,
     "requiredClosure": "Complete per-key and per-writer ownership, live admission + generation fencing, export/import/restore and real device tests before M01 can verify",
-    "behaviorRehearsedWriterRoutes": 3,
+    "behaviorRehearsedWriterRoutes": 5,
     "behaviorRehearsalDenominator": 78,
     "inboxReadOnlyCutoverGate": {
       "checkFunction": "inspectReadOnlyInboxJournalForCutover",
       "sourcePath": "state_runtime_v2.js",
       "testPath": "tests/state_runtime_v2_m01_inbox_cutover_guard_contract.test.js",
       "observesPendingOrMalformed": true,
+      "comparesBeforeAndAfterPeerInspection": true,
+      "canGrantProductionAuthority": false,
+      "allowsCutover": false
+    },
+    "flexReadOnlyCutoverGate": {
+      "checkFunction": "inspectReadOnlyFlexJournalsForCutover",
+      "sourcePath": "state_runtime_v2.js",
+      "testPath": "tests/state_runtime_v2_m01_flex_cutover_guard_contract.test.js",
+      "observesBothJournals": true,
       "comparesBeforeAndAfterPeerInspection": true,
       "canGrantProductionAuthority": false,
       "allowsCutover": false
@@ -3771,6 +3780,36 @@
         "newer_pending_journal_survives_older_verified_cleanup",
         "corrupt_journal_is_preserved",
         "pending_changes_overlay_reads_without_full_snapshot"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "flex_action_fast_path.js",
+      "anchor": "storage.setItem(JOURNAL_KEY, JSON.stringify(normalized));",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_flex_journal_behavior_contract.test.js",
+      "observedBehaviors": [
+        "combined_completion_and_order_replay",
+        "skipped_or_failed_save_retains_completion_journal",
+        "verified_snapshot_compacts_completion",
+        "stale_delayed_save_does_not_resurrect_old_state"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "flex_action_fast_path.js",
+      "anchor": "storage.setItem(ORDER_JOURNAL_KEY, JSON.stringify(record));",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_flex_journal_behavior_contract.test.js",
+      "observedBehaviors": [
+        "order_journal_durable_before_snapshot",
+        "successful_order_compaction",
+        "malformed_order_preserved",
+        "quota_and_recovery_lock_prevent_overwrite"
       ],
       "productionOwnerVerified": false,
       "productionFenceVerified": false,
