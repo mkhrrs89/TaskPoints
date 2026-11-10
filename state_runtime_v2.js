@@ -4151,6 +4151,40 @@
       messages, processedEventIds: events, dateMarkers };
   }
 
+
+  // A separate read-only inspection of both V1 Flex Action journals.
+  // Absence alone cannot prove a sleeping old tab or deferred save is fenced.
+  // Never normalize/write/remove these records here: malformed bytes are
+  // deliberately preserved as recovery evidence.
+  function inspectReadOnlyFlexJournalsForCutover() {
+    const inspect = (key, type) => {
+      const raw = global.localStorage.getItem(key);
+      if (raw === null) return { raw: null, reason: 'absent', pendingCount: 0 };
+      const malformed = () => ({ raw, reason: 'malformed', pendingCount: null });
+      if (typeof raw !== 'string' || !raw) return malformed();
+      let record;
+      try { record = JSON.parse(raw); }
+      catch (_) { return malformed(); }
+      if (type === 'completions') {
+        if (!Array.isArray(record)
+          || record.some(entry => !entry || typeof entry !== 'object'
+            || Array.isArray(entry) || entry.source !== 'flex'
+            || !entry.id || !entry.flexId || !entry.completedAtISO)) return malformed();
+        return { raw, reason: 'pending', pendingCount: record.length };
+      }
+      if (!record || typeof record !== 'object' || Array.isArray(record)
+        || !Array.isArray(record.orderedIds) || !record.orderedIds.length
+        || record.orderedIds.some(id => typeof id !== 'string' || !id.trim())) {
+        return malformed();
+      }
+      return { raw, reason: 'pending', pendingCount: record.orderedIds.length };
+    };
+    return {
+      completions: inspect('taskpoints_pending_flex_completions_v1', 'completions'),
+      order: inspect('taskpoints_pending_flex_order_v1', 'order')
+    };
+  }
+
   async function inspectAuthorityCutoverBarriers() {
     const hardBlockers = [
       'all_legacy_writers_not_fenced',
@@ -4162,12 +4196,13 @@
       'production_multi_context_handoff_not_validated',
       'task_journal_compaction_handoff_not_validated',
       'inbox_journal_compaction_handoff_not_validated',
+      'flex_journal_compaction_handoff_not_validated',
       // Work commit interception can journal several changed rows one by
       // one, or fall back to a full snapshot save. Neither path is fenced
       // by V2 or yet proven as one cross-context atomic logical action.
       'work_entry_multirecord_admission_not_validated'
     ];
-    const snapshot = (reason, pilot, rollback, peers, extra = [], taskJournal = null, inboxJournal = null) => {
+    const snapshot = (reason, pilot, rollback, peers, extra = [], taskJournal = null, inboxJournal = null, flexJournals = null) => {
       // Even a completely green Habit pilot and all responsive V2 preview
       // peers say nothing about suspended or pre-V2 legacy-only tabs.
       const checks = {
@@ -4182,6 +4217,9 @@
         taskJournalCompactionHandoffValidated: false,
         inboxJournalEmpty: inboxJournal?.reason === 'absent',
         inboxJournalCompactionHandoffValidated: false,
+        flexCompletionJournalEmpty: flexJournals?.completions?.reason === 'absent',
+        flexOrderJournalEmpty: flexJournals?.order?.reason === 'absent',
+        flexJournalCompactionHandoffValidated: false,
         workEntryAtomicAdmissionVerified: false,
         workEntryFallbackPathFenced: false,
         mirrorQueueStable: pilot?.checks?.mirrorQueueStable === true,
@@ -4210,6 +4248,10 @@
           ...(taskJournal?.reason === 'malformed' ? ['task_mutation_journal_malformed'] : []),
           ...(inboxJournal?.reason === 'pending' ? ['inbox_mutation_journal_pending'] : []),
           ...(inboxJournal?.reason === 'malformed' ? ['inbox_mutation_journal_malformed'] : []),
+          ...(flexJournals?.completions?.reason === 'pending' ? ['flex_completion_journal_pending'] : []),
+          ...(flexJournals?.completions?.reason === 'malformed' ? ['flex_completion_journal_malformed'] : []),
+          ...(flexJournals?.order?.reason === 'pending' ? ['flex_order_journal_pending'] : []),
+          ...(flexJournals?.order?.reason === 'malformed' ? ['flex_order_journal_malformed'] : []),
           ...extra, ...hardBlockers
         ])],
         knownUnfencedWriterFamilies: [...AUTHORITY_CUTOVER_WRITER_FAMILIES],
@@ -4224,6 +4266,12 @@
           messages: inboxJournal.messages,
           processedEventIds: inboxJournal.processedEventIds,
           dateMarkers: inboxJournal.dateMarkers
+        } : null,
+        flexJournals: flexJournals ? {
+          completions: { reason: flexJournals.completions.reason,
+            pendingCount: flexJournals.completions.pendingCount },
+          order: { reason: flexJournals.order.reason,
+            pendingCount: flexJournals.order.pendingCount }
         } : null,
         pilot: pilot ? { reason: pilot.reason,
           generation: pilot.generation || null, revision: pilot.revision ?? null } : null,
@@ -4248,6 +4296,7 @@
       const rollback = await inspectLegacyRollbackSource();
       const taskJournalBefore = inspectReadOnlyTaskJournalForCutover();
       const inboxJournalBefore = inspectReadOnlyInboxJournalForCutover();
+      const flexJournalsBefore = inspectReadOnlyFlexJournalsForCutover();
       // The preview writer inventory must include ALL current origin storage
       // keys, not merely taskpoints_* checkpoint keys or the Habit pilot.
       const fullStorageBefore = captureReadOnlyFullStorageInventory();
@@ -4256,6 +4305,7 @@
       const rollbackAfter = await inspectLegacyRollbackSource();
       const taskJournalAfter = inspectReadOnlyTaskJournalForCutover();
       const inboxJournalAfter = inspectReadOnlyInboxJournalForCutover();
+      const flexJournalsAfter = inspectReadOnlyFlexJournalsForCutover();
       const fullStorageAfter = captureReadOnlyFullStorageInventory();
       // The asynchronous peer observation is NOT a lock. Detect a new
       // generation or explicit preview switch during the report; never use
@@ -4268,11 +4318,12 @@
         || stableJson(rollback) !== stableJson(rollbackAfter)
         || stableJson(taskJournalBefore) !== stableJson(taskJournalAfter)
         || stableJson(inboxJournalBefore) !== stableJson(inboxJournalAfter)
+        || stableJson(flexJournalsBefore) !== stableJson(flexJournalsAfter)
         || fullStorageBefore !== fullStorageAfter)
         return snapshot('inventory_changed_during_check', pilot, rollback, peers,
-          ['legacy_or_preview_inventory_changed_during_check'], taskJournalAfter, inboxJournalAfter);
+          ['legacy_or_preview_inventory_changed_during_check'], taskJournalAfter, inboxJournalAfter, flexJournalsAfter);
       return snapshot('authority_cutover_blocked', pilot, rollback, peers,
-        [], taskJournalAfter, inboxJournalAfter);
+        [], taskJournalAfter, inboxJournalAfter, flexJournalsAfter);
     } catch (_) {
       return snapshot('inspection_unreadable', null, null, null,
         ['authority_cutover_inventory_unreadable']);
