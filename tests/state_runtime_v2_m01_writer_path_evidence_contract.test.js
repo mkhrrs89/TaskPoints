@@ -12,7 +12,7 @@ const inventory = JSON.parse(fs.readFileSync(path.join(
 
 test('M01 cross-page writer evidence is attached to reviewed existing sources', () => {
   const reviewed = new Set(inventory.firstPassInspected);
-  const families = new Set(['core', 'tasks', 'habits', 'game', 'season', 'storage', 'recovery', 'backup', 'settings']);
+  const families = new Set(['core', 'tasks', 'habits', 'game', 'season', 'storage', 'recovery', 'backup', 'settings', 'v2-preview']);
   const seen = new Set();
   assert.ok(inventory.writerPathEvidence.length >= 16, 'reviewed writer baselines lost');
   for (const entry of inventory.writerPathEvidence) {
@@ -28,7 +28,8 @@ test('M01 cross-page writer evidence is attached to reviewed existing sources', 
     assert.ok(source.includes(entry.anchor), 'reviewed writer anchor moved/removed: ' + identity);
   }
   // A read-only inventory cannot satisfy M01's full ownership / live admission gate.
-  assert.ok(inventory.firstPassInspected.length < inventory.sourceFiles.length);
+  assert.equal(inventory.firstPassInspected.length, inventory.sourceFiles.length);
+  assert.equal(inventory.writerOwnershipAudit.status, 'incomplete');
   assert.ok(inventory.limitations.some(x => /not a complete callgraph/.test(x)));
 });
 
@@ -56,7 +57,7 @@ test('M01 second-pass source evidence anchors all 30 inspected recovery and writ
   const reviewed = inventory.reviewedSourceEvidence || [];
   const seen = new Set();
   const permitted = new Set(['read', 'write', 'bridge', 'entrypoint']);
-  const families = new Set(['habits', 'game', 'season', 'settings', 'backup', 'recovery', 'storage', 'tasks', 'core']);
+  const families = new Set(['habits', 'game', 'season', 'settings', 'backup', 'recovery', 'storage', 'tasks', 'core', 'v2-preview']);
   assert.ok(reviewed.length >= 30, 'reviewed source evidence baseline regressed');
   assert.ok(inventory.firstPassInspected.length >= 72, 'inspected source baseline regressed');
   for (const row of reviewed) {
@@ -134,6 +135,45 @@ test('M01 reviewed legacy entrypoints stay tracked and explicitly unfenced', () 
     assert.ok(inventory.keyEvidence.some(row => row.key === key),
       'untracked auxiliary key: ' + key);
   }
-  assert.ok(inventory.firstPassInspected.length < inventory.sourceFiles.length,
-    'the static review does not satisfy migration/cutover');
+  assert.equal(inventory.firstPassInspected.length, inventory.sourceFiles.length);
+  assert.equal(inventory.writerOwnershipAudit.productionWritersFenced, false,
+    'root source inspection does not satisfy migration/cutover');
+});
+
+test('M01 all root sources inspected without certifying live writer admission', () => {
+  const inspected = inventory.firstPassInspected.slice().sort();
+  const declared = inventory.sourceFiles.slice().sort();
+  assert.deepEqual(inspected, declared, 'root source first-pass incomplete');
+  const reviews = inventory.reviewedSourceEvidence || [];
+  const finalRows = reviews.filter(r => r.auditPass === 'm01-final-root-source-pass');
+  assert.equal(finalRows.length, 62, 'final root source review baseline changed');
+  for(const row of finalRows) {
+    assert.equal(row.ownerVerification, 'unverified');
+    assert.ok(declared.includes(row.path), 'unknown reviewed source: ' + row.path);
+    assert.ok(fs.readFileSync(path.join(root,row.path),'utf8').includes(row.anchor),
+      'source-level evidence changed: ' + row.path);
+  }
+  const audit = inventory.writerOwnershipAudit;
+  assert.equal(audit.firstPassRootInspectionComplete,true);
+  assert.equal(audit.productionAuthority,'v1');
+  assert.equal(audit.productionWritersFenced,false);
+  assert.equal(audit.status,'incomplete');
+  assert.equal(audit.sourceFilesInspected,declared.length);
+  assert.ok(audit.unresolvedPassConditions.length>=5);
+  for(const key of [
+    'taskpoints_v2_pending_mutations_v1',
+    'taskpoints_state_v2_generation_v1',
+    'taskpoints_home_targeted_render_disabled_v1',
+    'taskpoints_skills_level_config',
+    'taskpoints_standings_scope_v1'
+  ]) assert.ok(inventory.keyEvidence.some(e => e.key === key),
+    'new auxiliary key cannot disappear: ' + key);
+  for(const [file, fragment] of [
+    ['skills.html', 'writeTaskPointsStoredState(nextState'],
+    ['season_bracket_builder.js', 'saveStateSnapshot(nextState'],
+    ['state_runtime_v2_wal.js', 'setWalStorageVerified(KEY'],
+    ['state_v2_preview_cleanup.html', 'indexedDB.deleteDatabase(databases[index])'],
+    ['verified_secondary_restore.html', 'taskpoints_emergency_recovery_hold_v1']
+  ]) assert.ok(inventory.writerPathEvidence.some(e=>e.path===file && e.anchor.includes(fragment)),
+    'critical V1/V2 writer route cannot be dropped: ' + file);
 });

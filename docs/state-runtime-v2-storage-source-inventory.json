@@ -182,11 +182,17 @@
     "archive.html",
     "audit.html",
     "audit_gold_integrity.js",
+    "audit_habit_vice_scoring_dates.js",
     "audit_integrity.js",
+    "audit_same_day_reconciliation.js",
+    "audit_selected_day_breakdown.js",
+    "daily_sources.html",
     "dual_write_status.html",
     "emergency_recovery.html",
     "emergency_recovery_lock_authorization.js",
+    "equations.html",
     "flex_action_fast_path.js",
+    "floating_alert_island_alignment.js",
     "game.html",
     "game_history_reconciliation_repair.js",
     "game_history_repair_alias_sync.js",
@@ -194,6 +200,7 @@
     "gamehub.html",
     "gold_circulation_total.js",
     "gold_ledger.html",
+    "gold_ledger_integrity.js",
     "gold_manual_adjustment.js",
     "gold_theft_top50_notifications.js",
     "greed_gold_economy.js",
@@ -201,17 +208,30 @@
     "habit_completion_source_guard.js",
     "habit_fast_path_control.js",
     "habit_ledger_completion_backed_repair.js",
+    "habit_ledger_matchup_impact_attestation.js",
+    "habit_ledger_matchup_impact_canonical.js",
+    "habit_ledger_matchup_impact_dateiso.js",
     "habit_ledger_matchup_impact_guard.js",
+    "habit_ledger_matchup_impact_legacy_scores.js",
+    "habit_ledger_matchup_impact_stale_guard.js",
     "habit_ledger_matchup_restore_apply.js",
+    "habit_ledger_matchup_restore_transform.js",
+    "habit_ledger_matchup_restore_ui.js",
     "habit_ledger_repair_audit.js",
+    "habit_ledger_repair_matchup_prelude.js",
     "habit_ledger_repair_planner.js",
     "habit_ledger_score_reconciliation.js",
     "habit_ledger_score_reconciliation_hardening.js",
     "habit_missing_donekey_date_analysis.js",
     "head_to_heads.html",
     "home_export_responsiveness.js",
+    "home_featured_matchup_visibility.js",
     "home_indexeddb_bootstrap.js",
     "home_rank_percentile_line.js",
+    "home_season_slate_long_quiet.js",
+    "home_streak_bonus_consistency.js",
+    "home_targeted_render_control.js",
+    "home_yesterday_result_consistency.js",
     "inbox.html",
     "inbox_count_badge.js",
     "index.html",
@@ -234,56 +254,98 @@
     "phase2_reset_hook.js",
     "phase3_navigation_cache.js",
     "phase3_read_path.js",
+    "phase3_read_status.html",
     "phase3_session_codec.js",
+    "phase3_status_cache_guard.js",
     "phase4_cache_guard.js",
     "phase4_diagnostics.js",
     "phase4_primary_read_path.js",
     "phase4_storage_coordinator.js",
+    "phase4_storage_status.html",
     "phase5a_native_snapshot.js",
     "phase5b_deferred_mirror.js",
     "player_profile.js",
+    "postcss.config.js",
     "projects.html",
     "rankings.html",
+    "rankings_tournament_trophies.js",
     "records.html",
+    "records_gold_theft_history_fix.js",
+    "records_gold_theft_tab.js",
+    "records_margin_of_victory_tab.js",
     "save_pipeline_shared_work.js",
     "schedule.html",
     "score_alias_audit_bootstrap.js",
     "score_alias_consistency.js",
     "scoring_core.js",
+    "scwm_history_load_more.js",
     "scwm_interaction_fast_path.js",
+    "season.html",
     "season.js",
     "season2_missed_playin_recovery.js",
     "season3_tournament_rollover.js",
+    "season_bracket_builder.html",
+    "season_bracket_builder.js",
+    "season_bracket_builder_core.js",
+    "season_bracket_builder_entry.js",
+    "season_bracket_builder_fixes.js",
     "season_champion_gold_bonus.js",
     "season_matchup_materialization_guard.js",
     "season_result_integrity_guard.js",
     "season_seed_sources.js",
     "season_series_upset_notifications.js",
     "settings.html",
+    "skills.html",
+    "standings.html",
     "state_hot_cache.js",
     "state_runtime_v2.js",
+    "state_runtime_v2_foreground_correlation.js",
+    "state_runtime_v2_generation.js",
+    "state_runtime_v2_habit_edit_bridge.js",
+    "state_runtime_v2_habit_structure_bridge.js",
+    "state_runtime_v2_live_review.js",
+    "state_runtime_v2_maintenance_idle.js",
+    "state_runtime_v2_perf.js",
+    "state_runtime_v2_serialization_guard.js",
+    "state_runtime_v2_trace_review.js",
+    "state_runtime_v2_wal.js",
+    "state_runtime_v2_wal_bridge.js",
+    "state_v2_preview_cleanup.html",
+    "state_v2_preview_enable.html",
+    "state_v2_trace_review.html",
+    "storage_diagnostics.html",
     "storage_diagnostics.js",
     "storage_diagnostics_cleanup_controller.js",
     "storage_diagnostics_season_image_repair_controller.js",
+    "storage_health.html",
+    "storage_health_codec.js",
     "storage_health_phase5c.js",
+    "storage_health_readers.js",
+    "storage_health_ui.js",
     "storage_image_cleanup.js",
     "storage_maintenance_idle.js",
     "storage_season_image_reference_repair.js",
     "streaks.html",
+    "streaks_nav_link.js",
+    "tailwind.config.js",
     "task_create_fast_path.js",
     "task_delete_fast_path.js",
     "task_mutation_journal.js",
     "today.html",
     "toolbar.js",
     "tournament.html",
+    "tournament_bracket_zoom.js",
+    "tournament_dynamic_bracket.js",
     "trash.html",
     "verified_secondary_lock_split.js",
     "verified_secondary_log_quiet_guard.js",
     "verified_secondary_recovery.html",
+    "verified_secondary_restore.html",
     "verified_secondary_restore.js",
     "verified_secondary_restore_lock_guard.js",
     "week.html",
-    "work_entry_fast_path.js"
+    "work_entry_fast_path.js",
+    "you_score_alias_alignment.js"
   ],
   "keyEvidence": [
     {
@@ -915,6 +977,252 @@
       "family": "core",
       "role": "Rankings V1 snapshot read",
       "evidencePath": "rankings.html"
+    },
+    {
+      "key": "taskpoints_home_targeted_render_disabled_v1",
+      "family": "settings",
+      "role": "Home targeted rendering fallback flag",
+      "evidencePath": "home_targeted_render_control.js"
+    },
+    {
+      "key": "taskpoints_recovery_write_lock_v1",
+      "family": "recovery",
+      "role": "Home consistency wrapper can clear recovery lock",
+      "evidencePath": "home_yesterday_result_consistency.js"
+    },
+    {
+      "key": "taskpoints_recovery_attempt_lock_v1",
+      "family": "recovery",
+      "role": "Home consistency wrapper can clear attempt lock",
+      "evidencePath": "home_yesterday_result_consistency.js"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Rankings tournament trophy view reads V1 state",
+      "evidencePath": "rankings_tournament_trophies.js"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Gold theft records history view reads V1 state",
+      "evidencePath": "records_gold_theft_history_fix.js"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Gold theft records tab reads V1 state",
+      "evidencePath": "records_gold_theft_tab.js"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Margin-of-victory records tab reads V1 state",
+      "evidencePath": "records_margin_of_victory_tab.js"
+    },
+    {
+      "key": "taskpoints_skills_bar_max",
+      "family": "settings",
+      "role": "Skills UI legacy maximum progress bar setting",
+      "evidencePath": "skills.html"
+    },
+    {
+      "key": "taskpoints_skills_bar_color",
+      "family": "settings",
+      "role": "Skills UI legacy progress color setting",
+      "evidencePath": "skills.html"
+    },
+    {
+      "key": "taskpoints_skills_level_config",
+      "family": "settings",
+      "role": "Skills levels independent configuration",
+      "evidencePath": "skills.html"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Skills page saves primary V1 snapshot",
+      "evidencePath": "skills.html"
+    },
+    {
+      "key": "taskpoints_standings_scope_v1",
+      "family": "settings",
+      "role": "Standings selected season scope",
+      "evidencePath": "standings.html"
+    },
+    {
+      "key": "taskpoints_standings_scope_season3_rollover_v1",
+      "family": "settings",
+      "role": "Standings one-time season three marker",
+      "evidencePath": "standings.html"
+    },
+    {
+      "key": "taskpoints_standings_scope_season4_rollover_v1",
+      "family": "settings",
+      "role": "Standings one-time season four marker",
+      "evidencePath": "standings.html"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Standings page reads primary snapshot",
+      "evidencePath": "standings.html"
+    },
+    {
+      "key": "taskpoints_state_v2_generation_v1",
+      "family": "v2-preview",
+      "role": "V2 dark preview generation marker",
+      "evidencePath": "state_runtime_v2_generation.js"
+    },
+    {
+      "key": "taskpoints_state_v2_dark_mode_v1",
+      "family": "v2-preview",
+      "role": "V2 pilot dark-mode setting read by generation bridge",
+      "evidencePath": "state_runtime_v2_generation.js"
+    },
+    {
+      "key": "taskpoints_state_v2_dark_mode_v1",
+      "family": "v2-preview",
+      "role": "V2 edit bridge dark gate",
+      "evidencePath": "state_runtime_v2_habit_edit_bridge.js"
+    },
+    {
+      "key": "taskpoints_state_v2_dark_mode_v1",
+      "family": "v2-preview",
+      "role": "V2 structure bridge dark gate",
+      "evidencePath": "state_runtime_v2_habit_structure_bridge.js"
+    },
+    {
+      "key": "taskpoints_state_v2_dark_mode_v1",
+      "family": "v2-preview",
+      "role": "V2 live review dark gate",
+      "evidencePath": "state_runtime_v2_live_review.js"
+    },
+    {
+      "key": "taskpoints_state_v2_wal_test_armed_v1",
+      "family": "v2-preview",
+      "role": "Manual test-arm session marker for WAL",
+      "evidencePath": "state_runtime_v2_live_review.js"
+    },
+    {
+      "key": "taskpoints_state_v2_dark_mode_v1",
+      "family": "v2-preview",
+      "role": "V2 background idle dark gate",
+      "evidencePath": "state_runtime_v2_maintenance_idle.js"
+    },
+    {
+      "key": "taskpoints_v2_pending_mutations_v1",
+      "family": "v2-preview",
+      "role": "V2 dark preview pending mutation WAL document",
+      "evidencePath": "state_runtime_v2_wal.js"
+    },
+    {
+      "key": "taskpoints_state_v2_generation_v1",
+      "family": "v2-preview",
+      "role": "WAL honors V2 generation identifier",
+      "evidencePath": "state_runtime_v2_wal.js"
+    },
+    {
+      "key": "taskpoints_state_v2_dark_mode_v1",
+      "family": "v2-preview",
+      "role": "WAL dark-mode authority gate",
+      "evidencePath": "state_runtime_v2_wal.js"
+    },
+    {
+      "key": "taskpoints_state_v2_wal_test_armed_v1",
+      "family": "v2-preview",
+      "role": "WAL bridge test-arm session flag",
+      "evidencePath": "state_runtime_v2_wal_bridge.js"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "WAL bridge only watches legacy V1 source",
+      "evidencePath": "state_runtime_v2_wal_bridge.js"
+    },
+    {
+      "key": "taskpoints_state_v2",
+      "family": "v2-preview",
+      "role": "Manual preview cleanup key",
+      "evidencePath": "state_v2_preview_cleanup.html"
+    },
+    {
+      "key": "taskpoints_v2_pending_mutations_v1",
+      "family": "v2-preview",
+      "role": "Manual preview cleanup removes V2 WAL",
+      "evidencePath": "state_v2_preview_cleanup.html"
+    },
+    {
+      "key": "taskpoints_state_v2_generation_v1",
+      "family": "v2-preview",
+      "role": "Manual preview cleanup removes V2 generation marker",
+      "evidencePath": "state_v2_preview_cleanup.html"
+    },
+    {
+      "key": "taskpoints_state_v2_dark_mode_v1",
+      "family": "v2-preview",
+      "role": "Preview enable page changes dark-mode flag",
+      "evidencePath": "state_v2_preview_enable.html"
+    },
+    {
+      "key": "tp_perf_trace_enabled_v1",
+      "family": "session",
+      "role": "Preview enable page optional perf trace",
+      "evidencePath": "state_v2_preview_enable.html"
+    },
+    {
+      "key": "taskpoints_safety_vault_v1",
+      "family": "recovery",
+      "role": "Storage health UI reads safety vault metadata",
+      "evidencePath": "storage_health_readers.js"
+    },
+    {
+      "key": "taskpoints_backup_latest",
+      "family": "backup",
+      "role": "Storage health reads rolling latest backup",
+      "evidencePath": "storage_health_readers.js"
+    },
+    {
+      "key": "taskpoints_phase4_storage_mode_v1",
+      "family": "storage",
+      "role": "Storage health status reads phase4 mode",
+      "evidencePath": "storage_health_ui.js"
+    },
+    {
+      "key": "taskpoints_phase5b_pending_changes_v1",
+      "family": "recovery",
+      "role": "Storage health status reads legacy journal",
+      "evidencePath": "storage_health_ui.js"
+    },
+    {
+      "key": "taskpoints_emergency_recovery_hold_v1",
+      "family": "recovery",
+      "role": "Verified-secondary restore preflight writes hold",
+      "evidencePath": "verified_secondary_restore.html"
+    },
+    {
+      "key": "taskpoints_phase4_storage_mode_v1",
+      "family": "storage",
+      "role": "Verified-secondary restore forces safe mode off",
+      "evidencePath": "verified_secondary_restore.html"
+    },
+    {
+      "key": "taskpoints_pending_habit_deltas_v1",
+      "family": "habits",
+      "role": "Verified-secondary restore backs up pending habit journal",
+      "evidencePath": "verified_secondary_restore.html"
+    },
+    {
+      "key": "taskpoints_phase5b_pending_changes_v1",
+      "family": "recovery",
+      "role": "Verified-secondary restore backs up legacy journal",
+      "evidencePath": "verified_secondary_restore.html"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Score alias alignment reads legacy primary snapshot",
+      "evidencePath": "you_score_alias_alignment.js"
     }
   ],
   "dbEvidence": [
@@ -955,7 +1263,8 @@
     "the 30 named taskpoints_v1 fields are a lower bound; normalizeState spreads src and does not enumerate every possible field",
     "writerPathEvidence anchors are reviewed direct or delegated entrypoints, not a complete callgraph or proof of production writer fencing",
     "reviewedSourceEvidence is static source inspection only, not complete ownership/fencing of indirect or stale-tab writers",
-    "legacy page and repair route evidence is static only; V1 fallback and idle writers require full callgraph and stale-generation fencing before cutover"
+    "legacy page and repair route evidence is static only; V1 fallback and idle writers require full callgraph and stale-generation fencing before cutover",
+    "all 170 tracked root files now have a first-pass inspection but source coverage is not a full cross-page callgraph, owner-certified key/field list, or safe V2 production cutover"
   ],
   "primarySnapshotNamedFields": [
     "tasks",
@@ -1485,6 +1794,196 @@
       "auditPass": "m01-legacy-entrypoints",
       "fencingStatus": "not_proven",
       "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "home_targeted_render_control.js",
+      "family": "settings",
+      "kind": "auxiliary setting",
+      "description": "Targeted rendering toggle writes localStorage flag",
+      "anchor": "global.localStorage?.setItem?.(key, value);",
+      "auditPass": "m01-final-root-source-pass",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "home_yesterday_result_consistency.js",
+      "family": "recovery",
+      "kind": "recovery lock",
+      "description": "Home consistency guard can remove recovery lock",
+      "anchor": "storage.removeItem(LOCK_KEY);",
+      "auditPass": "m01-final-root-source-pass",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "home_yesterday_result_consistency.js",
+      "family": "recovery",
+      "kind": "recovery attempt",
+      "description": "Home consistency guard can remove recovery attempt lock",
+      "anchor": "storage.removeItem(ATTEMPT_LOCK_KEY);",
+      "auditPass": "m01-final-root-source-pass",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "season_bracket_builder.js",
+      "family": "season",
+      "kind": "user-initiated save",
+      "description": "Bracket draft and official creation persist V1 snapshot",
+      "anchor": "const saved = core.saveStateSnapshot(nextState, { savePath, userInitiated: true, immediateWrite: true });",
+      "auditPass": "m01-final-root-source-pass",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "skills.html",
+      "family": "habits",
+      "kind": "page mutation",
+      "description": "Skills editor saves V1 snapshot",
+      "anchor": "const saved = TaskPointsCore.saveStateSnapshot(nextState, { savePath });",
+      "auditPass": "m01-final-root-source-pass",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "skills.html",
+      "family": "habits",
+      "kind": "fallback writer",
+      "description": "Skills editor retains raw V1 storage fallback",
+      "anchor": "TaskPointsCore.writeTaskPointsStoredState(nextState, { storageKey: STORAGE_KEY });",
+      "auditPass": "m01-final-root-source-pass",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "skills.html",
+      "family": "settings",
+      "kind": "auxiliary preference",
+      "description": "Skills settings persist separate level configuration",
+      "anchor": "localStorage.setItem(SKILLS_LEVEL_CONFIG_KEY, JSON.stringify(normalized));",
+      "auditPass": "m01-final-root-source-pass",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "standings.html",
+      "family": "settings",
+      "kind": "auxiliary preference",
+      "description": "Standings scope writes localStorage outside V1 snapshot",
+      "anchor": "localStorage.setItem(STANDINGS_SCOPE_STORAGE_KEY, standingsScope);",
+      "auditPass": "m01-final-root-source-pass",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "standings.html",
+      "family": "settings",
+      "kind": "rollover marker",
+      "description": "Standings Season 4 switch writes migration marker",
+      "anchor": "localStorage.setItem(STANDINGS_SEASON_FOUR_ROLLOVER_KEY, \"1\");",
+      "auditPass": "m01-final-root-source-pass",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "state_runtime_v2_generation.js",
+      "family": "v2-preview",
+      "kind": "generation marker",
+      "description": "Dark V2 preview generation control writes separate key",
+      "anchor": "global.localStorage?.setItem?.(key, String(value));",
+      "auditPass": "m01-final-root-source-pass",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "state_runtime_v2_live_review.js",
+      "family": "v2-preview",
+      "kind": "session test arm",
+      "description": "V2 preview test arms WAL in session storage",
+      "anchor": "global.sessionStorage.setItem(WAL_TEST_ARM_KEY, '1');",
+      "auditPass": "m01-final-root-source-pass",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "state_runtime_v2_wal.js",
+      "family": "v2-preview",
+      "kind": "preview WAL",
+      "description": "V2 dark preview WAL writes its own localStorage record",
+      "anchor": "setWalStorageVerified(KEY, text, 'state_runtime_v2_wal_write_failed');",
+      "auditPass": "m01-final-root-source-pass",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "state_runtime_v2_wal.js",
+      "family": "v2-preview",
+      "kind": "preview WAL cleanup",
+      "description": "V2 dark preview WAL removes its own localStorage record",
+      "anchor": "removeWalStorageVerified(KEY, 'state_runtime_v2_wal_remove_failed');",
+      "auditPass": "m01-final-root-source-pass",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "state_runtime_v2_wal_bridge.js",
+      "family": "v2-preview",
+      "kind": "session test flag",
+      "description": "WAL bridge disarms test session marker",
+      "anchor": "global.sessionStorage.removeItem(WAL_TEST_ARM_KEY);",
+      "auditPass": "m01-final-root-source-pass",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "state_v2_preview_cleanup.html",
+      "family": "v2-preview",
+      "kind": "manual preview cleanup",
+      "description": "Manual preview cleanup removes V2-only keys",
+      "anchor": "V2_KEYS.forEach((key) => localStorage.removeItem(key));",
+      "auditPass": "m01-final-root-source-pass",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "state_v2_preview_cleanup.html",
+      "family": "v2-preview",
+      "kind": "manual preview cleanup",
+      "description": "Manual preview cleanup deletes V2-only databases",
+      "anchor": "indexedDB.deleteDatabase(databases[index]);",
+      "auditPass": "m01-final-root-source-pass",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "state_v2_preview_enable.html",
+      "family": "v2-preview",
+      "kind": "manual preview enable",
+      "description": "User-only preview opt-in sets dark pilot flag",
+      "anchor": "localStorage.setItem(KEY, '1');",
+      "auditPass": "m01-final-root-source-pass",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "verified_secondary_restore.html",
+      "family": "recovery",
+      "kind": "restore preflight",
+      "description": "Secondary restore enters emergency recovery hold before scripts",
+      "anchor": "localStorage.setItem('taskpoints_emergency_recovery_hold_v1', JSON.stringify({",
+      "auditPass": "m01-final-root-source-pass",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "verified_secondary_restore.html",
+      "family": "recovery",
+      "kind": "restore preflight",
+      "description": "Secondary restore forces legacy mode to off",
+      "anchor": "localStorage.setItem('taskpoints_phase4_storage_mode_v1', 'off');",
+      "auditPass": "m01-final-root-source-pass",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
     }
   ],
   "reviewedSourceEvidence": [
@@ -1919,6 +2418,517 @@
       "behavior": "read",
       "anchor": "const raw = global.localStorage?.getItem(STORAGE_KEY);",
       "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "audit_habit_vice_scoring_dates.js",
+      "family": "habits",
+      "behavior": "read",
+      "anchor": "installHabitViceScoringDateAudit(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "audit_same_day_reconciliation.js",
+      "family": "game",
+      "behavior": "read",
+      "anchor": "const existing = global.TaskPointsAuditIntegrity || {};",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "audit_selected_day_breakdown.js",
+      "family": "habits",
+      "behavior": "read",
+      "anchor": "function buildSelectedDayBreakdown(stateInput, selectedDateKey",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "daily_sources.html",
+      "family": "core",
+      "behavior": "entrypoint",
+      "anchor": "<title>TaskPoints — Daily Sources</title>",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "equations.html",
+      "family": "core",
+      "behavior": "read",
+      "anchor": "Inertia:",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "floating_alert_island_alignment.js",
+      "family": "settings",
+      "behavior": "entrypoint",
+      "anchor": "installTaskPointsFloatingAlertIslandAlignment(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "gold_ledger_integrity.js",
+      "family": "game",
+      "behavior": "read",
+      "anchor": "installTaskPointsGoldLedgerIntegrity(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "habit_ledger_matchup_impact_attestation.js",
+      "family": "habits",
+      "behavior": "bridge",
+      "anchor": "installHabitLedgerImpactAttestation(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "habit_ledger_matchup_impact_canonical.js",
+      "family": "habits",
+      "behavior": "bridge",
+      "anchor": "installCanonicalHabitLedgerMatchupImpact(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "habit_ledger_matchup_impact_dateiso.js",
+      "family": "habits",
+      "behavior": "bridge",
+      "anchor": "installHabitLedgerDateIsoImpact(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "habit_ledger_matchup_impact_legacy_scores.js",
+      "family": "habits",
+      "behavior": "bridge",
+      "anchor": "installHabitLedgerLegacyScoreFallback(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "habit_ledger_matchup_impact_stale_guard.js",
+      "family": "habits",
+      "behavior": "bridge",
+      "anchor": "installHabitLedgerMatchupImpactStaleGuard(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "habit_ledger_matchup_restore_transform.js",
+      "family": "habits",
+      "behavior": "bridge",
+      "anchor": "installHabitLedgerStoredScoreRestoreTransform(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "habit_ledger_matchup_restore_ui.js",
+      "family": "habits",
+      "behavior": "entrypoint",
+      "anchor": "installHabitLedgerStoredScoreRestoreUi(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "habit_ledger_repair_matchup_prelude.js",
+      "family": "habits",
+      "behavior": "bridge",
+      "anchor": "installHabitLedgerRepairMatchupPrelude(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "home_featured_matchup_visibility.js",
+      "family": "game",
+      "behavior": "entrypoint",
+      "anchor": "installHomeFeaturedMatchupVisibility(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "home_season_slate_long_quiet.js",
+      "family": "season",
+      "behavior": "bridge",
+      "anchor": "installTaskPointsHomeSeasonSlateLongQuiet(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "home_streak_bonus_consistency.js",
+      "family": "habits",
+      "behavior": "bridge",
+      "anchor": "installTaskPointsHomeStreakBonusConsistency(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "home_targeted_render_control.js",
+      "family": "settings",
+      "behavior": "write",
+      "anchor": "taskpoints_home_targeted_render_disabled_v1",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "home_yesterday_result_consistency.js",
+      "family": "recovery",
+      "behavior": "write",
+      "anchor": "storage.removeItem(LOCK_KEY);",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "phase3_read_status.html",
+      "family": "storage",
+      "behavior": "entrypoint",
+      "anchor": "<title>TaskPoints",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "phase3_status_cache_guard.js",
+      "family": "storage",
+      "behavior": "bridge",
+      "anchor": "installTaskPointsPhase3StatusCacheGuard(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "phase4_storage_status.html",
+      "family": "storage",
+      "behavior": "entrypoint",
+      "anchor": "<title>TaskPoints — Phase 4 Storage</title>",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "postcss.config.js",
+      "family": "settings",
+      "behavior": "entrypoint",
+      "anchor": "module.exports = {",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "rankings_tournament_trophies.js",
+      "family": "game",
+      "behavior": "read",
+      "anchor": "installTaskPointsRankingsTournamentTrophies(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "records_gold_theft_history_fix.js",
+      "family": "game",
+      "behavior": "read",
+      "anchor": "installTaskPointsGoldTheftRecordsHistoryFix(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "records_gold_theft_tab.js",
+      "family": "game",
+      "behavior": "read",
+      "anchor": "installTaskPointsGoldTheftRecordsTab(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "records_margin_of_victory_tab.js",
+      "family": "game",
+      "behavior": "read",
+      "anchor": "installTaskPointsMarginOfVictoryRecordsTab(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "scwm_history_load_more.js",
+      "family": "habits",
+      "behavior": "entrypoint",
+      "anchor": "installTaskPointsScwmHistoryLoadMore(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "season.html",
+      "family": "season",
+      "behavior": "entrypoint",
+      "anchor": "<title>TaskPoints — Season</title>",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "season_bracket_builder.html",
+      "family": "season",
+      "behavior": "entrypoint",
+      "anchor": "<title>TaskPoints — Build a Bracket</title>",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "season_bracket_builder.js",
+      "family": "season",
+      "behavior": "write",
+      "anchor": "const saved = core.saveStateSnapshot(nextState, { savePath, userInitiated: true, immediateWrite: true });",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "season_bracket_builder_core.js",
+      "family": "season",
+      "behavior": "read",
+      "anchor": "const STANDARD_BEST_OF = [1, 3, 5, 7];",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "season_bracket_builder_entry.js",
+      "family": "season",
+      "behavior": "entrypoint",
+      "anchor": "let enhancementScheduled = false;",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "season_bracket_builder_fixes.js",
+      "family": "season",
+      "behavior": "bridge",
+      "anchor": "const api = global.TaskPointsBracketBuilder;",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "skills.html",
+      "family": "habits",
+      "behavior": "write",
+      "anchor": "TaskPointsCore.writeTaskPointsStoredState(nextState, { storageKey: STORAGE_KEY });",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "standings.html",
+      "family": "settings",
+      "behavior": "write",
+      "anchor": "localStorage.setItem(STANDINGS_SCOPE_STORAGE_KEY, standingsScope);",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "state_runtime_v2_foreground_correlation.js",
+      "family": "v2-preview",
+      "behavior": "read",
+      "anchor": "installTaskPointsStateRuntimeV2ForegroundCorrelation(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "state_runtime_v2_generation.js",
+      "family": "v2-preview",
+      "behavior": "write",
+      "anchor": "taskpoints_state_v2_generation_v1",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "state_runtime_v2_habit_edit_bridge.js",
+      "family": "v2-preview",
+      "behavior": "bridge",
+      "anchor": "installTaskPointsStateRuntimeV2HabitEditBridge(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "state_runtime_v2_habit_structure_bridge.js",
+      "family": "v2-preview",
+      "behavior": "bridge",
+      "anchor": "installTaskPointsStateRuntimeV2HabitStructureBridge(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "state_runtime_v2_live_review.js",
+      "family": "v2-preview",
+      "behavior": "write",
+      "anchor": "global.sessionStorage.setItem(WAL_TEST_ARM_KEY, '1');",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "state_runtime_v2_maintenance_idle.js",
+      "family": "v2-preview",
+      "behavior": "bridge",
+      "anchor": "installTaskPointsStateRuntimeV2MaintenanceIdle(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "state_runtime_v2_perf.js",
+      "family": "v2-preview",
+      "behavior": "read",
+      "anchor": "installTaskPointsStateRuntimeV2Perf(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "state_runtime_v2_serialization_guard.js",
+      "family": "v2-preview",
+      "behavior": "bridge",
+      "anchor": "installTaskPointsStateRuntimeV2SerializationGuard(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "state_runtime_v2_trace_review.js",
+      "family": "v2-preview",
+      "behavior": "read",
+      "anchor": "installTaskPointsStateRuntimeV2TraceReview(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "state_runtime_v2_wal.js",
+      "family": "v2-preview",
+      "behavior": "write",
+      "anchor": "taskpoints_v2_pending_mutations_v1",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "state_runtime_v2_wal_bridge.js",
+      "family": "v2-preview",
+      "behavior": "bridge",
+      "anchor": "installTaskPointsStateRuntimeV2WalBridge(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "state_v2_preview_cleanup.html",
+      "family": "v2-preview",
+      "behavior": "write",
+      "anchor": "V2_KEYS.forEach((key) => localStorage.removeItem(key));",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "state_v2_preview_enable.html",
+      "family": "v2-preview",
+      "behavior": "write",
+      "anchor": "localStorage.setItem(KEY, '1');",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "state_v2_trace_review.html",
+      "family": "v2-preview",
+      "behavior": "entrypoint",
+      "anchor": "<title>TaskPoints V2 Trace Review</title>",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "storage_diagnostics.html",
+      "family": "recovery",
+      "behavior": "entrypoint",
+      "anchor": "<title>TaskPoints",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "storage_health.html",
+      "family": "recovery",
+      "behavior": "entrypoint",
+      "anchor": "<title>TaskPoints",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "storage_health_codec.js",
+      "family": "recovery",
+      "behavior": "read",
+      "anchor": "installTaskPointsStorageHealthCodec(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "storage_health_readers.js",
+      "family": "recovery",
+      "behavior": "read",
+      "anchor": "const VAULT_DB_NAME = 'taskpoints_safety_vault_v1';",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "storage_health_ui.js",
+      "family": "recovery",
+      "behavior": "read",
+      "anchor": "installTaskPointsStorageHealthUI(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "streaks_nav_link.js",
+      "family": "settings",
+      "behavior": "entrypoint",
+      "anchor": "installTaskPointsStreaksNavLink(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "tailwind.config.js",
+      "family": "settings",
+      "behavior": "entrypoint",
+      "anchor": "module.exports = {",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "tournament_bracket_zoom.js",
+      "family": "game",
+      "behavior": "entrypoint",
+      "anchor": "installTaskPointsTournamentBracketZoom(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "tournament_dynamic_bracket.js",
+      "family": "game",
+      "behavior": "entrypoint",
+      "anchor": "installDynamicTournamentBracket(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "verified_secondary_restore.html",
+      "family": "recovery",
+      "behavior": "write",
+      "anchor": "localStorage.setItem('taskpoints_emergency_recovery_hold_v1', JSON.stringify({",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
+    },
+    {
+      "path": "you_score_alias_alignment.js",
+      "family": "game",
+      "behavior": "read",
+      "anchor": "installTaskPointsYouScoreAliasAlignment(global)",
+      "auditPass": "m01-final-root-source-pass",
+      "ownerVerification": "unverified"
     }
-  ]
+  ],
+  "writerOwnershipAudit": {
+    "status": "incomplete",
+    "productionAuthority": "v1",
+    "firstPassRootInspectionComplete": true,
+    "productionWritersFenced": false,
+    "sourceFilesEnumerated": 170,
+    "sourceFilesInspected": 170,
+    "unresolvedPassConditions": [
+      "Resolve each direct and indirect live writer to authoritative V2 owner or explicitly retained auxiliary storage",
+      "Enumerate dynamic storage aliases, complete schema fields and nested non-root scripts",
+      "Prove generation admission and stale-tab fencing for legacy, repair, deferred and raw fallback writes",
+      "Verify interrupted, quota-failed, restart, import, reset, export and recovery paths against live authority",
+      "Validate off-device recovery and physical iPhone Safari before production promotion"
+    ]
+  }
 }

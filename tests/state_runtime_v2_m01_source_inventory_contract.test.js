@@ -29,8 +29,13 @@ test('M01 first-pass inspection is distinct from full owner/writer validation',(
     inventory.firstPassInspected.length);
   for(const file of inventory.firstPassInspected)
     assert.ok(files.has(file),'inspected source must exist: '+file);
-  assert.ok(inventory.firstPassInspected.length<files.size,
-    'M01 requires separate exhaustive ownership validation before completion');
+  assert.equal(inventory.firstPassInspected.length,files.size,
+    'the root-source first pass must remain complete');
+  assert.equal(inventory.writerOwnershipAudit?.status,'incomplete');
+  assert.equal(inventory.writerOwnershipAudit?.productionAuthority,'v1');
+  assert.equal(inventory.writerOwnershipAudit?.productionWritersFenced,false);
+  assert.ok(inventory.writerOwnershipAudit.unresolvedPassConditions.length>=5,
+    'source review must not be mistaken for production ownership certification');
   assert.ok(inventory.limitations.some(x=>/dynamic aliases/.test(x)),
     'dynamic/indirect writers must remain an explicit unresolved risk');
 });
@@ -87,8 +92,10 @@ test('M01 reports discovered storage-use sites and unresolved inspection workloa
   }));
   assert.ok(storageTouched.length>=inspected.size/2,
     'unexpected scanner drop must trigger review');
-  assert.ok(unresolved.length>0,
-    'M01 is not yet certified complete; update acceptance only with proof');
+  assert.equal(unresolved.length,0,
+    'every storage-touching root file requires source-level first-pass review');
+  assert.equal(inventory.writerOwnershipAudit.status,'incomplete',
+    'a full root scan does NOT certify dynamic/indirect writer ownership');
 });
 
 test('M01 tracks every explicitly normalized V1 snapshot field without claiming exhaustiveness',()=>{
