@@ -2872,3 +2872,37 @@ explicit V2 preview reconciliation, and reload in Chromium and WebKit.
 The existing single-iPhone-first priorities and every safety gate remain
 intact. Main is unchanged. Weighted readiness is **67/100**; the
 separate informal 98% bar is not certification of an unpassed gate.
+
+## Rebuild a complete Today compatibility document from V2 records — November 10
+
+The opt-in, developer-preview-only \`buildPreviewTodayCompatibilitySnapshot()\`
+now reconstructs the **entire Today view** in memory from V2's root and
+per-day IndexedDB records, after a verified V1 source preflight. This
+completes a concrete compatibility-read groundwork step beyond checking one
+day: tasks, day notes, explicit empty arrays, map presence, ordering, unknown
+top-level fields, and even literal \`__proto__\` metadata must survive the
+round-trip without changing meaning.
+
+The rebuild first requires *both* full-collection V1/V2 parity and the
+independently checked V2 local receipt history, then makes its own two-pass
+record/metadata reads and a canonical-content fingerprint comparison.
+Canonical comparison deliberately allows harmless JSON object-key ordering
+differences between the original interleaved V1 object and V2's grouped
+root/day records; the original provenance checksum is still required to
+match the stored V1 source. Source edits, tampered records, extra rows,
+missing receipts, read errors and changed generations fail closed.
+
+The method returns a **Today-only preview snapshot**, not a live Today
+reader, automatic import, external backup, whole-app recovery, or storage
+promotion. Results explicitly keep \`readAuthority:'legacy_only'\`,
+\`todayMigrated:false\`, \`independentRecoveryVerified:false\`,
+\`offDeviceBackupVerified:false\`, \`canRestore:false\`, and
+\`canPromote:false\`. No V1 data, recovery markers, or existing V2 rows are
+modified. Existing mobile-app paths are unchanged. Automated Node and
+Chromium/WebKit scenarios verify the rebuild before/after a deliberate V1
+change, explicit V2 preview reconciliation, and reload. Physical standalone
+Safari and all production writer gates remain outstanding.
+
+**Weight stays 67/100**, and the user's informal progress-toward-leaving-67
+bar remains at 98% until the next entire milestone is actually met.
+Main is untouched.
