@@ -983,7 +983,10 @@ test('Today compatibility rebuild preserves complete sparse maps and unknown met
     JSON.stringify({...result,previewSnapshot:undefined}));
   assert.equal(result.snapshotBuilt,true);
   assert.equal(result.fullCollectionCompared,true);
-  assert.equal(result.independentRecoveryVerified,true);
+  assert.equal(result.previewEvidenceChainVerified,true);
+  assert.equal(result.independentRecoveryVerified,false);
+  assert.equal(result.offDeviceBackupVerified,false);
+  assert.equal(result.canRestore,false);
   assert.equal(result.sourcePresent,true);
   assert.equal(result.dayCount,3);
   assert.deepEqual(JSON.parse(JSON.stringify(result.previewSnapshot)),sample());
