@@ -2977,10 +2977,11 @@
     "directV1PageWriterEvidence": {
       "testPath": "tests/state_runtime_v2_m01_badges_trash_ratings_writer_behavior_contract.test.js",
       "behaviorTestedWriterRoutes": 5,
-      "rawFallbackRoutes": 3,
       "productionWriterAdmissionVerified": false,
       "oldTabGenerationFenceVerified": false,
-      "v1AuthorityUnchanged": true
+      "v1AuthorityUnchanged": true,
+      "directRawWriterRoutes": 3,
+      "fallbackWhenWrapperUnavailableOrThrows": 2
     }
   },
   "proposedWriterHandoffs": [
