@@ -2875,12 +2875,12 @@ separate informal 98% bar is not certification of an unpassed gate.
 
 ## Rebuild a complete Today compatibility document from V2 records — November 10
 
-The opt-in, developer-preview-only \`buildPreviewTodayCompatibilitySnapshot()\`
+The opt-in, developer-preview-only `buildPreviewTodayCompatibilitySnapshot()`
 now reconstructs the **entire Today view** in memory from V2's root and
 per-day IndexedDB records, after a verified V1 source preflight. This
 completes a concrete compatibility-read groundwork step beyond checking one
 day: tasks, day notes, explicit empty arrays, map presence, ordering, unknown
-top-level fields, and even literal \`__proto__\` metadata must survive the
+top-level fields, and even literal `__proto__` metadata must survive the
 round-trip without changing meaning.
 
 The rebuild first requires *both* full-collection V1/V2 parity and the
@@ -2894,10 +2894,10 @@ missing receipts, read errors and changed generations fail closed.
 
 The method returns a **Today-only preview snapshot**, not a live Today
 reader, automatic import, external backup, whole-app recovery, or storage
-promotion. Results explicitly keep \`readAuthority:'legacy_only'\`,
-\`todayMigrated:false\`, \`independentRecoveryVerified:false\`,
-\`offDeviceBackupVerified:false\`, \`canRestore:false\`, and
-\`canPromote:false\`. No V1 data, recovery markers, or existing V2 rows are
+promotion. Results explicitly keep `readAuthority:'legacy_only'`,
+`todayMigrated:false`, `independentRecoveryVerified:false`,
+`offDeviceBackupVerified:false`, `canRestore:false`, and
+`canPromote:false`. No V1 data, recovery markers, or existing V2 rows are
 modified. Existing mobile-app paths are unchanged. Automated Node and
 Chromium/WebKit scenarios verify the rebuild before/after a deliberate V1
 change, explicit V2 preview reconciliation, and reload. Physical standalone
