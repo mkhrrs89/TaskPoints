@@ -28,6 +28,30 @@
 - **After every "go" session:** link the commit(s), list IDs moved **Working/Open → Verified** (if none, say **none**), show previous → current counts, summarize code/tests that improved *unverified* rows, identify the next blocker, and note CI status. No artificial progress percentages.
 - Checkpoints marked Verified can revert to Working if tests or source proof regress. The tracker counts must follow the actual statuses, not vice versa.
 
+## M01 subprogress — initial authoritative-storage inventory
+
+**0 new checkpoints verified this session; M01 remains Working.** Unlike the
+weighted gate, these are raw, separately observable audit counts:
+
+| M01 first-pass measurement | Before this session | Now |
+| --- | ---: | ---: |
+| Production source files enumerated in a stable CI-guarded inventory | 0 | **168 / 168 discovered** |
+| Individual source files inspected for storage/key evidence | 0 | **20 / 168 inspected** |
+| Literal key-to-source evidence entries recorded | 0 | **33** |
+| Explicit named main V1 snapshot fields tracked and CI-checked | 0 | **30** |
+| IndexedDB database/store evidence examples recorded | 0 | **3** |
+| M01 checkpoint passed | No | **No** |
+
+These are **discovery and first-pass inspection metrics**, not percentages of
+completed writer ownership. In particular, **148 files are still awaiting
+individual review**, and indirect/dynamic writer paths and unknown primary
+snapshot fields are not fully mapped. Passing the source-baseline contract
+does not satisfy M01.
+
+Details: [M01 storage audit](docs/state-runtime-v2-m01-storage-audit.md) ·
+[machine-readable inventory](docs/state-runtime-v2-storage-source-inventory.json) ·
+[CI inventory contract](tests/state_runtime_v2_m01_source_inventory_contract.test.js).
+
 ## Stage P — prerequisite preview foundations (8 Verified)
 
 These are **required groundwork**, intentionally less ambitious than deployed storage authority. They are marked Verified only for these *preview-scoped* claims.
@@ -49,7 +73,7 @@ A preview test does **not** satisfy these. For each feature, success must show t
 
 | ID | Status | Pass condition required before marking Verified | Current blocker / evidence |
 | --- | --- | --- | --- |
-| M01 | Working | Exhaustive, reviewed inventory maps **every** authoritative field, localStorage key, IndexedDB store, pending journal and cross-page writer to its V2 owner or preserved auxiliary storage, including imports and resets. | [Writer matrix](docs/state-runtime-v2-writer-handoff-matrix.md) and [legacy writer tests](tests/state_runtime_v2_legacy_writer_inventory_contract.test.js) are substantial but explicitly **not exhaustive**. Audit all current page/key paths first. |
+| M01 | Working | Exhaustive, reviewed inventory maps **every** authoritative field, localStorage key, IndexedDB store, pending journal and cross-page writer to its V2 owner or preserved auxiliary storage, including imports and resets. | [Initial M01 inventory](docs/state-runtime-v2-m01-storage-audit.md): 168 files enumerated, 20 inspected, 33 key/source entries, 30 named V1 fields. [Writer matrix](docs/state-runtime-v2-writer-handoff-matrix.md) and [legacy writer tests](tests/state_runtime_v2_legacy_writer_inventory_contract.test.js) remain incomplete; 148 source files and indirect writes still need review. |
 | M02 | Working | Real Home/Tasks actions (create, edit, delete, finish, historical completion) take admitted transactional V2 writes, with synchronous pre-paint durability and V1 fallback/parity. | Preview task actions/journal protections exist, but [Home](index.html) and [Task journal](task_mutation_journal.js) still use V1 paths; no proven live handoff. |
 | M03 | Working | Real Today page add/edit/reorder/remove and notes writes use admitted V2 day-row transactions and survive reload/quota without losing empty/absent days. | Preview Today's row/rebuild/recovery work exists; [Today](today.html) still uses legacy `saveTodayStore()`. |
 | M04 | Working | Real Projects create/edit/delete/order operations commit as admitted atomic V2 changes with compatible project exports/restores. | Preview project reconcile + cooperative writer experiments exist, but [Home](index.html) keeps a direct `tp_projects_v1` path. |
@@ -88,5 +112,7 @@ See [weighted acceptance rubric](docs/state-runtime-v2-weighted-milestones.md) f
 | 2026-11-10 — audited baseline | **8/23** | Inspected V2 runtime, live page writers, source/contract suites and green browser/contract CI. All 8 completed rows are **preview-scoped** only. | **6 Working, 9 Open**. Next: M01 exhaustive source/writer inventory. No nonpilot gate credited. | [Baseline V2 head](https://github.com/mkhrrs89/TaskPoints/commit/e64ccebe21ec5b8f6af2688ea6b47fd10b9ac6a7) · [CI contracts](https://github.com/mkhrrs89/TaskPoints/actions/runs/42846573945) · [CI browser](https://github.com/mkhrrs89/TaskPoints/actions/runs/42846574123) |
 
 | 2026-11-10 — tracker introduced | **8 → 8 / 23** | **0 newly verified**. Established 23 stable IDs, fixed pass conditions, source/test links, and a CI status-count/evidence guard. | M01 still Working: audit remaining authoritative keys/writers before production integration. No weighted milestone unlocked. | [Tracker created](https://github.com/mkhrrs89/TaskPoints/commit/e81a8bbf2d26fbb1933eb8a9b6be3431b5b2bb15) · [CI guard added](https://github.com/mkhrrs89/TaskPoints/commit/c5093827b7ee3e0e841b2ef43cb5fa6a870a10bf) · [Future-completion guard fixed](https://github.com/mkhrrs89/TaskPoints/commit/991e63007a97252814ebdaffbb61691d0a71a3da) |
+
+| 2026-11-10 — M01 source and storage discovery | **8 → 8 / 23** | **0 newly verified**. Enumerated 168 root production source files; inspected first 20; captured 33 storage key/source entries, 3 DB examples and 30 named normalized V1 fields. Added CI checks for new source files and named V1 fields. | **M01 Working**: review 148 other files, dynamic/indirect writers, source ownership and recovery paths. Overall 67/100 unchanged. | [Storage inventory](docs/state-runtime-v2-storage-source-inventory.json) · [M01 audit](docs/state-runtime-v2-m01-storage-audit.md) · [CI tests](tests/state_runtime_v2_m01_source_inventory_contract.test.js) |
 
 **Future update format:** `old verified/new verified · IDs completed · IDs still blocked · code commits · tests pass/fail · next closure target`. If work improves a Working item but doesn't finish its pass condition, explicitly write **0 new checkpoints verified**. Never report the withdrawn "98%" or a fabricated replacement.
