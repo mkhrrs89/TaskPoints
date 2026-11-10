@@ -223,8 +223,10 @@ test('M01 Task-delete witness is explicitly non-production and tied to one write
   const inv = JSON.parse(fs.readFileSync(path.join(__dirname, '..',
     'docs/state-runtime-v2-storage-source-inventory.json'), 'utf8'));
   const witnesses = inv.writerBehaviorWitnesses || [];
-  assert.equal(witnesses.length, 1);
-  const witness = witnesses[0];
+  const taskDelete = witnesses.filter(row => row.path === 'task_delete_fast_path.js');
+  assert.equal(taskDelete.length, 1,
+    'Task-delete ownership must retain exactly one explicit behavior witness');
+  const witness = taskDelete[0];
   assert.equal(witness.path, 'task_delete_fast_path.js');
   assert.equal(witness.testPath, 'tests/state_runtime_v2_m01_task_delete_behavior_contract.test.js');
   assert.ok(inv.writerPathEvidence.some(row =>
