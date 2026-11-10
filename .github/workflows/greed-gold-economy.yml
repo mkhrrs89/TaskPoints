@@ -8,6 +8,7 @@ on:
   pull_request:
     paths:
       - greed_gold_economy.js
+      - index.html
       - gold_manual_adjustment.js
       - gold_circulation_total.js
       - gold_theft_top50_notifications.js
@@ -20,6 +21,7 @@ on:
       - tests/gold_circulation_total.test.js
       - tests/gold_manual_adjustment_core_integration.test.js
       - tests/greed_gold_economy.test.js
+      - tests/greed_gold_daily_scoring_batch.test.js
       - tests/greed_rating.test.js
       - tests/season_champion_gold_bonus.test.js
       - tests/inbox_gold_theft_top50_notification.test.js
@@ -51,6 +53,7 @@ jobs:
           node --test
           tests/rankings_three_digit_fit.test.js
           tests/greed_gold_economy.test.js
+          tests/greed_gold_daily_scoring_batch.test.js
           tests/gold_manual_adjustment.test.js
           tests/gold_circulation_total.test.js
           tests/gold_manual_adjustment_core_integration.test.js
