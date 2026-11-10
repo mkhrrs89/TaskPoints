@@ -2933,7 +2933,7 @@
     "proposedOwnerAssignments": 78,
     "verifiedOwnerAssignments": 0,
     "requiredClosure": "Complete per-key and per-writer ownership, live admission + generation fencing, export/import/restore and real device tests before M01 can verify",
-    "behaviorRehearsedWriterRoutes": 8,
+    "behaviorRehearsedWriterRoutes": 12,
     "behaviorRehearsalDenominator": 78,
     "inboxReadOnlyCutoverGate": {
       "checkFunction": "inspectReadOnlyInboxJournalForCutover",
@@ -2960,6 +2960,19 @@
       "protectsHistoricMatchupResults": true,
       "productionHandoffCertified": false,
       "legacyV1AuthorityUnchanged": true
+    },
+    "crossDomainWriterEvidence": {
+      "testPath": "tests/state_runtime_v2_m01_four_cross_domain_writer_behavior_contract.test.js",
+      "behaviorTestedWriterRoutes": 4,
+      "families": [
+        "game",
+        "season",
+        "tasks"
+      ],
+      "productionSourcesExecuted": true,
+      "productionOwnerCertified": false,
+      "liveCrossTabFencingVerified": false,
+      "v1AuthorityUnchanged": true
     }
   },
   "proposedWriterHandoffs": [
@@ -3867,6 +3880,70 @@
         "unrelated_gold_and_player_data_preserved"
       ],
       "behaviorName": "score_and_matchup_history_reconciliation",
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "gold_manual_adjustment.js",
+      "anchor": "latest.core.saveValidatedSnapshot(candidate",
+      "kind": "v1_existing_behavior_synthetic",
+      "behaviorName": "manual_gold_atomic_verified_save",
+      "testPath": "tests/state_runtime_v2_m01_four_cross_domain_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "exact_snapshot_confirmation_required",
+        "recovery_hold_and_quota_rejection",
+        "unpersisted_write_not_accepted",
+        "historical_rows_and_unknown_data_preserved"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "season2_missed_playin_recovery.js",
+      "anchor": "const saved = core.saveStateSnapshot(result.state, {",
+      "kind": "v1_existing_behavior_synthetic",
+      "behaviorName": "season2_playin_recovery",
+      "testPath": "tests/state_runtime_v2_m01_four_cross_domain_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "rebuild_missing_legacy_series_result_once",
+        "unclosed_day_and_missing_scores_declined",
+        "idempotent_repeated_check",
+        "failed_save_leaves_original_unchanged"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "season_series_upset_notifications.js",
+      "anchor": "saved = core.mergeAndSaveState({",
+      "kind": "v1_existing_behavior_synthetic",
+      "behaviorName": "upset_background_inbox_merge",
+      "testPath": "tests/state_runtime_v2_m01_four_cross_domain_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "inbox_only_change_without_touching_tasks",
+        "idempotent_series_notification",
+        "processed_event_recorded",
+        "failure_does_not_claim_save"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "season_result_integrity_guard.js",
+      "anchor": "original.saveStateSnapshot(state, { immediateWrite: true, savePath: 'season-result-integrity-repair'",
+      "kind": "v1_existing_behavior_synthetic",
+      "behaviorName": "season_integrity_startup",
+      "testPath": "tests/state_runtime_v2_m01_four_cross_domain_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "legacy_duplicate_slate_repaired",
+        "typed_canonical_results_retained",
+        "clean_snapshot_reused_without_write",
+        "save_failure_leaves_original_and_retries"
+      ],
       "productionOwnerVerified": false,
       "productionFenceVerified": false,
       "cutoverPermission": false
