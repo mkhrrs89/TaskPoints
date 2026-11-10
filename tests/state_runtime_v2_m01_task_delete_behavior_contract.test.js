@@ -139,3 +139,82 @@ test('unconsumed click arm expires in a microtask; disabled click cannot arm', (
   assert.equal(h.saved.length, 1);
   assert.equal(h.journaled.length, 0);
 });
+
+const realJournalSource = fs.readFileSync(path.join(__dirname, '..',
+  'task_mutation_journal.js'), 'utf8');
+
+function realJournalHarness({ quotaJournal = false } = {}) {
+  const snapshot = { tasks: [{ id: 'task-1', title: 'Before', status: 'active' }],
+    completions: [{ id: 'c1', taskId: 'task-1', points: 3 }] };
+  const storageRows = new Map([['taskpoints_v1', JSON.stringify(snapshot)]]);
+  let fullSaves = 0;
+  const storage = {
+    getItem(key) { return storageRows.get(String(key)) ?? null; },
+    setItem(key, value) {
+      if (quotaJournal && key === 'taskpoints_pending_task_mutations_v1')
+        throw new Error('QuotaExceededError');
+      storageRows.set(String(key), String(value));
+    },
+    removeItem(key) { storageRows.delete(String(key)); }
+  };
+  const core = {
+    STORAGE_KEY: 'taskpoints_v1',
+    readTaskPointsStoredState() { return JSON.parse(storage.getItem('taskpoints_v1')); },
+    parseTaskPointsStorageJson(raw) { return JSON.parse(raw); },
+    loadAppState() { return { state: this.readTaskPointsStoredState() }; },
+    saveStateSnapshot(state) {
+      fullSaves += 1;
+      storage.setItem('taskpoints_v1', JSON.stringify(state));
+      return { state };
+    },
+    getStorageMaintenanceIdleStatus() { return { lastInteractionAgoMs: 0 }; },
+    clearStateHotCache() {}
+  };
+  const document = { addEventListener() {} };
+  const context = {
+    TaskPointsCore: core, localStorage: storage, document, structuredClone,
+    setTimeout() { return 1; }, clearTimeout() {}, queueMicrotask() {},
+    console, Promise, Date
+  };
+  context.window = context;
+  context.globalThis = context;
+  vm.createContext(context);
+  vm.runInContext(realJournalSource, context, { filename: 'task_mutation_journal.js' });
+  vm.runInContext(source, context, { filename: 'task_delete_fast_path.js' });
+  return {
+    core, storage,
+    get fullSaves() { return fullSaves; }
+  };
+}
+
+test('actual Task journal implementation persists a delete, overlays reads and compacts safely', () => {
+  const h = realJournalHarness();
+  const deletedState = taskState();
+  h.core.armTaskDeleteFastPath('task-1');
+  const routed = h.core.saveStateSnapshot(deletedState);
+  assert.equal(routed.taskDeleteFastPath, true);
+  assert.equal(h.fullSaves, 0);
+  const journal = JSON.parse(h.storage.getItem('taskpoints_pending_task_mutations_v1'));
+  assert.deepEqual(journal.tasks.map(t => t.id), ['task-1']);
+  assert.equal(journal.tasks[0].status, 'trashed');
+  assert.equal(h.core.readTaskPointsStoredState().tasks.find(t => t.id === 'task-1').status, 'trashed');
+  assert.equal(h.core.getTaskMutationJournalStatus().tasks, 1);
+  assert.equal(h.core.flushPendingTaskMutations(), true);
+  assert.equal(h.storage.getItem('taskpoints_pending_task_mutations_v1'), null);
+  const saved = JSON.parse(h.storage.getItem('taskpoints_v1'));
+  assert.equal(saved.tasks.find(t => t.id === 'task-1').status, 'trashed');
+  assert.equal(saved.completions[0].id, 'c1');
+});
+
+test('actual Task journal quota rejection falls back to full V1 save without false fast-path acknowledgment', () => {
+  const h = realJournalHarness({ quotaJournal: true });
+  const deletedState = taskState();
+  h.core.armTaskDeleteFastPath('task-1');
+  const result = h.core.saveStateSnapshot(deletedState, { immediateWrite: true });
+  assert.equal(result.taskDeleteFastPath, undefined);
+  assert.equal(h.fullSaves, 1);
+  assert.equal(h.storage.getItem('taskpoints_pending_task_mutations_v1'), null);
+  const saved = JSON.parse(h.storage.getItem('taskpoints_v1'));
+  assert.equal(saved.tasks.find(t => t.id === 'task-1').status, 'trashed');
+  assert.equal(saved.completions[0].id, 'c1');
+});
