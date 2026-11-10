@@ -146,7 +146,8 @@ test('Habit audit stale-preview and failed-write routes do not claim a successfu
   newer.completions.unshift({id:'other',source:'habit',habitId:'v1',dayKey:'2026-04-13'});
   s.replace(newer);s.execute();
   assert.equal(s.saveAttempts.length,0,'stale row must not enter V1 writer');
-  assert.match(s.status.textContent,/Repair failed:/);
+  assert.match(s.status.textContent,/No rows changed/);
+  assert.equal(s.stored.completions.length,2,'stale audit cannot remove or rewrite another row');
 
   const f=screen('audit',viceState(),{planner:correctionPlanner()});
   f.previewPlan();f.confirm();f.failMode='skipped';f.execute();
@@ -186,7 +187,7 @@ test('actual completion-backed Habit writer repairs missing doneKey but preserve
 test('completion-backed stale preview and quota failure cannot erase original ledger',()=>{
   const s=screen('completion',completionState(),{planner:completionPlanner()});
   s.previewPlan();s.confirm();
-  const changed=s.stored;changed.completions[0].points=7;s.replace(changed);s.execute();
+  const changed=s.stored;changed.completions[0].dayKey='2026-04-13';s.replace(changed);s.execute();
   assert.equal(s.saveAttempts.length,0);
   assert.match(s.status.textContent,/Repair failed:/);
   const q=screen('completion',completionState(),{planner:completionPlanner()});
