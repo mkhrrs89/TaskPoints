@@ -4556,7 +4556,7 @@ const effectsById = {};
     scoresById['YOU'] = youScore;
   }
 
-participantIds.forEach(id => {
+const scoreNpcParticipants = () => participantIds.forEach(id => {
   if (id === 'YOU') return;
   const player = playerMap.get(id);
   if (!player) return;
@@ -4595,6 +4595,15 @@ effectsById[id] = capturedEffects;
     });
   }
 });
+
+  // Home's first daily simulation has no new Gold outcomes until after all
+  // NPC scores have been computed. Share the current pre-game wallets for this
+  // one scoring pass, then discard them before matchups settle and save.
+  if (typeof TaskPointsCore?.withGoldNpcScoringBatch === 'function') {
+    TaskPointsCore.withGoldNpcScoringBatch(state, scoreNpcParticipants);
+  } else {
+    scoreNpcParticipants();
+  }
 
   todaysPairs.forEach(pair => {
     const matchup = {
