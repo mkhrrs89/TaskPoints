@@ -2906,3 +2906,39 @@ Safari and all production writer gates remain outstanding.
 **Weight stays 67/100**, and the user's informal progress-toward-leaving-67
 bar remains at 98% until the next entire milestone is actually met.
 Main is untouched.
+
+## Detached Today candidate from sealed V2 records — November 10
+
+The developer-preview-only `buildPreviewTodayDetachedRecoveryCandidate()`
+proves the next practical migration boundary: a **complete in-memory Today
+document can be reconstructed from the V2 IndexedDB records without reading
+the original `taskpoints_today_view_v1` localStorage key**. This is useful
+when reasoning about interrupted or lost V1 Today data.
+
+The read first requires the existing **V2-only, locally sealed** Today
+record/receipt-chain recovery audit. It then reads the full V2 Today rows,
+revalidates the SHA-256 row seal, generation, receipt head and structural
+day-map constraints, reconstructs sparse day-map membership and unknown root
+metadata (including literal `__proto__` keys), verifies JSON stability, and
+rechecks the complete V2 chain plus exact readback. A malformed, stale,
+unsealed or tampered V2 preview fails closed. Normal V1 Today state, missing
+source keys and other app data are never rewritten or reconstituted
+automatically.
+
+Node and real-browser regression tests remove the V1 Today key **only in an
+isolated synthetic fixture**, then verify the sealed V2 candidate preserves
+the latest edited notes, day ordering, explicit empty days, and unknown
+fields through reload in Chromium and WebKit. Other tests block corrupt
+records, missing receipts, reset-generation drift and read failures.
+
+This is **not an off-device backup or a verified restore**. It does not
+write to V1, activate V2 as a reader, satisfy whole-app migration, or
+prove a transaction survives a real iPhone power loss. Results explicitly
+return `legacyTodaySourceRead:false`, `v1SourceCompared:false`,
+`independentRecoveryVerified:false`, `offDeviceBackupVerified:false`,
+`canRestore:false`, `todayMigrated:false`, `canPromote:false` and
+`readAuthority:'legacy_only'`. Existing safety gates remain uncredited.
+
+**Weighted readiness 67/100**; user's separate informal
+progress-toward-leaving-67 remains **98%** until a complete gate has evidence.
+Main is untouched.
