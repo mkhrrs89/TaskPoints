@@ -8441,7 +8441,9 @@
   async function buildPreviewTodayCompatibilitySnapshot() {
     const refuse=(reason,detail={})=>({
       checked:true,previewOnly:true,snapshotBuilt:false,
-      fullCollectionCompared:false,independentRecoveryVerified:false,
+      fullCollectionCompared:false,previewEvidenceChainVerified:false,
+      independentRecoveryVerified:false,offDeviceBackupVerified:false,
+      canRestore:false,
       todayMigrated:false,canPromote:false,productionWritersFenced:false,
       readAuthority:'legacy_only',mutationAuthority:'legacy_only',
       reason,...detail
@@ -8569,7 +8571,9 @@
       if(!current())return refuse('today_source_changed_after_rebuild');
       return {
         checked:true,previewOnly:true,snapshotBuilt:true,
-        fullCollectionCompared:true,independentRecoveryVerified:true,
+        fullCollectionCompared:true,previewEvidenceChainVerified:true,
+        independentRecoveryVerified:false,offDeviceBackupVerified:false,
+        canRestore:false,
         sourcePresent:source.raw!==null,dayCount:source.dayCount,
         // This is a Today-only preview, NOT a restorable whole-app
         // backup, deployed read path or authority transfer.
