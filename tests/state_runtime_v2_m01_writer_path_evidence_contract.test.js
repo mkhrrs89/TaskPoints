@@ -12,7 +12,7 @@ const inventory = JSON.parse(fs.readFileSync(path.join(
 
 test('M01 cross-page writer evidence is attached to reviewed existing sources', () => {
   const reviewed = new Set(inventory.firstPassInspected);
-  const families = new Set(['core', 'tasks', 'habits', 'game', 'season', 'storage', 'recovery']);
+  const families = new Set(['core', 'tasks', 'habits', 'game', 'season', 'storage', 'recovery', 'backup']);
   const seen = new Set();
   assert.ok(inventory.writerPathEvidence.length >= 16, 'reviewed writer baselines lost');
   for (const entry of inventory.writerPathEvidence) {
