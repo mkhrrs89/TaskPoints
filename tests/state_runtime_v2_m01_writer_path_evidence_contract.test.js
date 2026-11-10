@@ -12,7 +12,7 @@ const inventory = JSON.parse(fs.readFileSync(path.join(
 
 test('M01 cross-page writer evidence is attached to reviewed existing sources', () => {
   const reviewed = new Set(inventory.firstPassInspected);
-  const families = new Set(['core', 'tasks', 'habits', 'game', 'season', 'storage', 'recovery', 'backup']);
+  const families = new Set(['core', 'tasks', 'habits', 'game', 'season', 'storage', 'recovery', 'backup', 'settings']);
   const seen = new Set();
   assert.ok(inventory.writerPathEvidence.length >= 16, 'reviewed writer baselines lost');
   for (const entry of inventory.writerPathEvidence) {
@@ -56,7 +56,7 @@ test('M01 second-pass source evidence anchors all 30 inspected recovery and writ
   const reviewed = inventory.reviewedSourceEvidence || [];
   const seen = new Set();
   const permitted = new Set(['read', 'write', 'bridge', 'entrypoint']);
-  const families = new Set(['habits', 'game', 'season', 'settings', 'backup', 'recovery', 'storage']);
+  const families = new Set(['habits', 'game', 'season', 'settings', 'backup', 'recovery', 'storage', 'tasks', 'core']);
   assert.ok(reviewed.length >= 30, 'reviewed source evidence baseline regressed');
   assert.ok(inventory.firstPassInspected.length >= 72, 'inspected source baseline regressed');
   for (const row of reviewed) {
@@ -100,4 +100,40 @@ test('M01 preserves both Flex journals and independent Season/photo repair write
     ['storage_diagnostics_season_image_repair_controller.js', 'core.writeTaskPointsStoredState(nextState, {']
   ]) assert.ok(paths.has(file + '|' + anchor),
     'previously located legacy writer requires ownership before V2 cutover: ' + file);
+});
+
+test('M01 reviewed legacy entrypoints stay tracked and explicitly unfenced', () => {
+  const reviewed = (inventory.reviewedSourceEvidence || [])
+    .filter(row => row.auditPass === 'm01-legacy-entrypoints');
+  const writers = (inventory.writerPathEvidence || [])
+    .filter(row => row.auditPass === 'm01-legacy-entrypoints');
+  assert.ok(reviewed.length >= 36);
+  assert.ok(writers.length >= 26);
+  for (const row of writers) {
+    assert.equal(row.fencingStatus, 'not_proven');
+    assert.equal(row.ownerStatus, 'awaiting_full_callgraph');
+    assert.ok(reviewed.some(r => r.path === row.path),
+      'legacy writer was not source inspected: ' + row.path);
+  }
+  for (const [file, needle] of [
+    ['achievements.html', 'writeTaskPointsStoredState(nextState'],
+    ['game_ratings.html', 'writeTaskPointsStoredState(parsed'],
+    ['log.html', 'writeTaskPointsStoredState(merged'],
+    ['trash.html', 'writeTaskPointsStoredState(nextState'],
+    ['audit.html', 'season-repair-sync-results'],
+    ['tournament.html', 'const saved = TaskPointsCore.saveStateSnapshot(nextState'],
+    ['task_delete_fast_path.js', 'function taskDeleteFastPathSaveStateSnapshot']
+  ]) {
+    const code = fs.readFileSync(path.join(root, file), 'utf8');
+    assert.ok(code.includes(needle), 'high-risk V1 writer moved: ' + file);
+    assert.ok(writers.some(w => w.path === file && w.anchor.includes(needle.slice(0, 18))),
+      'legacy writer not added to inventory: ' + file);
+  }
+  for (const key of ['taskpoints_ratings_show_inactive',
+    'taskpoints_rankings_scope_v1', 'taskpoints_rankings_scope_season4_rollover_v1']) {
+    assert.ok(inventory.keyEvidence.some(row => row.key === key),
+      'untracked auxiliary key: ' + key);
+  }
+  assert.ok(inventory.firstPassInspected.length < inventory.sourceFiles.length,
+    'the static review does not satisfy migration/cutover');
 });

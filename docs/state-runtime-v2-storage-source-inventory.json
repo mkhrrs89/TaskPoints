@@ -178,10 +178,19 @@
   "firstPassInspected": [
     "_worker.js",
     "_worker_core.js",
+    "achievements.html",
+    "archive.html",
+    "audit.html",
+    "audit_gold_integrity.js",
+    "audit_integrity.js",
+    "dual_write_status.html",
     "emergency_recovery.html",
     "emergency_recovery_lock_authorization.js",
     "flex_action_fast_path.js",
     "game.html",
+    "game_history_reconciliation_repair.js",
+    "game_history_repair_alias_sync.js",
+    "game_ratings.html",
     "gamehub.html",
     "gold_circulation_total.js",
     "gold_ledger.html",
@@ -189,10 +198,21 @@
     "gold_theft_top50_notifications.js",
     "greed_gold_economy.js",
     "habit_completion_backup_recovery.js",
+    "habit_completion_source_guard.js",
     "habit_fast_path_control.js",
+    "habit_ledger_completion_backed_repair.js",
+    "habit_ledger_matchup_impact_guard.js",
+    "habit_ledger_matchup_restore_apply.js",
+    "habit_ledger_repair_audit.js",
+    "habit_ledger_repair_planner.js",
+    "habit_ledger_score_reconciliation.js",
+    "habit_ledger_score_reconciliation_hardening.js",
+    "habit_missing_donekey_date_analysis.js",
+    "head_to_heads.html",
     "home_export_responsiveness.js",
     "home_indexeddb_bootstrap.js",
     "home_rank_percentile_line.js",
+    "inbox.html",
     "inbox_count_badge.js",
     "index.html",
     "indexeddb_requalification.html",
@@ -204,9 +224,12 @@
     "indexeddb_requalification_readonly_guard.js",
     "indexeddb_requalification_session_compat.js",
     "indexeddb_requalification_vault_gate.js",
+    "log.html",
     "matchups.html",
     "mobile_boot_gate.js",
+    "mood_notes_copy_range.js",
     "notes.html",
+    "performance_diagnostics.js",
     "phase2_dual_write.js",
     "phase2_reset_hook.js",
     "phase3_navigation_cache.js",
@@ -220,12 +243,22 @@
     "phase5b_deferred_mirror.js",
     "player_profile.js",
     "projects.html",
+    "rankings.html",
+    "records.html",
     "save_pipeline_shared_work.js",
+    "schedule.html",
+    "score_alias_audit_bootstrap.js",
+    "score_alias_consistency.js",
     "scoring_core.js",
+    "scwm_interaction_fast_path.js",
     "season.js",
+    "season2_missed_playin_recovery.js",
     "season3_tournament_rollover.js",
     "season_champion_gold_bonus.js",
+    "season_matchup_materialization_guard.js",
     "season_result_integrity_guard.js",
+    "season_seed_sources.js",
+    "season_series_upset_notifications.js",
     "settings.html",
     "state_hot_cache.js",
     "state_runtime_v2.js",
@@ -238,9 +271,12 @@
     "storage_season_image_reference_repair.js",
     "streaks.html",
     "task_create_fast_path.js",
+    "task_delete_fast_path.js",
     "task_mutation_journal.js",
     "today.html",
     "toolbar.js",
+    "tournament.html",
+    "trash.html",
     "verified_secondary_lock_split.js",
     "verified_secondary_log_quiet_guard.js",
     "verified_secondary_recovery.html",
@@ -705,6 +741,180 @@
       "family": "game",
       "role": "Pending Player edits invalidate phase4 cache",
       "evidencePath": "phase4_cache_guard.js"
+    },
+    {
+      "key": "taskpoints_ratings_show_inactive",
+      "family": "settings",
+      "role": "Ratings show-inactive preference",
+      "evidencePath": "game_ratings.html"
+    },
+    {
+      "key": "taskpoints_rankings_scope_v1",
+      "family": "settings",
+      "role": "Rankings scope selection preference",
+      "evidencePath": "rankings.html"
+    },
+    {
+      "key": "taskpoints_rankings_scope_season3_rollover_v1",
+      "family": "settings",
+      "role": "Season 3 one-time scope migration flag",
+      "evidencePath": "rankings.html"
+    },
+    {
+      "key": "taskpoints_rankings_scope_season4_rollover_v1",
+      "family": "settings",
+      "role": "Season 4 one-time scope migration flag",
+      "evidencePath": "rankings.html"
+    },
+    {
+      "key": "tp_perf_trace_enabled_v1",
+      "family": "session",
+      "role": "Performance trace session enablement",
+      "evidencePath": "performance_diagnostics.js"
+    },
+    {
+      "key": "tp_perf_trace_pages_v1",
+      "family": "session",
+      "role": "Performance trace session history",
+      "evidencePath": "performance_diagnostics.js"
+    },
+    {
+      "key": "tp_perf_trace_pending_nav_v1",
+      "family": "session",
+      "role": "Pending performance trace navigation",
+      "evidencePath": "performance_diagnostics.js"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Achievement badges write V1 snapshot",
+      "evidencePath": "achievements.html"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Archive view writes V1 snapshot",
+      "evidencePath": "archive.html"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Ratings editor writes V1 snapshot",
+      "evidencePath": "game_ratings.html"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Log page writes V1 snapshot",
+      "evidencePath": "log.html"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Schedule page writes V1 snapshot",
+      "evidencePath": "schedule.html"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Trash page writes V1 snapshot",
+      "evidencePath": "trash.html"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Tournament delayed V1 snapshot writer",
+      "evidencePath": "tournament.html"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Audit repairs write V1 snapshot",
+      "evidencePath": "audit.html"
+    },
+    {
+      "key": "taskpoints_notes_v1",
+      "family": "notes",
+      "role": "Audit Notes cache read",
+      "evidencePath": "audit.html"
+    },
+    {
+      "key": "taskpoints_notes_dirty_v1",
+      "family": "notes",
+      "role": "Audit Notes dirty marker read",
+      "evidencePath": "audit.html"
+    },
+    {
+      "key": "taskpoints_notes_authoritative_v1",
+      "family": "notes",
+      "role": "Audit Notes authority marker read",
+      "evidencePath": "audit.html"
+    },
+    {
+      "key": "taskpoints_full_backup",
+      "family": "backup",
+      "role": "Audit backup format reference",
+      "evidencePath": "audit.html"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Game history repair V1 snapshot read",
+      "evidencePath": "game_history_reconciliation_repair.js"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Habit repair audit V1 snapshot read",
+      "evidencePath": "habit_ledger_repair_audit.js"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Habit completion backed repair V1 snapshot read",
+      "evidencePath": "habit_ledger_completion_backed_repair.js"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Habit reconciliation V1 snapshot read",
+      "evidencePath": "habit_ledger_score_reconciliation.js"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Habit reconciliation hardening V1 snapshot read",
+      "evidencePath": "habit_ledger_score_reconciliation_hardening.js"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Mood Notes V1 snapshot read",
+      "evidencePath": "mood_notes_copy_range.js"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Head-to-head V1 snapshot read",
+      "evidencePath": "head_to_heads.html"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Inbox V1 snapshot read",
+      "evidencePath": "inbox.html"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Records V1 snapshot read",
+      "evidencePath": "records.html"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Rankings V1 snapshot read",
+      "evidencePath": "rankings.html"
     }
   ],
   "dbEvidence": [
@@ -744,7 +954,8 @@
     "missing physical iOS and disconnected off-device backups are separate cutover gates",
     "the 30 named taskpoints_v1 fields are a lower bound; normalizeState spreads src and does not enumerate every possible field",
     "writerPathEvidence anchors are reviewed direct or delegated entrypoints, not a complete callgraph or proof of production writer fencing",
-    "reviewedSourceEvidence is static source inspection only, not complete ownership/fencing of indirect or stale-tab writers"
+    "reviewedSourceEvidence is static source inspection only, not complete ownership/fencing of indirect or stale-tab writers",
+    "legacy page and repair route evidence is static only; V1 fallback and idle writers require full callgraph and stale-generation fencing before cutover"
   ],
   "primarySnapshotNamedFields": [
     "tasks",
@@ -1014,6 +1225,266 @@
       "kind": "export side effect",
       "description": "Export invokes cross-location Notes synchronization",
       "anchor": "global.syncNotesStorageLocations('responsive-export-sync')"
+    },
+    {
+      "path": "achievements.html",
+      "family": "game",
+      "kind": "badge edit",
+      "description": "Badge edits save V1 snapshot",
+      "anchor": "TaskPointsCore.saveStateSnapshot(nextState, {",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "achievements.html",
+      "family": "game",
+      "kind": "fallback",
+      "description": "Badge edits may fall back to direct snapshot write",
+      "anchor": "TaskPointsCore.writeTaskPointsStoredState(nextState, { storageKey: 'taskpoints_v1' });",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "archive.html",
+      "family": "game",
+      "kind": "page mutation",
+      "description": "Archive page writes V1 snapshot",
+      "anchor": "TaskPointsCore.saveStateSnapshot({ ...existing, ...partial }, { storageKey: STORAGE_KEY }).state;",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "audit.html",
+      "family": "season",
+      "kind": "audit auto-repair",
+      "description": "Audit can save Season reconciliation during audit",
+      "anchor": "TaskPointsCore.saveStateSnapshot(state, { savePath: 'season-repair-sync-results' });",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "audit.html",
+      "family": "season",
+      "kind": "manual resync",
+      "description": "Audit can save corrected matchups",
+      "anchor": "TaskPointsCore.saveStateSnapshot(nextState, { savePath: 'season-result-resync' });",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "game_history_reconciliation_repair.js",
+      "family": "game",
+      "kind": "manual repair",
+      "description": "Game history repair persists corrected records",
+      "anchor": "const saved = core.saveStateSnapshot?.(result.state, {",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "game_ratings.html",
+      "family": "game",
+      "kind": "player edit",
+      "description": "Ratings writes V1 snapshot directly",
+      "anchor": "TaskPointsCore.writeTaskPointsStoredState(parsed, { storageKey: STORAGE_KEY });",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "game_ratings.html",
+      "family": "settings",
+      "kind": "auxiliary preference",
+      "description": "Ratings show-inactive setting stored separately",
+      "anchor": "localStorage.setItem(RATINGS_SHOW_INACTIVE_KEY, showInactivePlayers ? \"1\" : \"0\");",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "habit_ledger_completion_backed_repair.js",
+      "family": "habits",
+      "kind": "manual repair",
+      "description": "Completion-backed Habit repair overwrites history",
+      "anchor": "const saved = core.saveStateSnapshot(result.state, {",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "habit_ledger_repair_audit.js",
+      "family": "habits",
+      "kind": "manual repair",
+      "description": "Habit ledger audit repairs completion rows",
+      "anchor": "const saved = core.saveStateSnapshot(result.state, {",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "habit_ledger_score_reconciliation.js",
+      "family": "habits",
+      "kind": "manual repair",
+      "description": "Habit score reconciliation writes legacy completions",
+      "anchor": "const saved = core.saveStateSnapshot(result.state, {",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "habit_ledger_score_reconciliation_hardening.js",
+      "family": "habits",
+      "kind": "repair wrapper",
+      "description": "Hardened Habit reconciliation writes corrected state",
+      "anchor": "const saved = core.saveStateSnapshot(result.state, {",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "log.html",
+      "family": "habits",
+      "kind": "page mutation",
+      "description": "Log edits save V1 snapshot",
+      "anchor": "TaskPointsCore.saveStateSnapshot(merged, { storageKey: STORAGE_KEY }).state;",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "log.html",
+      "family": "habits",
+      "kind": "fallback",
+      "description": "Log fallback writes V1 snapshot directly",
+      "anchor": "TaskPointsCore.writeTaskPointsStoredState(merged, { storageKey: STORAGE_KEY });",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "performance_diagnostics.js",
+      "family": "storage",
+      "kind": "session telemetry",
+      "description": "Performance trace session markers stored separately",
+      "anchor": "global.sessionStorage?.setItem?.(k,v)",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "rankings.html",
+      "family": "settings",
+      "kind": "auxiliary preference",
+      "description": "Rankings scope stores independent preference",
+      "anchor": "localStorage.setItem(RANKINGS_SCOPE_STORAGE_KEY, rankingsScope);",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "rankings.html",
+      "family": "settings",
+      "kind": "rollover marker",
+      "description": "Rankings season change stores marker",
+      "anchor": "localStorage.setItem(RANKINGS_SEASON_FOUR_ROLLOVER_KEY, \"1\");",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "schedule.html",
+      "family": "season",
+      "kind": "page mutation",
+      "description": "Schedule edits save V1 snapshot",
+      "anchor": "TaskPointsCore.saveStateSnapshot({ ...existing, ...nextState }, { storageKey: STORAGE_KEY }).state;",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "scwm_interaction_fast_path.js",
+      "family": "habits",
+      "kind": "deferred wrapper",
+      "description": "SCWM eventually invokes original deferred save",
+      "anchor": "originals.save.apply(queued.thisArg, queued.args);",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "season2_missed_playin_recovery.js",
+      "family": "season",
+      "kind": "startup repair",
+      "description": "Season 2 repair saves missed Play-In results",
+      "anchor": "const saved = core.saveStateSnapshot(result.state, {",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "season_seed_sources.js",
+      "family": "season",
+      "kind": "UI mutation",
+      "description": "Season seed choices save through V1",
+      "anchor": "const saved = core.saveStateSnapshot(state, { savePath });",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "season_series_upset_notifications.js",
+      "family": "tasks",
+      "kind": "background Inbox",
+      "description": "Upset notifications merge Inbox data through legacy save",
+      "anchor": "saved = core.mergeAndSaveState({",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "tournament.html",
+      "family": "season",
+      "kind": "idle save",
+      "description": "Tournament schedules deferred Season result resync",
+      "anchor": "const saved = TaskPointsCore.saveStateSnapshot(nextState, {",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "trash.html",
+      "family": "tasks",
+      "kind": "trash mutation",
+      "description": "Trash writes task status snapshot",
+      "anchor": "TaskPointsCore.saveStateSnapshot(nextState, { storageKey: STORAGE_KEY, immediateWrite: true });",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "trash.html",
+      "family": "tasks",
+      "kind": "fallback",
+      "description": "Trash fallback writes V1 snapshot directly",
+      "anchor": "TaskPointsCore.writeTaskPointsStoredState(nextState, { storageKey: STORAGE_KEY });",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "task_delete_fast_path.js",
+      "family": "tasks",
+      "kind": "journal wrapper",
+      "description": "Task deletion overrides core save and journals trash edits",
+      "anchor": "core.saveStateSnapshot = function taskDeleteFastPathSaveStateSnapshot(state, options = {}) {",
+      "auditPass": "m01-legacy-entrypoints",
+      "fencingStatus": "not_proven",
+      "ownerStatus": "awaiting_full_callgraph"
     }
   ],
   "reviewedSourceEvidence": [
@@ -1196,6 +1667,258 @@
       "family": "habits",
       "behavior": "write",
       "anchor": "storage.setItem(JOURNAL_KEY, JSON.stringify(normalized));"
+    },
+    {
+      "path": "achievements.html",
+      "family": "game",
+      "behavior": "write",
+      "anchor": "function saveAchievementsPageState(nextState){",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "archive.html",
+      "family": "game",
+      "behavior": "write",
+      "anchor": "function saveMerged(partial) {",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "audit.html",
+      "family": "recovery",
+      "behavior": "write",
+      "anchor": "TaskPointsCore.saveStateSnapshot(state, { savePath: 'season-repair-sync-results' });",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "audit_gold_integrity.js",
+      "family": "game",
+      "behavior": "read",
+      "anchor": "// Pure, read-only checks. No Gold recalculation or historical recovery.",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "audit_integrity.js",
+      "family": "game",
+      "behavior": "read",
+      "anchor": "const DEFAULT_DETAIL_LIMIT = 75;",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "dual_write_status.html",
+      "family": "storage",
+      "behavior": "read",
+      "anchor": "const raw = window.localStorage.getItem(core.STORAGE_KEY);",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "game_history_reconciliation_repair.js",
+      "family": "game",
+      "behavior": "write",
+      "anchor": "const saved = core.saveStateSnapshot?.(result.state, {",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "game_history_repair_alias_sync.js",
+      "family": "game",
+      "behavior": "bridge",
+      "anchor": "repair.applyGameHistoryRepair = wrappedApply;",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "game_ratings.html",
+      "family": "game",
+      "behavior": "write",
+      "anchor": "TaskPointsCore.writeTaskPointsStoredState(parsed, { storageKey: STORAGE_KEY });",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "habit_completion_source_guard.js",
+      "family": "habits",
+      "behavior": "read",
+      "anchor": "const revision = global.localStorage?.getItem?.(REVISION_KEY);",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "habit_ledger_completion_backed_repair.js",
+      "family": "habits",
+      "behavior": "write",
+      "anchor": "const saved = core.saveStateSnapshot(result.state, {",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "habit_ledger_matchup_restore_apply.js",
+      "family": "habits",
+      "behavior": "bridge",
+      "anchor": "const previousApply = planner.applyHabitLedgerRepairPlan.bind(planner);",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "habit_ledger_repair_audit.js",
+      "family": "habits",
+      "behavior": "write",
+      "anchor": "const saved = core.saveStateSnapshot(result.state, {",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "habit_ledger_repair_planner.js",
+      "family": "habits",
+      "behavior": "read",
+      "anchor": "const STORAGE_KEY = global.TaskPointsCore?.STORAGE_KEY || 'taskpoints_v1';",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "habit_ledger_score_reconciliation.js",
+      "family": "habits",
+      "behavior": "write",
+      "anchor": "const saved = core.saveStateSnapshot(result.state, {",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "habit_ledger_score_reconciliation_hardening.js",
+      "family": "habits",
+      "behavior": "write",
+      "anchor": "const saved = core.saveStateSnapshot(result.state, {",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "head_to_heads.html",
+      "family": "game",
+      "behavior": "read",
+      "anchor": "const raw = localStorage.getItem(STORAGE_KEY);",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "inbox.html",
+      "family": "tasks",
+      "behavior": "read",
+      "anchor": "const raw = localStorage.getItem(STORAGE_KEY);",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "log.html",
+      "family": "habits",
+      "behavior": "write",
+      "anchor": "function saveMerged(partial) {",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "mood_notes_copy_range.js",
+      "family": "habits",
+      "behavior": "read",
+      "anchor": "const raw = global.localStorage?.getItem?.(STORAGE_KEY);",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "performance_diagnostics.js",
+      "family": "storage",
+      "behavior": "write",
+      "anchor": "global.sessionStorage?.setItem?.(k,v)",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "rankings.html",
+      "family": "settings",
+      "behavior": "write",
+      "anchor": "localStorage.setItem(RANKINGS_SCOPE_STORAGE_KEY, rankingsScope);",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "records.html",
+      "family": "game",
+      "behavior": "read",
+      "anchor": "const raw = localStorage.getItem(STORAGE_KEY);",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "schedule.html",
+      "family": "season",
+      "behavior": "write",
+      "anchor": "function saveState(nextState) {",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "score_alias_audit_bootstrap.js",
+      "family": "game",
+      "behavior": "bridge",
+      "anchor": "function installTaskPointsScoreAliasAuditBootstrap(global) {",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "score_alias_consistency.js",
+      "family": "game",
+      "behavior": "read",
+      "anchor": "const raw = global.localStorage?.getItem?.(STORAGE_KEY);",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "scwm_interaction_fast_path.js",
+      "family": "habits",
+      "behavior": "bridge",
+      "anchor": "originals.save.apply(queued.thisArg, queued.args);",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "season2_missed_playin_recovery.js",
+      "family": "season",
+      "behavior": "write",
+      "anchor": "savePath: 'season2-missed-play-in-recovery'",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "season_matchup_materialization_guard.js",
+      "family": "season",
+      "behavior": "bridge",
+      "anchor": "const originalMaterializeSeasonSlateMatchupsForDate =",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "season_seed_sources.js",
+      "family": "season",
+      "behavior": "write",
+      "anchor": "const saved = core.saveStateSnapshot(state, { savePath });",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "season_series_upset_notifications.js",
+      "family": "tasks",
+      "behavior": "write",
+      "anchor": "saved = core.mergeAndSaveState({",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "tournament.html",
+      "family": "season",
+      "behavior": "write",
+      "anchor": "savePath: 'tournament-season-result-resync'",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "trash.html",
+      "family": "tasks",
+      "behavior": "write",
+      "anchor": "function saveState(nextState) {",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "task_delete_fast_path.js",
+      "family": "tasks",
+      "behavior": "bridge",
+      "anchor": "core.saveStateSnapshot = function taskDeleteFastPathSaveStateSnapshot(state, options = {}) {",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "habit_missing_donekey_date_analysis.js",
+      "family": "habits",
+      "behavior": "read",
+      "anchor": "const STORAGE_KEY = core.STORAGE_KEY || 'taskpoints_v1';",
+      "auditPass": "m01-legacy-entrypoints"
+    },
+    {
+      "path": "habit_ledger_matchup_impact_guard.js",
+      "family": "habits",
+      "behavior": "read",
+      "anchor": "const raw = global.localStorage?.getItem(STORAGE_KEY);",
+      "auditPass": "m01-legacy-entrypoints"
     }
   ]
 }
