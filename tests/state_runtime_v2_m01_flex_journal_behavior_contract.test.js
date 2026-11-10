@@ -177,3 +177,23 @@ test('drained delayed Flex fast save must never resurrect stale in-memory state'
   assert.equal(h.raw(COMPLETIONS), null);
   assert.equal(h.raw(ORDER), null);
 });
+
+test('M01 Flex witnesses remain V1 behavior only, with no production handoff', () => {
+  const inv = JSON.parse(fs.readFileSync(path.join(__dirname, '..',
+    'docs/state-runtime-v2-storage-source-inventory.json'), 'utf8'));
+  const rows = inv.writerBehaviorWitnesses.filter(row => row.path === 'flex_action_fast_path.js');
+  assert.equal(rows.length, 2);
+  for (const row of rows) {
+    assert.equal(row.testPath, 'tests/state_runtime_v2_m01_flex_journal_behavior_contract.test.js');
+    assert.ok(row.observedBehaviors.length >= 4);
+    assert.ok(inv.writerPathEvidence.some(writer =>
+      writer.path === row.path && writer.anchor === row.anchor));
+    assert.equal(row.productionOwnerVerified, false);
+    assert.equal(row.productionFenceVerified, false);
+    assert.equal(row.cutoverPermission, false);
+  }
+  assert.equal(inv.writerOwnershipAudit.behaviorRehearsedWriterRoutes, 5);
+  assert.equal(inv.writerOwnershipAudit.verifiedOwnerAssignments, 0);
+  assert.equal(inv.writerOwnershipAudit.productionWritersFenced, false);
+  assert.equal(inv.writerOwnershipAudit.flexReadOnlyCutoverGate.allowsCutover, false);
+});
