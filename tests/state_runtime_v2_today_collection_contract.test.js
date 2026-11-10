@@ -974,3 +974,130 @@ test('targeted Today day check refuses read failure and verifies reconciled day 
   assert.equal(verified.targetDayVerified,true);
   assert.equal(verified.collectionParityVerified,false);
 });
+
+test('Today compatibility rebuild preserves complete sparse maps and unknown metadata',async()=>{
+  const app=await seeded();
+  const before=app.indexedDB.dump(DB),token=app.token();
+  const result=await app.api.buildPreviewTodayCompatibilitySnapshot();
+  assert.equal(result.reason,'today_preview_compatibility_rebuilt',
+    JSON.stringify({...result,previewSnapshot:undefined}));
+  assert.equal(result.snapshotBuilt,true);
+  assert.equal(result.fullCollectionCompared,true);
+  assert.equal(result.independentRecoveryVerified,true);
+  assert.equal(result.sourcePresent,true);
+  assert.equal(result.dayCount,3);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.previewSnapshot)),sample());
+  assert.deepEqual(Object.keys(result.previewSnapshot.notesByDay).sort(),
+    ['2026-11-03','2026-11-04']);
+  assert.deepEqual(result.previewSnapshot.notesByDay['2026-11-03'],[]);
+  assert.equal(Object.hasOwn(result.previewSnapshot.tasksByDay,'2026-11-03'),false);
+  assert.equal(result.previewSnapshot.futureSettings.foo.bar[0],'retain this');
+  assert.equal(result.canPromote,false);
+  assert.equal(result.todayMigrated,false);
+  assert.equal(result.readAuthority,'legacy_only');
+  assert.equal(app.token(),token);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('Today compatibility distinguishes absent source, empty map and safe unknown keys',async()=>{
+  for(const [raw,present] of [
+    [null,false],
+    [JSON.stringify({tasksByDay:{},notesByDay:{'2026-11-01':[]}}),true],
+    ['{"version":1,"__proto__":{"notPolluted":true},"notesByDay":{"2026-11-01":[]}}',true]
+  ]){
+    const app=await boot(raw);
+    const seededResult=await app.api.rehearsePreviewTodayCollectionSeed(
+      app.token(),'compat-source');
+    assert.equal(seededResult.collectionParityVerified,true,
+      JSON.stringify(seededResult));
+    const result=await app.api.buildPreviewTodayCompatibilitySnapshot();
+    assert.equal(result.snapshotBuilt,true,JSON.stringify(result));
+    assert.equal(result.sourcePresent,present);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.previewSnapshot)),
+      raw===null?{}:JSON.parse(raw));
+    if(raw===null)assert.deepEqual(Object.keys(result.previewSnapshot),[]);
+    if(raw?.includes('"__proto__"')){
+      assert.equal(Object.hasOwn(result.previewSnapshot,'__proto__'),true);
+      assert.equal({}.notPolluted,undefined);
+    }
+    assert.equal(result.canPromote,false);
+  }
+});
+
+test('Today compatibility refuses stale and tampered V2 records without touching V1',async()=>{
+  for(const kind of ['stale','day','extra','receipt']){
+    const app=await seeded();
+    const v1=app.localStorage.getItem(V1);
+    const today=app.localStorage.getItem(TODAY);
+    const stores=app.indexedDB._databases.get(DB)._stores;
+    if(kind==='stale'){
+      const next=sample();
+      next.orderByDay['2026-11-04'].reverse();
+      app.localStorage.setItem(TODAY,JSON.stringify(next));
+    }else if(kind==='day'){
+      stores.get('todayDays').get('day:2026-11-04')
+        .value.notesByDay[0].text='corrupted';
+    }else if(kind==='extra'){
+      stores.get('todayDays').set('day:2026-11-07',{
+        id:'day:2026-11-07',dayKey:'2026-11-07',
+        value:{notesByDay:[]}
+      });
+    }else{
+      stores.get('mutations').delete('today-preview-seed:first');
+    }
+    const afterChange=app.indexedDB.dump(DB);
+    const result=await app.api.buildPreviewTodayCompatibilitySnapshot();
+    assert.equal(result.snapshotBuilt,false,JSON.stringify(result));
+    assert.equal(result.canPromote,false);
+    assert.equal(result.readAuthority,'legacy_only');
+    assert.equal(Object.hasOwn(result,'previewSnapshot'),false);
+    assert.equal(app.localStorage.getItem(V1),v1);
+    assert.equal(app.localStorage.getItem(TODAY),
+      kind==='stale'?JSON.stringify(JSON.parse(app.localStorage.getItem(TODAY))):today);
+    assert.deepEqual(app.indexedDB.dump(DB),afterChange);
+  }
+});
+
+test('Today compatibility survives explicit reconcile and browser-style runtime restart',async()=>{
+  const app=await seeded();
+  const next=sample();
+  next.notesByDay['2026-11-04'][0].done=true;
+  next.notesByDay['2026-11-08']=[];
+  next.orderByDay['2026-11-08']=['task:new'];
+  app.localStorage.setItem(TODAY,JSON.stringify(next));
+  const stale=await app.api.buildPreviewTodayCompatibilitySnapshot();
+  assert.equal(stale.snapshotBuilt,false);
+  const recon=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'compat-reconcile');
+  assert.equal(recon.collectionParityVerified,true,JSON.stringify(recon));
+  const reload=await boot(undefined,{
+    localStorage:app.localStorage,indexedDB:app.indexedDB
+  });
+  const result=await reload.api.buildPreviewTodayCompatibilitySnapshot();
+  assert.equal(result.snapshotBuilt,true,JSON.stringify(result));
+  assert.deepEqual(JSON.parse(JSON.stringify(result.previewSnapshot)),next);
+  assert.equal(result.previewSnapshot.notesByDay['2026-11-04'][0].done,true);
+  assert.equal(result.previewSnapshot.notesByDay['2026-11-08'].length,0);
+  assert.equal(result.canPromote,false);
+});
+
+test('Today compatibility fails closed on readonly failure and production host',async()=>{
+  const app=await seeded();
+  const before=app.indexedDB.dump(DB),origin=app.token();
+  app.indexedDB.failNext({store:'todayDays',operation:'getAll',
+    error:new Error('forced_read_failure')});
+  const failure=await app.api.buildPreviewTodayCompatibilitySnapshot();
+  assert.equal(failure.snapshotBuilt,false,JSON.stringify(failure));
+  assert.equal(failure.canPromote,false);
+  assert.equal(Object.hasOwn(failure,'previewSnapshot'),false);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+  assert.equal(app.token(),origin);
+  app.ctx.location.hostname='taskpoints.pages.dev';
+  const denied=await app.api.buildPreviewTodayCompatibilitySnapshot();
+  assert.equal(denied.reason,'preview_host_required');
+  assert.equal(denied.snapshotBuilt,false);
+  app.ctx.location.hostname='localhost';
+  app.localStorage.removeItem(DARK);
+  assert.equal((await app.api.buildPreviewTodayCompatibilitySnapshot()).reason,
+    'dark_disabled');
+});
