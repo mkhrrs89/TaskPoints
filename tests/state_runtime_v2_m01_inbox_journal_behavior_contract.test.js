@@ -212,7 +212,7 @@ test('Inbox owner evidence remains provisional despite confirmed V1 behavior reh
     assert.equal(route.productionFenceVerified, false);
     assert.equal(route.cutoverPermission, false);
   }
-  assert.equal(inv.writerOwnershipAudit.behaviorRehearsedWriterRoutes, 5);
+  assert.equal(inv.writerOwnershipAudit.behaviorRehearsedWriterRoutes, 8);
   assert.equal(inv.writerOwnershipAudit.verifiedOwnerAssignments, 0);
   assert.equal(inv.writerOwnershipAudit.productionWritersFenced, false);
   assert.equal(inv.writerOwnershipAudit.status, 'incomplete');
