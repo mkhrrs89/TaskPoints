@@ -35,12 +35,12 @@ weighted gate, these are raw, separately observable audit counts:
 
 | M01 first-pass measurement | Before this session | Now |
 | --- | ---: | ---: |
-| Production source files enumerated in a stable CI-guarded inventory | 0 | **168 / 168 discovered** |
-| Individual source files inspected for storage/key evidence | 20 | **40 / 168 inspected** |
-| Literal key-to-source evidence entries recorded | 33 | **51** |
+| Production source files enumerated in a stable CI-guarded inventory | 168 | **170 / 170 discovered** |
+| Individual source files inspected for storage/key evidence | 40 | **42 / 170 inspected** |
+| Literal key-to-source evidence entries recorded | 51 | **53** |
 | Explicit named main V1 snapshot fields tracked and CI-checked | 0 | **30** |
 | IndexedDB database/store evidence examples recorded | 3 | **4** |
-| Reviewed cross-page writer-route anchors guarded by tests | 0 | **16** |
+| Reviewed cross-page writer-route anchors guarded by tests | 16 | **17** |
 | M01 checkpoint passed | No | **No** |
 
 These are **discovery and first-pass inspection metrics**, not percentages of
@@ -74,7 +74,7 @@ A preview test does **not** satisfy these. For each feature, success must show t
 
 | ID | Status | Pass condition required before marking Verified | Current blocker / evidence |
 | --- | --- | --- | --- |
-| M01 | Working | Exhaustive, reviewed inventory maps **every** authoritative field, localStorage key, IndexedDB store, pending journal and cross-page writer to its V2 owner or preserved auxiliary storage, including imports and resets. | [Initial M01 inventory](docs/state-runtime-v2-m01-storage-audit.md): 168 files enumerated, 40 inspected, 51 key/source entries, 16 writer-path anchors, 30 named V1 fields. [Writer matrix](docs/state-runtime-v2-writer-handoff-matrix.md) and [legacy writer tests](tests/state_runtime_v2_legacy_writer_inventory_contract.test.js) remain incomplete; 128 source files and indirect writes still need review. |
+| M01 | Working | Exhaustive, reviewed inventory maps **every** authoritative field, localStorage key, IndexedDB store, pending journal and cross-page writer to its V2 owner or preserved auxiliary storage, including imports and resets. | [Initial M01 inventory](docs/state-runtime-v2-m01-storage-audit.md): 170 files enumerated, 42 inspected, 53 key/source entries, 17 writer-path anchors, 30 named V1 fields. [Writer matrix](docs/state-runtime-v2-writer-handoff-matrix.md) and [legacy writer tests](tests/state_runtime_v2_legacy_writer_inventory_contract.test.js) remain incomplete; 128 source files and indirect writes still need review. |
 | M02 | Working | Real Home/Tasks actions (create, edit, delete, finish, historical completion) take admitted transactional V2 writes, with synchronous pre-paint durability and V1 fallback/parity. | Preview task actions/journal protections exist, but [Home](index.html) and [Task journal](task_mutation_journal.js) still use V1 paths; no proven live handoff. |
 | M03 | Working | Real Today page add/edit/reorder/remove and notes writes use admitted V2 day-row transactions and survive reload/quota without losing empty/absent days. | Preview Today's row/rebuild/recovery work exists; [Today](today.html) still uses legacy `saveTodayStore()`. |
 | M04 | Working | Real Projects create/edit/delete/order operations commit as admitted atomic V2 changes with compatible project exports/restores. | Preview project reconcile + cooperative writer experiments exist, but [Home](index.html) keeps a direct `tp_projects_v1` path. |
@@ -117,5 +117,7 @@ See [weighted acceptance rubric](docs/state-runtime-v2-weighted-milestones.md) f
 | 2026-11-10 — M01 source and storage discovery | **8 → 8 / 23** | **0 newly verified**. Enumerated 168 root production source files; inspected first 20; captured 33 storage key/source entries, 3 DB examples and 30 named normalized V1 fields. Added CI checks for new source files and named V1 fields. | **M01 Working**: review 148 other files, dynamic/indirect writers, source ownership and recovery paths. Overall 67/100 unchanged. | [Storage inventory](docs/state-runtime-v2-storage-source-inventory.json) · [M01 audit](docs/state-runtime-v2-m01-storage-audit.md) · [CI tests](tests/state_runtime_v2_m01_source_inventory_contract.test.js) |
 
 | 2026-11-10 — M01 cross-page writer pass | **8 → 8 / 23** | **0 newly verified**. Inspected 20 more source files (40/168 total), expanded key-source evidence **33 → 51**, database examples **3 → 4** and added **16** tested writer-route anchors. | **M01 Working**: 128 uninspected root files plus nested/dynamic writers; Week/Matchups, Inbox journal, delayed Toolbar/Gold/season writers, restore locks and verified-secondary backups require ownership proof. Overall 67/100 unchanged; no live authority changes. | [Inventory expansion](https://github.com/mkhrrs89/TaskPoints/commit/a6180defc530ea285f2a551bdf069d854ceb573a) · [Writer anchor contract](https://github.com/mkhrrs89/TaskPoints/commit/c4b298f098f4964af948ba8d7aba32f7937d92bc) · [Second-pass audit](docs/state-runtime-v2-m01-storage-audit.md) |
+
+| 2026-11-10 — requested Main → V2 sync | **8 → 8 / 23** | **0 newly verified**. Integrated 65 newer Main commits (41 affected files), safely merged two overlapping V2-edited files, preserved existing V2-only files; audited two new Gold scripts, with **170/170 listed, 42 reviewed, 53 keys, 17 writer routes**. | **M01 Working / M07 Open:** new manual Gold ledger writer requires owner/fencing; 128 uninspected root files and dynamic paths remain. Weighted rubric still **67/100**. Main not modified, V1 retains authority. | [Merge commit](https://github.com/mkhrrs89/TaskPoints/commit/959979e98d4f96e587bed63d0b9c727f4b7da0e9) · [Updated inventory](docs/state-runtime-v2-storage-source-inventory.json) · [Audit](docs/state-runtime-v2-m01-storage-audit.md) |
 
 **Future update format:** `old verified/new verified · IDs completed · IDs still blocked · code commits · tests pass/fail · next closure target`. If work improves a Working item but doesn't finish its pass condition, explicitly write **0 new checkpoints verified**. Never report the withdrawn "98%" or a fabricated replacement.

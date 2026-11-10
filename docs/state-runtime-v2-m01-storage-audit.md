@@ -7,13 +7,13 @@
 
 | Observable | Initial result | Meaning |
 | --- | ---: | --- |
-| Tracked root-level production JS/HTML/MJS files | **168** | Reproducible source-file baseline; tests and docs excluded |
-| Files inspected at the source level across both audit passes | **40** | **128** other files still need independent review |
-| Key-to-source evidence entries | **51** | Source-linked references (one Notes key has two legitimate roles) — **not** all unique persistence keys |
+| Tracked root-level production JS/HTML/MJS files | **170** | Reproducible source-file baseline; tests and docs excluded |
+| Files inspected at the source level across both audit passes and Main sync | **42** | **128** other files still need independent review |
+| Key-to-source evidence entries | **53** | Source-linked references (one Notes key has two legitimate roles) — **not** all unique persistence keys |
 | Known IndexedDB database/store evidence examples | **4** | `taskpoints/images`, safety vault snapshots, and V2 preview DB |
 | Explicit primary snapshot fields in `normalizeState` | **30** | Reproducible named-field lower bound, NOT entire V1 schema |
 
-Reproducible manifest: [source inventory](state-runtime-v2-storage-source-inventory.json). Every tracked source filename and the 30 named `src.` fields are checked in V2 CI by [M01 inventory contracts](../tests/state_runtime_v2_m01_source_inventory_contract.test.js). CI also checks key/database evidence paths exist. A new root-level source file or a new explicitly normalized field **fails the CI inventory guard** until the manifest is consciously updated. The additional [writer-path anchor contract](../tests/state_runtime_v2_m01_writer_path_evidence_contract.test.js) now catches disappearance/movement of 16 reviewed writer entrypoints and six high-risk storage key/database anchors. It does NOT enumerate every dynamic writer inside an existing file or prove caller ownership; this is not a completed-callgraph proof.
+Reproducible manifest: [source inventory](state-runtime-v2-storage-source-inventory.json). Every tracked source filename and the 30 named `src.` fields are checked in V2 CI by [M01 inventory contracts](../tests/state_runtime_v2_m01_source_inventory_contract.test.js). CI also checks key/database evidence paths exist. A new root-level source file or a new explicitly normalized field **fails the CI inventory guard** until the manifest is consciously updated. The additional [writer-path anchor contract](../tests/state_runtime_v2_m01_writer_path_evidence_contract.test.js) now catches disappearance/movement of 17 reviewed writer entrypoints and six high-risk storage key/database anchors. It does NOT enumerate every dynamic writer inside an existing file or prove caller ownership; this is not a completed-callgraph proof.
 
 ## What is actually stored separately
 
@@ -25,7 +25,7 @@ Reproducible manifest: [source inventory](state-runtime-v2-storage-source-invent
 | Notes | `taskpoints_notes_v1`, dirty and authoritative markers; main V1 `notes` | `notes.html`, `scoring_core.js`, `settings.html` | Finish dirty-first edit and snapshot-sync recovery and ownership |
 | Projects | `tp_projects_v1`; legacy V1 `projects` | `projects.html`, `index.html` | Reconcile every independent editor and import/export behavior |
 | Game and seasons | Main V1 `players`, `seasonHistory`, `matchups` etc; separate gallery/sort/group keys | `game.html`, `season.js`, `matchups.html`, `season3_tournament_rollover.js`, `settings.html` | All gameplay, result, gold, season archive, manual repair and auxiliary settings paths |
-| Gold | Main V1 Gold/economy fields, settlements and secondary result claims | `greed_gold_economy.js`, `gold_ledger.html`, `index.html` | Outcome, margin, theft, repair and replay writers; no live V2 ownership |
+| Gold | Main V1 Gold/economy fields, settlements and secondary result claims | `greed_gold_economy.js`, `gold_ledger.html`, `gold_manual_adjustment.js`, `index.html` | Outcome, margin, theft, repair and replay writers; no live V2 ownership |
 | Pictures | IndexedDB database `taskpoints`, object store `images` (binary blobs) | `scoring_core.js` | All image refs, backup/export bytes and restore with no omission |
 | Backups / recovery | Backup slots, quarantined state, `taskpoints_safety_vault_v1/snapshots`, `taskpoints_verified_secondary_v1/snapshots`, phase3/4/5 markers and restore locks | `scoring_core.js`, `settings.html`, `phase2_reset_hook.js`, `phase3_read_path.js`, `phase4_storage_coordinator.js`, `phase5b_deferred_mirror.js`, `emergency_recovery.html`, `verified_secondary_restore.js` | Source-complete export/import, generation rotation, emergency restore and old-tab effects |
 | V2 previews | `taskpoints_state_v2`, preview Notes, Game, Habit ordering and checkpoint DBs | `state_runtime_v2.js` | Distinguish strictly preview-only writes from eventual production admission; no unauthorized promotion |
@@ -44,9 +44,18 @@ Twenty additional production files were inspected: 40/168 total, leaving 128. Ev
 
 Remaining blockers: 128 uninspected root sources, nested sources/assets/service worker entrypoints, computed key aliases, unknown V1 snapshot properties, caller-to-sink paths, restore/import/reset behavior and a reviewed owner for every surviving writer. No V1 or V2 production save behavior was changed.
 
+## November 10 Main → V2 sync — new Gold writer reviewed
+
+Merged [Main head 017e456](https://github.com/mkhrrs89/TaskPoints/commit/017e4562a8575e53f7b84818b46449c54475d78b) into [V2 commit 959979e](https://github.com/mkhrrs89/TaskPoints/commit/959979e98d4f96e587bed63d0b9c727f4b7da0e9) **without modifying Main**. The merge inherited Main's 65 newer commits (41 changed files) and retained all V2-specific files. Two overlapping sources, `index.html` and `scoring_core.js`, were merged with non-overlapping line changes from both branches. V1 remains authoritative; this is not a V2 storage cutover.
+
+- Main introduced `gold_manual_adjustment.js`, which writes the live Gold ledger through `TaskPointsCore.saveValidatedSnapshot` after a freshness check, reads `taskpoints_v1`, and respects the emergency recovery hold. **This is a newly discovered nonpilot Gold writer** requiring M07 ownership/fencing before V2 authority.
+- Main introduced `gold_circulation_total.js`, a Gold-ledger read/aggregation helper. Both new production sources were inspected and added to the CI-guarded root source list.
+- Current inventory: **170 enumerated / 42 inspected**, **53 key/source entries**, 4 database/store examples and **17** guarded writer anchors. **128 root files** remain uninspected, plus indirect/dynamic call paths.
+- Existing M01 limitations, field-extension preservation, safety vault and recovery gates remain blocked. No new engineering checkpoint was verified by the synchronization.
+
 ## Specific next work to close M01
 
-1. Run the CI source scanner against all 168 files; triage which of the 128 uninspected files access or indirectly modify storage. Move from *inspected* to *writer ownership verified* only with a caller/writer trace, including indirect `TaskPointsCore` saves and dynamic key aliases.
+1. Run the CI source scanner against all 170 files; triage which of the 128 uninspected files access or indirectly modify storage. Move from *inspected* to *writer ownership verified* only with a caller/writer trace, including indirect `TaskPointsCore` saves and dynamic key aliases.
 2. Group all literal and computed localStorage keys by authoritative vs derived vs session-only vs recovery-only, and identify how each is imported/exported and reset. Preserve user-defined fields and unknown V1 properties.
 3. Audit every other IndexedDB database/version/store and each image read/write/delete and backup path. Include malformed schema and no-DB cases.
 4. Map all UI and maintenance entrypoints, including pages, service worker lifecycle, deferred compaction, Phase4/5 mirrors, restore and import, to the nine known legacy writer families; use negative tests where a stale writer must be refused.
