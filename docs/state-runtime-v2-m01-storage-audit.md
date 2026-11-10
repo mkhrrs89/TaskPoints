@@ -98,6 +98,14 @@ Additional risk paths found in the last 62 files:
 
 **Next practical closure work:** resolve the known 78 provisional handoffs to actual owners and prove caller-to-sink completeness, including old-tab generation fencing, fallback writes, generated scripts, import/reset and recovery paths. Preserve every existing safeguard and keep V1 authoritative until all independent safety gates pass.
 
+## November 10 sixth pass — actual V1 Task-delete writer behavior witness
+
+The M01 audit moved beyond file anchors for the first named route: `task_delete_fast_path.js`. A dedicated [Node VM regression](../tests/state_runtime_v2_m01_task_delete_behavior_contract.test.js) executes the **real installed Task-delete fast-path module** and, in two integration cases, the **actual existing V1 Task journal module** (`task_mutation_journal.js`) against disposable memory storage.
+
+The focused cases preserve and check: confirmed deletes journal before any full snapshot; unrelated/unfinished actions still take the original save route; missing/locked/failing journals fall back to V1; click arms expire safely; journaled deletes overlay reads and compact to V1 without losing unrelated completions; and a forced journal quota error falls back to the original snapshot writer instead of falsely acknowledging a durable journal.
+
+This gives **1 of the 78 source-tracked writer paths a tested synthetic V1 behavior witness**. The source inventory records the test and its five scenario classes. It is deliberately **not** a verified V2 owner, not a multi-tab transaction, not an iPhone proof, and not a production writer fence. **0/78 production ownership proofs** remain complete, and the migration/cutover blockers stay in force.
+
 ## Specific next work to close M01
 
 1. Run the CI source scanner against all 170 files; triage which of the 98 uninspected files access or indirectly modify storage. Move from *inspected* to *writer ownership verified* only with a caller/writer trace, including indirect `TaskPointsCore` saves and dynamic key aliases.

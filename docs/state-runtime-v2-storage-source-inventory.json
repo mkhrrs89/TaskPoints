@@ -2932,7 +2932,9 @@
     ],
     "proposedOwnerAssignments": 78,
     "verifiedOwnerAssignments": 0,
-    "requiredClosure": "Complete per-key and per-writer ownership, live admission + generation fencing, export/import/restore and real device tests before M01 can verify"
+    "requiredClosure": "Complete per-key and per-writer ownership, live admission + generation fencing, export/import/restore and real device tests before M01 can verify",
+    "behaviorRehearsedWriterRoutes": 1,
+    "behaviorRehearsalDenominator": 78
   },
   "proposedWriterHandoffs": [
     {
@@ -3713,6 +3715,24 @@
       "requiredEvidence": "emergency lock, quarantine, restore and rollback proof",
       "evidenceStatus": "not_verified",
       "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    }
+  ],
+  "writerBehaviorWitnesses": [
+    {
+      "path": "task_delete_fast_path.js",
+      "anchor": "core.saveStateSnapshot = function taskDeleteFastPathSaveStateSnapshot(state, options = {}) {",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_task_delete_behavior_contract.test.js",
+      "observedBehaviors": [
+        "confirmed_delete_writes_synchronous_task_journal",
+        "real_task_journal_replays_deleted_task_and_compacts",
+        "journal_quota_failure_uses_existing_full_v1_snapshot_fallback",
+        "unrelated_or_unconfirmed_mutation_uses_original_snapshot_save",
+        "expired_click_arm_does_not_reroute_unrelated_saves"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
       "cutoverPermission": false
     }
   ]

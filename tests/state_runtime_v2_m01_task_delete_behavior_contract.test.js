@@ -218,3 +218,23 @@ test('actual Task journal quota rejection falls back to full V1 save without fal
   assert.equal(saved.tasks.find(t => t.id === 'task-1').status, 'trashed');
   assert.equal(saved.completions[0].id, 'c1');
 });
+
+test('M01 Task-delete witness is explicitly non-production and tied to one writer path', () => {
+  const inv = JSON.parse(fs.readFileSync(path.join(__dirname, '..',
+    'docs/state-runtime-v2-storage-source-inventory.json'), 'utf8'));
+  const witnesses = inv.writerBehaviorWitnesses || [];
+  assert.equal(witnesses.length, 1);
+  const witness = witnesses[0];
+  assert.equal(witness.path, 'task_delete_fast_path.js');
+  assert.equal(witness.testPath, 'tests/state_runtime_v2_m01_task_delete_behavior_contract.test.js');
+  assert.ok(inv.writerPathEvidence.some(row =>
+    row.path === witness.path && row.anchor === witness.anchor));
+  assert.ok(witness.observedBehaviors.length >= 5);
+  assert.equal(witness.productionOwnerVerified, false);
+  assert.equal(witness.productionFenceVerified, false);
+  assert.equal(witness.cutoverPermission, false);
+  assert.equal(inv.writerOwnershipAudit.behaviorRehearsedWriterRoutes, witnesses.length);
+  assert.equal(inv.writerOwnershipAudit.verifiedOwnerAssignments, 0);
+  assert.equal(inv.writerOwnershipAudit.productionWritersFenced, false);
+  assert.equal(inv.writerOwnershipAudit.status, 'incomplete');
+});

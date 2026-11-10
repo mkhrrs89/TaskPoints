@@ -974,3 +974,9 @@ and margin, wrong claimed amount, contradictory copies, and broken
 counterparty IDs; a new Chromium/WebKit test confirms equal V1/V2
 ledgers still fail the semantic integrity check when a settled
 matchup records a missing theft. Readiness **67/100**.
+
+## November 10 M01 Task Delete: V1 journal/fallback behavior witness
+
+The [Task-delete M01 contract](../tests/state_runtime_v2_m01_task_delete_behavior_contract.test.js) exercises the installed `task_delete_fast_path.js` wrapper in a disposable VM. Two scenarios also load the **real** `task_mutation_journal.js`, rather than replacing the journal with a mock. The guard checks synchronous durability, replay into effective V1 reads, successful compaction, and quota failure fallback to the existing full V1 snapshot. Unconfirmed and unrelated saves still use the original path.
+
+This is **one behavior-witnessed route out of 78 observed writer/delegation anchors**, not a certificate of complete V1 ownership or a usable V2 migration protocol. The manifest explicitly preserves `productionOwnerVerified:false`, `productionFenceVerified:false`, `cutoverPermission:false`. Pending unknown writers, separate Inbox/Habit/Flex journals, recovery, old paused tabs, and physical-device lifecycle checks remain blockers. No production runtime logic or Main branch was changed.
