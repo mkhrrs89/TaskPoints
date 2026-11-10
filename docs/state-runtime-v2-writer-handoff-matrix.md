@@ -980,3 +980,11 @@ matchup records a missing theft. Readiness **67/100**.
 The [Task-delete M01 contract](../tests/state_runtime_v2_m01_task_delete_behavior_contract.test.js) exercises the installed `task_delete_fast_path.js` wrapper in a disposable VM. Two scenarios also load the **real** `task_mutation_journal.js`, rather than replacing the journal with a mock. The guard checks synchronous durability, replay into effective V1 reads, successful compaction, and quota failure fallback to the existing full V1 snapshot. Unconfirmed and unrelated saves still use the original path.
 
 This is **one behavior-witnessed route out of 78 observed writer/delegation anchors**, not a certificate of complete V1 ownership or a usable V2 migration protocol. The manifest explicitly preserves `productionOwnerVerified:false`, `productionFenceVerified:false`, `cutoverPermission:false`. Pending unknown writers, separate Inbox/Habit/Flex journals, recovery, old paused tabs, and physical-device lifecycle checks remain blockers. No production runtime logic or Main branch was changed.
+
+## November 10 M01 Inbox journal and cutover observer
+
+The V1 Inbox fast-path module has two known storage writer routes: a synchronous pending-Inbox journal append, and verified cleanup after idle snapshot compaction. The [M01 Inbox behavior tests](../tests/state_runtime_v2_m01_inbox_journal_behavior_contract.test.js) exercise both through the actual production source, including journal quota rejection, malformed recovery evidence, skipped/failed/mismatched compaction, newly journaled changes during an older compaction, and maintenance deferral.
+
+The V2-only `inspectAuthorityCutoverBarriers()` now has an independent **read-only** Inbox journal observer, two-pass before/after comparison, explicit pending/malformed blockers, and a permanent `inbox_journal_compaction_handoff_not_validated` blocker. It never deletes or replays journal contents and does not confuse an empty count inside a present record with an absent journal.
+
+All this establishes **V1 behavior and conservative inspection only**: two additional known route witnesses, **three of 78 total**, but **zero certified production writer owners**. Dormant legacy-only tabs, the Inbox full-save fallback, independent Task/Habit/Flex journals, recovery and cross-tab generation fencing still prevent cutover. V1 and Main were not modified.

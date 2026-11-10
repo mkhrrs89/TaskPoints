@@ -196,3 +196,26 @@ test('compaction refuses active editing and page exit until quiet; no premature 
   assert.equal(h.storage.getItem(KEY), null);
   assert.ok(h.core.getInboxMutationJournalStatus().compactionDeferrals >= 3);
 });
+
+test('Inbox owner evidence remains provisional despite confirmed V1 behavior rehearsals', () => {
+  const inv = JSON.parse(fs.readFileSync(path.join(__dirname, '..',
+    'docs/state-runtime-v2-storage-source-inventory.json'), 'utf8'));
+  const paths = inv.writerBehaviorWitnesses || [];
+  const inbox = paths.filter(row => row.path === 'task_create_fast_path.js');
+  assert.equal(inbox.length, 2, 'both journal append and cleanup must be behavior witnessed');
+  for (const route of inbox) {
+    assert.ok(inv.writerPathEvidence.some(row =>
+      row.path === route.path && row.anchor === route.anchor));
+    assert.equal(route.testPath, 'tests/state_runtime_v2_m01_inbox_journal_behavior_contract.test.js');
+    assert.ok(route.observedBehaviors.length >= 4);
+    assert.equal(route.productionOwnerVerified, false);
+    assert.equal(route.productionFenceVerified, false);
+    assert.equal(route.cutoverPermission, false);
+  }
+  assert.equal(inv.writerOwnershipAudit.behaviorRehearsedWriterRoutes, 3);
+  assert.equal(inv.writerOwnershipAudit.verifiedOwnerAssignments, 0);
+  assert.equal(inv.writerOwnershipAudit.productionWritersFenced, false);
+  assert.equal(inv.writerOwnershipAudit.status, 'incomplete');
+  assert.equal(inv.writerOwnershipAudit.inboxReadOnlyCutoverGate.canGrantProductionAuthority, false);
+  assert.equal(inv.writerOwnershipAudit.inboxReadOnlyCutoverGate.allowsCutover, false);
+});

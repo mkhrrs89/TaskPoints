@@ -106,6 +106,14 @@ The focused cases preserve and check: confirmed deletes journal before any full 
 
 This gives **1 of the 78 source-tracked writer paths a tested synthetic V1 behavior witness**. The source inventory records the test and its five scenario classes. It is deliberately **not** a verified V2 owner, not a multi-tab transaction, not an iPhone proof, and not a production writer fence. **0/78 production ownership proofs** remain complete, and the migration/cutover blockers stay in force.
 
+## November 10 seventh pass — Inbox journal behavior and conservative cutover block
+
+The **real** `task_create_fast_path.js` Inbox mutation journal has been exercised with synthetic memory storage for its two recorded writer routes: synchronous `setItem` and post-verification `removeItem`. The new [Inbox behavior contract](../tests/state_runtime_v2_m01_inbox_journal_behavior_contract.test.js) tests successful immediate journaling, durable journal read overlay, direct V1 fallback on quota failure, preservation of malformed journal evidence, retention and retry after skipped/failed/nonpersisted compaction, and protection of newer journal records created while older compaction is in progress.
+
+The V2-only read-only `inspectAuthorityCutoverBarriers()` additionally observes `taskpoints_pending_inbox_state_v1` **before and after** the asynchronous peer probe and full-origin inventory. The [cutover observer contract](../tests/state_runtime_v2_m01_inbox_cutover_guard_contract.test.js) checks V1 array and V2 object formats, malformed/unknown journals, inaccessible reads, exact no-mutation behavior and permanent hard blockers. A valid present journal is **pending**, even if the record contains empty arrays. Cutover remains impossible even when absent: `inbox_journal_compaction_handoff_not_validated` is always a blocker.
+
+Current behavioral-witness metric: **3/78** known source-anchored routes (Task Delete + Inbox append + Inbox cleanup); **0/78** production owners verified. These are two separate measures. No nonpilot V2 writer admission, old-tab fencing, or primary migration has occurred.
+
 ## Specific next work to close M01
 
 1. Run the CI source scanner against all 170 files; triage which of the 98 uninspected files access or indirectly modify storage. Move from *inspected* to *writer ownership verified* only with a caller/writer trace, including indirect `TaskPointsCore` saves and dynamic key aliases.
