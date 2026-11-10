@@ -9,7 +9,7 @@
 | --- | ---: | --- |
 | Tracked root-level production JS/HTML/MJS files | **168** | Reproducible source-file baseline; tests and docs excluded |
 | Files inspected at the source level across both audit passes | **40** | **128** other files still need independent review |
-| Key-to-source evidence entries | **50** | Source-linked references (one Notes key has two legitimate roles) — **not** all unique persistence keys |
+| Key-to-source evidence entries | **51** | Source-linked references (one Notes key has two legitimate roles) — **not** all unique persistence keys |
 | Known IndexedDB database/store evidence examples | **4** | `taskpoints/images`, safety vault snapshots, and V2 preview DB |
 | Explicit primary snapshot fields in `normalizeState` | **30** | Reproducible named-field lower bound, NOT entire V1 schema |
 
@@ -34,7 +34,7 @@ Reproducible manifest: [source inventory](state-runtime-v2-storage-source-invent
 
 ## November 10 second pass — discovered writer routes (NOT a migration)
 
-Twenty additional production files were inspected: 40/168 total, leaving 128. Evidence now includes 50 key/source entries, 4 database/store examples, and **16 source-anchored writer/delegation routes** in the machine-readable manifest. These anchors are checked in a new Node contract; they are **not** exhaustive callgraph or live-operation tests.
+Twenty additional production files were inspected: 40/168 total, leaving 128. Evidence now includes 51 key/source entries, 4 database/store examples, and **16 source-anchored writer/delegation routes** in the machine-readable manifest. These anchors are checked in a new Node contract; they are **not** exhaustive callgraph or live-operation tests.
 
 - **Week** saves through `TaskPointsCore.saveStateSnapshot`; **Matchups** saves through `mergeAndSaveState`. Both are non-Home legacy write entrypoints that must be admitted or fenced during any cutover.
 - **Toolbar** delegates Inbox writes through `mergeAndSaveState`, wraps the core save functions with deferred writes, and independently updates image blobs. **Inbox** also has its own synchronous `taskpoints_pending_inbox_state_v1` journal and delayed compaction/removal in `task_create_fast_path.js`. Losing this journal would lose events even if main-snapshot parity passed.
