@@ -515,6 +515,12 @@
       "family": "settings",
       "role": "toolbar navigation emoji preference",
       "evidencePath": "toolbar.js"
+    },
+    {
+      "key": "taskpoints_verified_secondary_v1",
+      "family": "recovery",
+      "role": "verified-secondary recovery mirror IndexedDB namespace",
+      "evidencePath": "phase5b_deferred_mirror.js"
     }
   ],
   "dbEvidence": [
