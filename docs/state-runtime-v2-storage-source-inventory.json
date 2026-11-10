@@ -2455,7 +2455,7 @@
       "path": "equations.html",
       "family": "core",
       "behavior": "read",
-      "anchor": "Inertia:",
+      "anchor": "Avg last 7 days (excl. today) × 0.25",
       "auditPass": "m01-final-root-source-pass",
       "ownerVerification": "unverified"
     },
@@ -2929,6 +2929,791 @@
       "Prove generation admission and stale-tab fencing for legacy, repair, deferred and raw fallback writes",
       "Verify interrupted, quota-failed, restart, import, reset, export and recovery paths against live authority",
       "Validate off-device recovery and physical iPhone Safari before production promotion"
-    ]
-  }
+    ],
+    "proposedOwnerAssignments": 78,
+    "verifiedOwnerAssignments": 0,
+    "requiredClosure": "Complete per-key and per-writer ownership, live admission + generation fencing, export/import/restore and real device tests before M01 can verify"
+  },
+  "proposedWriterHandoffs": [
+    {
+      "path": "week.html",
+      "anchor": "TaskPointsCore.saveStateSnapshot(",
+      "family": "core",
+      "proposedOwner": "V2 state coordinator / V1 compatibility snapshot",
+      "requiredEvidence": "legacy snapshot admission and stale-generation protection",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "matchups.html",
+      "anchor": "TaskPointsCore.mergeAndSaveState(fullState",
+      "family": "game",
+      "proposedOwner": "V2 Game and Gold collection coordinator",
+      "requiredEvidence": "Game/Gold parity, image refs and stale-tab mutation fencing",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "toolbar.js",
+      "anchor": "TaskPointsCore.mergeAndSaveState({",
+      "family": "tasks",
+      "proposedOwner": "V2 Tasks/Inbox journal adapter",
+      "requiredEvidence": "Task journal and Inbox replay must not double-write or lose deletions",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "toolbar.js",
+      "anchor": "core.mergeAndSaveState = debouncedMerge;",
+      "family": "core",
+      "proposedOwner": "V2 state coordinator / V1 compatibility snapshot",
+      "requiredEvidence": "legacy snapshot admission and stale-generation protection",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "toolbar.js",
+      "anchor": "store.delete(imageId)",
+      "family": "game",
+      "proposedOwner": "V2 Game and Gold collection coordinator",
+      "requiredEvidence": "Game/Gold parity, image refs and stale-tab mutation fencing",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "task_create_fast_path.js",
+      "anchor": "storage.setItem(JOURNAL_KEY, raw);",
+      "family": "tasks",
+      "proposedOwner": "V2 Tasks/Inbox journal adapter",
+      "requiredEvidence": "Task journal and Inbox replay must not double-write or lose deletions",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "task_create_fast_path.js",
+      "anchor": "storage.removeItem(JOURNAL_KEY);",
+      "family": "tasks",
+      "proposedOwner": "V2 Tasks/Inbox journal adapter",
+      "requiredEvidence": "Task journal and Inbox replay must not double-write or lose deletions",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "emergency_recovery.html",
+      "anchor": "localStorage.setItem('taskpoints_emergency_recovery_hold_v1'",
+      "family": "recovery",
+      "proposedOwner": "retained V1 restore/safety-vault owner",
+      "requiredEvidence": "emergency lock, quarantine, restore and rollback proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "verified_secondary_restore.js",
+      "anchor": "localStorage.setItem(LOCK_KEY, JSON.stringify(lock));",
+      "family": "recovery",
+      "proposedOwner": "retained V1 restore/safety-vault owner",
+      "requiredEvidence": "emergency lock, quarantine, restore and rollback proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "phase3_read_path.js",
+      "anchor": "global.localStorage?.setItem?.(MODE_KEY, nextMode);",
+      "family": "storage",
+      "proposedOwner": "retained V1 auxiliary/cache owner",
+      "requiredEvidence": "storage marker, generation and cache invalidation proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "phase5b_deferred_mirror.js",
+      "anchor": "global.indexedDB.open(DB, 1);",
+      "family": "recovery",
+      "proposedOwner": "retained V1 restore/safety-vault owner",
+      "requiredEvidence": "emergency lock, quarantine, restore and rollback proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "storage_maintenance_idle.js",
+      "anchor": "core.saveStateSnapshot = wrapped;",
+      "family": "core",
+      "proposedOwner": "V2 state coordinator / V1 compatibility snapshot",
+      "requiredEvidence": "legacy snapshot admission and stale-generation protection",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "habit_fast_path_control.js",
+      "anchor": "global.localStorage?.setItem?.(key, value);",
+      "family": "habits",
+      "proposedOwner": "V2 Habits and completion journal adapter",
+      "requiredEvidence": "completion/ledger replay, quota and stale-tab tests",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "gold_theft_top50_notifications.js",
+      "anchor": "core.saveStateSnapshot = function saveStateSnapshotWithRetroactiveGoldAdjustments",
+      "family": "game",
+      "proposedOwner": "V2 Game and Gold collection coordinator",
+      "requiredEvidence": "Game/Gold parity, image refs and stale-tab mutation fencing",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "season3_tournament_rollover.js",
+      "anchor": "savePath: 'season3-october-auto-rollover'",
+      "family": "season",
+      "proposedOwner": "V2 Season/history collection coordinator",
+      "requiredEvidence": "matchup, bracket and derived repair writer generation fencing",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "storage_diagnostics.js",
+      "anchor": "store.delete(key)",
+      "family": "recovery",
+      "proposedOwner": "retained V1 restore/safety-vault owner",
+      "requiredEvidence": "emergency lock, quarantine, restore and rollback proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "gold_manual_adjustment.js",
+      "anchor": "latest.core.saveValidatedSnapshot(candidate",
+      "family": "game",
+      "proposedOwner": "V2 Game and Gold collection coordinator",
+      "requiredEvidence": "Game/Gold parity, image refs and stale-tab mutation fencing",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "flex_action_fast_path.js",
+      "anchor": "storage.setItem(JOURNAL_KEY, JSON.stringify(normalized));",
+      "family": "habits",
+      "proposedOwner": "V2 Habits and completion journal adapter",
+      "requiredEvidence": "completion/ledger replay, quota and stale-tab tests",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "flex_action_fast_path.js",
+      "anchor": "storage.setItem(ORDER_JOURNAL_KEY, JSON.stringify(record));",
+      "family": "habits",
+      "proposedOwner": "V2 Habits and completion journal adapter",
+      "requiredEvidence": "completion/ledger replay, quota and stale-tab tests",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "season_result_integrity_guard.js",
+      "anchor": "original.saveStateSnapshot(state, { immediateWrite: true, savePath: 'season-result-integrity-repair'",
+      "family": "season",
+      "proposedOwner": "V2 Season/history collection coordinator",
+      "requiredEvidence": "matchup, bracket and derived repair writer generation fencing",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "inbox_count_badge.js",
+      "anchor": "core.saveValidatedSnapshot(normalized, {",
+      "family": "backup",
+      "proposedOwner": "retained V1 export/backup compatibility owner",
+      "requiredEvidence": "full source-and-image export, restore and off-device proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "indexeddb_requalification.js",
+      "anchor": "const set = (key, value) => localStorage.setItem(key, value);",
+      "family": "recovery",
+      "proposedOwner": "retained V1 restore/safety-vault owner",
+      "requiredEvidence": "emergency lock, quarantine, restore and rollback proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "indexeddb_requalification_guard.js",
+      "anchor": "storage.setItem(DIAG_KEY, JSON.stringify(",
+      "family": "recovery",
+      "proposedOwner": "retained V1 restore/safety-vault owner",
+      "requiredEvidence": "emergency lock, quarantine, restore and rollback proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "indexeddb_requalification_hold_guard.js",
+      "anchor": "storage.setItem(MODE_KEY, 'off');",
+      "family": "recovery",
+      "proposedOwner": "retained V1 restore/safety-vault owner",
+      "requiredEvidence": "emergency lock, quarantine, restore and rollback proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "indexeddb_requalification_session_compat.js",
+      "anchor": "storage.setItem(GATE_KEY, JSON.stringify({",
+      "family": "recovery",
+      "proposedOwner": "retained V1 restore/safety-vault owner",
+      "requiredEvidence": "emergency lock, quarantine, restore and rollback proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "phase4_cache_guard.js",
+      "anchor": "storage.setItem(GATE_KEY, JSON.stringify({",
+      "family": "recovery",
+      "proposedOwner": "retained V1 restore/safety-vault owner",
+      "requiredEvidence": "emergency lock, quarantine, restore and rollback proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "phase4_primary_read_path.js",
+      "anchor": "global.localStorage?.setItem?.(DIAGNOSTICS_KEY, JSON.stringify(next));",
+      "family": "storage",
+      "proposedOwner": "retained V1 auxiliary/cache owner",
+      "requiredEvidence": "storage marker, generation and cache invalidation proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "phase3_navigation_cache.js",
+      "anchor": "global.sessionStorage?.setItem?.(SESSION_CACHE_KEY, JSON.stringify(record));",
+      "family": "storage",
+      "proposedOwner": "retained V1 auxiliary/cache owner",
+      "requiredEvidence": "storage marker, generation and cache invalidation proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "storage_diagnostics_cleanup_controller.js",
+      "anchor": "keys.forEach((key) => store.delete(key));",
+      "family": "recovery",
+      "proposedOwner": "retained V1 restore/safety-vault owner",
+      "requiredEvidence": "emergency lock, quarantine, restore and rollback proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "storage_diagnostics_season_image_repair_controller.js",
+      "anchor": "core.writeTaskPointsStoredState(nextState, {",
+      "family": "recovery",
+      "proposedOwner": "retained V1 restore/safety-vault owner",
+      "requiredEvidence": "emergency lock, quarantine, restore and rollback proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "verified_secondary_restore_lock_guard.js",
+      "anchor": "storage.removeItem(LOCK_KEY);",
+      "family": "recovery",
+      "proposedOwner": "retained V1 restore/safety-vault owner",
+      "requiredEvidence": "emergency lock, quarantine, restore and rollback proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "emergency_recovery_lock_authorization.js",
+      "anchor": "storage.setItem(COMMITTED_LOCK_KEY, JSON.stringify(committed));",
+      "family": "recovery",
+      "proposedOwner": "retained V1 restore/safety-vault owner",
+      "requiredEvidence": "emergency lock, quarantine, restore and rollback proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "home_export_responsiveness.js",
+      "anchor": "global.syncNotesStorageLocations('responsive-export-sync')",
+      "family": "backup",
+      "proposedOwner": "retained V1 export/backup compatibility owner",
+      "requiredEvidence": "full source-and-image export, restore and off-device proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "achievements.html",
+      "anchor": "TaskPointsCore.saveStateSnapshot(nextState, {",
+      "family": "game",
+      "proposedOwner": "V2 Game and Gold collection coordinator",
+      "requiredEvidence": "Game/Gold parity, image refs and stale-tab mutation fencing",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "achievements.html",
+      "anchor": "TaskPointsCore.writeTaskPointsStoredState(nextState, { storageKey: 'taskpoints_v1' });",
+      "family": "game",
+      "proposedOwner": "V2 Game and Gold collection coordinator",
+      "requiredEvidence": "Game/Gold parity, image refs and stale-tab mutation fencing",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "archive.html",
+      "anchor": "TaskPointsCore.saveStateSnapshot({ ...existing, ...partial }, { storageKey: STORAGE_KEY }).state;",
+      "family": "game",
+      "proposedOwner": "V2 Game and Gold collection coordinator",
+      "requiredEvidence": "Game/Gold parity, image refs and stale-tab mutation fencing",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "audit.html",
+      "anchor": "TaskPointsCore.saveStateSnapshot(state, { savePath: 'season-repair-sync-results' });",
+      "family": "season",
+      "proposedOwner": "V2 Season/history collection coordinator",
+      "requiredEvidence": "matchup, bracket and derived repair writer generation fencing",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "audit.html",
+      "anchor": "TaskPointsCore.saveStateSnapshot(nextState, { savePath: 'season-result-resync' });",
+      "family": "season",
+      "proposedOwner": "V2 Season/history collection coordinator",
+      "requiredEvidence": "matchup, bracket and derived repair writer generation fencing",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "game_history_reconciliation_repair.js",
+      "anchor": "const saved = core.saveStateSnapshot?.(result.state, {",
+      "family": "game",
+      "proposedOwner": "V2 Game and Gold collection coordinator",
+      "requiredEvidence": "Game/Gold parity, image refs and stale-tab mutation fencing",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "game_ratings.html",
+      "anchor": "TaskPointsCore.writeTaskPointsStoredState(parsed, { storageKey: STORAGE_KEY });",
+      "family": "game",
+      "proposedOwner": "V2 Game and Gold collection coordinator",
+      "requiredEvidence": "Game/Gold parity, image refs and stale-tab mutation fencing",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "game_ratings.html",
+      "anchor": "localStorage.setItem(RATINGS_SHOW_INACTIVE_KEY, showInactivePlayers ? \"1\" : \"0\");",
+      "family": "settings",
+      "proposedOwner": "retained auxiliary preference with explicit V2 compatibility owner",
+      "requiredEvidence": "preference key and migration-owner proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "habit_ledger_completion_backed_repair.js",
+      "anchor": "const saved = core.saveStateSnapshot(result.state, {",
+      "family": "habits",
+      "proposedOwner": "V2 Habits and completion journal adapter",
+      "requiredEvidence": "completion/ledger replay, quota and stale-tab tests",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "habit_ledger_repair_audit.js",
+      "anchor": "const saved = core.saveStateSnapshot(result.state, {",
+      "family": "habits",
+      "proposedOwner": "V2 Habits and completion journal adapter",
+      "requiredEvidence": "completion/ledger replay, quota and stale-tab tests",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "habit_ledger_score_reconciliation.js",
+      "anchor": "const saved = core.saveStateSnapshot(result.state, {",
+      "family": "habits",
+      "proposedOwner": "V2 Habits and completion journal adapter",
+      "requiredEvidence": "completion/ledger replay, quota and stale-tab tests",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "habit_ledger_score_reconciliation_hardening.js",
+      "anchor": "const saved = core.saveStateSnapshot(result.state, {",
+      "family": "habits",
+      "proposedOwner": "V2 Habits and completion journal adapter",
+      "requiredEvidence": "completion/ledger replay, quota and stale-tab tests",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "log.html",
+      "anchor": "TaskPointsCore.saveStateSnapshot(merged, { storageKey: STORAGE_KEY }).state;",
+      "family": "habits",
+      "proposedOwner": "V2 Habits and completion journal adapter",
+      "requiredEvidence": "completion/ledger replay, quota and stale-tab tests",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "log.html",
+      "anchor": "TaskPointsCore.writeTaskPointsStoredState(merged, { storageKey: STORAGE_KEY });",
+      "family": "habits",
+      "proposedOwner": "V2 Habits and completion journal adapter",
+      "requiredEvidence": "completion/ledger replay, quota and stale-tab tests",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "performance_diagnostics.js",
+      "anchor": "global.sessionStorage?.setItem?.(k,v)",
+      "family": "storage",
+      "proposedOwner": "retained V1 auxiliary/cache owner",
+      "requiredEvidence": "storage marker, generation and cache invalidation proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "rankings.html",
+      "anchor": "localStorage.setItem(RANKINGS_SCOPE_STORAGE_KEY, rankingsScope);",
+      "family": "settings",
+      "proposedOwner": "retained auxiliary preference with explicit V2 compatibility owner",
+      "requiredEvidence": "preference key and migration-owner proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "rankings.html",
+      "anchor": "localStorage.setItem(RANKINGS_SEASON_FOUR_ROLLOVER_KEY, \"1\");",
+      "family": "settings",
+      "proposedOwner": "retained auxiliary preference with explicit V2 compatibility owner",
+      "requiredEvidence": "preference key and migration-owner proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "schedule.html",
+      "anchor": "TaskPointsCore.saveStateSnapshot({ ...existing, ...nextState }, { storageKey: STORAGE_KEY }).state;",
+      "family": "season",
+      "proposedOwner": "V2 Season/history collection coordinator",
+      "requiredEvidence": "matchup, bracket and derived repair writer generation fencing",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "scwm_interaction_fast_path.js",
+      "anchor": "originals.save.apply(queued.thisArg, queued.args);",
+      "family": "habits",
+      "proposedOwner": "V2 Habits and completion journal adapter",
+      "requiredEvidence": "completion/ledger replay, quota and stale-tab tests",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "season2_missed_playin_recovery.js",
+      "anchor": "const saved = core.saveStateSnapshot(result.state, {",
+      "family": "season",
+      "proposedOwner": "V2 Season/history collection coordinator",
+      "requiredEvidence": "matchup, bracket and derived repair writer generation fencing",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "season_seed_sources.js",
+      "anchor": "const saved = core.saveStateSnapshot(state, { savePath });",
+      "family": "season",
+      "proposedOwner": "V2 Season/history collection coordinator",
+      "requiredEvidence": "matchup, bracket and derived repair writer generation fencing",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "season_series_upset_notifications.js",
+      "anchor": "saved = core.mergeAndSaveState({",
+      "family": "tasks",
+      "proposedOwner": "V2 Tasks/Inbox journal adapter",
+      "requiredEvidence": "Task journal and Inbox replay must not double-write or lose deletions",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "tournament.html",
+      "anchor": "const saved = TaskPointsCore.saveStateSnapshot(nextState, {",
+      "family": "season",
+      "proposedOwner": "V2 Season/history collection coordinator",
+      "requiredEvidence": "matchup, bracket and derived repair writer generation fencing",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "trash.html",
+      "anchor": "TaskPointsCore.saveStateSnapshot(nextState, { storageKey: STORAGE_KEY, immediateWrite: true });",
+      "family": "tasks",
+      "proposedOwner": "V2 Tasks/Inbox journal adapter",
+      "requiredEvidence": "Task journal and Inbox replay must not double-write or lose deletions",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "trash.html",
+      "anchor": "TaskPointsCore.writeTaskPointsStoredState(nextState, { storageKey: STORAGE_KEY });",
+      "family": "tasks",
+      "proposedOwner": "V2 Tasks/Inbox journal adapter",
+      "requiredEvidence": "Task journal and Inbox replay must not double-write or lose deletions",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "task_delete_fast_path.js",
+      "anchor": "core.saveStateSnapshot = function taskDeleteFastPathSaveStateSnapshot(state, options = {}) {",
+      "family": "tasks",
+      "proposedOwner": "V2 Tasks/Inbox journal adapter",
+      "requiredEvidence": "Task journal and Inbox replay must not double-write or lose deletions",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "home_targeted_render_control.js",
+      "anchor": "global.localStorage?.setItem?.(key, value);",
+      "family": "settings",
+      "proposedOwner": "retained auxiliary preference with explicit V2 compatibility owner",
+      "requiredEvidence": "preference key and migration-owner proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "home_yesterday_result_consistency.js",
+      "anchor": "storage.removeItem(LOCK_KEY);",
+      "family": "recovery",
+      "proposedOwner": "retained V1 restore/safety-vault owner",
+      "requiredEvidence": "emergency lock, quarantine, restore and rollback proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "home_yesterday_result_consistency.js",
+      "anchor": "storage.removeItem(ATTEMPT_LOCK_KEY);",
+      "family": "recovery",
+      "proposedOwner": "retained V1 restore/safety-vault owner",
+      "requiredEvidence": "emergency lock, quarantine, restore and rollback proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "season_bracket_builder.js",
+      "anchor": "const saved = core.saveStateSnapshot(nextState, { savePath, userInitiated: true, immediateWrite: true });",
+      "family": "season",
+      "proposedOwner": "V2 Season/history collection coordinator",
+      "requiredEvidence": "matchup, bracket and derived repair writer generation fencing",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "skills.html",
+      "anchor": "const saved = TaskPointsCore.saveStateSnapshot(nextState, { savePath });",
+      "family": "habits",
+      "proposedOwner": "V2 Habits and completion journal adapter",
+      "requiredEvidence": "completion/ledger replay, quota and stale-tab tests",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "skills.html",
+      "anchor": "TaskPointsCore.writeTaskPointsStoredState(nextState, { storageKey: STORAGE_KEY });",
+      "family": "habits",
+      "proposedOwner": "V2 Habits and completion journal adapter",
+      "requiredEvidence": "completion/ledger replay, quota and stale-tab tests",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "skills.html",
+      "anchor": "localStorage.setItem(SKILLS_LEVEL_CONFIG_KEY, JSON.stringify(normalized));",
+      "family": "settings",
+      "proposedOwner": "retained auxiliary preference with explicit V2 compatibility owner",
+      "requiredEvidence": "preference key and migration-owner proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "standings.html",
+      "anchor": "localStorage.setItem(STANDINGS_SCOPE_STORAGE_KEY, standingsScope);",
+      "family": "settings",
+      "proposedOwner": "retained auxiliary preference with explicit V2 compatibility owner",
+      "requiredEvidence": "preference key and migration-owner proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "standings.html",
+      "anchor": "localStorage.setItem(STANDINGS_SEASON_FOUR_ROLLOVER_KEY, \"1\");",
+      "family": "settings",
+      "proposedOwner": "retained auxiliary preference with explicit V2 compatibility owner",
+      "requiredEvidence": "preference key and migration-owner proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "state_runtime_v2_generation.js",
+      "anchor": "global.localStorage?.setItem?.(key, String(value));",
+      "family": "v2-preview",
+      "proposedOwner": "V2 dark preview only, never production-authoritative",
+      "requiredEvidence": "dark-mode, cleanup and WAL test isolation proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "preview_only",
+      "cutoverPermission": false
+    },
+    {
+      "path": "state_runtime_v2_live_review.js",
+      "anchor": "global.sessionStorage.setItem(WAL_TEST_ARM_KEY, '1');",
+      "family": "v2-preview",
+      "proposedOwner": "V2 dark preview only, never production-authoritative",
+      "requiredEvidence": "dark-mode, cleanup and WAL test isolation proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "preview_only",
+      "cutoverPermission": false
+    },
+    {
+      "path": "state_runtime_v2_wal.js",
+      "anchor": "setWalStorageVerified(KEY, text, 'state_runtime_v2_wal_write_failed');",
+      "family": "v2-preview",
+      "proposedOwner": "V2 dark preview only, never production-authoritative",
+      "requiredEvidence": "dark-mode, cleanup and WAL test isolation proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "preview_only",
+      "cutoverPermission": false
+    },
+    {
+      "path": "state_runtime_v2_wal.js",
+      "anchor": "removeWalStorageVerified(KEY, 'state_runtime_v2_wal_remove_failed');",
+      "family": "v2-preview",
+      "proposedOwner": "V2 dark preview only, never production-authoritative",
+      "requiredEvidence": "dark-mode, cleanup and WAL test isolation proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "preview_only",
+      "cutoverPermission": false
+    },
+    {
+      "path": "state_runtime_v2_wal_bridge.js",
+      "anchor": "global.sessionStorage.removeItem(WAL_TEST_ARM_KEY);",
+      "family": "v2-preview",
+      "proposedOwner": "V2 dark preview only, never production-authoritative",
+      "requiredEvidence": "dark-mode, cleanup and WAL test isolation proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "preview_only",
+      "cutoverPermission": false
+    },
+    {
+      "path": "state_v2_preview_cleanup.html",
+      "anchor": "V2_KEYS.forEach((key) => localStorage.removeItem(key));",
+      "family": "v2-preview",
+      "proposedOwner": "V2 dark preview only, never production-authoritative",
+      "requiredEvidence": "dark-mode, cleanup and WAL test isolation proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "preview_only",
+      "cutoverPermission": false
+    },
+    {
+      "path": "state_v2_preview_cleanup.html",
+      "anchor": "indexedDB.deleteDatabase(databases[index]);",
+      "family": "v2-preview",
+      "proposedOwner": "V2 dark preview only, never production-authoritative",
+      "requiredEvidence": "dark-mode, cleanup and WAL test isolation proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "preview_only",
+      "cutoverPermission": false
+    },
+    {
+      "path": "state_v2_preview_enable.html",
+      "anchor": "localStorage.setItem(KEY, '1');",
+      "family": "v2-preview",
+      "proposedOwner": "V2 dark preview only, never production-authoritative",
+      "requiredEvidence": "dark-mode, cleanup and WAL test isolation proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "preview_only",
+      "cutoverPermission": false
+    },
+    {
+      "path": "verified_secondary_restore.html",
+      "anchor": "localStorage.setItem('taskpoints_emergency_recovery_hold_v1', JSON.stringify({",
+      "family": "recovery",
+      "proposedOwner": "retained V1 restore/safety-vault owner",
+      "requiredEvidence": "emergency lock, quarantine, restore and rollback proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    },
+    {
+      "path": "verified_secondary_restore.html",
+      "anchor": "localStorage.setItem('taskpoints_phase4_storage_mode_v1', 'off');",
+      "family": "recovery",
+      "proposedOwner": "retained V1 restore/safety-vault owner",
+      "requiredEvidence": "emergency lock, quarantine, restore and rollback proof",
+      "evidenceStatus": "not_verified",
+      "authorityStatus": "v1_authoritative_or_auxiliary",
+      "cutoverPermission": false
+    }
+  ]
 }

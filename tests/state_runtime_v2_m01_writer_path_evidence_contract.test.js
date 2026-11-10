@@ -177,3 +177,30 @@ test('M01 all root sources inspected without certifying live writer admission', 
   ]) assert.ok(inventory.writerPathEvidence.some(e=>e.path===file && e.anchor.includes(fragment)),
     'critical V1/V2 writer route cannot be dropped: ' + file);
 });
+
+test('M01 maps every discovered writer to a provisional owner without granting cutover permission', () => {
+  const known = new Map(inventory.writerPathEvidence.map(w =>
+    [w.path + '|' + w.anchor, w]));
+  const handoffs = inventory.proposedWriterHandoffs || [];
+  assert.equal(handoffs.length, known.size,
+    'each discovered writer requires a proposed owner and an unresolved safety requirement');
+  const reviewed = new Set();
+  for (const route of handoffs) {
+    const id = route.path + '|' + route.anchor;
+    assert.ok(known.has(id), 'unrecognized or deleted writer handoff: ' + id);
+    assert.ok(!reviewed.has(id), 'duplicate writer handoff: ' + id);
+    reviewed.add(id);
+    assert.equal(route.family, known.get(id).family);
+    assert.ok(route.proposedOwner.length >= 18);
+    assert.ok(route.requiredEvidence.length >= 22);
+    assert.equal(route.evidenceStatus, 'not_verified');
+    assert.equal(route.cutoverPermission, false);
+    assert.equal(route.authorityStatus,
+      route.family === 'v2-preview' ? 'preview_only' : 'v1_authoritative_or_auxiliary');
+  }
+  assert.equal(inventory.writerOwnershipAudit.proposedOwnerAssignments, known.size);
+  assert.equal(inventory.writerOwnershipAudit.verifiedOwnerAssignments, 0);
+  assert.equal(inventory.writerOwnershipAudit.status, 'incomplete');
+  assert.equal(inventory.writerOwnershipAudit.productionWritersFenced, false);
+  assert.ok(inventory.writerOwnershipAudit.requiredClosure.includes('generation fencing'));
+});

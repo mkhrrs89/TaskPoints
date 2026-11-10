@@ -8,12 +8,12 @@
 | Observable | Initial result | Meaning |
 | --- | ---: | --- |
 | Tracked root-level production JS/HTML/MJS files | **170** | Reproducible source-file baseline; tests and docs excluded |
-| Files inspected at the source level across four audits and Main sync | **108** | **62** other root files need independent review |
-| Key-to-source evidence entries | **105** | Source-linked references (one Notes key has two legitimate roles) — **not** all unique persistence keys |
+| Root source files inspected in the first-pass audit | **170** | All enumerated root JS/HTML/MJS source files examined; nested/dynamic paths remain |
+| Key-to-source evidence entries | **146** | Source-linked references (one Notes key has two legitimate roles) — **not** all unique persistence keys |
 | Known IndexedDB database/store evidence examples | **4** | `taskpoints/images`, safety vault snapshots, and V2 preview DB |
 | Explicit primary snapshot fields in `normalizeState` | **30** | Reproducible named-field lower bound, NOT entire V1 schema |
 
-Reproducible manifest: [source inventory](state-runtime-v2-storage-source-inventory.json). Every tracked source filename and the 30 named `src.` fields are checked in V2 CI by [M01 inventory contracts](../tests/state_runtime_v2_m01_source_inventory_contract.test.js). CI also checks key/database evidence paths exist. A new root-level source file or a new explicitly normalized field **fails the CI inventory guard** until the manifest is consciously updated. The additional [writer-path anchor contract](../tests/state_runtime_v2_m01_writer_path_evidence_contract.test.js) now catches disappearance/movement of 59 reviewed writer entrypoints and 66 reviewed source anchors and six high-risk storage key/database anchors. It does NOT enumerate every dynamic writer inside an existing file or prove caller ownership; this is not a completed-callgraph proof.
+Reproducible manifest: [source inventory](state-runtime-v2-storage-source-inventory.json). Every tracked source filename and the 30 named `src.` fields are checked in V2 CI by [M01 inventory contracts](../tests/state_runtime_v2_m01_source_inventory_contract.test.js). CI also checks key/database evidence paths exist. A new root-level source file or a new explicitly normalized field **fails the CI inventory guard** until the manifest is consciously updated. The additional [writer-path anchor contract](../tests/state_runtime_v2_m01_writer_path_evidence_contract.test.js) now catches disappearance/movement of 78 reviewed writer entrypoints and 128 reviewed source anchors and six high-risk storage key/database anchors. It does NOT enumerate every dynamic writer inside an existing file or prove caller ownership; this is not a completed-callgraph proof.
 
 ## What is actually stored separately
 
@@ -81,6 +81,22 @@ This pass uncovered important write paths outside Home:
 The 26 newly documented writer routes explicitly carry `fencingStatus: not_proven` and `ownerStatus: awaiting_full_callgraph`. [CI guards](../tests/state_runtime_v2_m01_writer_path_evidence_contract.test.js) reject their omission or premature reclassification. This is **static evidence**, not production writer admission. Do not activate V2 or delete legacy fallback routes based on these source anchors.
 
 **Remaining M01 work:** 62 other root files, dynamic/indirect mutation paths, unknown V1 fields, full ownership mapping and safe writer fencing across real tabs, repairs, import/export, startup and restore. Other cutover gates for disconnected backups and physical iPhone validation remain independently blocked.
+
+## November 10 fifth pass — complete root discovery; ownership remains blocked
+
+The remaining **62 root JS/HTML/MJS files** were reviewed, taking the first-pass count from **108 to 170 of 170 enumerated**. This records **146 key-to-source evidence entries**, **78 source-anchored writer/delegation paths** and **128 individual source-review anchors**. This is **not** exhaustive migration inventory: dynamic aliases, embedded/generated scripts, nested assets, open-ended unknown V1 fields and indirect callers remain.
+
+The new `proposedWriterHandoffs` list maps all **78 observed writer routes** to a **provisional** migration/retained auxiliary owner and a required proof. It gives us a finite set of known routes to investigate, not a completeness claim. **0 of 78 are owner-verified or production-fenced.** Every route explicitly has `evidenceStatus: not_verified`, `cutoverPermission: false`. CI compares the handoff rows to the tracked source-anchored writers and prevents silently dropping one.
+
+Additional risk paths found in the last 62 files:
+
+- **Skills and Bracket Builder** save complete legacy snapshots; Skills also retains a raw V1 write fallback and separate preference keys.
+- **Standings** writes its season-scope setting and one-time rollover markers independently of the main V1 snapshot.
+- **Home yesterday result consistency** may remove emergency/attempt recovery lock keys; these are safety boundaries, not disposable cache state.
+- **V2 generation and WAL** have separate localStorage keys; V2 live review has a session-scoped WAL test arm, and preview enable/cleanup can set/remove pilot keys and delete **preview-only** databases. None of this grants production authority.
+- **Storage health** reads safety-vault, rolling backups and image stores, so full backup/restore validation must include independent IDB blobs and backup keys.
+
+**Next practical closure work:** resolve the known 78 provisional handoffs to actual owners and prove caller-to-sink completeness, including old-tab generation fencing, fallback writes, generated scripts, import/reset and recovery paths. Preserve every existing safeguard and keep V1 authoritative until all independent safety gates pass.
 
 ## Specific next work to close M01
 
