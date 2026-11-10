@@ -8435,6 +8435,149 @@
     };
   }
 
+
+  // Explicit, isolated Today compatibility projection: reconstruct the
+  // old sparse document IN MEMORY from verified V2 day records.
+  async function buildPreviewTodayCompatibilitySnapshot() {
+    const refuse=(reason,detail={})=>({
+      checked:true,previewOnly:true,snapshotBuilt:false,
+      fullCollectionCompared:false,independentRecoveryVerified:false,
+      todayMigrated:false,canPromote:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...detail
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    const generation=currentGeneration({create:false});
+    if(!generation)return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    let source;
+    try{
+      source=await capturePreviewTodaySource();
+      if(source.reason)return refuse('today_source_preflight_required',{
+        prerequisiteReason:source.prerequisiteReason||source.reason
+      });
+    }catch(_){return refuse('today_source_unavailable');}
+    const current=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&darkMirrorModeEpoch===epoch
+      &&currentGeneration({create:false})===generation
+      &&captureReadOnlyFullStorageInventory()===source.inventory;
+    try{if(!current())return refuse('today_source_changed_before_rebuild');}
+    catch(_){return refuse('today_source_unavailable');}
+    // Targeted day parity cannot exclude unexpected rows or broken
+    // ancestry: require full V1/V2 parity AND independent receipt proof.
+    const parity=await inspectPreviewTodayCollectionParity();
+    if(!parity.match)return refuse('today_collection_parity_required',{
+      prerequisiteReason:parity.reason
+    });
+    const recovery=await inspectPreviewTodayRecoveryEvidence();
+    if(!recovery.evidenceVerified)
+      return refuse('today_recovery_evidence_required',{
+        prerequisiteReason:recovery.reason
+      });
+    try{if(!current())return refuse('today_source_changed_before_rebuild');}
+    catch(_){return refuse('today_source_unavailable');}
+    let db;
+    try{
+      db=await open();
+      if(!db)return refuse('v2_unavailable');
+    }catch(_){return refuse('today_rebuild_database_unavailable');}
+    const read=async()=>{
+      const tx=db.transaction(['todayDays','meta','mutations'],'readonly');
+      const completed=transactionPromise(tx);
+      // Queue all reads before awaiting to accommodate Safari IDB.
+      const values=await Promise.all([
+        requestPromise(tx.objectStore('todayDays').getAll()),
+        requestPromise(tx.objectStore('meta').get('today-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
+        requestPromise(tx.objectStore('mutations').getAll()),
+        completed
+      ]);
+      return values.slice(0,4);
+    };
+    let first;
+    try{first=await read();}
+    catch(_){return refuse('today_rebuild_read_unavailable');}
+    const [rows,evidence,meta,receipts]=first;
+    if(!meta||meta.schemaVersion!==SCHEMA_VERSION
+      ||meta.resetGeneration!==generation||meta.legacyMissing===true)
+      return refuse('pilot_meta_not_ready');
+    if(!evidence||evidence.id!=='today-preview'
+      ||evidence.resetGeneration!==generation
+      ||evidence.sourceInventory!==fnv1a(source.inventory)+':'+source.inventory.length
+      ||evidence.sourceFingerprint!==source.sourceFingerprint
+      ||evidence.recordCount!==source.records.length
+      ||evidence.dayCount!==source.dayCount
+      ||evidence.sourcePresent!==(source.raw!==null))
+      return refuse('today_rebuild_source_stale');
+    const head=receipts.find(r=>r.id===evidence.receiptId);
+    if(!head||head.recordsFingerprint!==evidence.recordsFingerprint
+      ||head.resetGeneration!==generation)
+      return refuse('today_rebuild_receipt_changed');
+    if(rows.length!==source.records.length)
+      return refuse('today_rebuild_row_count_mismatch');
+    const sorted=items=>items.slice().sort((a,b)=>
+      String(a.id).localeCompare(String(b.id)));
+    if(stableJson(sorted(rows))!==stableJson(sorted(source.records)))
+      return refuse('today_rebuild_row_mismatch');
+    const fields=['tasksByDay','notesByDay','selectedHabitIdsByDay','orderByDay'];
+    const root=rows.find(row=>row.id==='root');
+    if(!root||!Array.isArray(root.presentMaps)
+      ||root.presentMaps.some(field=>!fields.includes(field))
+      ||new Set(root.presentMaps).size!==root.presentMaps.length
+      ||!root.value||typeof root.value!=='object'
+      ||Array.isArray(root.value))
+      return refuse('today_rebuild_root_invalid');
+    try{
+      const document={};
+      // Explicit property definition preserves literal "__proto__" keys
+      // from older imported payloads without modifying prototypes.
+      const put=(object,key,value)=>Object.defineProperty(object,key,{
+        value:clone(value),enumerable:true,writable:true,configurable:true
+      });
+      for(const [key,value] of Object.entries(root.value))
+        put(document,key,value);
+      for(const field of root.presentMaps){
+        const days={};
+        for(const row of rows){
+          if(row.id==='root')continue;
+          if(!/^day:\d{4}-\d{2}-\d{2}$/.test(row.id)
+            ||row.dayKey!==row.id.slice(4))throw Error('invalid_day_row');
+          if(Object.prototype.hasOwnProperty.call(row.value,field))
+            put(days,row.dayKey,row.value[field]);
+        }
+        put(document,field,days);
+      }
+      const original=source.raw===null?{}:JSON.parse(source.raw);
+      if(stableJson(document)!==stableJson(original))
+        return refuse('today_rebuild_legacy_roundtrip_mismatch');
+      const proof=await previewRecoveryFingerprint({
+        sourcePresent:source.raw!==null,payload:document
+      });
+      if(proof!==source.sourceFingerprint)
+        return refuse('today_rebuild_source_fingerprint_mismatch');
+      const rowProof=await previewRecoveryFingerprint(sorted(rows));
+      if(rowProof!==evidence.recordsFingerprint)
+        return refuse('today_rebuild_row_fingerprint_mismatch');
+      if(!current())return refuse('today_source_changed_during_rebuild');
+      const reread=await read();
+      if(stableJson(reread)!==stableJson(first))
+        return refuse('today_rebuild_changed_during_readback');
+      if(!current())return refuse('today_source_changed_after_rebuild');
+      return {
+        checked:true,previewOnly:true,snapshotBuilt:true,
+        fullCollectionCompared:true,independentRecoveryVerified:true,
+        sourcePresent:source.raw!==null,dayCount:source.dayCount,
+        // This is a Today-only preview, NOT a restorable whole-app
+        // backup, deployed read path or authority transfer.
+        previewSnapshot:document,
+        todayMigrated:false,reason:'today_preview_compatibility_rebuilt',
+        canPromote:false,productionWritersFenced:false,
+        readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+      };
+    }catch(_){return refuse('today_rebuild_validation_unavailable');}
+  }
+
   // Independent, read-only Today source vs record-level V2 proof. The V1
   // Today page keeps complete write/read authority even on a green result.
   async function inspectPreviewTodayCollectionParity() {
@@ -18753,6 +18896,7 @@
     rehearsePreviewTodayCollectionSeed,
     inspectPreviewTodayCollectionParity,
     inspectPreviewTodayDayRecord,
+    buildPreviewTodayCompatibilitySnapshot,
     inspectPreviewTodayRecoveryEvidence,
     rehearsePreviewTodayCollectionReconcile,
     rehearsePreviewTodayRowSeal,
