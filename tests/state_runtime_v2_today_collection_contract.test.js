@@ -860,3 +860,117 @@ test('Independent Today recovery proof refuses production and reset-generation d
   assert.equal((await app.api.inspectPreviewTodayRecoveryEvidence()).evidenceVerified,false);
   assert.deepEqual(app.indexedDB.dump(DB),before);
 });
+
+test('targeted Today day reader verifies one sparse row without scanning V2 day collection',async()=>{
+  const app=await seeded(),db=await app.api.open();
+  const initial=app.token(),before=app.indexedDB.dump(DB);
+  const txOriginal=db.transaction.bind(db);
+  db.transaction=(names,mode)=>{
+    const tx=txOriginal(names,mode);
+    const getStore=tx.objectStore.bind(tx);
+    tx.objectStore=name=>{
+      const store=getStore(name);
+      if(name==='todayDays')store.getAll=()=>{
+        throw Error('targeted reader must not use todayDays.getAll()');
+      };
+      return store;
+    };
+    return tx;
+  };
+  for(const day of ['2026-11-04','2026-11-03','2026-11-05']){
+    const proof=await app.api.inspectPreviewTodayDayRecord(day);
+    assert.equal(proof.reason,'today_day_record_verified',JSON.stringify(proof));
+    assert.equal(proof.targetDayVerified,true);
+    assert.equal(proof.recordPresent,true);
+    assert.equal(proof.collectionParityVerified,false);
+    assert.equal(proof.canPromote,false);
+    assert.equal(proof.readAuthority,'legacy_only');
+    assert.equal(JSON.stringify(proof).includes('private retained note'),false);
+  }
+  const absent=await app.api.inspectPreviewTodayDayRecord('2026-11-06');
+  assert.equal(absent.reason,'today_day_absence_verified',JSON.stringify(absent));
+  assert.equal(absent.targetDayVerified,true);
+  assert.equal(absent.recordPresent,false);
+  assert.equal(absent.collectionParityVerified,false);
+  assert.equal(app.token(),initial);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+  db.transaction=txOriginal;
+});
+
+test('targeted Today day reader refuses malformed date, no seed and stale V1 source',async()=>{
+  const app=await boot();
+  for(const bad of [null,[],42,'2026-02-30','2026-13-01','2026-11-4',
+    '2026-11-04T00:00:00Z','__proto__']){
+    const proof=await app.api.inspectPreviewTodayDayRecord(bad);
+    assert.equal(proof.reason,'today_day_key_invalid',JSON.stringify(proof));
+    assert.equal(proof.targetDayVerified,false);
+  }
+  const unseeded=await app.api.inspectPreviewTodayDayRecord('2026-11-04');
+  assert.equal(unseeded.reason,'today_preview_seed_required',
+    JSON.stringify(unseeded));
+  assert.equal((await app.api.rehearsePreviewTodayCollectionSeed(
+    app.token(),'targeted-seed')).committed,true);
+  const prior=app.indexedDB.dump(DB);
+  const next=sample();
+  next.notesByDay['2026-11-04'][0].done=true;
+  app.localStorage.setItem(TODAY,JSON.stringify(next));
+  const stale=await app.api.inspectPreviewTodayDayRecord('2026-11-04');
+  assert.equal(stale.reason,'today_preview_source_stale',JSON.stringify(stale));
+  assert.equal(stale.targetDayVerified,false);
+  assert.deepEqual(app.indexedDB.dump(DB),prior);
+});
+
+test('targeted Today day reader refuses corrupt day, corrupt root and missing receipt',async()=>{
+  for(const kind of ['day','root','receipt']){
+    const app=await seeded(),db=await app.api.open();
+    const original=app.localStorage.getItem(TODAY);
+    const snapshot=app.localStorage.getItem(V1);
+    if(kind==='day'){
+      const row=app.indexedDB._databases.get(DB)
+        ._stores.get('todayDays').get('day:2026-11-04');
+      row.value.notesByDay[0].text='tampered';
+    }else if(kind==='root'){
+      app.indexedDB._databases.get(DB)._stores.get('todayDays')
+        .get('root').value.futureSettings.foo.bar.push('tampered');
+    }else{
+      app.indexedDB._databases.get(DB)._stores.get('mutations')
+        .delete('today-preview-seed:first');
+    }
+    const proof=await app.api.inspectPreviewTodayDayRecord('2026-11-04');
+    assert.equal(proof.reason,kind==='day'?'today_day_record_mismatch':
+      kind==='root'?'today_day_root_mismatch':'today_preview_receipt_invalid',
+      JSON.stringify(proof));
+    assert.equal(proof.targetDayVerified,false);
+    assert.equal(proof.canPromote,false);
+    assert.equal(app.localStorage.getItem(TODAY),original);
+    assert.equal(app.localStorage.getItem(V1),snapshot);
+  }
+});
+
+test('targeted Today day check refuses read failure and verifies reconciled day after reload',async()=>{
+  const app=await seeded();
+  const before=app.indexedDB.dump(DB);
+  const source=app.token();
+  app.indexedDB.failNext({store:'todayDays',operation:'get',
+    error:new Error('read_abort')});
+  const refused=await app.api.inspectPreviewTodayDayRecord('2026-11-04');
+  assert.equal(refused.reason,'today_day_record_read_unavailable',
+    JSON.stringify(refused));
+  assert.equal(refused.targetDayVerified,false);
+  assert.equal(app.token(),source);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+
+  const next=sample();
+  next.notesByDay['2026-11-04'][0].done=true;
+  app.localStorage.setItem(TODAY,JSON.stringify(next));
+  const updated=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'targeted-update');
+  assert.equal(updated.collectionParityVerified,true,JSON.stringify(updated));
+  const reload=await boot(undefined,{localStorage:app.localStorage,
+    indexedDB:app.indexedDB});
+  const verified=await reload.api.inspectPreviewTodayDayRecord('2026-11-04');
+  assert.equal(verified.reason,'today_day_record_verified',
+    JSON.stringify(verified));
+  assert.equal(verified.targetDayVerified,true);
+  assert.equal(verified.collectionParityVerified,false);
+});
