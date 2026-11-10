@@ -8,12 +8,12 @@
 | Observable | Initial result | Meaning |
 | --- | ---: | --- |
 | Tracked root-level production JS/HTML/MJS files | **170** | Reproducible source-file baseline; tests and docs excluded |
-| Files inspected at the source level across three audits and Main sync | **72** | **98** other root files need independent review |
-| Key-to-source evidence entries | **76** | Source-linked references (one Notes key has two legitimate roles) — **not** all unique persistence keys |
+| Files inspected at the source level across four audits and Main sync | **108** | **62** other root files need independent review |
+| Key-to-source evidence entries | **105** | Source-linked references (one Notes key has two legitimate roles) — **not** all unique persistence keys |
 | Known IndexedDB database/store evidence examples | **4** | `taskpoints/images`, safety vault snapshots, and V2 preview DB |
 | Explicit primary snapshot fields in `normalizeState` | **30** | Reproducible named-field lower bound, NOT entire V1 schema |
 
-Reproducible manifest: [source inventory](state-runtime-v2-storage-source-inventory.json). Every tracked source filename and the 30 named `src.` fields are checked in V2 CI by [M01 inventory contracts](../tests/state_runtime_v2_m01_source_inventory_contract.test.js). CI also checks key/database evidence paths exist. A new root-level source file or a new explicitly normalized field **fails the CI inventory guard** until the manifest is consciously updated. The additional [writer-path anchor contract](../tests/state_runtime_v2_m01_writer_path_evidence_contract.test.js) now catches disappearance/movement of 33 reviewed writer entrypoints and 30 newly reviewed source anchors and six high-risk storage key/database anchors. It does NOT enumerate every dynamic writer inside an existing file or prove caller ownership; this is not a completed-callgraph proof.
+Reproducible manifest: [source inventory](state-runtime-v2-storage-source-inventory.json). Every tracked source filename and the 30 named `src.` fields are checked in V2 CI by [M01 inventory contracts](../tests/state_runtime_v2_m01_source_inventory_contract.test.js). CI also checks key/database evidence paths exist. A new root-level source file or a new explicitly normalized field **fails the CI inventory guard** until the manifest is consciously updated. The additional [writer-path anchor contract](../tests/state_runtime_v2_m01_writer_path_evidence_contract.test.js) now catches disappearance/movement of 59 reviewed writer entrypoints and 66 reviewed source anchors and six high-risk storage key/database anchors. It does NOT enumerate every dynamic writer inside an existing file or prove caller ownership; this is not a completed-callgraph proof.
 
 ## What is actually stored separately
 
@@ -65,6 +65,22 @@ Thirty more root production files were inspected with source-specific anchors (n
 - **Session caches** and **hot-state read guards** add auxiliary values and watch pending Player edits. These are distinct from the authoritative V1 snapshot.
 
 **Remaining:** 98 root files not individually reviewed, plus nested sources and computed/indirect writers, full key/field owner reconciliation, import/reset/recovery callgraphs, production writer fencing, off-device backups and physical Safari qualification. M01 stays **Working**; all 23 milestone statuses are unchanged.
+
+## November 10 fourth pass — non-Home production save entrypoints
+
+An additional **36 root source files** were inspected (now **108/170**, with **62 root files** awaiting review). The source inventory now has **105 key/source evidence entries**, **59 writer/delegation path anchors**, and **66 explicit source-review anchors**.
+
+This pass uncovered important write paths outside Home:
+
+- **Achievements, Game Ratings, Log and Trash** save directly into V1. Several have a `writeTaskPointsStoredState` fallback, so a future V2 fence cannot protect only ordinary `saveStateSnapshot` calls.
+- **Habit and Game-history repair panels** can rewrite completion history and season-linked data after backup confirmation. Migration must preserve safety checks and recovery semantics, not just the happy-path save.
+- **Tournament resync** can run later through `requestIdleCallback` or a timer. **SCWM** may queue an original save. **Task Delete fast path** intercepts snapshot saves and routes confirmed deletes through a Task journal, retaining fallbacks.
+- **Background Season upset notifications** persist Inbox state through a separate merge path, in addition to the pending Inbox journal.
+- **Rankings scope and Game ratings filters** persist separate localStorage preferences; performance trace state persists to sessionStorage.
+
+The 26 newly documented writer routes explicitly carry `fencingStatus: not_proven` and `ownerStatus: awaiting_full_callgraph`. [CI guards](../tests/state_runtime_v2_m01_writer_path_evidence_contract.test.js) reject their omission or premature reclassification. This is **static evidence**, not production writer admission. Do not activate V2 or delete legacy fallback routes based on these source anchors.
+
+**Remaining M01 work:** 62 other root files, dynamic/indirect mutation paths, unknown V1 fields, full ownership mapping and safe writer fencing across real tabs, repairs, import/export, startup and restore. Other cutover gates for disconnected backups and physical iPhone validation remain independently blocked.
 
 ## Specific next work to close M01
 
