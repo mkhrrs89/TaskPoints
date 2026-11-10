@@ -1104,3 +1104,136 @@ test('Today compatibility fails closed on readonly failure and production host',
   assert.equal((await app.api.buildPreviewTodayCompatibilitySnapshot()).reason,
     'dark_disabled');
 });
+
+test('Today detached candidate reconstructs original notes and ordering after V1 Today key disappears',async()=>{
+  const app=await seeded(),v1=app.localStorage.getItem(V1);
+  const original=app.localStorage.getItem(TODAY);
+  const before=app.indexedDB.dump(DB);
+  app.localStorage.removeItem(TODAY);
+  // Make accidental reads of the lost source a hard failure rather than
+  // silently treating it as an empty Today document.
+  const getItem=app.localStorage.getItem.bind(app.localStorage);
+  let sourceReads=0;
+  app.localStorage.getItem=key=>{
+    if(key===TODAY){sourceReads++;throw Error('lost Today key is unreadable');}
+    return getItem(key);
+  };
+  const result=await app.api.buildPreviewTodayDetachedRecoveryCandidate();
+  app.localStorage.getItem=getItem;
+  assert.equal(result.reason,'today_detached_candidate_verified',
+    JSON.stringify({...result,previewSnapshot:undefined}));
+  assert.equal(result.candidateBuilt,true);
+  assert.equal(result.v2ReceiptChainVerified,true);
+  assert.equal(result.legacyTodaySourceRead,false);
+  assert.equal(result.v1SourceCompared,false);
+  assert.equal(result.canRestore,false);
+  assert.equal(result.independentRecoveryVerified,false);
+  assert.equal(result.offDeviceBackupVerified,false);
+  assert.equal(result.canPromote,false);
+  assert.equal(result.readAuthority,'legacy_only');
+  assert.equal(sourceReads,0);
+  assert.equal(result.sourcePresent,true);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.previewSnapshot)),
+    JSON.parse(original));
+  assert.equal(app.localStorage.getItem(V1),v1);
+  assert.equal(app.localStorage.getItem(TODAY),null);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+});
+
+test('Today detached candidate survives reload after reconciling a later V1 edit',async()=>{
+  const app=await seeded(),next=sample();
+  next.notesByDay['2026-11-04'][0].text='Newer private journal';
+  next.orderByDay['2026-11-04']=['note:note-1','task:task-1'];
+  next.notesByDay['2026-11-07']=[];
+  app.localStorage.setItem(TODAY,JSON.stringify(next));
+  const applied=await app.api.rehearsePreviewTodayCollectionReconcile(
+    app.token(),'detached-after-reconcile');
+  assert.equal(applied.collectionParityVerified,true,JSON.stringify(applied));
+  app.localStorage.removeItem(TODAY);
+  const reload=await boot(undefined,{
+    localStorage:app.localStorage,indexedDB:app.indexedDB
+  });
+  const result=await reload.api.buildPreviewTodayDetachedRecoveryCandidate();
+  assert.equal(result.candidateBuilt,true,JSON.stringify(result));
+  assert.deepEqual(JSON.parse(JSON.stringify(result.previewSnapshot)),next);
+  assert.equal(result.previewSnapshot.notesByDay['2026-11-07'].length,0);
+  assert.equal(result.canPromote,false);
+  assert.equal(app.localStorage.getItem(TODAY),null);
+});
+
+test('Today detached candidate preserves original missing-key semantics and unknown metadata',async()=>{
+  for(const raw of [
+    null,
+    JSON.stringify({tasksByDay:{},notesByDay:{'2026-11-01':[]}}),
+    '{"version":1,"__proto__":{"safeField":"keep"},"notesByDay":{"2026-11-01":[]}}'
+  ]){
+    const app=await boot(raw);
+    const seed=await app.api.rehearsePreviewTodayCollectionSeed(
+      app.token(),'detached-source');
+    assert.equal(seed.collectionParityVerified,true,JSON.stringify(seed));
+    app.localStorage.removeItem(TODAY);
+    const result=await app.api.buildPreviewTodayDetachedRecoveryCandidate();
+    assert.equal(result.candidateBuilt,true,JSON.stringify(result));
+    assert.equal(result.sourcePresent,raw!==null);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.previewSnapshot)),
+      raw===null?{}:JSON.parse(raw));
+    if(raw?.includes('"__proto__"')){
+      assert.equal(Object.hasOwn(result.previewSnapshot,'__proto__'),true);
+      assert.equal({}.safeField,undefined);
+    }
+    assert.equal(result.canRestore,false);
+  }
+});
+
+test('Today detached candidate refuses tampered rows receipts and stale generation without repairs',async()=>{
+  for(const kind of ['notes','extra-day','missing-receipt','invalid-root','generation']){
+    const app=await seeded(),v1=app.localStorage.getItem(V1);
+    app.localStorage.removeItem(TODAY);
+    const stores=app.indexedDB._databases.get(DB)._stores;
+    if(kind==='notes'){
+      stores.get('todayDays').get('day:2026-11-04')
+        .value.notesByDay[0].text='corrupt';
+    }else if(kind==='extra-day'){
+      stores.get('todayDays').set('day:2026-11-07',{
+        id:'day:2026-11-07',dayKey:'2026-11-07',
+        value:{notesByDay:[]}
+      });
+    }else if(kind==='missing-receipt'){
+      stores.get('mutations').delete('today-preview-seed:first');
+    }else if(kind==='invalid-root'){
+      stores.get('todayDays').get('root').presentMaps.push('unknownMap');
+    }else{
+      app.localStorage.setItem('taskpoints_state_v2_generation_v1','old-generation');
+    }
+    const before=app.indexedDB.dump(DB);
+    const proof=await app.api.buildPreviewTodayDetachedRecoveryCandidate();
+    assert.equal(proof.candidateBuilt,false,JSON.stringify(proof));
+    assert.equal(Object.hasOwn(proof,'previewSnapshot'),false);
+    assert.equal(proof.canRestore,false);
+    assert.equal(proof.canPromote,false);
+    assert.equal(app.localStorage.getItem(V1),v1);
+    assert.equal(app.localStorage.getItem(TODAY),null);
+    assert.deepEqual(app.indexedDB.dump(DB),before);
+  }
+});
+
+test('Today detached recovery is gated to previews and handles failed readonly fetch',async()=>{
+  const app=await seeded(),source=app.localStorage.getItem(TODAY);
+  const before=app.indexedDB.dump(DB);
+  app.ctx.location.hostname='taskpoints.pages.dev';
+  assert.equal((await app.api.buildPreviewTodayDetachedRecoveryCandidate()).reason,
+    'preview_host_required');
+  app.ctx.location.hostname='localhost';
+  app.localStorage.removeItem(DARK);
+  assert.equal((await app.api.buildPreviewTodayDetachedRecoveryCandidate()).reason,
+    'dark_disabled');
+  app.localStorage.setItem(DARK,'1');
+  app.indexedDB.failNext({store:'todayDays',operation:'getAll',
+    error:new Error('read_rejected')});
+  const failure=await app.api.buildPreviewTodayDetachedRecoveryCandidate();
+  assert.equal(failure.candidateBuilt,false,JSON.stringify(failure));
+  assert.equal(failure.canRestore,false);
+  assert.equal(Object.hasOwn(failure,'previewSnapshot'),false);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+  assert.equal(app.localStorage.getItem(TODAY),source);
+});
