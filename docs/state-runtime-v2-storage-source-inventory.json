@@ -1,0 +1,427 @@
+{
+  "schemaVersion": 1,
+  "scope": "root-level production .js/.mjs/.html source files on V2 branch; tests/docs excluded",
+  "asOf": "2026-11-10",
+  "baselineHead": "b4892e4ff7026e94486ffb2c03633759843d3d29",
+  "sourceFiles": [
+    "_worker.js",
+    "_worker_core.js",
+    "achievements.html",
+    "archive.html",
+    "audit.html",
+    "audit_gold_integrity.js",
+    "audit_habit_vice_scoring_dates.js",
+    "audit_integrity.js",
+    "audit_same_day_reconciliation.js",
+    "audit_selected_day_breakdown.js",
+    "daily_sources.html",
+    "dual_write_status.html",
+    "emergency_recovery.html",
+    "emergency_recovery_lock_authorization.js",
+    "equations.html",
+    "flex_action_fast_path.js",
+    "floating_alert_island_alignment.js",
+    "game.html",
+    "game_history_reconciliation_repair.js",
+    "game_history_repair_alias_sync.js",
+    "game_ratings.html",
+    "gamehub.html",
+    "gold_ledger.html",
+    "gold_ledger_integrity.js",
+    "gold_theft_top50_notifications.js",
+    "greed_gold_economy.js",
+    "habit_completion_backup_recovery.js",
+    "habit_completion_source_guard.js",
+    "habit_fast_path_control.js",
+    "habit_ledger_completion_backed_repair.js",
+    "habit_ledger_matchup_impact_attestation.js",
+    "habit_ledger_matchup_impact_canonical.js",
+    "habit_ledger_matchup_impact_dateiso.js",
+    "habit_ledger_matchup_impact_guard.js",
+    "habit_ledger_matchup_impact_legacy_scores.js",
+    "habit_ledger_matchup_impact_stale_guard.js",
+    "habit_ledger_matchup_restore_apply.js",
+    "habit_ledger_matchup_restore_transform.js",
+    "habit_ledger_matchup_restore_ui.js",
+    "habit_ledger_repair_audit.js",
+    "habit_ledger_repair_matchup_prelude.js",
+    "habit_ledger_repair_planner.js",
+    "habit_ledger_score_reconciliation.js",
+    "habit_ledger_score_reconciliation_hardening.js",
+    "habit_missing_donekey_date_analysis.js",
+    "head_to_heads.html",
+    "home_export_responsiveness.js",
+    "home_featured_matchup_visibility.js",
+    "home_indexeddb_bootstrap.js",
+    "home_rank_percentile_line.js",
+    "home_season_slate_long_quiet.js",
+    "home_streak_bonus_consistency.js",
+    "home_targeted_render_control.js",
+    "home_yesterday_result_consistency.js",
+    "inbox.html",
+    "inbox_count_badge.js",
+    "index.html",
+    "indexeddb_requalification.html",
+    "indexeddb_requalification.js",
+    "indexeddb_requalification_guard.js",
+    "indexeddb_requalification_hold_guard.js",
+    "indexeddb_requalification_loader.js",
+    "indexeddb_requalification_preflight_hold.js",
+    "indexeddb_requalification_readonly_guard.js",
+    "indexeddb_requalification_session_compat.js",
+    "indexeddb_requalification_vault_gate.js",
+    "log.html",
+    "matchups.html",
+    "mobile_boot_gate.js",
+    "mood_notes_copy_range.js",
+    "notes.html",
+    "performance_diagnostics.js",
+    "phase2_dual_write.js",
+    "phase2_reset_hook.js",
+    "phase3_navigation_cache.js",
+    "phase3_read_path.js",
+    "phase3_read_status.html",
+    "phase3_session_codec.js",
+    "phase3_status_cache_guard.js",
+    "phase4_cache_guard.js",
+    "phase4_diagnostics.js",
+    "phase4_primary_read_path.js",
+    "phase4_storage_coordinator.js",
+    "phase4_storage_status.html",
+    "phase5a_native_snapshot.js",
+    "phase5b_deferred_mirror.js",
+    "player_profile.js",
+    "postcss.config.js",
+    "projects.html",
+    "rankings.html",
+    "rankings_tournament_trophies.js",
+    "records.html",
+    "records_gold_theft_history_fix.js",
+    "records_gold_theft_tab.js",
+    "records_margin_of_victory_tab.js",
+    "save_pipeline_shared_work.js",
+    "schedule.html",
+    "score_alias_audit_bootstrap.js",
+    "score_alias_consistency.js",
+    "scoring_core.js",
+    "scwm_history_load_more.js",
+    "scwm_interaction_fast_path.js",
+    "season.html",
+    "season.js",
+    "season2_missed_playin_recovery.js",
+    "season3_tournament_rollover.js",
+    "season_bracket_builder.html",
+    "season_bracket_builder.js",
+    "season_bracket_builder_core.js",
+    "season_bracket_builder_entry.js",
+    "season_bracket_builder_fixes.js",
+    "season_champion_gold_bonus.js",
+    "season_matchup_materialization_guard.js",
+    "season_result_integrity_guard.js",
+    "season_seed_sources.js",
+    "season_series_upset_notifications.js",
+    "settings.html",
+    "skills.html",
+    "standings.html",
+    "state_hot_cache.js",
+    "state_runtime_v2.js",
+    "state_runtime_v2_foreground_correlation.js",
+    "state_runtime_v2_generation.js",
+    "state_runtime_v2_habit_edit_bridge.js",
+    "state_runtime_v2_habit_structure_bridge.js",
+    "state_runtime_v2_live_review.js",
+    "state_runtime_v2_maintenance_idle.js",
+    "state_runtime_v2_perf.js",
+    "state_runtime_v2_serialization_guard.js",
+    "state_runtime_v2_trace_review.js",
+    "state_runtime_v2_wal.js",
+    "state_runtime_v2_wal_bridge.js",
+    "state_v2_preview_cleanup.html",
+    "state_v2_preview_enable.html",
+    "state_v2_trace_review.html",
+    "storage_diagnostics.html",
+    "storage_diagnostics.js",
+    "storage_diagnostics_cleanup_controller.js",
+    "storage_diagnostics_season_image_repair_controller.js",
+    "storage_health.html",
+    "storage_health_codec.js",
+    "storage_health_phase5c.js",
+    "storage_health_readers.js",
+    "storage_health_ui.js",
+    "storage_image_cleanup.js",
+    "storage_maintenance_idle.js",
+    "storage_season_image_reference_repair.js",
+    "streaks.html",
+    "streaks_nav_link.js",
+    "tailwind.config.js",
+    "task_create_fast_path.js",
+    "task_delete_fast_path.js",
+    "task_mutation_journal.js",
+    "today.html",
+    "toolbar.js",
+    "tournament.html",
+    "tournament_bracket_zoom.js",
+    "tournament_dynamic_bracket.js",
+    "trash.html",
+    "verified_secondary_lock_split.js",
+    "verified_secondary_log_quiet_guard.js",
+    "verified_secondary_recovery.html",
+    "verified_secondary_restore.html",
+    "verified_secondary_restore.js",
+    "verified_secondary_restore_lock_guard.js",
+    "week.html",
+    "work_entry_fast_path.js",
+    "you_score_alias_alignment.js"
+  ],
+  "firstPassInspected": [
+    "game.html",
+    "gamehub.html",
+    "gold_ledger.html",
+    "greed_gold_economy.js",
+    "habit_completion_backup_recovery.js",
+    "home_indexeddb_bootstrap.js",
+    "index.html",
+    "notes.html",
+    "phase2_dual_write.js",
+    "phase2_reset_hook.js",
+    "phase4_storage_coordinator.js",
+    "phase5a_native_snapshot.js",
+    "projects.html",
+    "save_pipeline_shared_work.js",
+    "scoring_core.js",
+    "season.js",
+    "settings.html",
+    "state_runtime_v2.js",
+    "task_mutation_journal.js",
+    "today.html"
+  ],
+  "keyEvidence": [
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "live authoritative snapshot",
+      "evidencePath": "scoring_core.js"
+    },
+    {
+      "key": "taskpoints_pending_habit_deltas_v1",
+      "family": "habits",
+      "role": "live synchronous pending Habit delta journal",
+      "evidencePath": "scoring_core.js"
+    },
+    {
+      "key": "taskpoints_pending_task_mutations_v1",
+      "family": "tasks",
+      "role": "live synchronous pending Task journal",
+      "evidencePath": "task_mutation_journal.js"
+    },
+    {
+      "key": "taskpoints_notes_v1",
+      "family": "notes",
+      "role": "separately persisted Notes cache",
+      "evidencePath": "notes.html"
+    },
+    {
+      "key": "taskpoints_notes_dirty_v1",
+      "family": "notes",
+      "role": "dirty state for Notes cache",
+      "evidencePath": "notes.html"
+    },
+    {
+      "key": "taskpoints_notes_authoritative_v1",
+      "family": "notes",
+      "role": "Notes cache authority marker",
+      "evidencePath": "notes.html"
+    },
+    {
+      "key": "tp_projects_v1",
+      "family": "projects",
+      "role": "standalone Projects document",
+      "evidencePath": "projects.html"
+    },
+    {
+      "key": "taskpoints_today_view_v1",
+      "family": "today",
+      "role": "standalone sparse Today day maps",
+      "evidencePath": "today.html"
+    },
+    {
+      "key": "taskpoints_gallery_columns",
+      "family": "game",
+      "role": "Game UI gallery preference",
+      "evidencePath": "game.html"
+    },
+    {
+      "key": "taskpoints_player_sort_mode",
+      "family": "game",
+      "role": "Game UI sorting preference",
+      "evidencePath": "game.html"
+    },
+    {
+      "key": "taskpoints_group_active_players",
+      "family": "game",
+      "role": "Game UI active-player grouping preference",
+      "evidencePath": "game.html"
+    },
+    {
+      "key": "taskpoints_habit_order_overlay_v1",
+      "family": "habits",
+      "role": "separate Habit order overlay",
+      "evidencePath": "state_runtime_v2.js"
+    },
+    {
+      "key": "taskpoints_notes_v1",
+      "family": "settings",
+      "role": "Notes recovery/import path",
+      "evidencePath": "settings.html"
+    },
+    {
+      "key": "taskpoints_full_backup",
+      "family": "backup",
+      "role": "full backup metadata/live UI path",
+      "evidencePath": "settings.html"
+    },
+    {
+      "key": "taskpoints_quarantined_snapshot",
+      "family": "recovery",
+      "role": "quarantined snapshot recovery",
+      "evidencePath": "scoring_core.js"
+    },
+    {
+      "key": "taskpoints_backup_latest",
+      "family": "recovery",
+      "role": "latest automatic backup slot",
+      "evidencePath": "scoring_core.js"
+    },
+    {
+      "key": "taskpoints_backup_prev1",
+      "family": "recovery",
+      "role": "historical backup slot",
+      "evidencePath": "scoring_core.js"
+    },
+    {
+      "key": "taskpoints_backup_prev2",
+      "family": "recovery",
+      "role": "historical backup slot",
+      "evidencePath": "scoring_core.js"
+    },
+    {
+      "key": "taskpoints_backup_prev3",
+      "family": "recovery",
+      "role": "historical backup slot",
+      "evidencePath": "scoring_core.js"
+    },
+    {
+      "key": "taskpoints_season_archive_data",
+      "family": "season",
+      "role": "independent season archive import/export",
+      "evidencePath": "settings.html"
+    },
+    {
+      "key": "taskpoints_phase4_storage_mode_v1",
+      "family": "storage",
+      "role": "phase4 mode/coordinator metadata",
+      "evidencePath": "phase4_storage_coordinator.js"
+    },
+    {
+      "key": "taskpoints_phase4_verified_primary_cache_v1",
+      "family": "storage",
+      "role": "verified primary cache",
+      "evidencePath": "phase4_storage_coordinator.js"
+    },
+    {
+      "key": "taskpoints_phase5b_pending_changes_v1",
+      "family": "recovery",
+      "role": "phase5 legacy pending journal",
+      "evidencePath": "phase2_reset_hook.js"
+    },
+    {
+      "key": "taskpoints_safety_vault_v1",
+      "family": "recovery",
+      "role": "safety vault IndexedDB database",
+      "evidencePath": "phase2_reset_hook.js"
+    },
+    {
+      "key": "taskpoints_state_v2",
+      "family": "v2-preview",
+      "role": "V2 IndexedDB records (not authoritative)",
+      "evidencePath": "state_runtime_v2.js"
+    },
+    {
+      "key": "taskpoints_v2_notes_preview",
+      "family": "v2-preview",
+      "role": "Notes preview IndexedDB database",
+      "evidencePath": "state_runtime_v2.js"
+    },
+    {
+      "key": "taskpoints_v2_game_preview",
+      "family": "v2-preview",
+      "role": "Game preview IndexedDB database",
+      "evidencePath": "state_runtime_v2.js"
+    },
+    {
+      "key": "taskpoints_v2_habit_order_preview",
+      "family": "v2-preview",
+      "role": "Habit order preview database",
+      "evidencePath": "state_runtime_v2.js"
+    },
+    {
+      "key": "taskpoints_v2_recovery_checkpoints_preview",
+      "family": "v2-preview",
+      "role": "V2 local checkpoint preview database",
+      "evidencePath": "state_runtime_v2.js"
+    },
+    {
+      "key": "taskpoints_shadow_state_v1",
+      "family": "recovery",
+      "role": "legacy shadow IndexedDB database",
+      "evidencePath": "scoring_core.js"
+    },
+    {
+      "key": "taskpoints_verified_secondary_v1",
+      "family": "recovery",
+      "role": "secondary snapshot consistency reference",
+      "evidencePath": "home_indexeddb_bootstrap.js"
+    },
+    {
+      "key": "tpBootSeenThisSession",
+      "family": "session",
+      "role": "session-only boot performance marker",
+      "evidencePath": "index.html"
+    },
+    {
+      "key": "taskpoints_season_round_collapsed_v1",
+      "family": "season",
+      "role": "season round UI preference",
+      "evidencePath": "season.js"
+    }
+  ],
+  "dbEvidence": [
+    {
+      "db": "taskpoints",
+      "store": "images",
+      "owner": "V1 player/season image blobs",
+      "evidencePath": "scoring_core.js",
+      "state": "live"
+    },
+    {
+      "db": "taskpoints_safety_vault_v1",
+      "store": "snapshots",
+      "owner": "legacy recovery vault",
+      "evidencePath": "phase2_reset_hook.js",
+      "state": "live"
+    },
+    {
+      "db": "taskpoints_state_v2",
+      "store": "multiple",
+      "owner": "V2 preview records and receipts",
+      "evidencePath": "state_runtime_v2.js",
+      "state": "preview"
+    }
+  ],
+  "limitations": [
+    "firstPassInspected means one static source inspection, NOT exhaustive writer ownership certification",
+    "conditional/dynamic aliases and storage wrappers require manual callgraph review",
+    "unknown keys, imported fields, generated script code, indirect writers and non-root sources remain M01 blockers",
+    "missing physical iOS and disconnected off-device backups are separate cutover gates"
+  ]
+}
