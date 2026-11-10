@@ -134,6 +134,17 @@ These are intentional manual repair paths with `replaceCompletions` and `allowDe
 
 **Measured progress:** **5 → 8 of 78** known writer routes with scenario-tested V1 behavior. **0 of 78** routes have owner/fence certification. M01 is still Working and the 23-checkpoint/67-point scoring rubric does not change.
 
+## November 10 — four more cross-domain V1 save paths verified behaviorally
+
+The new [four-writer contract](../tests/state_runtime_v2_m01_four_cross_domain_writer_behavior_contract.test.js) executes four **real production modules** against disposable Node VM storage. All four were already in the 78-route inventory.
+
+- **Gold ledger manual adjustment** `gold_manual_adjustment.js`: requires raw snapshot confirmation, blocks recovery holds, uses protected `saveValidatedSnapshot`, and checks actual stored ledger balance/IDs. Skipped and unpersisted writes cannot be counted as success.
+- **Season 2 historical Play-In recovery** `season2_missed_playin_recovery.js`: saves reconstructed results once, declines incomplete input, skips repeat recovery and retains V1 data when the protected save fails.
+- **Season upset Inbox notifications** `season_series_upset_notifications.js`: writes only Inbox fields, deduplicates processed upset event IDs, and cannot mutate effective V1 authority on rejected writes.
+- **Season result integrity** `season_result_integrity_guard.js`: reconciles duplicate legacy results/schedules using the existing protected writer, avoids unnecessary writes for clean state, and retries rather than marking an unsuccessful repair clean.
+
+These four **V1 behavior tests** bring M01 behavior-witness coverage from **8 to 12 out of 78** known writer routes. They do **not** certify V2 writer generation fencing, complete nested source inventories, multi-tab authority transfer or real device backup/restore. **0/78 V2 production owners are certified; M01 remains Working and overall readiness 67/100.**
+
 ## Specific next work to close M01
 
 1. Run the CI source scanner against all 170 files; triage which of the 98 uninspected files access or indirectly modify storage. Move from *inspected* to *writer ownership verified* only with a caller/writer trace, including indirect `TaskPointsCore` saves and dynamic key aliases.
