@@ -8732,6 +8732,69 @@
     };
   }
 
+
+  // Developer-only, read-only recovery package for a fresh SANDBOX origin.
+  // The package can be inspected/validated elsewhere; this app does not
+  // import it, write V1 keys or automatically promote any storage.
+  async function preparePreviewTodayDetachedRestorePackage() {
+    const refuse=(reason,extra={})=>({
+      checked:true,previewOnly:true,packagePrepared:false,
+      sourceReadAuthority:'legacy_only',readAuthority:'legacy_only',
+      mutationAuthority:'legacy_only',todayMigrated:false,
+      independentRecoveryVerified:false,offDeviceBackupVerified:false,
+      canApply:false,canRestore:false,canPromote:false,
+      reason,...extra
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    const generation=currentGeneration({create:false});
+    if(!generation)return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    const current=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&darkMirrorModeEpoch===epoch
+      &&currentGeneration({create:false})===generation;
+    let first;
+    try{first=await buildPreviewTodayDetachedRecoveryCandidate();}
+    catch(_){return refuse('today_package_candidate_unavailable');}
+    if(!first.candidateBuilt||!first.v2ReceiptChainVerified
+      ||first.canRestore!==false)
+      return refuse('today_package_candidate_required',{
+        prerequisiteReason:first.reason
+      });
+    if(!current())return refuse('today_package_generation_changed');
+    let serialized,sha;
+    try{
+      serialized=JSON.stringify(first.previewSnapshot);
+      if(typeof serialized!=='string'||serialized.length>1048576
+        ||stableJson(JSON.parse(serialized))
+          !==stableJson(first.previewSnapshot))
+        return refuse('today_package_json_invalid');
+      sha=await previewRecoveryFingerprint({
+        schemaVersion:1,sourcePresent:first.sourcePresent,serialized
+      });
+    }catch(_){return refuse('today_package_digest_unavailable');}
+    if(!current())return refuse('today_package_generation_changed');
+    // A generation-safe second reconstruction catches a preview edit that
+    // occurs while hashing. No source localStorage Today key is read.
+    let second;
+    try{second=await buildPreviewTodayDetachedRecoveryCandidate();}
+    catch(_){return refuse('today_package_second_read_unavailable');}
+    if(!second.candidateBuilt||second.sourcePresent!==first.sourcePresent
+      ||stableJson(second.previewSnapshot)!==stableJson(first.previewSnapshot))
+      return refuse('today_package_source_changed');
+    if(!current())return refuse('today_package_generation_changed');
+    return {
+      ...refuse('today_detached_restore_package_prepared'),
+      packagePrepared:true,
+      // Explicit absence means an isolated test target should have NO
+      // Today key. Writing "{}" would change absent-source semantics.
+      recoveryPackage:{
+        schemaVersion:1,sourcePresent:first.sourcePresent,
+        serialized,sha256:sha
+      }
+    };
+  }
+
   // Independent, read-only Today source vs record-level V2 proof. The V1
   // Today page keeps complete write/read authority even on a green result.
   async function inspectPreviewTodayCollectionParity() {
@@ -19052,6 +19115,7 @@
     inspectPreviewTodayDayRecord,
     buildPreviewTodayCompatibilitySnapshot,
     buildPreviewTodayDetachedRecoveryCandidate,
+    preparePreviewTodayDetachedRestorePackage,
     inspectPreviewTodayRecoveryEvidence,
     rehearsePreviewTodayCollectionReconcile,
     rehearsePreviewTodayRowSeal,
