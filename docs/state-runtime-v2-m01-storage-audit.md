@@ -122,6 +122,18 @@ The V2-only [read-only Flex cutover observer](../tests/state_runtime_v2_m01_flex
 
 The audit's behavior rehearsal count increased from **3 to 5 of 78** known source-anchored writer routes. **Zero of 78** writer owners have been certified for production, and no new checkpoint was verified. These are V1 behavioral tests and V2 inspection gates, not real multi-tab writer fencing or a V2 cutover.
 
+## November 10 ninth pass — three Habit repair entrypoints behavior-tested
+
+The [M01 Habit repair writer test](../tests/state_runtime_v2_m01_habit_repair_writer_behavior_contract.test.js) runs three **real existing production scripts** in isolated synthetic browser/DOM and storage environments. This round adds three distinct behavioral witnesses:
+
+1. **`habit_ledger_repair_audit.js`** — Backup confirmation and preview are required before ordinary source-label correction is written via `core.saveStateSnapshot`; stale entries do not trigger a V1 writer, and skipped saves do not claim success.
+2. **`habit_ledger_completion_backed_repair.js`** — A completion-backed missing `doneKey` is restored while existing completion points, Game records and Gold remain intact. A changed completion date invalidates the preview, and a forced save error leaves canonical data unchanged.
+3. **`habit_ledger_score_reconciliation.js`** — The applied repair updates matching historical score copies (matchup/schedule/game history), preserves the existing winner and Gold, and refuses to save when an observed historical matchup changed after preview.
+
+These are intentional manual repair paths with `replaceCompletions` and `allowDestructiveOverwrite`. They are high-risk exceptions requiring full owner inventory, backup confirmation, recovery semantics, and old-tab fencing in any future migration. The tests exercise the genuine UI save code but do **not** simulate actual device persistence, live cross-tab admissions or certified V2 owners.
+
+**Measured progress:** **5 → 8 of 78** known writer routes with scenario-tested V1 behavior. **0 of 78** routes have owner/fence certification. M01 is still Working and the 23-checkpoint/67-point scoring rubric does not change.
+
 ## Specific next work to close M01
 
 1. Run the CI source scanner against all 170 files; triage which of the 98 uninspected files access or indirectly modify storage. Move from *inspected* to *writer ownership verified* only with a caller/writer trace, including indirect `TaskPointsCore` saves and dynamic key aliases.
