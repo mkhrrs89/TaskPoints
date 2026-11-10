@@ -8,33 +8,45 @@
 | Observable | Initial result | Meaning |
 | --- | ---: | --- |
 | Tracked root-level production JS/HTML/MJS files | **168** | Reproducible source-file baseline; tests and docs excluded |
-| Files personally inspected at the source level this pass | **20** | **148** other files still need independent review |
-| Key-to-source evidence entries | **33** | Source-linked references (one Notes key has two legitimate roles) — **not** all unique persistence keys |
-| Known IndexedDB database/store evidence examples | **3** | `taskpoints/images`, safety vault snapshots, and V2 preview DB |
+| Files inspected at the source level across both audit passes | **40** | **128** other files still need independent review |
+| Key-to-source evidence entries | **50** | Source-linked references (one Notes key has two legitimate roles) — **not** all unique persistence keys |
+| Known IndexedDB database/store evidence examples | **4** | `taskpoints/images`, safety vault snapshots, and V2 preview DB |
 | Explicit primary snapshot fields in `normalizeState` | **30** | Reproducible named-field lower bound, NOT entire V1 schema |
 
-Reproducible manifest: [source inventory](state-runtime-v2-storage-source-inventory.json). Every tracked source filename and the 30 named `src.` fields are checked in V2 CI by [M01 inventory contracts](../tests/state_runtime_v2_m01_source_inventory_contract.test.js). CI also checks key/database evidence paths exist. A new root-level source file or a new explicitly normalized field **fails the CI inventory guard** until the manifest is consciously updated. A new indirect/dynamic writer *inside* an existing file is not guaranteed to be caught; this is not a completed-callgraph proof.
+Reproducible manifest: [source inventory](state-runtime-v2-storage-source-inventory.json). Every tracked source filename and the 30 named `src.` fields are checked in V2 CI by [M01 inventory contracts](../tests/state_runtime_v2_m01_source_inventory_contract.test.js). CI also checks key/database evidence paths exist. A new root-level source file or a new explicitly normalized field **fails the CI inventory guard** until the manifest is consciously updated. The additional [writer-path anchor contract](../tests/state_runtime_v2_m01_writer_path_evidence_contract.test.js) now catches disappearance/movement of 16 reviewed writer entrypoints and six high-risk storage key/database anchors. It does NOT enumerate every dynamic writer inside an existing file or prove caller ownership; this is not a completed-callgraph proof.
 
 ## What is actually stored separately
 
 | Family | Known source of truth / source-specific record | Direct/indirect save path checked so far | Missing ownership proof |
 | --- | --- | --- | --- |
 | Main V1 snapshot | `taskpoints_v1`; normalized known fields plus unknown `...src` extension fields | `scoring_core.js`, `index.html`, `settings.html` | Enumerate dynamic/derived fields and every page/helper capable of rewriting snapshot |
-| Pending Habits and Tasks | `taskpoints_pending_habit_deltas_v1`, `taskpoints_pending_task_mutations_v1` | `scoring_core.js`, `task_mutation_journal.js` | All completion/compaction, replay, reset, stale-tab and fallback writers |
+| Pending Habits, Tasks and Inbox | `taskpoints_pending_habit_deltas_v1`, `taskpoints_pending_task_mutations_v1`, **`taskpoints_pending_inbox_state_v1`** | `scoring_core.js`, `task_mutation_journal.js`, `task_create_fast_path.js`, `toolbar.js` | Inbox idle compaction, all completion/replay/reset/stale-tab/fallback writers |
 | Today | `taskpoints_today_view_v1` | `today.html` (`saveTodayStore`), Home also references Today | Link each Today/SCWM/Notes UI event to authoritative write and the V2 equivalent |
 | Notes | `taskpoints_notes_v1`, dirty and authoritative markers; main V1 `notes` | `notes.html`, `scoring_core.js`, `settings.html` | Finish dirty-first edit and snapshot-sync recovery and ownership |
 | Projects | `tp_projects_v1`; legacy V1 `projects` | `projects.html`, `index.html` | Reconcile every independent editor and import/export behavior |
-| Game and seasons | Main V1 `players`, `seasonHistory`, `matchups` etc; separate gallery/sort/group keys | `game.html`, `season.js`, `settings.html` | All gameplay, result, gold, season archive, manual repair and auxiliary settings paths |
+| Game and seasons | Main V1 `players`, `seasonHistory`, `matchups` etc; separate gallery/sort/group keys | `game.html`, `season.js`, `matchups.html`, `season3_tournament_rollover.js`, `settings.html` | All gameplay, result, gold, season archive, manual repair and auxiliary settings paths |
 | Gold | Main V1 Gold/economy fields, settlements and secondary result claims | `greed_gold_economy.js`, `gold_ledger.html`, `index.html` | Outcome, margin, theft, repair and replay writers; no live V2 ownership |
 | Pictures | IndexedDB database `taskpoints`, object store `images` (binary blobs) | `scoring_core.js` | All image refs, backup/export bytes and restore with no omission |
-| Backups / recovery | Backup slots, quarantined state, `taskpoints_safety_vault_v1/snapshots`, phase4/5 markers | `scoring_core.js`, `settings.html`, `phase2_reset_hook.js`, `phase4_storage_coordinator.js` | Source-complete export/import, generation rotation, emergency restore and old-tab effects |
+| Backups / recovery | Backup slots, quarantined state, `taskpoints_safety_vault_v1/snapshots`, `taskpoints_verified_secondary_v1/snapshots`, phase3/4/5 markers and restore locks | `scoring_core.js`, `settings.html`, `phase2_reset_hook.js`, `phase3_read_path.js`, `phase4_storage_coordinator.js`, `phase5b_deferred_mirror.js`, `emergency_recovery.html`, `verified_secondary_restore.js` | Source-complete export/import, generation rotation, emergency restore and old-tab effects |
 | V2 previews | `taskpoints_state_v2`, preview Notes, Game, Habit ordering and checkpoint DBs | `state_runtime_v2.js` | Distinguish strictly preview-only writes from eventual production admission; no unauthorized promotion |
 
 **The main snapshot is open-ended.** In `scoring_core.js`, `normalizeState` spreads `...src` before normalizing named fields. The 30 known fields therefore cannot be used to delete, normalize away, or ignore unknown properties when moving to V2.
 
+## November 10 second pass — discovered writer routes (NOT a migration)
+
+Twenty additional production files were inspected: 40/168 total, leaving 128. Evidence now includes 50 key/source entries, 4 database/store examples, and **16 source-anchored writer/delegation routes** in the machine-readable manifest. These anchors are checked in a new Node contract; they are **not** exhaustive callgraph or live-operation tests.
+
+- **Week** saves through `TaskPointsCore.saveStateSnapshot`; **Matchups** saves through `mergeAndSaveState`. Both are non-Home legacy write entrypoints that must be admitted or fenced during any cutover.
+- **Toolbar** delegates Inbox writes through `mergeAndSaveState`, wraps the core save functions with deferred writes, and independently updates image blobs. **Inbox** also has its own synchronous `taskpoints_pending_inbox_state_v1` journal and delayed compaction/removal in `task_create_fast_path.js`. Losing this journal would lose events even if main-snapshot parity passed.
+- **Season rollover** saves a new legacy snapshot; the **Gold retrospective adjustment** helper replaces the save wrapper, another indirect route not discoverable from literal `localStorage.setItem` searches alone.
+- **Emergency and verified-secondary restore** persist recovery holds, lock markers and pre-restore backup references. **Phase3** has separate read mode/diagnostic keys. **Phase5b** writes a verified-secondary IndexedDB `snapshots` store; it remains a V1 recovery mirror, not V2 authority.
+- **Storage maintenance** wraps snapshot saves, while **storage diagnostics** can delete IDB image records. Deferred callbacks and manual cleanup must be included in the ownership/fencing map, not silently treated as read-only pages.
+
+Remaining blockers: 128 uninspected root sources, nested sources/assets/service worker entrypoints, computed key aliases, unknown V1 snapshot properties, caller-to-sink paths, restore/import/reset behavior and a reviewed owner for every surviving writer. No V1 or V2 production save behavior was changed.
+
 ## Specific next work to close M01
 
-1. Run the CI source scanner against all 168 files; triage which of the 148 uninspected files access or indirectly modify storage. Move from *inspected* to *writer ownership verified* only with a caller/writer trace, including indirect `TaskPointsCore` saves and dynamic key aliases.
+1. Run the CI source scanner against all 168 files; triage which of the 128 uninspected files access or indirectly modify storage. Move from *inspected* to *writer ownership verified* only with a caller/writer trace, including indirect `TaskPointsCore` saves and dynamic key aliases.
 2. Group all literal and computed localStorage keys by authoritative vs derived vs session-only vs recovery-only, and identify how each is imported/exported and reset. Preserve user-defined fields and unknown V1 properties.
 3. Audit every other IndexedDB database/version/store and each image read/write/delete and backup path. Include malformed schema and no-DB cases.
 4. Map all UI and maintenance entrypoints, including pages, service worker lifecycle, deferred compaction, Phase4/5 mirrors, restore and import, to the nine known legacy writer families; use negative tests where a stale writer must be refused.
