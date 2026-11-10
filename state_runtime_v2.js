@@ -8318,6 +8318,123 @@
     }); }
   }
 
+  // Developer-only targeted Today read proof. Consults one V2 day row and
+  // the root/provenance rows with IDB get(), not todayDays.getAll(). This is
+  // NOT a production read: V1 is parsed and verified as the source of truth.
+  async function inspectPreviewTodayDayRecord(dayKey) {
+    const refuse=(reason,detail={})=>({
+      checked:true,previewOnly:true,targetDayVerified:false,
+      recordPresent:false,collectionParityVerified:false,
+      todayMigrated:false,canPromote:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...detail
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    if(typeof dayKey!=='string'||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(dayKey))
+      return refuse('today_day_key_invalid');
+    try{
+      if(new Date(dayKey+'T00:00:00.000Z').toISOString().slice(0,10)!==dayKey)
+        return refuse('today_day_key_invalid');
+    }catch(_){return refuse('today_day_key_invalid');}
+    const generation=currentGeneration({create:false}),epoch=darkMirrorModeEpoch;
+    if(!generation)return refuse('generation_unavailable');
+    let source;
+    try{
+      source=await capturePreviewTodaySource();
+      if(source.reason)return refuse('today_source_preflight_required',{
+        prerequisiteReason:source.prerequisiteReason||source.reason
+      });
+    }catch(_){return refuse('legacy_today_storage_unreadable');}
+    const current=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&darkMirrorModeEpoch===epoch
+      &&currentGeneration({create:false})===generation
+      &&captureReadOnlyFullStorageInventory()===source.inventory;
+    try{if(!current())return refuse('today_source_changed_before_day_read');}
+    catch(_){return refuse('legacy_today_storage_unreadable');}
+    const expectedRoot=source.records[0];
+    const expectedDay=source.records.find(row=>row.id==='day:'+dayKey);
+    let db,evidence;
+    try{
+      db=await open();
+      if(!db)return refuse('v2_unavailable');
+      evidence=await requestPromise(db.transaction('meta','readonly')
+        .objectStore('meta').get('today-preview'));
+    }catch(_){return refuse('today_day_evidence_unavailable');}
+    if(!evidence)return refuse('today_preview_seed_required');
+    if(evidence.id!=='today-preview'||evidence.schemaVersion!==1
+      ||evidence.resetGeneration!==generation
+      ||evidence.sourceInventory!==fnv1a(source.inventory)+':'+source.inventory.length
+      ||evidence.sourceFingerprint!==source.sourceFingerprint
+      ||evidence.sourcePresent!==(source.raw!==null)
+      ||evidence.dayCount!==source.dayCount
+      ||evidence.recordCount!==source.records.length)
+      return refuse('today_preview_source_stale');
+    if(typeof evidence.recordsFingerprint!=='string'
+      ||!/^sha256:[0-9a-f]{64}:\\d+$/.test(evidence.recordsFingerprint))
+      return refuse('today_preview_row_seal_required');
+    if(typeof evidence.receiptId!=='string'||!evidence.receiptId.startsWith('today-preview-'))
+      return refuse('today_preview_receipt_invalid');
+    const read=async()=>{
+      // Queue every request before awaiting: iPhone Safari can close an
+      // IndexedDB transaction between separate asynchronous get() calls.
+      const tx=db.transaction(['todayDays','meta','mutations'],'readonly');
+      const completed=transactionPromise(tx);
+      const values=await Promise.all([
+        requestPromise(tx.objectStore('todayDays').get('root')),
+        requestPromise(tx.objectStore('todayDays').get('day:'+dayKey)),
+        requestPromise(tx.objectStore('meta').get('today-preview')),
+        requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID)),
+        requestPromise(tx.objectStore('mutations').get(evidence.receiptId)),
+        completed
+      ]);
+      return values.slice(0,5);
+    };
+    let first,second;
+    try{first=await read();}
+    catch(_){return refuse('today_day_record_read_unavailable');}
+    const [root,record,storedEvidence,meta,receipt]=first;
+    if(!meta||meta.schemaVersion!==SCHEMA_VERSION
+      ||meta.resetGeneration!==generation||meta.legacyMissing===true)
+      return refuse('pilot_meta_not_ready');
+    if(stableJson(storedEvidence)!==stableJson(evidence))
+      return refuse('today_day_evidence_changed');
+    if(!receipt||receipt.id!==evidence.receiptId
+      ||!['today-preview-seed','today-preview-reconcile',
+        'today-preview-seal'].includes(receipt.type)
+      ||receipt.resetGeneration!==generation
+      ||receipt.sourceInventory!==evidence.sourceInventory
+      ||receipt.sourceFingerprint!==evidence.sourceFingerprint
+      ||receipt.sourcePresent!==evidence.sourcePresent
+      ||receipt.dayCount!==evidence.dayCount
+      ||receipt.recordCount!==evidence.recordCount
+      ||receipt.recordsFingerprint!==evidence.recordsFingerprint)
+      return refuse('today_preview_receipt_invalid');
+    // Both the root and selected day must equal the V1 projection,
+    // including absent-vs-empty map entries and unknown root fields.
+    if(stableJson(root)!==stableJson(expectedRoot))
+      return refuse('today_day_root_mismatch');
+    if(stableJson(record)!==stableJson(expectedDay))
+      return refuse('today_day_record_mismatch');
+    try{
+      if(!current())return refuse('today_source_changed_during_day_read');
+      second=await read();
+      if(stableJson(second)!==stableJson(first))
+        return refuse('today_day_changed_during_read');
+      if(!current())return refuse('today_source_changed_after_day_read');
+    }catch(_){return refuse('today_day_readback_unavailable');}
+    return {
+      checked:true,previewOnly:true,targetDayVerified:true,
+      recordPresent:!!expectedDay,sourceDayPresent:!!expectedDay,
+      // A targeted record check cannot rule out extra or corrupt day
+      // rows elsewhere. Neither write authority nor full parity follows.
+      collectionParityVerified:false,todayMigrated:false,
+      reason:expectedDay?'today_day_record_verified':'today_day_absence_verified',
+      canPromote:false,productionWritersFenced:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only'
+    };
+  }
+
   // Independent, read-only Today source vs record-level V2 proof. The V1
   // Today page keeps complete write/read authority even on a green result.
   async function inspectPreviewTodayCollectionParity() {
@@ -18635,6 +18752,7 @@
     inspectPreviewTodaySource,
     rehearsePreviewTodayCollectionSeed,
     inspectPreviewTodayCollectionParity,
+    inspectPreviewTodayDayRecord,
     inspectPreviewTodayRecoveryEvidence,
     rehearsePreviewTodayCollectionReconcile,
     rehearsePreviewTodayRowSeal,
