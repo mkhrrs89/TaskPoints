@@ -422,6 +422,44 @@
     "firstPassInspected means one static source inspection, NOT exhaustive writer ownership certification",
     "conditional/dynamic aliases and storage wrappers require manual callgraph review",
     "unknown keys, imported fields, generated script code, indirect writers and non-root sources remain M01 blockers",
-    "missing physical iOS and disconnected off-device backups are separate cutover gates"
-  ]
+    "missing physical iOS and disconnected off-device backups are separate cutover gates",
+    "the 30 named taskpoints_v1 fields are a lower bound; normalizeState spreads src and does not enumerate every possible field"
+  ],
+  "primarySnapshotNamedFields": [
+    "tasks",
+    "reminders",
+    "completions",
+    "players",
+    "reservedPlayerPids",
+    "habits",
+    "flexActions",
+    "gameHistory",
+    "matchups",
+    "schedule",
+    "opponentDripSchedules",
+    "weightHistory",
+    "vo2MaxHistory",
+    "workHistory",
+    "liveDiffHistory",
+    "liveDiffSnapshots",
+    "youImageId",
+    "youName",
+    "youNotes",
+    "youRivalId",
+    "youPrimaryColor",
+    "youSecondaryColor",
+    "projects",
+    "notes",
+    "habitTagColors",
+    "scoringSettings",
+    "playerBadges",
+    "currentSeason",
+    "latestSeasonId",
+    "seasonHistory"
+  ],
+  "primarySnapshotFieldEvidence": {
+    "path": "scoring_core.js",
+    "function": "normalizeState",
+    "limitation": "30 explicitly normalized src.* fields; spread of ...src preserves additional unknown fields and other writers may create more"
+  }
 }
