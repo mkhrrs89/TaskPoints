@@ -1931,6 +1931,143 @@ try {
       authorityPreserved:true};
   });
 
+
+  await run('Today signed package rehearsal survives interrupted staging in isolated browser storage',async sourceContext=>{
+    const sourcePage=await open(sourceContext);
+    const exported=await sourcePage.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const original={
+        version:1,
+        tasksByDay:{'2026-11-04':['task-1']},
+        notesByDay:{'2026-11-04':[{id:'n1',text:'newest saved note',done:false}],
+          '2026-11-05':[]},
+        selectedHabitIdsByDay:{'2026-11-06':['h1']},
+        orderByDay:{'2026-11-04':['task:task-1','note:n1']},
+        futureSettings:{preserved:true}
+      };
+      localStorage.setItem('taskpoints_today_view_v1',JSON.stringify(original));
+      const token=()=>JSON.stringify(
+        Array.from({length:localStorage.length},(_,i)=>localStorage.key(i))
+          .sort().map(k=>[k,localStorage.getItem(k)]));
+      const seed=await api.rehearsePreviewTodayCollectionSeed(token(),'sandbox-package-seed');
+      const prior=localStorage.getItem('taskpoints_v1');
+      localStorage.removeItem('taskpoints_today_view_v1');
+      const pkg=await api.preparePreviewTodayDetachedRestorePackage();
+      return {seed,pkg,prior,
+        originalMissing:localStorage.getItem('taskpoints_today_view_v1')===null,
+        unchanged:localStorage.getItem('taskpoints_v1')===prior};
+    });
+    assert.equal(exported.seed.collectionParityVerified,true,JSON.stringify(exported.seed));
+    assert.equal(exported.pkg.packagePrepared,true,JSON.stringify(exported.pkg));
+    assert.equal(exported.pkg.canRestore,false);
+    assert.equal(exported.pkg.canPromote,false);
+    assert.equal(exported.originalMissing,true);
+    assert.equal(exported.unchanged,true);
+
+    // Different browser context = completely independent localStorage +
+    // IndexedDB. The source context is never given access to these writes.
+    const sandbox=await browser.newContext();
+    await sandbox.route('**/*',route=>
+      new URL(route.request().url()).hostname==='127.0.0.1'
+        ?route.continue():route.abort());
+    try{
+      const page=await open(sandbox);
+      const older='{"notesByDay":{"2026-11-01":[{"id":"old","text":"existing target"}]}}';
+      const targetBefore=await page.evaluate(raw=>{
+        localStorage.setItem('taskpoints_today_view_v1',raw);
+        localStorage.setItem('today_sandbox_unrelated','PRESERVE-ME');
+        return {
+          today:localStorage.getItem('taskpoints_today_view_v1'),
+          legacy:localStorage.getItem('taskpoints_v1'),
+          unrelated:localStorage.getItem('today_sandbox_unrelated')
+        };
+      },older);
+      const packageData=exported.pkg.recoveryPackage;
+      const verify=async p=>page.evaluate(async pkg=>{
+        if(pkg.schemaVersion!==1||typeof pkg.sourcePresent!=='boolean'
+          ||typeof pkg.serialized!=='string'
+          ||typeof pkg.sha256!=='string')return false;
+        const input=JSON.stringify({schemaVersion:1,
+          sourcePresent:pkg.sourcePresent,serialized:pkg.serialized});
+        const bytes=new TextEncoder().encode(input);
+        const digest=await crypto.subtle.digest('SHA-256',bytes);
+        const hash=Array.from(new Uint8Array(digest),
+          v=>v.toString(16).padStart(2,'0')).join('');
+        return pkg.sha256==='sha256:'+hash+':'+bytes.byteLength;
+      },p);
+      assert.equal(await verify(packageData),true);
+      const corrupted={...packageData,serialized:packageData.serialized+' '};
+      assert.equal(await verify(corrupted),false);
+
+      // Interrupted pre-commit: write the candidate into disposable tab
+      // staging only, then close that page as though iOS killed it.
+      const staged=await page.evaluate(pkg=>{
+        sessionStorage.setItem('today_preview_restore_stage',pkg.serialized);
+        return {
+          staged:sessionStorage.getItem('today_preview_restore_stage')===pkg.serialized,
+          today:localStorage.getItem('taskpoints_today_view_v1'),
+          unrelated:localStorage.getItem('today_sandbox_unrelated')
+        };
+      },packageData);
+      assert.equal(staged.staged,true);
+      assert.equal(staged.today,older);
+      assert.equal(staged.unrelated,'PRESERVE-ME');
+      await page.close();
+
+      const resumed=await open(sandbox);
+      const intact=await resumed.evaluate(()=>({
+        today:localStorage.getItem('taskpoints_today_view_v1'),
+        legacy:localStorage.getItem('taskpoints_v1'),
+        unrelated:localStorage.getItem('today_sandbox_unrelated')
+      }));
+      assert.deepEqual(intact,targetBefore,
+        'staged but interrupted restore must preserve all target data');
+
+      // Explicit controlled synthetic commit AFTER signature verification.
+      // No production restore routine is invoked or enabled.
+      const committed=await resumed.evaluate(async pkg=>{
+        const input=JSON.stringify({schemaVersion:1,
+          sourcePresent:pkg.sourcePresent,serialized:pkg.serialized});
+        const bytes=new TextEncoder().encode(input);
+        const digest=await crypto.subtle.digest('SHA-256',bytes);
+        const hash=Array.from(new Uint8Array(digest),
+          n=>n.toString(16).padStart(2,'0')).join('');
+        if(pkg.sha256!=='sha256:'+hash+':'+bytes.byteLength)
+          return {accepted:false};
+        if(pkg.sourcePresent)
+          localStorage.setItem('taskpoints_today_view_v1',pkg.serialized);
+        else localStorage.removeItem('taskpoints_today_view_v1');
+        return {accepted:true,
+          bytes:localStorage.getItem('taskpoints_today_view_v1'),
+          unrelated:localStorage.getItem('today_sandbox_unrelated')};
+      },packageData);
+      assert.equal(committed.accepted,true);
+      assert.equal(committed.bytes,packageData.serialized);
+      assert.equal(committed.unrelated,'PRESERVE-ME');
+      await resumed.close();
+      const reopened=await open(sandbox);
+      const restored=await reopened.evaluate(()=>({
+        today:localStorage.getItem('taskpoints_today_view_v1'),
+        state:localStorage.getItem('taskpoints_v1'),
+        unrelated:localStorage.getItem('today_sandbox_unrelated')
+      }));
+      assert.deepEqual(JSON.parse(restored.today),JSON.parse(packageData.serialized));
+      assert.equal(restored.state,targetBefore.legacy);
+      assert.equal(restored.unrelated,'PRESERVE-ME');
+    }finally{await sandbox.close();}
+    const sourceIntact=await sourcePage.evaluate(()=>({
+      missing:localStorage.getItem('taskpoints_today_view_v1')===null,
+      authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+    }));
+    assert.equal(sourceIntact.missing,true);
+    assert.equal(sourceIntact.authority,'legacy_only');
+    return {separateStorageContext:true,shaVerified:true,
+      corruptPackageRejected:true,precommitInterruptPreservesOriginal:true,
+      explicitSandboxWriteSurvivesReload:true,sourceUntouched:true,
+      productionRestoreStillDisabled:true};
+  });
+
   await run('Projects preview seeds atomic V2 records and receipts while V1 stays primary',async context=>{
     const page=await open(context);
     const result=await page.evaluate(async()=>{
