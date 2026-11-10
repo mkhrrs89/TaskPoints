@@ -1723,6 +1723,8 @@ try {
       const repeat=await api.rehearsePreviewTodayCollectionSeed(inventory(),'repeat');
       const parity=await api.inspectPreviewTodayCollectionParity();
       const recovery=await api.inspectPreviewTodayRecoveryEvidence();
+      const oneDay=await api.inspectPreviewTodayDayRecord('2026-11-04');
+      const missingDay=await api.inspectPreviewTodayDayRecord('2026-11-06');
       const db=await api.open();
       const read=req=>new Promise((resolve,reject)=>{
         req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
@@ -1733,7 +1735,8 @@ try {
         read(tx.objectStore('mutations').get('today-preview-seed:browser-today')),
         read(tx.objectStore('meta').get('today-preview'))
       ]);
-      return {first,repeat,parity,recovery,version:db.version,rows,receipt,evidence,
+      return {first,repeat,parity,recovery,oneDay,missingDay,
+        version:db.version,rows,receipt,evidence,
         unchanged:localStorage.getItem('taskpoints_today_view_v1')===raw
           && localStorage.getItem('taskpoints_v1')===v1,
         authority:api.getStatus().readAuthority};
@@ -1744,6 +1747,12 @@ try {
     assert.equal(initial.parity.match,true,JSON.stringify(initial.parity));
     assert.equal(initial.recovery.evidenceVerified,true,JSON.stringify(initial.recovery));
     assert.equal(initial.recovery.safeToRestore,false);
+    assert.equal(initial.oneDay.reason,'today_day_record_verified',
+      JSON.stringify(initial.oneDay));
+    assert.equal(initial.oneDay.targetDayVerified,true);
+    assert.equal(initial.oneDay.collectionParityVerified,false);
+    assert.equal(initial.missingDay.reason,'today_day_absence_verified');
+    assert.equal(initial.missingDay.recordPresent,false);
     assert.equal(initial.version,6);
     assert.equal(initial.rows.length,3);
     assert.deepEqual(initial.rows.find(r=>r.id==='root').presentMaps,
@@ -1763,6 +1772,7 @@ try {
       payload.notesByDay['2026-11-04'][0].done=true;
       localStorage.setItem('taskpoints_today_view_v1',JSON.stringify(payload));
       const stale=await api.inspectPreviewTodayCollectionParity();
+      const staleDay=await api.inspectPreviewTodayDayRecord('2026-11-04');
       const staleRecovery=await api.inspectPreviewTodayRecoveryEvidence();
       const token=JSON.stringify(Array.from({length:localStorage.length},
         (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
@@ -1776,13 +1786,18 @@ try {
       const reconciled=await api.rehearsePreviewTodayCollectionReconcile(
         token,'browser-today-reconcile');
       const repaired=await api.inspectPreviewTodayCollectionParity();
+      const repairedDay=await api.inspectPreviewTodayDayRecord('2026-11-04');
       const newerRecovery=await api.inspectPreviewTodayRecoveryEvidence();
-      return {parity,stale,staleRecovery,reseed,previousDone:row.value.notesByDay[0].done,
-        reconciled,repaired,newerRecovery,authority:api.getStatus().readAuthority};
+      return {parity,stale,staleDay,staleRecovery,reseed,
+        previousDone:row.value.notesByDay[0].done,
+        reconciled,repaired,repairedDay,newerRecovery,
+        authority:api.getStatus().readAuthority};
     });
     assert.equal(after.parity.match,true,JSON.stringify(after.parity));
     assert.equal(after.stale.match,false);
     assert.equal(after.stale.reason,'today_preview_source_stale');
+    assert.equal(after.staleDay.reason,'today_preview_source_stale');
+    assert.equal(after.staleDay.targetDayVerified,false);
     assert.equal(after.staleRecovery.evidenceVerified,true);
     assert.equal(after.staleRecovery.sourceCompared,false);
     assert.equal(after.reseed.reason,'today_preview_existing_evidence_preserved');
@@ -1792,6 +1807,9 @@ try {
     assert.equal(after.reconciled.changedRows,1);
     assert.equal(after.reconciled.collectionParityVerified,true);
     assert.equal(after.repaired.match,true,JSON.stringify(after.repaired));
+    assert.equal(after.repairedDay.targetDayVerified,true,
+      JSON.stringify(after.repairedDay));
+    assert.equal(after.repairedDay.collectionParityVerified,false);
     assert.equal(after.newerRecovery.evidenceVerified,true,JSON.stringify(after.newerRecovery));
     assert.equal(after.newerRecovery.receiptCount,2);
     assert.equal(after.authority,'legacy_only');
@@ -1806,13 +1824,17 @@ try {
       });
       const row=await read(db.transaction('todayDays','readonly')
         .objectStore('todayDays').get('day:2026-11-04'));
-      return {parity,done:row?.value?.notesByDay?.[0]?.done,
+      const oneDay=await api.inspectPreviewTodayDayRecord('2026-11-04');
+      return {parity,oneDay,done:row?.value?.notesByDay?.[0]?.done,
         authority:api.getStatus().readAuthority};
     });
     assert.equal(final.parity.match,true,JSON.stringify(final.parity));
     assert.equal(final.done,true);
+    assert.equal(final.oneDay.targetDayVerified,true,
+      JSON.stringify(final.oneDay));
     assert.equal(final.authority,'legacy_only');
-    return {dayRows:2,reloadVerified:true,staleTodaySourceBlocked:true,
+    return {dayRows:2,dayScopedReadVerified:true,
+      dayScopedReadAfterReconcile:true,reloadVerified:true,staleTodaySourceBlocked:true,
       atomicReconciliation:true,reconciledReloadVerified:true,
       noSilentNotesLoss:true,legacyAuthorityPreserved:true};
   });
