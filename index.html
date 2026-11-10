@@ -14,10 +14,14 @@ Nothing visible on the page is built here. === -->
   <meta name="color-scheme" content="dark">
   <style id="tp-prepaint">
     html, body { background:#0b0d10 !important; }
+    /* Sunday-only display rule; Work Hours data and calculations stay intact. */
+    html.tp-home-sunday #homeWorkHoursSection { display:none !important; }
   </style>
   <script>
     (function () {
       const root = document.documentElement;
+      // Apply the local Sunday rule before Home paints, including cached visits.
+      root.classList.toggle('tp-home-sunday', new Date().getDay() === 0);
       try {
         if (sessionStorage.getItem('tpBootSeenThisSession') === '1') {
           root.classList.add('tp-boot-seen');
@@ -50,7 +54,7 @@ Nothing visible on the page is built here. === -->
       background:#0b0d10 !important;
     }
 
-    html.tp-boot-pending body > *:not(#bootSplash) {
+    html.tp-boot-pending body > *:not(#bootSplash):not(#tp-boot-recovery-notice) {
       visibility:hidden !important;
       opacity:0 !important;
       pointer-events:none !important;
@@ -648,7 +652,9 @@ Nothing visible on the page is built here. === -->
     titleEl.classList.add("tp-matrix-skip");
     settleMatrixTitle();
     finish();
-    completeBootView({ skipped: true });
+    // Use the currently installed reveal gate (which may be the deferred-runtime coordinator).
+    // Never bypass it and expose placeholder scores while saved state is loading.
+    window.__tpCompleteBootView?.({ skipped: true });
   };
 
   // This watchdog runs independently of the large Home initialization script.
@@ -656,12 +662,16 @@ Nothing visible on the page is built here. === -->
   // never leave an iPhone trapped behind the animation indefinitely.
   let bootRecoveryTimer = null;
   const releaseStalledSplash = () => {
-    if (viewFinished || window.__tpBootViewFinished) return;
+    // The matrix animation flag can be true while deferred saved-data startup
+    // is still pending. Only the actual Home reveal ends the recovery timer.
+    if (viewFinished || window.__tpMobileBootCoordinator?.isRevealed?.()) return;
     settleMatrixTitle();
     finish();
     // The coordinator can accept a reveal request while deferred scripts
     // are still pending. Never mistake acceptance for a visible Home page.
-    const revealAccepted = completeBootView({ skipped: true });
+    // Respect the deferred runtime gate; the local closure would reveal the
+    // HTML placeholders even when the authoritative state has not loaded.
+    const revealAccepted = window.__tpCompleteBootView?.({ skipped: true }) === true;
     const deferredRuntimePending = Boolean(
       window.__tpMobileBootCoordinator?.isRevealed
       && !window.__tpMobileBootCoordinator.isRevealed()
@@ -669,11 +679,11 @@ Nothing visible on the page is built here. === -->
     if (!revealAccepted || deferredRuntimePending) {
       // The HTML may still be streaming or a required script may have
       // stalled before appRoot exists. Never make this a silent dead end.
-      if (splash && !document.getElementById('tp-boot-wait-notice')) {
+      if (!document.getElementById('tp-boot-recovery-notice')) {
         const notice = document.createElement('div');
-        notice.id = 'tp-boot-wait-notice';
+        notice.id = 'tp-boot-recovery-notice';
         notice.setAttribute('role', 'status');
-        notice.style.cssText = 'padding:12px 18px;color:#ffe3d6;background:#241817;border:1px solid #b86b45;border-radius:10px;font:13px/1.45 system-ui,sans-serif;max-width:320px;margin:18px auto 0';
+        notice.style.cssText = 'position:fixed;z-index:2147483647;left:14px;right:14px;bottom:max(28px,env(safe-area-inset-bottom));margin:0 auto;max-width:460px;padding:16px;color:#ffe3d6;background:#241817;border:1px solid #b86b45;border-radius:14px;font:14px/1.5 system-ui,sans-serif;box-shadow:0 8px 35px #000a;pointer-events:auto';
         const text = document.createElement('span');
         text.textContent = 'Startup is taking longer than expected. Your saved data has not been cleared.';
         const link = document.createElement('a');
@@ -681,9 +691,9 @@ Nothing visible on the page is built here. === -->
         link.textContent = ' Open Recovery';
         link.style.cssText = 'color:#ffca9f;text-decoration:underline;display:block;margin-top:8px';
         notice.append(text, link);
-        (splash.querySelector('.bootSplashContent') || splash).appendChild(notice);
+        // Keep the link outside the splash's pointer-event interception.
+        (document.body || document.documentElement).appendChild(notice);
       }
-      bootRecoveryTimer = setTimeout(releaseStalledSplash, 1000);
       return;
     }
     // If Home didn't initialize at all, show a recoverable, read-only notice
@@ -1724,7 +1734,6 @@ Nothing visible on the page is built here. === -->
   <button id="weekBackBtnHabits" class="btn btn-secondary btn-compact" type="button">
     ◀︎ Week
   </button>
-  <button id="habitOlderWeekBtn" class="btn btn-secondary btn-compact hidden" type="button" title="View an earlier habit week">◀︎ Older</button>
 </div>
 </div>
 
@@ -2585,6 +2594,33 @@ function getTodayCaloriesEntry() {
   return null;
 }
 
+// Calories edits use the existing durable task-mutation journal instead of
+// recompressing the entire history on the Save button. The core overlays this
+// journal on reads and compacts it after sustained inactivity. If the journal
+// is unavailable, locked, malformed, or the edited row is not in live state,
+// retain the fully guarded legacy save path.
+function persistCaloriesEditFast(entry) {
+  const core = window.TaskPointsCore;
+  const isLiveCaloriesRow = entry && entry.id != null && String(entry.id).trim()
+    && Array.isArray(state?.completions)
+    && state.completions.includes(entry)
+    && String(entry.title || '').startsWith('Calories')
+    && entry.source === 'metric';
+  if (isLiveCaloriesRow
+    && typeof core?.assertTaskMutationJournalWritable === 'function'
+    && typeof core?.journalTaskMutation === 'function') {
+    try {
+      core.assertTaskMutationJournalWritable();
+      core.journalTaskMutation({ completionUpsert: entry });
+      window.TaskPointsPerf?.mark?.('caloriesEdit.journalCommitted', { entryId: String(entry.id) });
+      return true;
+    } catch (error) {
+      console.warn('TaskPoints Calories edit journal failed; using the protected full save.', error);
+    }
+  }
+  return save();
+}
+
 async function editTodayCalories() {
   const entry = getTodayCaloriesEntry();
   if (!entry) return alert("You haven't entered today's calories yet.");
@@ -2627,7 +2663,7 @@ async function editTodayCalories() {
   toastPointsDeltaTodayAware(impactPts, oldPts, key);
   markCompletionsDirty();
 
-  save();
+  persistCaloriesEditFast(entry);
   scheduleRender(renderAll);
 }
 
@@ -4527,7 +4563,7 @@ const effectsById = {};
     scoresById['YOU'] = youScore;
   }
 
-participantIds.forEach(id => {
+const scoreNpcParticipants = () => participantIds.forEach(id => {
   if (id === 'YOU') return;
   const player = playerMap.get(id);
   if (!player) return;
@@ -4566,6 +4602,15 @@ effectsById[id] = capturedEffects;
     });
   }
 });
+
+  // Home's first daily simulation has no new Gold outcomes until after all
+  // NPC scores have been computed. Share the current pre-game wallets for this
+  // one scoring pass, then discard them before matchups settle and save.
+  if (typeof TaskPointsCore?.withGoldNpcScoringBatch === 'function') {
+    TaskPointsCore.withGoldNpcScoringBatch(state, scoreNpcParticipants);
+  } else {
+    scoreNpcParticipants();
+  }
 
   todaysPairs.forEach(pair => {
     const matchup = {
@@ -8223,9 +8268,6 @@ function updateWeekToggleButtons() {
   const label = habitViceWeekOffsetDays < 0 ? 'This ▶︎' : '◀︎ Week';
   if (habitsBtn) habitsBtn.textContent = label;
   if (vicesBtn) vicesBtn.textContent = label;
-  // Older weeks are optional; the original Week button still returns to Today.
-  const olderBtn = document.getElementById('habitOlderWeekBtn');
-  if (olderBtn) olderBtn.classList.toggle('hidden', habitViceWeekOffsetDays === 0);
 }
 
 async function swapWeekViewAnimated(direction) {
@@ -8276,15 +8318,6 @@ async function swapWeekViewAnimated(direction) {
     w.style.transform = '';
     w.style.opacity = '';
   });
-}
-
-async function goHabitViceWeekOlder() {
-  if (weekSwapInFlight || habitViceWeekOffsetDays >= 0) return;
-  weekSwapInFlight = true;
-  habitViceWeekOffsetDays -= 7;
-  updateWeekToggleButtons();
-  try { await swapWeekViewAnimated('back'); }
-  finally { weekSwapInFlight = false; }
 }
 
 async function toggleHabitViceWeek() {
@@ -11408,6 +11441,12 @@ function formatHomeWorkHours(value) {
 }
 
 function renderHomeWorkHours() {
+  const now = new Date();
+  // Visibility is strictly presentational. Sunday hours still count toward
+  // the Mon–Sun week and are never removed or rewritten.
+  if (typeof document !== 'undefined') {
+    document.documentElement?.classList?.toggle('tp-home-sunday', now.getDay() === 0);
+  }
   const loggedEl = $('homeWorkHoursLogged');
   if (!loggedEl) return;
   const remainingEl = $('homeWorkHoursRemaining');
@@ -11416,7 +11455,7 @@ function renderHomeWorkHours() {
   const trackEl = $('homeWorkHoursProgressTrack');
   const statusEl = $('homeWorkHoursStatus');
   const averageEl = $('homeWorkHoursAverage');
-  const summary = calculateHomeWeeklyWorkHours(getDerived().workEntries, new Date());
+  const summary = calculateHomeWeeklyWorkHours(getDerived().workEntries, now);
   const dateOptions = { month: 'short', day: 'numeric' };
   const startText = summary.weekStart.toLocaleDateString(undefined, dateOptions);
   const endText = summary.weekEnd.toLocaleDateString(undefined, dateOptions);
@@ -11437,15 +11476,16 @@ function renderHomeWorkHours() {
   }
 }
 
-// A read-only timer refreshes the card if TaskPoints stays open across Sunday
-// night. On suspended iPhones, pageshow/visibilitychange refresh it instead.
+// Read-only daily refresh keeps the Sunday display rule and Monday weekly
+// rollover correct, even when Home stays open across midnight. On suspended
+// iPhones, pageshow/visibilitychange refreshes the display on return.
 function startHomeWorkHoursWeekRollover() {
   const scheduleNext = () => {
     const now = new Date();
-    const nextMonday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    nextMonday.setDate(nextMonday.getDate() + (((8 - nextMonday.getDay()) % 7) || 7));
-    nextMonday.setHours(0, 0, 1, 0);
-    const delay = Math.max(1000, nextMonday.getTime() - now.getTime());
+    const nextDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    nextDay.setDate(nextDay.getDate() + 1);
+    nextDay.setHours(0, 0, 1, 0);
+    const delay = Math.max(1000, nextDay.getTime() - now.getTime());
     setTimeout(() => {
       renderHomeWorkHours();
       scheduleNext();
@@ -12789,7 +12829,7 @@ block.onclick = async () => {
 
   toastPointsDeltaTodayAware(impactPts, oldPts, target);
   markCompletionsDirty();
-  save();
+  persistCaloriesEditFast(target);
   scheduleRender(renderAll);
 };
     container.appendChild(block);
@@ -14629,7 +14669,7 @@ if (key === "calories") {
 
   toastPointsDeltaTodayAware(impactPts, oldPts, dayKey);
   markCompletionsDirty();
-  save();
+  persistCaloriesEditFast(existing || state.completions[0]);
   scheduleRender(renderAll);
 
   setTimeout(() => {
@@ -14970,7 +15010,7 @@ if (cat === "calories") {
   toastPointsDeltaTodayAware(impactPts, oldPts, target);
 
   markCompletionsDirty();
-  save();
+  persistCaloriesEditFast(target);
   scheduleRender(renderAll);
 
 try { if (scoreV2RecentOpen) renderScoreV2RecentGrid(); } catch(e){}
@@ -15207,8 +15247,6 @@ try {
   const b2 = document.getElementById('weekBackBtnVices');
   if (b1) b1.onclick = toggleHabitViceWeek;
   if (b2) b2.onclick = toggleHabitViceWeek;
-  const olderHabitWeekBtn = document.getElementById('habitOlderWeekBtn');
-  if (olderHabitWeekBtn) olderHabitWeekBtn.onclick = goHabitViceWeekOlder;
   $('addFlexBtn')?.addEventListener('click', openFlexModal);
   $('flexDayToggleBtn')?.addEventListener('click', toggleFlexDayView);
   $('saveSleepScoreBtn')?.addEventListener('click', saveSleepScore);

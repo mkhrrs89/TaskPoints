@@ -124,6 +124,7 @@
   function hasPendingHabitJournal() {
     try {
       if ((Number(core.readPendingHabitDeltas?.().length) || 0) > 0) return true;
+      if ((Number(core.readPendingPlayerEdits?.().length) || 0) > 0) return true;
     } catch (_) {
       return true;
     }

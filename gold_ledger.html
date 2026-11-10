@@ -19,6 +19,10 @@
     .gold-balance-card { padding:12px 14px; border:1px solid rgba(148,163,184,.14); border-radius:14px; background:rgba(255,255,255,.025); min-width:0; }
     .gold-balance-name { font-size:12px; color:#cbd5e1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .gold-balance-value { margin-top:3px; font-size:23px; line-height:1; font-weight:900; color:#fb923c; font-variant-numeric:tabular-nums; }
+    .gold-circulation { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px 20px; border-bottom:1px solid rgba(148,163,184,.18); margin-bottom:16px; padding:2px 0 16px; }
+    .gold-circulation-label { color:#e2e8f0; font-weight:800; font-size:15px; }
+    .gold-circulation-value { color:#fb923c; font-size:clamp(28px,6vw,38px); line-height:1.15; font-weight:900; letter-spacing:-.04em; font-variant-numeric:tabular-nums; }
+    .gold-circulation-note { font-size:12px; color:#94a3b8; margin-top:4px; }
     .gold-controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
     .gold-select { min-height:38px; padding:7px 10px; border-radius:10px; border:1px solid rgba(148,163,184,.3); background:#111827; color:#f8fafc; }
     .gold-table-wrap { overflow-x:auto; }
@@ -38,6 +42,64 @@
     .gold-ledger-check.warning { border-color:rgba(251,146,60,.55); background:rgba(154,52,18,.13); }
     .gold-ledger-check strong { color:#fdba74; }
     .gold-ledger-check p + p { margin-top:7px; }
+    /* Native details/summary keeps all four Gold sections accessible and
+       independently collapsible without touching any saved game state. */
+    .gold-fold > summary { list-style:none; cursor:pointer; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px 16px; min-height:44px; }
+    .gold-fold > summary::-webkit-details-marker { display:none; }
+    .gold-fold > summary::marker { content:''; }
+    .gold-fold > summary:focus-visible { outline:2px solid #fb923c; outline-offset:5px; border-radius:8px; }
+    .gold-fold-content { padding-top:16px; }
+    .gold-fold-chevron { display:inline-block; width:12px; height:12px; flex:none; border-bottom:2px solid #fdba74; border-right:2px solid #fdba74; transform:rotate(45deg); transition:transform 140ms ease; margin:0 6px 5px 10px; }
+    .gold-fold[open] > summary .gold-fold-chevron { transform:rotate(225deg); margin-bottom:-5px; }
+    .gold-fold-summary-right { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-left:auto; }
+    @media (prefers-reduced-motion:reduce) { .gold-fold-chevron { transition:none; } }
+    .gold-manual-fields { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+    .gold-manual-field { display:flex; flex-direction:column; gap:6px; min-width:0; font-size:13px; font-weight:600; color:#cbd5e1; }
+    .gold-manual-input { min-width:0; width:100%; min-height:42px; border:1px solid rgba(148,163,184,.3); border-radius:10px; padding:9px 11px; background:#111827; color:#f8fafc; font:inherit; }
+    .gold-manual-input:focus { outline:2px solid rgba(251,146,60,.6); outline-offset:1px; }
+    .gold-manual-preview { color:#fdba74; font-weight:700; font-variant-numeric:tabular-nums; padding:10px 0; min-height:42px; }
+    .gold-manual-status { font-size:13px; color:#86efac; min-height:18px; }
+    .gold-manual-status.gold-manual-error { color:#fca5a5; }
+    .gold-manual-actions { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
+    .gold-manual-actions button:disabled { opacity:.45; cursor:not-allowed; }
+    /* Standalone iPhones render underneath the status bar with viewport-fit=cover.
+       Keep the entire ledger shell (logo, header, cards) below that area. */
+    @media (max-width:767px) {
+      .gold-shell {
+        padding-top: max(76px, calc(env(safe-area-inset-top, 0px) + 16px));
+        padding-bottom: max(150px, calc(var(--tp-toolbar-height) + var(--tp-safe-bottom) + 24px));
+      }
+      /* The shared toolbar is normally mounted in a document-flow spacer.
+         On long Gold Ledger pages, iOS can leave the composited fixed child
+         at an old scroll/viewport position. Anchor the *mount* to the viewport
+         and position its existing swipe-expandable nav inside it instead.
+         This is scoped to Gold Ledger only; shared toolbar code is unchanged. */
+      body.gold-ledger-page #bottomToolbarMount {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: calc(var(--tp-toolbar-height) + var(--tp-safe-bottom));
+        min-height: 0;
+        z-index: var(--tp-z-toolbar-popup-layer);
+        pointer-events: none;
+      }
+      body.gold-ledger-page #bottomToolbarMount > #mobileBottomNav {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: -10px;
+        pointer-events: auto;
+      }
+      /* The shared bottom toolbar keeps Projects accessible on mobile. Hide
+         only the out-of-place extra button in this page's upper header. */
+      .gold-shell .header-nav > a[href="projects.html"] {
+        display: none !important;
+      }
+    }
+    @media (max-width:640px) {
+      .gold-manual-fields { grid-template-columns:1fr; }
+    }
     @media (max-width:640px) {
       .gold-shell { padding-left:12px; padding-right:12px; }
       .gold-card { border-radius:15px; }
@@ -47,7 +109,7 @@
     }
   </style>
 </head>
-<body class="min-h-screen">
+<body class="min-h-screen gold-ledger-page">
   <div class="gold-shell">
     <div class="flex items-center justify-between gap-3 mb-3 md:hidden">
       <a href="index.html" class="flex items-center gap-3">
@@ -95,26 +157,88 @@
     </header>
 
     <main class="space-y-4">
-      <section class="gold-card p-4 sm:p-5">
-        <div class="flex items-start justify-between gap-4 flex-wrap mb-4">
+      <details id="goldOverviewSection" class="gold-card p-4 sm:p-5 gold-fold" open>
+        <summary class="gold-fold-summary">
           <div>
             <div class="text-xs uppercase tracking-[.16em] gold-muted">Gold Economy</div>
             <h2 class="text-2xl font-black gold-title mt-1">Gold Ledger</h2>
+          </div>
+          <span class="gold-fold-chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="gold-fold-content">
+          <div class="flex items-start justify-between gap-4 flex-wrap mb-4">
             <p class="text-sm gold-muted mt-1">Permanent Gold transactions from the Greed economy. Historical activity before launch is condensed into a legacy-rule opening balance; previous Gold thefts can remain visible in Records without appearing as individual ledger transactions.</p>
+            <div id="ledgerLaunchMeta" class="text-xs gold-muted text-right"></div>
           </div>
-          <div id="ledgerLaunchMeta" class="text-xs gold-muted text-right"></div>
+          <div id="goldLedgerHistoryCheck" class="gold-ledger-check hidden" role="status" aria-live="polite"></div>
         </div>
-        <div id="goldLedgerHistoryCheck" class="gold-ledger-check hidden" role="status" aria-live="polite"></div>
-        <div id="goldBalances" class="gold-balance-grid"></div>
-      </section>
+      </details>
 
-      <section class="gold-card p-4 sm:p-5">
-        <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
-          <div>
-            <h2 class="text-lg font-bold">Transactions</h2>
-            <div id="transactionCount" class="text-xs gold-muted"></div>
+      <details id="goldCirculationSection" class="gold-card p-4 sm:p-5 gold-fold" open>
+        <summary class="gold-fold-summary">
+          <h2 class="gold-circulation-label">Gold in Circulation</h2>
+          <span class="gold-fold-summary-right">
+            <span class="gold-circulation-value" aria-live="polite"><span id="goldCirculationTotal">—</span> <span class="text-sm gold-muted">Gold</span></span>
+            <span class="gold-fold-chevron" aria-hidden="true"></span>
+          </span>
+        </summary>
+        <div class="gold-fold-content">
+          <p id="goldCirculationContext" class="gold-circulation-note mb-4">Combined Gold held by every player, including inactive and retired players.</p>
+          <div id="goldBalances" class="gold-balance-grid"></div>
+        </div>
+      </details>
+
+      <details id="goldManualSection" class="gold-card p-4 sm:p-5 gold-fold" open>
+        <summary class="gold-fold-summary">
+          <h2 id="goldManualHeading" class="text-lg font-bold">Manual Gold Adjustment</h2>
+          <span class="gold-fold-chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="gold-fold-content">
+          <p class="text-sm gold-muted mb-4">Give or remove Gold, or set an exact balance. Every adjustment is saved as a new transaction; existing history is never edited.</p>
+          <form id="goldManualForm">
+          <div class="gold-manual-fields">
+            <label class="gold-manual-field" for="goldManualPlayer">
+              Player
+              <select id="goldManualPlayer" class="gold-manual-input" required>
+                <option value="">Choose a player</option>
+              </select>
+            </label>
+            <label class="gold-manual-field" for="goldManualMode">
+              Action
+              <select id="goldManualMode" class="gold-manual-input">
+                <option value="add">Add Gold</option>
+                <option value="subtract">Subtract Gold</option>
+                <option value="set">Set Exact Balance</option>
+              </select>
+            </label>
+            <label class="gold-manual-field" for="goldManualAmount">
+              Amount (Gold)
+              <input id="goldManualAmount" class="gold-manual-input" type="number" inputmode="decimal" step="0.1" min="0" max="1000000" placeholder="0.0" required />
+            </label>
           </div>
-          <div class="gold-controls">
+          <label class="gold-manual-field mt-3" for="goldManualNote">
+            Note (optional)
+            <input id="goldManualNote" class="gold-manual-input" type="text" maxlength="200" placeholder="Reason for this adjustment" />
+          </label>
+          <div id="goldManualPreview" class="gold-manual-preview" aria-live="polite">Select a player and enter an amount to preview the change.</div>
+          <div class="gold-manual-actions">
+            <button type="submit" id="goldManualSubmit" class="btn btn-teal btn-toolbar" disabled>Confirm Gold Adjustment</button>
+            <span class="text-xs gold-muted">Balances cannot go below zero. A confirmation is required before saving.</span>
+          </div>
+          <p id="goldManualStatus" class="gold-manual-status mt-3" role="status" aria-live="polite"></p>
+          </form>
+        </div>
+      </details>
+
+      <details id="goldTransactionsSection" class="gold-card p-4 sm:p-5 gold-fold" open>
+        <summary class="gold-fold-summary">
+          <h2 class="text-lg font-bold">Transactions</h2>
+          <span class="gold-fold-chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="gold-fold-content">
+          <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
+            <div id="transactionCount" class="text-xs gold-muted"></div>
+            <div class="gold-controls">
             <select id="playerFilter" class="gold-select" aria-label="Filter Gold transactions by player"><option value="">All players</option></select>
             <select id="typeFilter" class="gold-select" aria-label="Filter Gold transactions by type">
               <option value="">All transaction types</option>
@@ -122,6 +246,7 @@
               <option value="matchup_margin">Matchup Margin</option>
               <option value="matchup_theft">Gold Theft</option>
               <option value="champion_bonus">Champion Bonus</option>
+              <option value="manual_adjustment">Manual Adjustment</option>
             </select>
           </div>
         </div>
@@ -131,13 +256,15 @@
             <tbody id="ledgerRows"></tbody>
           </table>
           <div id="ledgerEmpty" class="gold-empty hidden">No Gold transactions match these filters.</div>
+          </div>
         </div>
-      </section>
+      </details>
     </main>
   </div>
 
   <script src="scoring_core.js"></script>
   <script src="gold_ledger_integrity.js?v=20261105-gold-check-1"></script>
+  <script src="gold_circulation_total.js?v=20261108-gold-in-circulation-1"></script>
   <script>
   (function () {
     const core = window.TaskPointsCore || {};
@@ -158,7 +285,7 @@
     }
 
     let state = loadState();
-    const players = new Map((Array.isArray(state.players) ? state.players : []).map((player) => [String(player.id || player.playerId || ''), player]));
+    let players = new Map((Array.isArray(state.players) ? state.players : []).map((player) => [String(player.id || player.playerId || ''), player]));
     const playerName = (id) => {
       if (String(id) === 'YOU') return String(state.youName || 'You');
       return String(players.get(String(id))?.name || id || 'Unknown');
@@ -166,7 +293,7 @@
 
     // Historical records may outlive their underlying Gold ledger rows.
     // Show the discrepancy without inventing transfers or changing balances.
-    const historicalCheck = window.TaskPointsGoldLedgerIntegrity?.analyzeGoldLedger?.(state);
+    let historicalCheck = window.TaskPointsGoldLedgerIntegrity?.analyzeGoldLedger?.(state);
     function renderGoldLedgerHistoryCheck(selectedId = '') {
       const el = document.getElementById('goldLedgerHistoryCheck');
       if (!el) return;
@@ -207,7 +334,8 @@
       opening_balance: 'Opening Balance',
       matchup_margin: 'Matchup Margin',
       matchup_theft: 'Gold Theft',
-      champion_bonus: 'Champion Bonus'
+      champion_bonus: 'Champion Bonus',
+      manual_adjustment: 'Manual Adjustment'
     }[type] || type || 'Transaction');
 
     function formatLedgerDate(value) {
@@ -223,6 +351,11 @@
     function transactionDetail(row) {
       const opponent = row.opponentId ? playerName(row.opponentId) : '';
       if (row.type === 'opening_balance') return 'Gold carried into the new ledger at launch.';
+      if (row.type === 'manual_adjustment') {
+        const mode = { add: 'Gold added', subtract: 'Gold removed', set: 'Balance set' }[row.meta?.mode] || 'Manual change';
+        const note = String(row.meta?.note || '').trim();
+        return mode + (note ? ': ' + note : '.');
+      }
       if (row.type === 'champion_bonus') return `Season championship bonus${row.seasonId ? ` · ${row.seasonId}` : ''}.`;
       if (row.type === 'matchup_margin') {
         const diff = Number(row.meta?.pointDifferential);
@@ -237,9 +370,30 @@
       return '';
     }
 
+    function renderGoldCirculation() {
+      const result = window.TaskPointsGoldCirculation?.calculate?.(state);
+      const total = document.getElementById('goldCirculationTotal');
+      const context = document.getElementById('goldCirculationContext');
+      if (!result?.ok) {
+        total.textContent = '—';
+        context.textContent = result?.reason || 'Gold total unavailable until saved data can be read.';
+        return;
+      }
+      total.textContent = result.total.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+      context.textContent = 'Across ' + result.walletCount + ' player wallet' + (result.walletCount === 1 ? '' : 's')
+        + ', including inactive and retired players.';
+    }
+
     function renderBalances() {
+      renderGoldCirculation();
       const ids = new Set(['YOU']);
       players.forEach((player, id) => { if (id) ids.add(id); });
+      // Keep wallets belonging to former or no-longer-rostered players visible;
+      // their Gold remains part of the total in circulation.
+      (Array.isArray(state.goldLedger) ? state.goldLedger : []).forEach(row => {
+        const id = String(row?.playerId || '').trim();
+        if (id) ids.add(id);
+      });
       const rows = [...ids].map((id) => ({ id, name: playerName(id), gold: core.getGoldBalance ? core.getGoldBalance(state, id) : 0 }))
         .sort((a, b) => b.gold - a.gold || a.name.localeCompare(b.name));
       document.getElementById('goldBalances').innerHTML = rows.map((row) => `
@@ -251,6 +405,8 @@
 
     function installPlayerFilter() {
       const select = document.getElementById('playerFilter');
+      const selected = select.value;
+      select.replaceChildren(new Option('All players', ''));
       const ids = new Set((Array.isArray(state.goldLedger) ? state.goldLedger : []).map((row) => String(row.playerId || '')).filter(Boolean));
       const options = [...ids].map((id) => ({ id, name: playerName(id) })).sort((a,b) => a.name.localeCompare(b.name));
       options.forEach(({ id, name }) => {
@@ -259,6 +415,7 @@
         option.textContent = name;
         select.appendChild(option);
       });
+      select.value = [...select.options].some(option => option.value === selected) ? selected : '';
     }
 
     function renderLedger() {
@@ -298,7 +455,21 @@
     renderLedger();
     document.getElementById('playerFilter').addEventListener('change', renderLedger);
     document.getElementById('typeFilter').addEventListener('change', renderLedger);
+    window.addEventListener('taskpoints:gold-manual-adjusted', (event) => {
+      // Refresh the on-screen wallet totals, transaction history and filters
+      // from the verified snapshot returned by the protected save.
+      const refreshed = event.detail?.state || loadState();
+      if (!refreshed || !Array.isArray(refreshed.goldLedger)) return;
+      state = refreshed;
+      players = new Map((Array.isArray(state.players) ? state.players : []).map(player =>
+        [String(player.id || player.playerId || ''), player]));
+      historicalCheck = window.TaskPointsGoldLedgerIntegrity?.analyzeGoldLedger?.(state);
+      renderBalances();
+      installPlayerFilter();
+      renderLedger();
+    });
   })();
   </script>
+  <script src="gold_manual_adjustment.js?v=20261108-manual-gold-1"></script>
 </body>
 </html>

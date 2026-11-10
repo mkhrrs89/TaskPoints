@@ -321,7 +321,7 @@
   'use strict';
 
   const SCRIPT_ID = 'tpSeasonResultIntegrityScript';
-  const SCRIPT_SRC = '/season_result_integrity_guard.js?v=20260803-1';
+  const SCRIPT_SRC = '/season_result_integrity_guard.js?v=20261106-unchanged-state-reuse-1';
 
   function load() {
     if (global.TaskPointsSeasonResultIntegrity?.installed) return true;

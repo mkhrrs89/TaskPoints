@@ -20,8 +20,10 @@
   let sourcePackageMissCount = 0;
 
   function pendingJournalCount() {
-    try { return Number(core.readPendingHabitDeltas?.().length) || 0; }
-    catch (_) { return 1; }
+    try {
+      return (Number(core.readPendingHabitDeltas?.().length) || 0)
+        + (Number(core.readPendingPlayerEdits?.().length) || 0);
+    } catch (_) { return 1; }
   }
 
   function verifiedCacheForRaw(raw) {
@@ -49,6 +51,21 @@
     return JSON.parse(JSON.stringify(value));
   }
 
+  // This cache is optional: a failed large clone must never turn a perfectly
+  // valid authoritative storage decode into an empty Home state.
+  let cloneFallbackWarned = false;
+  function tryCloneForParseCache(value) {
+    try {
+      return cloneSnapshot(value);
+    } catch (error) {
+      if (!cloneFallbackWarned) {
+        global.console?.warn?.('TaskPoints optional read cache failed; using the authoritative parser.', error);
+        cloneFallbackWarned = true;
+      }
+      return null;
+    }
+  }
+
   function rememberSnapshot(value, metadata) {
     if (!value || typeof value !== 'object' || Array.isArray(value) || !metadata) return value;
     snapshotMeta.set(value, metadata);
@@ -60,10 +77,15 @@
       recentParse = null;
       return;
     }
+    const snapshot = tryCloneForParseCache(parsed);
+    if (!snapshot) {
+      recentParse = null;
+      return;
+    }
     recentParse = {
       raw,
       source: parsed,
-      snapshot: cloneSnapshot(parsed),
+      snapshot,
       summary: null
     };
   }
@@ -84,27 +106,33 @@
     const cache = verifiedCacheForRaw(raw);
     const cachedSummary = cache ? summaryFromCache(cache) : null;
     if (cache && cachedSummary) {
-      parseReuseCount += 1;
-      return rememberSnapshot(cloneSnapshot(cache.state), {
-        raw,
-        sequence: Number(cache.sequence) || 0,
-        summary: cachedSummary,
-        verifiedAt: cache.verifiedAt || null
-      });
+      const cloned = tryCloneForParseCache(cache.state);
+      if (cloned) {
+        parseReuseCount += 1;
+        return rememberSnapshot(cloned, {
+          raw,
+          sequence: Number(cache.sequence) || 0,
+          summary: cachedSummary,
+          verifiedAt: cache.verifiedAt || null
+        });
+      }
     }
 
     if (recentParse && typeof raw === 'string' && recentParse.raw === raw) {
-      parseReuseCount += 1;
-      const cloned = cloneSnapshot(recentParse.snapshot);
-      if (recentParse.summary) {
-        rememberSnapshot(cloned, {
-          raw,
-          sequence: 0,
-          summary: recentParse.summary,
-          verifiedAt: null
-        });
+      const cloned = tryCloneForParseCache(recentParse.snapshot);
+      if (cloned) {
+        parseReuseCount += 1;
+        if (recentParse.summary) {
+          rememberSnapshot(cloned, {
+            raw,
+            sequence: 0,
+            summary: recentParse.summary,
+            verifiedAt: null
+          });
+        }
+        return cloned;
       }
-      return cloned;
+      recentParse = null;
     }
 
     const parsed = originalParse(raw, fallback);

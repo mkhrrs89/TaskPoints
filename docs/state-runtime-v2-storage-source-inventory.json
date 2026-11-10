@@ -26,8 +26,10 @@
     "game_history_repair_alias_sync.js",
     "game_ratings.html",
     "gamehub.html",
+    "gold_circulation_total.js",
     "gold_ledger.html",
     "gold_ledger_integrity.js",
+    "gold_manual_adjustment.js",
     "gold_theft_top50_notifications.js",
     "greed_gold_economy.js",
     "habit_completion_backup_recovery.js",
@@ -179,7 +181,9 @@
     "emergency_recovery.html",
     "game.html",
     "gamehub.html",
+    "gold_circulation_total.js",
     "gold_ledger.html",
+    "gold_manual_adjustment.js",
     "gold_theft_top50_notifications.js",
     "greed_gold_economy.js",
     "habit_completion_backup_recovery.js",
@@ -521,6 +525,18 @@
       "family": "recovery",
       "role": "verified-secondary recovery mirror IndexedDB namespace",
       "evidencePath": "phase5b_deferred_mirror.js"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "Manual Gold adjustment uses V1 validated snapshot save",
+      "evidencePath": "gold_manual_adjustment.js"
+    },
+    {
+      "key": "taskpoints_emergency_recovery_hold_v1",
+      "family": "recovery",
+      "role": "Manual Gold writer respects emergency recovery hold",
+      "evidencePath": "gold_manual_adjustment.js"
     }
   ],
   "dbEvidence": [
@@ -710,6 +726,13 @@
       "kind": "manual maintenance",
       "description": "Diagnostics can delete image records directly",
       "anchor": "store.delete(key)"
+    },
+    {
+      "path": "gold_manual_adjustment.js",
+      "family": "game",
+      "kind": "live UI",
+      "description": "Manual Gold adjustments issue protected V1 snapshot saves after recovery and stale-snapshot guards",
+      "anchor": "latest.core.saveValidatedSnapshot(candidate"
     }
   ]
 }

@@ -29,6 +29,131 @@
   const TASKPOINTS_INTERACTIVE_PACKED_SAFE_BYTES = 3.75 * 1024 * 1024;
   const TASKPOINTS_INTERACTIVE_RECOMPRESS_DELAY_MS = 2000;
   const pendingInteractiveRecompresses = new Map();
+
+  // Durable, tiny write-ahead journal for Player editor changes. Full canonical
+  // storage stays compressed, verified and untouched until the browser is idle.
+  const PENDING_PLAYER_EDITS_KEY = 'taskpoints_pending_player_edits_v1';
+  const PLAYER_RATING_EDIT_FIELDS = ['baseline','variance','varianceTilt','momentum','risky','intimidation','poise','greed','streaky','style'];
+  const PLAYER_PROFILE_EDIT_FIELDS = [...PLAYER_RATING_EDIT_FIELDS,'name','notes','rivalId','primaryColor','secondaryColor'];
+  const PLAYER_JOURNAL_QUIET_MS = 8000;
+  let playerJournalTimer = null;
+  let playerJournalFlushActive = false;
+  let lastPlayerJournalInteractionAt = Date.now();
+
+  function readPendingPlayerEdits() {
+    const raw = localStorage.getItem(PENDING_PLAYER_EDITS_KEY);
+    if (!raw) return [];
+    let document;
+    try { document = JSON.parse(raw); } catch (_) { throw new Error('Player edit journal is malformed; original bytes preserved.'); }
+    if (!document || document.version !== 1 || !Array.isArray(document.edits)
+      || document.edits.some(entry => !entry || typeof entry.playerId !== 'string'
+        || !entry.playerId || !entry.patch || typeof entry.patch !== 'object'
+        || Array.isArray(entry.patch)
+        || Object.keys(entry.patch).some(key => !PLAYER_PROFILE_EDIT_FIELDS.includes(key)))) {
+      throw new Error('Player edit journal has unsupported fields; original bytes preserved.');
+    }
+    return document.edits;
+  }
+
+  function applyPendingPlayerEdits(state, edits = readPendingPlayerEdits()) {
+    if (!state || !Array.isArray(state.players) || !edits?.length) return state;
+    for (const edit of edits) {
+      const player = state.players.find(row => String(row?.id || '') === edit.playerId);
+      if (player) Object.assign(player, edit.patch); // No resurrection of removed players.
+    }
+    return state;
+  }
+
+  function clearVerifiedPlayerEdits(saved) {
+    const current = readPendingPlayerEdits();
+    if (!current.length) return 0;
+    const verified = current.filter(edit => {
+      const player = (Array.isArray(saved?.players) ? saved.players : [])
+        .find(row => String(row?.id || '') === edit.playerId);
+      return player && Object.keys(edit.patch).every(key =>
+        JSON.stringify(player[key]) === JSON.stringify(edit.patch[key]));
+    });
+    if (!verified.length) return 0;
+    const ids = new Set(verified.map(row => row.playerId));
+    const remaining = readPendingPlayerEdits().filter(row => !ids.has(row.playerId));
+    localStorage.setItem(PENDING_PLAYER_EDITS_KEY, JSON.stringify({ version: 1, edits: remaining }));
+    return verified.length;
+  }
+
+  function schedulePlayerJournalFlush(delayMs = PLAYER_JOURNAL_QUIET_MS) {
+    if (playerJournalTimer != null) clearTimeout(playerJournalTimer);
+    playerJournalTimer = setTimeout(() => {
+      playerJournalTimer = null;
+      if (playerJournalFlushActive) return;
+      const quietFor = Date.now() - lastPlayerJournalInteractionAt;
+      if (quietFor < PLAYER_JOURNAL_QUIET_MS
+        || global.document?.visibilityState === 'hidden'
+        || global.TaskPointsCore?.isStorageMaintenanceQuiet?.() === false) {
+        schedulePlayerJournalFlush(Math.max(1500, PLAYER_JOURNAL_QUIET_MS - quietFor));
+        return;
+      }
+      try {
+        if (!readPendingPlayerEdits().length) return;
+        playerJournalFlushActive = true;
+        const state = loadAppState({ syncDerived: false, persistSync: false }).state;
+        const result = global.TaskPointsCore?.saveAppState?.(state, {
+          savePath: 'player-editor-idle-journal-compaction', userInitiated: true
+        });
+        if (!result || result.skipped || result.blocked || result.blockedByQuotaCircuit)
+          throw new Error('Protected full save was skipped; player journal remains durable.');
+        clearVerifiedPlayerEdits(readStoredStateRaw(STORAGE_KEY));
+      } catch (error) {
+        console.warn('Player editor background compaction deferred; journal retained.', error);
+      } finally { playerJournalFlushActive = false; }
+      try {
+        if (readPendingPlayerEdits().length) schedulePlayerJournalFlush();
+      } catch (_) { /* Never discard malformed journals. */ }
+    }, delayMs);
+  }
+
+  function stagePlayerEdit(state, playerId, options = {}) {
+    const id = String(playerId || '').trim();
+    const player = (Array.isArray(state?.players) ? state.players : [])
+      .find(row => String(row?.id || '') === id);
+    if (!id || id === 'YOU' || !player) return { saved: false, reason: 'invalid-player' };
+    try {
+      if (!localStorage.getItem(STORAGE_KEY)) return { saved: false, reason: 'missing-canonical-state' };
+      const fields = options.profile === true ? PLAYER_PROFILE_EDIT_FIELDS : PLAYER_RATING_EDIT_FIELDS;
+      const patch = {};
+      for (const key of fields) if (Object.prototype.hasOwnProperty.call(player, key)) patch[key] = player[key];
+      if (!Object.keys(patch).length) return { saved: false, reason: 'no-player-fields' };
+      const existingEdits = readPendingPlayerEdits();
+      // A ratings-only edit must not discard a still-pending profile edit
+      // (name, notes, colors, rival). Merge by field before coalescing by ID.
+      const previous = existingEdits.find(entry => entry.playerId === id);
+      const other = existingEdits.filter(entry => entry.playerId !== id);
+      const entry = {
+        playerId: id,
+        patch: JSON.parse(JSON.stringify({ ...(previous?.patch || {}), ...patch })),
+        updatedAtISO: new Date().toISOString()
+      };
+      const raw = JSON.stringify({ version: 1, edits: [...other, entry] });
+      localStorage.setItem(PENDING_PLAYER_EDITS_KEY, raw);
+      if (localStorage.getItem(PENDING_PLAYER_EDITS_KEY) !== raw) throw new Error('Journal readback mismatch');
+      lastPlayerJournalInteractionAt = Date.now();
+      global.TaskPointsCore?.clearStateHotCache?.();
+      global.TaskPointsCore?.clearSharedSaveWork?.();
+      schedulePlayerJournalFlush();
+      return { saved: true, state };
+    } catch (error) {
+      console.warn('Player edit journal unavailable; using protected full-save fallback.', error);
+      return { saved: false, reason: 'journal-write-failed' };
+    }
+  }
+
+  if (global.document?.addEventListener) {
+    for (const eventName of ['pointerdown','touchstart','keydown','input']) {
+      global.document.addEventListener(eventName, () => { lastPlayerJournalInteractionAt = Date.now(); }, true);
+    }
+  }
+  if (global.setTimeout) global.setTimeout(() => {
+    try { if (readPendingPlayerEdits().length) schedulePlayerJournalFlush(); } catch (_) {}
+  }, 1000);
   const pendingHabitJournalCompactions = new Map();
 
   // This deliberately contains only the final state of a habit/day pair.  It is
@@ -637,7 +762,10 @@ function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
     if (!raw) return fallback;
     const state = parseTaskPointsStorageJson(raw, fallback || {});
     // Keep direct shared-reader consumers (older pages) current too.
-    if (key === STORAGE_KEY && state) applyPendingHabitDeltas(state);
+    if (key === STORAGE_KEY && state) {
+      applyPendingHabitDeltas(state);
+      applyPendingPlayerEdits(state);
+    }
     return state;
   }
 
@@ -6113,12 +6241,26 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
       } else {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
-          parsed = parseTaskPointsStorageJson(raw, {}) || {};
+          // Reuse the exact-byte verified/shared parser when available.
+          // That layer always returns a detached snapshot and rejects stale
+          // snapshots when journals or pending writes are present. The base
+          // parser remains the fallback before its wrapper is installed.
+          const sharedParser = global.TaskPointsCore?.parseTaskPointsStorageJson;
+          parsed = (typeof sharedParser === 'function' && sharedParser !== parseTaskPointsStorageJson
+            ? sharedParser.call(global.TaskPointsCore, raw, {})
+            : parseTaskPointsStorageJson(raw, {})) || {};
           storageKeysFound.push(STORAGE_KEY);
         }
       }
     } catch (e) {
       console.error("Failed to parse stored state", e);
+      // A present but unreadable authoritative snapshot is NOT a fresh account.
+      // Never normalize an empty placeholder state that a later auto-save could
+      // mistake for the user's real history. Leave storage unchanged so the
+      // existing recovery page can inspect it.
+      const failure = new Error('TaskPoints saved data could not be read; startup was stopped to protect your history.');
+      failure.cause = e;
+      throw failure;
     }
 
     endLoadParse?.({ preloaded: !!options.preloadedState });
@@ -6131,6 +6273,7 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
     try {
       pendingHabitDeltas = readPendingHabitDeltas();
       if (pendingHabitDeltas.length) applyPendingHabitDeltas(state, pendingHabitDeltas);
+      applyPendingPlayerEdits(state);
     } catch (error) {
       console.error('Failed to safely read pending habit journal; it was preserved.', error);
     }
@@ -6743,6 +6886,7 @@ function fastEnsureStateShape(s) {
     }
 
     const mergedSnapshot = deepMerge(existing, nextState || {});
+    if (storageKey === STORAGE_KEY && options.allowDestructiveOverwrite !== true) applyPendingPlayerEdits(mergedSnapshot);
     applyStickyKeyGuard({ existing, nextState, mergedSnapshot, options, storageKey });
 
     // Protected Home histories are sticky across unrelated page saves. Matchups and
@@ -7641,6 +7785,17 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
         const size = summarizeStateSizes(candidateWithSticky);
         console.log(`[TP saveStateSnapshot] success stage=${stage} trimmed=${trimmed} savePath=${savePath} storageKey=${storageKey} completions=${size.completions} gameHistory=${size.gameHistory} matchups=${size.matchups} workHistory=${size.workHistory} schedule=${size.schedule}`);
       }
+      if (storageKey === STORAGE_KEY) {
+        try {
+          if (options.allowDestructiveOverwrite === true) {
+            // An explicitly confirmed import/restore supersedes prior edits.
+            // Only clear the journal after the replacement passes readback.
+            localStorage.setItem(PENDING_PLAYER_EDITS_KEY, JSON.stringify({ version: 1, edits: [] }));
+          } else {
+            clearVerifiedPlayerEdits(saved);
+          }
+        } catch (error) { console.warn('Player edit journal was retained after full save.', error); }
+      }
       const returnedState = inflateRedundantFieldsFromStorage(candidateWithSticky);
       setQuotaTrimMarker(stage, summarizeStateSizes(returnedState), trimmed);
       if (useFastPacked) scheduleInteractiveRecompress(storageKey, returnedState);
@@ -7661,9 +7816,14 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
 const hasOpponentDripScheduleLimit = Number.isFinite(options?.limits?.maxOpponentDripSchedules);
 
 const saveDedupeDateKey = String(options.dedupeDateKey || options.todayDateKey || '').slice(0, 10);
-const dedupedSaveState = saveDedupeDateKey
-  ? dedupeSameDayGeneratedSlateState(state, saveDedupeDateKey).state
+const pendingPlayerJournal = storageKey === STORAGE_KEY && options.allowDestructiveOverwrite !== true
+  ? readPendingPlayerEdits() : [];
+const journalSafeState = pendingPlayerJournal.length
+  ? applyPendingPlayerEdits({ ...state, players: Array.isArray(state?.players) ? state.players.map(player => ({ ...player })) : [] }, pendingPlayerJournal)
   : state;
+const dedupedSaveState = saveDedupeDateKey
+  ? dedupeSameDayGeneratedSlateState(journalSafeState, saveDedupeDateKey).state
+  : journalSafeState;
 const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
   todayOnly: options?.limits?.opponentDripSchedulesTodayOnly !== false,
   ...(hasOpponentDripScheduleLimit
@@ -10643,6 +10803,9 @@ return Number(cappedScore.toFixed(1));
     getPendingInteractiveRecompressCount: () => pendingInteractiveRecompresses.size,
     mergeState,
     saveStateSnapshot,
+    stagePlayerEdit,
+    readPendingPlayerEdits,
+    applyPendingPlayerEdits,
     saveValidatedSnapshot,
     mergeAndSaveState,
     saveAppState,

@@ -22,6 +22,10 @@
   let displayStateCacheRevision = '';
   // Temporary, synchronous reconciliation cache only. Never persisted.
   let activeGoldReconciliationBatch = null;
+  // NPC scores for one daily slate share the same pre-game Gold balances.
+  // This snapshot exists only inside withGoldNpcScoringBatch's callback.
+  // It is never persisted or reused after scoring (even on an exception).
+  let activeGoldNpcScoringBatch = null;
 
   const roundGold = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 10) / 10;
   const roundScore = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 10) / 10;
@@ -240,6 +244,7 @@
     if (!id) return 0;
     if (!state?.goldEconomy || Number(state.goldEconomy.version) !== ECONOMY_VERSION) return legacyGoldForPlayer(state || {}, id);
     if (activeGoldReconciliationBatch?.state === state) return roundGold(activeGoldReconciliationBatch.balances.get(id) || 0);
+    if (activeGoldNpcScoringBatch?.state === state) return roundGold(activeGoldNpcScoringBatch.balances.get(id) || 0);
     return roundGold(ledgerRows(state || {}).reduce((sum, row) => String(row?.playerId || '') === id ? sum + (Number(row?.amount) || 0) : sum, 0));
   }
 
@@ -260,17 +265,57 @@
   }
 
   function richestActiveNpcGold(state) {
+    if (activeGoldNpcScoringBatch?.state === state) return activeGoldNpcScoringBatch.richest;
     return roundGold(activeNpcPlayers(state).reduce((max, player) => Math.max(max, goldBalance(state, player.id || player.playerId)), 0));
   }
 
   function opponentGoldRating(state, opponentId) {
     const id = String(opponentId || '').trim();
     if (!id || id === 'YOU') return 0;
-    const player = activeNpcPlayers(state).find((item) => String(item?.id || item?.playerId || '') === id);
-    if (!player) return 0;
+    const isActive = activeGoldNpcScoringBatch?.state === state
+      ? activeGoldNpcScoringBatch.activeIds.has(id)
+      : activeNpcPlayers(state).some((item) => String(item?.id || item?.playerId || '') === id);
+    if (!isActive) return 0;
     const richest = richestActiveNpcGold(state);
     if (richest <= 0) return 0;
     return Math.min(100, Math.max(0, (goldBalance(state, id) / richest) * 100));
+  }
+
+  // The daily simulation calculates NPC scores before it creates/settles the
+  // new matchups. Snapshot Gold once for that read-only scoring phase, rather
+  // than reconciling all historical matchups for every NPC and repeatedly
+  // scanning the growing transaction ledger for each opponent.
+  // All normal callers and settlement paths continue using live Gold values.
+  function withGoldNpcScoringBatch(state, scorePlayers) {
+    if (typeof scorePlayers !== 'function') throw new TypeError('Gold NPC scoring requires a function.');
+    if (!state || typeof state !== 'object') return scorePlayers();
+    if (activeGoldNpcScoringBatch?.state === state) return scorePlayers();
+
+    const previous = activeGoldNpcScoringBatch;
+    // Full reconciliation remains mandatory once BEFORE the pre-game snapshot.
+    // Any new Gold transactions still pass the existing append-only safeguards.
+    reconcileGoldEconomy(state, { dateKey: localDateKey(), nowISO: new Date().toISOString() });
+    if (Number(state.goldEconomy?.version) !== ECONOMY_VERSION || !Array.isArray(state.goldLedger)) {
+      return scorePlayers(); // fall back to ordinary Gold reads if not initialized
+    }
+    const balances = new Map();
+    for (const row of state.goldLedger) {
+      const id = String(row?.playerId || '');
+      balances.set(id, (balances.get(id) || 0) + (Number(row?.amount) || 0));
+    }
+    const activeIds = new Set();
+    let richest = 0;
+    for (const player of activeNpcPlayers(state)) {
+      const id = String(player?.id || player?.playerId || '');
+      activeIds.add(id);
+      richest = Math.max(richest, roundGold(balances.get(id) || 0));
+    }
+    activeGoldNpcScoringBatch = { state, balances, activeIds, richest: roundGold(richest) };
+    try {
+      return scorePlayers();
+    } finally {
+      activeGoldNpcScoringBatch = previous;
+    }
   }
 
   function effectiveTheftGreed(state, playerId, matchup = null) {
@@ -796,7 +841,11 @@
   if (originalSimulator) {
     core.simulateAiScoreForPlayerCore = function greedAwareAiScore(player, dateKey, options = {}) {
       const state = options?.state && typeof options.state === 'object' ? options.state : null;
-      if (state) reconcileGoldEconomy(state, { dateKey: localDateKey(), nowISO: new Date().toISOString() });
+      // During Home's single-day NPC scoring pass, the Gold snapshot was
+      // already reconciled once before the loop. Other paths stay unchanged.
+      if (state && activeGoldNpcScoringBatch?.state !== state) {
+        reconcileGoldEconomy(state, { dateKey: localDateKey(), nowISO: new Date().toISOString() });
+      }
       const context = options?.context || {};
       const originalCapture = typeof context.captureEffects === 'function' ? context.captureEffects : null;
       let baseEffects = null;
@@ -1111,6 +1160,7 @@
     legacyGoldForPlayer,
     ensureGoldEconomy,
     reconcileGoldEconomy,
+    withGoldNpcScoringBatch,
     reconcileChampionBonuses,
     settleOneMatchup,
     goldBalance,
@@ -1130,6 +1180,7 @@
   core.getOpponentGoldRating = (state, playerId) => opponentGoldRating(state || {}, playerId);
   core.getGreedPerformance = (state, player, opponent) => greedPerformance(state || {}, player || {}, opponent || {});
   core.reconcileGoldEconomy = (state, options) => reconcileGoldEconomy(state || {}, options || {});
+  core.withGoldNpcScoringBatch = withGoldNpcScoringBatch;
   global.TaskPointsGreedGoldEconomy = api;
 
   if (global.document?.readyState === 'loading') global.document.addEventListener?.('DOMContentLoaded', patchWhenReady, { once: true });

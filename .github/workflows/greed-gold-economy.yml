@@ -8,11 +8,20 @@ on:
   pull_request:
     paths:
       - greed_gold_economy.js
+      - index.html
+      - gold_manual_adjustment.js
+      - gold_circulation_total.js
       - gold_theft_top50_notifications.js
       - records_gold_theft_history_fix.js
       - _worker.js
       - gold_ledger.html
+      - rankings.html
+      - tests/rankings_three_digit_fit.test.js
+      - tests/gold_manual_adjustment.test.js
+      - tests/gold_circulation_total.test.js
+      - tests/gold_manual_adjustment_core_integration.test.js
       - tests/greed_gold_economy.test.js
+      - tests/greed_gold_daily_scoring_batch.test.js
       - tests/greed_rating.test.js
       - tests/season_champion_gold_bonus.test.js
       - tests/inbox_gold_theft_top50_notification.test.js
@@ -31,6 +40,10 @@ jobs:
           node-version: 22
       - name: Check Greed Gold runtime syntax
         run: node --check greed_gold_economy.js
+      - name: Check Manual Gold adjustment syntax
+        run: |
+          node --check gold_manual_adjustment.js
+          node --check gold_circulation_total.js
       - name: Check Gold Theft inbox notification syntax
         run: node --check gold_theft_top50_notifications.js
       - name: Check Gold Theft records history syntax
@@ -38,7 +51,12 @@ jobs:
       - name: Run Greed Gold contracts
         run: >-
           node --test
+          tests/rankings_three_digit_fit.test.js
           tests/greed_gold_economy.test.js
+          tests/greed_gold_daily_scoring_batch.test.js
+          tests/gold_manual_adjustment.test.js
+          tests/gold_circulation_total.test.js
+          tests/gold_manual_adjustment_core_integration.test.js
           tests/greed_rating.test.js
           tests/season_champion_gold_bonus.test.js
           tests/inbox_gold_theft_top50_notification.test.js

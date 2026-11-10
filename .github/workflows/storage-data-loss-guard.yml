@@ -4,7 +4,32 @@ on:
   push:
     branches: [main]
     paths:
+      - 'index.html'
+      - 'mobile_boot_gate.js'
+      - 'tests/home_worker_route_contract.test.js'
+      - 'tests/home_weekly_work_hours.test.js'
+      - 'tests/habit_manual_streak_freezes.test.js'
+      - 'tests/mobile_boot_recovery_notice.test.js'
+      - 'tests/shared_read_cache_clone_failure.test.js'
+      - 'tests/load_state_decode_fail_closed.test.js'
       - 'scoring_core.js'
+      - 'game.html'
+      - 'player_profile.js'
+      - 'state_hot_cache.js'
+      - 'save_pipeline_shared_work.js'
+      - 'storage_maintenance_idle.js'
+      - 'tests/player_editor_journal_perf.test.js'
+      - 'tests/player_edit_cache_guards.test.js'
+      - 'season_result_integrity_guard.js'
+      - 'inbox_count_badge.js'
+      - 'tests/unchanged_state_read_reuse_contract.test.js'
+      - 'phase3_read_path.js'
+      - 'phase3_navigation_cache.js'
+      - 'phase4_storage_coordinator.js'
+      - 'phase4_primary_read_path.js'
+      - 'phase4_cache_guard.js'
+      - 'phase5a_native_snapshot.js'
+      - 'emergency_recovery.html'
       - 'settings.html'
       - 'phase2_reset_hook.js'
       - 'phase5b_deferred_mirror.js'
@@ -38,11 +63,30 @@ jobs:
       - name: Run focused storage-loss protection contracts
         run: >-
           node --test
+          tests/player_editor_journal_perf.test.js
+          tests/player_edit_cache_guards.test.js
+          tests/unchanged_state_read_reuse_contract.test.js
+          tests/load_state_decode_fail_closed.test.js
+          tests/season_result_integrity_guard.test.js
+          tests/save_pipeline_shared_work_contract.test.js
           tests/storage_atomic_replace_contract.test.js
           tests/storage_data_loss_fail_closed.test.js
           tests/phase5b_deferred_mirror_contract.test.js
           tests/phase2_reset_hook.test.js
           tests/phase2_authoritative_absence.test.js
+
+      - name: Validate deferred mobile startup syntax and recovery gate
+        run: |
+          node --input-type=module --check < mobile_boot_gate.js
+          node --test tests/home_worker_route_contract.test.js
+          node --test tests/mobile_boot_recovery_notice.test.js
+          node --test tests/shared_read_cache_clone_failure.test.js
+
+      - name: Verify Sunday Work Hours visibility and Monday restoration
+        run: node --test tests/home_weekly_work_hours.test.js
+
+      - name: Verify the Habits Week / This toggle without the Older button
+        run: node --test tests/habit_manual_streak_freezes.test.js
 
       - name: Run full TaskPoints suite
         run: npm test

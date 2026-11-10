@@ -9,7 +9,7 @@
   const STORAGE_KEY = core.STORAGE_KEY || 'taskpoints_v1';
   const JOURNAL_KEY = core.PENDING_HABIT_DELTAS_KEY || 'taskpoints_pending_habit_deltas_v1';
   const REVISION_KEY = 'taskpoints_state_revision_v1';
-  const TRACKED_KEYS = new Set([STORAGE_KEY, JOURNAL_KEY]);
+  const TRACKED_KEYS = new Set([STORAGE_KEY, JOURNAL_KEY, 'taskpoints_pending_player_edits_v1']);
   const originalLoad = core.loadAppState;
   const originalReadStoredState = core.readTaskPointsStoredState;
   let generation = 0;

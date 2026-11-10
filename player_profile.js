@@ -256,7 +256,7 @@
       var parsed = parseRatings(form);
       if (!parsed.valid) { reportInvalidRating(form, parsed.field); return false; }
       applyRatings(target, parsed.values);
-      deps.save(deps.getState(), {});
+      deps.save(deps.getState(), { playerRatingJournalId: id });
       deps.renderRoster();
       editingRatings = false;
       refreshRatingsSection();
@@ -435,6 +435,9 @@
         var wasActive = target.active !== false;
         target.active = active;
         if (wasActive !== active) deps.onActiveChange();
+        if (!pidAssignment?.changed && wasActive === active) {
+          options.playerProfileJournalId = id;
+        }
       }
       deps.save(deps.getState(), options);
       deps.renderRoster();
