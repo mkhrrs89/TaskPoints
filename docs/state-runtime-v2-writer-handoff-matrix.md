@@ -996,3 +996,9 @@ Existing V1 Flex Actions use **two independent keys**, one for completion histor
 V2's cutover inspection now makes **read-only two-pass observations** of both journals around peer checks and full-origin inventory capture. Present, malformed, changing or inaccessible evidence never authorizes promotion; `flex_journal_compaction_handoff_not_validated` remains a permanent blocker independent of snapshot parity.
 
 **Scope:** Two additional behavior-witnessed routes, raising the total to **5/78**. **0/78** production writer handoffs are owner/fence verified. Paused old tabs, cross-tab atomic admission, independent backups and real Safari lifecycle validation remain unresolved. This modification is strictly on V2; V1 is authoritative and Main is untouched.
+
+## November 10 M01 — three manually confirmed Habit repair writers
+
+The [Habit UI save-path contract](../tests/state_runtime_v2_m01_habit_repair_writer_behavior_contract.test.js) executes the production code behind three destructive/manual repair panels. Each routes through a legacy V1 snapshot save with `replaceCompletions:true`, `allowDestructiveOverwrite:true` and `immediateWrite:true`. Source-level test scenarios enforce a fresh-backup confirmation, preservation of unrelated domain data, refusal/no accidental saves on stale source changes, and conservative failure handling.
+
+The three newly witnessed routes are the ordinary audit ledger repair, completion-backed ledger repair, and result-preserving historical score reconciliation. These are **three separate existing entries** in the 78-route inventory; they do not add fabricated inventory denominator or certify V2 authority. Including them raises **V1 behavior rehearsal coverage to 8/78**, while **production owner/fence certification remains 0/78**. The V2 hard blockers for paused old tabs, import/reset, unverified off-device backup, and physical Safari remain intact. Main and live V1 runtime logic are unchanged.
