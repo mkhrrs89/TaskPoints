@@ -233,3 +233,28 @@ test('Ratings actual edit validates input before direct write, and reports faile
   assert.equal(failed.saved().players[0].poise,25);
   assert.equal(failed.paths.direct.length,1);
 });
+
+test('M01 badges, Trash and Ratings behavior witness coverage cannot grant cutover',()=>{
+  const inv=JSON.parse(fs.readFileSync(path.join(root,
+    'docs/state-runtime-v2-storage-source-inventory.json'),'utf8'));
+  const rows=inv.writerBehaviorWitnesses.filter(row=>
+    row.testPath==='tests/state_runtime_v2_m01_badges_trash_ratings_writer_behavior_contract.test.js');
+  assert.equal(rows.length,5);
+  assert.deepEqual(rows.map(row=>row.path).sort(),[
+    'achievements.html','achievements.html','game_ratings.html','trash.html','trash.html'
+  ]);
+  for(const row of rows){
+    assert.ok(inv.writerPathEvidence.some(x=>x.path===row.path&&x.anchor===row.anchor));
+    assert.ok(row.observedBehaviors.length>=4);
+    assert.equal(row.productionOwnerVerified,false);
+    assert.equal(row.productionFenceVerified,false);
+    assert.equal(row.cutoverPermission,false);
+  }
+  assert.equal(inv.writerOwnershipAudit.behaviorRehearsedWriterRoutes,17);
+  assert.equal(inv.writerOwnershipAudit.behaviorRehearsalDenominator,78);
+  assert.equal(inv.writerOwnershipAudit.verifiedOwnerAssignments,0);
+  assert.equal(inv.writerOwnershipAudit.productionWritersFenced,false);
+  assert.equal(inv.writerOwnershipAudit.status,'incomplete');
+  assert.equal(inv.writerOwnershipAudit.directV1PageWriterEvidence.productionWriterAdmissionVerified,false);
+  assert.equal(inv.writerOwnershipAudit.directV1PageWriterEvidence.oldTabGenerationFenceVerified,false);
+});
