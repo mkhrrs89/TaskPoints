@@ -78,6 +78,7 @@ jobs:
           tests/state_runtime_v2_m01_inbox_journal_behavior_contract.test.js
           tests/state_runtime_v2_m01_inbox_cutover_guard_contract.test.js
           tests/state_runtime_v2_m01_flex_journal_behavior_contract.test.js
+          tests/state_runtime_v2_m01_flex_cutover_guard_contract.test.js
 
       - name: Run V2 core storage contracts
         run: >-
