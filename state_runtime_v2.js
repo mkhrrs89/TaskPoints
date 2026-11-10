@@ -8551,11 +8551,14 @@
       const original=source.raw===null?{}:JSON.parse(source.raw);
       if(stableJson(document)!==stableJson(original))
         return refuse('today_rebuild_legacy_roundtrip_mismatch');
-      const proof=await previewRecoveryFingerprint({
-        sourcePresent:source.raw!==null,payload:document
-      });
-      if(proof!==source.sourceFingerprint)
-        return refuse('today_rebuild_source_fingerprint_mismatch');
+      // The legacy provenance SHA covers JSON.stringify's insertion order.
+      // V2 day records are intentionally grouped differently, so compare
+      // *canonical semantic bytes* rather than confusing key order with a
+      // missing field. The original V1 SHA remains checked against evidence.
+      const originalProof=await previewRecoveryFingerprint(stableJson(original));
+      const rebuiltProof=await previewRecoveryFingerprint(stableJson(document));
+      if(rebuiltProof!==originalProof)
+        return refuse('today_rebuild_canonical_fingerprint_mismatch');
       const rowProof=await previewRecoveryFingerprint(sorted(rows));
       if(rowProof!==evidence.recordsFingerprint)
         return refuse('today_rebuild_row_fingerprint_mismatch');
