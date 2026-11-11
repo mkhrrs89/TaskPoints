@@ -1483,6 +1483,39 @@ function setupDebouncedPersistence() {
   const pendingByKey = new Map();
   const timers = new Map();
 
+  // Preview-only freshness evidence. Legacy V1 remains authoritative and is
+  // not globally fenced: this simply prevents a *known stale* delayed snapshot
+  // from replaying after a newer save or a V2 preview generation rotation.
+  const PREVIEW_DARK_KEY = 'taskpoints_state_v2_dark_mode_v1';
+  const PREVIEW_GENERATION_KEY = 'taskpoints_state_v2_generation_v1';
+  let retainedFailedFlushes = 0;
+  let blockedStalePreviewFlushes = 0;
+  let lastDeferredSaveError = '';
+
+  const capturePreviewSource = (storageKey) => {
+    const storage = window.localStorage;
+    if (!storage || storage.getItem(PREVIEW_DARK_KEY) !== '1') return null;
+    const generation = storage.getItem(PREVIEW_GENERATION_KEY);
+    // Never claim a generation fence before the preview generation exists.
+    if (!generation) return null;
+    return { generation, raw: storage.getItem(storageKey) };
+  };
+
+  const deferredSaveError = (code, message) => {
+    const error = new Error(message);
+    error.code = code;
+    return error;
+  };
+
+  core.getDeferredSaveSafetyStatus = () => ({
+    pendingKeys: Array.from(pendingByKey.keys()),
+    retainedFailedFlushes,
+    blockedStalePreviewFlushes,
+    lastError: lastDeferredSaveError,
+    previewOnlyFreshnessCheck: true,
+    allLegacyWritersFenced: false
+  });
+
 const scheduleFlush = (storageKey) => {
   const existingId = timers.get(storageKey);
   if (existingId) {
@@ -1514,12 +1547,47 @@ const flushKey = (storageKey) => {
   const pending = pendingByKey.get(storageKey);
   if (!pending) return;
 
-  pendingByKey.delete(storageKey);
+  try {
+    // Do not commit an old full-state image if a peer wrote different source
+    // bytes, or restore/reset rotated the preview epoch while it was queued.
+    // This is an observable best-effort check, NOT atomic cross-tab CAS.
+    if (pending.previewSource) {
+      const current = capturePreviewSource(storageKey);
+      if (!current
+        || current.generation !== pending.previewSource.generation
+        || current.raw !== pending.previewSource.raw) {
+        blockedStalePreviewFlushes += 1;
+        throw deferredSaveError(
+          'TASKPOINTS_V2_PREVIEW_DEFERRED_SOURCE_CHANGED',
+          'A newer storage snapshot or preview generation replaced the queued save source.'
+        );
+      }
+    }
 
-// Flush the latest queued full-state snapshot to localStorage.
-// This uses a direct snapshot write so deletions persist correctly;
-// stale-tab protection must be handled separately from this flush step.
-core.saveStateSnapshot(pending.state, { ...pending.options, storageKey, immediateWrite: true });
+    // Keep the pending save until the canonical core writer acknowledges it.
+    // Quota cooldown may return a skipped result instead of throwing; dropping
+    // that queued change silently would make later user edits disappear.
+    const result = core.saveStateSnapshot(pending.state, {
+      ...pending.options, storageKey, immediateWrite: true
+    });
+    if (!result || !result.state || result.skipped === true || result.blocked === true
+      || result.ok === false || result.blockedByQuotaCircuit === true) {
+      throw deferredSaveError(
+        'TASKPOINTS_DEFERRED_SAVE_NOT_DURABLE',
+        'TaskPoints did not confirm the deferred snapshot was saved.'
+      );
+    }
+    if (pendingByKey.get(storageKey) === pending) pendingByKey.delete(storageKey);
+    lastDeferredSaveError = '';
+    return true;
+  } catch (error) {
+    retainedFailedFlushes += 1;
+    lastDeferredSaveError = String(error?.code || error?.message || error);
+    console.warn('TaskPoints kept a deferred save pending after a refused flush.', error);
+    // Keep the exact pending intent for a later explicit retry or recovery.
+    // No background polling, hidden fallback or destructive key rewrite.
+    throw error;
+  }
 };
 
 
@@ -1546,7 +1614,10 @@ core.saveStateSnapshot(pending.state, { ...pending.options, storageKey, immediat
   existing: pending?.state,
   assumeNormalized: true
 });
-    pendingByKey.set(storageKey, { state: merged.state, options: { ...options, storageKey } });
+    pendingByKey.set(storageKey, {
+      state: merged.state, options: { ...options, storageKey },
+      previewSource: pending ? pending.previewSource : capturePreviewSource(storageKey)
+    });
     scheduleFlush(storageKey);
     return { state: merged.state, trimmed: false };
   };
@@ -1570,7 +1641,11 @@ core.saveStateSnapshot(pending.state, { ...pending.options, storageKey, immediat
       return core.saveStateSnapshot(nextState, options);
     }
     const storageKey = options.storageKey || core.STORAGE_KEY || STORAGE_KEY_FALLBACK;
-    pendingByKey.set(storageKey, { state: nextState, options: { ...options, storageKey } });
+    const pending = pendingByKey.get(storageKey);
+    pendingByKey.set(storageKey, {
+      state: nextState, options: { ...options, storageKey },
+      previewSource: pending ? pending.previewSource : capturePreviewSource(storageKey)
+    });
     scheduleFlush(storageKey);
     return { state: nextState, trimmed: false };
   };

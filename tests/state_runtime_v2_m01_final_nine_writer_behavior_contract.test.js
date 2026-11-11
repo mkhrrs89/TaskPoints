@@ -80,21 +80,29 @@ test('Toolbar Inbox denied write returns no success and preserves whole V1 snaps
 });
 
 // Route 2: Toolbar's true delayed merge/snapshot writer.
-function debouncedHarness({denySnapshot=false}={}){
-  const s=storage(),timers=[],listeners={},writes=[];
+function debouncedHarness({denySnapshot=false,skipSnapshot=false,preview=false}={}){
+  const s=storage(preview
+    ? {'taskpoints_state_v2_dark_mode_v1':'1','taskpoints_state_v2_generation_v1':'epoch-a'}
+    : {}),timers=[],listeners={},writes=[];
+  let denied=denySnapshot,skipped=skipSnapshot;
   const core={STORAGE_KEY:V1,
     mergeState(partial,{existing}={}){return {state:{...(existing||inspect(s)),...partial}}},
     mergeAndSaveState(partial,opts={}){const next={...inspect(s),...partial};s.setItem(V1,JSON.stringify(next));return {state:next}},
-    saveStateSnapshot(next,opts={}){writes.push({next,opts});if(denySnapshot)throw Error('snapshot refused');s.setItem(V1,JSON.stringify(next));return {state:next}}
+    saveStateSnapshot(next,opts={}){
+      writes.push({next,opts});
+      if(denied)throw Error('snapshot refused');
+      if(skipped)return {state:next,skipped:true,blockedByQuotaCircuit:true};
+      s.setItem(V1,JSON.stringify(next));return {state:next};
+    }
   };
-  const c=vmContext({TaskPointsCore:core,STORAGE_KEY_FALLBACK:V1,
+  const c=vmContext({TaskPointsCore:core,STORAGE_KEY_FALLBACK:V1,localStorage:s,
     TP_PERSIST_DEBOUNCE_MS:900,document:{addEventListener(name,fn){listeners['doc:'+name]=fn},visibilityState:'visible'},
     addEventListener(name,fn){listeners[name]=fn},
     setTimeout(fn){timers.push(fn);return timers.length},
     clearTimeout(){},requestIdleCallback:null
   });
   run(c,source('toolbar.js','function setupDebouncedPersistence() {','setupDebouncedPersistence();')+'\nsetupDebouncedPersistence();','toolbar.js');
-  return {s,core,timers,writes,listeners};
+  return {s,core,timers,writes,listeners,allowSnapshot(){denied=false;skipped=false}};
 }
 test('Toolbar debounced merges flush the latest full state and preserve untouched snapshot fields',()=>{
   const h=debouncedHarness();
@@ -114,6 +122,55 @@ test('Toolbar denied deferred snapshot flush does not claim a durable save',()=>
   h.core.mergeAndSaveState({notes:'nondurable'});
   assert.throws(()=>h.core.flushPendingSaves(),/snapshot refused/);
   assertV1Untouched(h.s);
+  assert.equal(h.core.getDeferredSaveSafetyStatus().pendingKeys.length,1);
+  h.allowSnapshot();
+  h.core.flushPendingSaves();
+  assert.equal(inspect(h.s).notes,'nondurable','pending edit is retried after quota clears');
+  assert.equal(h.core.getDeferredSaveSafetyStatus().pendingKeys.length,0);
+});
+
+test('Toolbar skipped quota-cooldown result retains the queued save until acknowledged',()=>{
+  const h=debouncedHarness({skipSnapshot:true});
+  h.core.mergeAndSaveState({notes:'queued-under-quota'});
+  assert.throws(()=>h.core.flushPendingSaves(),
+    error=>error.code==='TASKPOINTS_DEFERRED_SAVE_NOT_DURABLE');
+  assertV1Untouched(h.s);
+  assert.equal(h.core.getDeferredSaveSafetyStatus().pendingKeys.length,1);
+  h.allowSnapshot();
+  h.core.flushPendingSaves();
+  assert.equal(inspect(h.s).notes,'queued-under-quota');
+  assert.equal(h.core.getDeferredSaveSafetyStatus().pendingKeys.length,0);
+});
+
+test('Toolbar V2 preview refuses known stale queued snapshot after a peer edits V1',()=>{
+  const h=debouncedHarness({preview:true});
+  h.core.mergeAndSaveState({notes:'stale-tab'});
+  const newer={...inspect(h.s),goldLedger:[{id:'newer-gold',amount:100}]};
+  h.s.setItem(V1,JSON.stringify(newer));
+  assert.throws(()=>h.core.flushPendingSaves(),
+    error=>error.code==='TASKPOINTS_V2_PREVIEW_DEFERRED_SOURCE_CHANGED');
+  assert.equal(inspect(h.s).goldLedger[0].id,'newer-gold');
+  assert.equal(h.core.getDeferredSaveSafetyStatus().pendingKeys.length,1);
+  assert.equal(h.core.getDeferredSaveSafetyStatus().blockedStalePreviewFlushes,1);
+});
+
+test('Toolbar V2 preview rejects delayed writes across reset generation rotation',()=>{
+  const h=debouncedHarness({preview:true});
+  h.core.queueStateSnapshot({...inspect(h.s),notes:'pre-reset'});
+  h.s.setItem('taskpoints_state_v2_generation_v1','epoch-b');
+  assert.throws(()=>h.core.flushPendingSaves(),
+    error=>error.code==='TASKPOINTS_V2_PREVIEW_DEFERRED_SOURCE_CHANGED');
+  assertV1Untouched(h.s);
+  assert.equal(h.core.getDeferredSaveSafetyStatus().pendingKeys.length,1);
+});
+
+test('Toolbar preview freshness gate never changes normal V1 save behavior',()=>{
+  const h=debouncedHarness();
+  h.core.mergeAndSaveState({notes:'allowed-nonpreview'});
+  h.core.flushPendingSaves();
+  assert.equal(inspect(h.s).notes,'allowed-nonpreview');
+  assert.equal(h.core.getDeferredSaveSafetyStatus().pendingKeys.length,0);
+  assert.equal(h.core.getDeferredSaveSafetyStatus().allLegacyWritersFenced,false);
 });
 
 // Route 3: verified-secondary restore's actual lock sequence and exact readback.

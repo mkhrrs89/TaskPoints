@@ -3082,6 +3082,17 @@
       "verifiedSecondaryRestoreLockReadbackProbed": true,
       "originalToolbarAndRepairWritersRehearsed": true,
       "cutoverPermission": false
+    },
+    "toolbarDeferredSaveSafetyEvidence": {
+      "sourcePath": "toolbar.js",
+      "testPath": "tests/state_runtime_v2_m01_final_nine_writer_behavior_contract.test.js",
+      "retainsQueuedIntentOnThrownSave": true,
+      "retainsQueuedIntentOnNonthrowingQuotaSkip": true,
+      "previewOnlySourceByteAndGenerationFence": true,
+      "atomicCrossTabFence": false,
+      "allLegacyWritersFenced": false,
+      "productionOwnerCertified": false,
+      "v1AuthorityUnchanged": true
     }
   },
   "proposedWriterHandoffs": [
