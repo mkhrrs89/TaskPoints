@@ -204,7 +204,7 @@ test('M01 witnessed routes in this contract are not V2 owner or cutover certific
     assert.equal(row.productionFenceVerified,false);
     assert.equal(row.cutoverPermission,false);
   }
-  assert.equal(inv.writerOwnershipAudit.behaviorRehearsedWriterRoutes,34);
+  assert.equal(inv.writerOwnershipAudit.behaviorRehearsedWriterRoutes,42);
   assert.equal(inv.writerOwnershipAudit.verifiedOwnerAssignments,0);
   assert.equal(inv.writerOwnershipAudit.productionWritersFenced,false);
   assert.equal(inv.writerOwnershipAudit.status,'incomplete');

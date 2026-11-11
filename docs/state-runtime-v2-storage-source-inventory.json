@@ -2933,7 +2933,7 @@
     "proposedOwnerAssignments": 78,
     "verifiedOwnerAssignments": 0,
     "requiredClosure": "Complete per-key and per-writer ownership, live admission + generation fencing, export/import/restore and real device tests before M01 can verify",
-    "behaviorRehearsedWriterRoutes": 34,
+    "behaviorRehearsedWriterRoutes": 42,
     "behaviorRehearsalDenominator": 78,
     "inboxReadOnlyCutoverGate": {
       "checkFunction": "inspectReadOnlyInboxJournalForCutover",
@@ -3013,6 +3013,17 @@
       "storageFailureIsNotDurabilityProof": true,
       "productionOwnerCertified": false,
       "liveCrossTabFencingVerified": false,
+      "cutoverPermission": false
+    },
+    "modeRecoverySidecarBehaviorEvidence": {
+      "testPath": "tests/state_runtime_v2_m01_mode_recovery_sidecar_behavior_contract.test.js",
+      "behaviorTestedWriterRoutes": 8,
+      "includesRecoveredWriteLockExpiry": true,
+      "keepsCommittedRestoreLock": true,
+      "deniesFastStorageWithRecoveryHold": true,
+      "failuresCannotClaimDurableMutation": true,
+      "productionOwnerCertified": false,
+      "oldTabFenceProductionVerified": false,
       "cutoverPermission": false
     }
   },
@@ -4324,6 +4335,118 @@
         "level_config_normalized_before_persistence",
         "reload_and_corrupt_json_fallback",
         "failed_write_leaves_stored_config_unchanged"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "phase3_read_path.js",
+      "anchor": "global.localStorage?.setItem?.(MODE_KEY, nextMode);",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_mode_recovery_sidecar_behavior_contract.test.js",
+      "observedBehaviors": [
+        "mode_off_compare_and_unknown_mode_policy",
+        "sidecar_mode_persistence_with_diagnostic_and_no_snapshot_rewrite",
+        "quota_denied_mode_writer_does_not_change_actual_mode"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "habit_fast_path_control.js",
+      "anchor": "global.localStorage?.setItem?.(key, value);",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_mode_recovery_sidecar_behavior_contract.test.js",
+      "observedBehaviors": [
+        "habit_fast_path_persistent_kill_switch",
+        "fresh_page_reads_prior_preference",
+        "quota_denial_leaves_runtime_only_switch_and_preserves_v1"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "indexeddb_requalification_guard.js",
+      "anchor": "storage.setItem(DIAG_KEY, JSON.stringify(",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_mode_recovery_sidecar_behavior_contract.test.js",
+      "observedBehaviors": [
+        "fast_mode_denial_logs_reason_and_returns_off",
+        "active_recovery_hold_denies_requalification",
+        "diagnostic_write_failure_keeps_safe_mode_off"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "indexeddb_requalification_hold_guard.js",
+      "anchor": "storage.setItem(MODE_KEY, 'off');",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_mode_recovery_sidecar_behavior_contract.test.js",
+      "observedBehaviors": [
+        "missing_preflight_fails_closed_even_if_core_mode_set_throws",
+        "newer_recovery_hold_cannot_be_removed",
+        "storage_event_force_off_preserves_snapshot"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "phase4_primary_read_path.js",
+      "anchor": "global.localStorage?.setItem?.(DIAGNOSTICS_KEY, JSON.stringify(next));",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_mode_recovery_sidecar_behavior_contract.test.js",
+      "observedBehaviors": [
+        "missing_authoritative_mirror_uses_legacy_loader",
+        "fallback_diagnostics_increment_without_clobbering_extra_fields",
+        "quota_denied_diagnostics_do_not_block_fallback"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "emergency_recovery_lock_authorization.js",
+      "anchor": "storage.setItem(COMMITTED_LOCK_KEY, JSON.stringify(committed));",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_mode_recovery_sidecar_behavior_contract.test.js",
+      "observedBehaviors": [
+        "verified_restore_commits_timestamped_recovery_lock",
+        "successful_lock_commit_clears_attempt_and_hides_lock_on_recovery_page",
+        "failed_lock_commit_preserves_attempt_and_displays_warning"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "home_targeted_render_control.js",
+      "anchor": "global.localStorage?.setItem?.(key, value);",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_mode_recovery_sidecar_behavior_contract.test.js",
+      "observedBehaviors": [
+        "targeted_render_kill_switch_persists_across_module_reloads",
+        "enable_removes_independent_key",
+        "quota_denial_not_confused_with_durable_setting"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "home_yesterday_result_consistency.js",
+      "anchor": "storage.removeItem(LOCK_KEY);",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_mode_recovery_sidecar_behavior_contract.test.js",
+      "observedBehaviors": [
+        "expired_uncommitted_lock_removed_by_real_home_guard",
+        "committed_recovery_lock_retained_even_if_old",
+        "stale_tab_snapshot_and_habit_journal_writes_rejected"
       ],
       "productionOwnerVerified": false,
       "productionFenceVerified": false,
