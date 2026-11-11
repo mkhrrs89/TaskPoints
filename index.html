@@ -4650,6 +4650,38 @@ effectsById[id] = capturedEffects;
   }
   markHomeMorningStartupPhase('npc-scores-ready');
 
+  // Index only today's matchups once. Previously every generated pair
+  // searched all historical games with findIndex, which becomes expensive
+  // after months of league history on an iPhone.
+  const todayMatchupIndexes = [];
+  const todayMatchupIds = new Map();
+  const todayMatchupPairs = new Map();
+  const matchupPairKey = (row) => {
+    const pair = [String(row?.playerAId || ''), String(row?.playerBId || '')].sort();
+    return JSON.stringify([pair[0], pair[1], String(row?.matchupType || '')]);
+  };
+  const rememberTodayMatchup = (row, index) => {
+    const id = String(row?.id || row?.matchupId || '');
+    if (id && !todayMatchupIds.has(id)) todayMatchupIds.set(id, index);
+    const pair = matchupPairKey(row);
+    if (!todayMatchupPairs.has(pair)) todayMatchupPairs.set(pair, index);
+  };
+  const rebuildTodayMatchupIndex = () => {
+    todayMatchupIds.clear();
+    todayMatchupPairs.clear();
+    for (const index of todayMatchupIndexes) {
+      const row = state.matchups[index];
+      if (row && getMatchupDateKeyLocal(row) === todayKey) rememberTodayMatchup(row, index);
+    }
+  };
+  for (let index = 0; index < state.matchups.length; index++) {
+    const row = state.matchups[index];
+    if (row && getMatchupDateKeyLocal(row) === todayKey) {
+      todayMatchupIndexes.push(index);
+      rememberTodayMatchup(row, index);
+    }
+  }
+
   todaysPairs.forEach(pair => {
     const matchup = {
       ...pair,
@@ -4668,34 +4700,37 @@ playerBEffects: effectsById[pair.playerBId] ?? null
     };
 
     const stableId = String(matchup.id || matchup.matchupId || '');
-    const existingIndex = state.matchups.findIndex(m => {
-      if (!m || getMatchupDateKeyLocal(m) !== todayKey) return false;
-      if (stableId && String(m.id || m.matchupId || '') === stableId) return true;
-      const a = String(m.playerAId || '');
-      const b = String(m.playerBId || '');
-      return [a, b].sort().join('|') === [String(matchup.playerAId), String(matchup.playerBId)].sort().join('|')
-        && String(m.matchupType || '') === String(matchup.matchupType || '');
-    });
-if (existingIndex >= 0) {
-  const existing = state.matchups[existingIndex];
-
-  state.matchups[existingIndex] = {
-    ...matchup,
-    ...existing,
-
-    playerAEffects:
-      existing.playerAEffects ??
-      matchup.playerAEffects ??
-      null,
-
-    playerBEffects:
-      existing.playerBEffects ??
-      matchup.playerBEffects ??
-      null
-  };
-} else {
-  state.matchups.push(matchup);
-}
+    const pairKey = matchupPairKey(matchup);
+    const byId = stableId ? todayMatchupIds.get(stableId) : undefined;
+    const byPair = todayMatchupPairs.get(pairKey);
+    // Match the old findIndex rule: the earliest same-day row matching either
+    // this ID or unordered pair + matchup type wins, even with duplicates.
+    const existingIndex = Math.min(
+      byId === undefined ? Infinity : byId,
+      byPair === undefined ? Infinity : byPair
+    );
+    if (Number.isFinite(existingIndex)) {
+      const existing = state.matchups[existingIndex];
+      const oldId = String(existing.id || existing.matchupId || '');
+      const oldPair = matchupPairKey(existing);
+      state.matchups[existingIndex] = {
+        ...matchup,
+        ...existing,
+        playerAEffects: existing.playerAEffects ?? matchup.playerAEffects ?? null,
+        playerBEffects: existing.playerBEffects ?? matchup.playerBEffects ?? null
+      };
+      const updated = state.matchups[existingIndex];
+      if (oldId !== String(updated.id || updated.matchupId || '')
+        || oldPair !== matchupPairKey(updated)
+        || getMatchupDateKeyLocal(updated) !== todayKey) {
+        rebuildTodayMatchupIndex(); // rare changing-key fallback, still only today's rows
+      }
+    } else {
+      const index = state.matchups.length;
+      state.matchups.push(matchup);
+      todayMatchupIndexes.push(index);
+      rememberTodayMatchup(matchup, index);
+    }
   });
 
   if (window.TaskPointsCore?.dedupeSameDayGeneratedSlateState) {
