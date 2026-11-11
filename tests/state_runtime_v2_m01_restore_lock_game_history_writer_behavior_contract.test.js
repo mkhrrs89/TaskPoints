@@ -191,3 +191,23 @@ test('Game History repair refuses a stale preview, and blocked save never report
   assert.match(blocked.status(),/Save failed, so no success/);
   assert.equal(blocked.runs.length,0);
 });
+
+test('M01 witnessed routes in this contract are not V2 owner or cutover certificates',()=>{
+  const inv=JSON.parse(fs.readFileSync(path.join(root,
+    'docs/state-runtime-v2-storage-source-inventory.json'),'utf8'));
+  const witness=inv.writerBehaviorWitnesses.filter(row=>row.testPath==='tests/state_runtime_v2_m01_restore_lock_game_history_writer_behavior_contract.test.js');
+  assert.equal(witness.length,2);
+  for(const row of witness){
+    assert.ok(inv.writerPathEvidence.some(src=>src.path===row.path&&src.anchor===row.anchor));
+    assert.ok(row.observedBehaviors.length>=4);
+    assert.equal(row.productionOwnerVerified,false);
+    assert.equal(row.productionFenceVerified,false);
+    assert.equal(row.cutoverPermission,false);
+  }
+  assert.equal(inv.writerOwnershipAudit.behaviorRehearsedWriterRoutes,28);
+  assert.equal(inv.writerOwnershipAudit.verifiedOwnerAssignments,0);
+  assert.equal(inv.writerOwnershipAudit.productionWritersFenced,false);
+  assert.equal(inv.writerOwnershipAudit.status,'incomplete');
+  assert.equal(inv.writerOwnershipAudit.sixRouteSafetyEvidence.crossTabFencingVerified,false);
+  assert.equal(inv.writerOwnershipAudit.sixRouteSafetyEvidence.cutoverPermission,false);
+});
