@@ -92,7 +92,7 @@ function harness(initial = seed(), flags = {}, fakeNow = '2027-01-01T08:30:00') 
   context.globalThis = context;
   vm.runInNewContext(source, context, { filename: 'gold_season_interest.js' });
   return {
-    api: context.TaskPointsGoldSeasonInterest, core, calls, storage,
+    api: context.TaskPointsGoldSeasonInterest, core, calls, storage, context,
     now: () => new FixedDate(),
     current: () => JSON.parse(storage.getItem('taskpoints_v1')),
     writes: () => writes
@@ -273,4 +273,81 @@ test('Settings and Gold Ledger include seasonal settings and interest transactio
   assert.ok(ledgerPage.includes('<option value="season_interest">Season Interest</option>'));
   assert.ok(ledgerPage.includes("season_interest: 'Season Interest'"));
   assert.ok(ledgerPage.includes("if (row.type === 'season_interest')"));
+});
+
+
+test('new-season popup waits for Home reveal and applies interest only after Yes', async () => {
+  const h = harness();
+  const timers = [];
+  const removed = [];
+  let visible = false;
+  function node(tag) {
+    return {
+      tag, children: [], handlers: {}, attributes: {}, style: {}, id: '',
+      textContent: '', disabled: false,
+      append(...children) { this.children.push(...children); },
+      appendChild(child) { this.children.push(child); return child; },
+      setAttribute(key, value) { this.attributes[key] = value; },
+      addEventListener(name, fn) { this.handlers[name] = fn; },
+      click() { this.handlers.click?.(); },
+      focus() {},
+      remove() { removed.push(this); }
+    };
+  }
+  const body = node('body');
+  h.context.document = {
+    hidden: false,
+    body,
+    createElement(tag) { return node(tag); }
+  };
+  h.context.setTimeout = fn => { timers.push(fn); };
+  h.context.__tpMobileBootCoordinator = { isRevealed() { return visible; } };
+  const promise = h.api.ensureSeasonDecision();
+  assert.equal(body.children.length, 0, 'no popup before the saved Home state is shown');
+  assert.equal(timers.length, 1);
+  visible = true;
+  timers.shift()();
+  assert.equal(body.children.length, 1);
+  const backdrop = body.children[0];
+  assert.equal(backdrop.id, 'tpSeasonInterestModal');
+  const dialog = backdrop.children[0];
+  assert.equal(dialog.attributes.role, 'dialog');
+  assert.equal(dialog.attributes['aria-modal'], 'true');
+  const buttons = dialog.children[3].children;
+  assert.equal(buttons[0].textContent, 'Yes, Apply Interest');
+  assert.equal(buttons[1].textContent, 'No, Skip This Season');
+  assert.equal(h.calls.save, 0, 'displaying offer cannot grant Gold');
+  buttons[0].click();
+  const result = await promise;
+  assert.equal(result.status, 'applied');
+  assert.equal(h.current().goldLedger.filter(row => row.type === 'season_interest').length, 4);
+  assert.ok(removed.includes(backdrop));
+  assert.equal((await h.api.ensureSeasonDecision()).status, 'applied');
+  assert.equal(h.calls.save, 1, 'reopening cannot apply again');
+});
+
+test('clicking No skips interest without changing any Gold or showing it again', async () => {
+  const h = harness();
+  function node(tag) {
+    return {
+      tag, children: [], handlers: {}, attributes: {}, style: {},
+      append(...children) { this.children.push(...children); },
+      appendChild(child) { this.children.push(child); },
+      setAttribute(key, value) { this.attributes[key] = value; },
+      addEventListener(name, fn) { this.handlers[name] = fn; },
+      click() { this.handlers.click?.(); },
+      focus() {}, remove() {}
+    };
+  }
+  const body = node('body');
+  h.context.document = { hidden: false, body, createElement(tag) { return node(tag); } };
+  const promise = h.api.ensureSeasonDecision();
+  const no = body.children[0].children[0].children[3].children[1];
+  no.click();
+  assert.equal((await promise).status, 'skipped');
+  assert.equal(h.current().goldLedger.length, 4);
+  assert.equal(h.current().goldEconomy.seasonInterestDecisions[0].status, 'skipped');
+  assert.equal(h.calls.save, 1);
+  assert.equal((await h.api.ensureSeasonDecision()).status, 'skipped');
+  assert.equal(h.calls.save, 1);
 });
