@@ -7482,6 +7482,27 @@ return { state: merged, storageKey };
             const newValues = Array.isArray(incomingEconomy[key]) ? incomingEconomy[key] : [];
             merged[key] = [...new Set([...oldValues, ...newValues])];
           }
+          // Seasonal interest decisions are permanent, keyed by the date the
+          // two-month season began. An unrelated/stale page save cannot erase
+          // or replace a prior decision, just as it cannot erase Gold rows.
+          const oldInterest = Array.isArray(savedEconomy.seasonInterestDecisions)
+            ? savedEconomy.seasonInterestDecisions : [];
+          const newInterest = Array.isArray(incomingEconomy.seasonInterestDecisions)
+            ? incomingEconomy.seasonInterestDecisions : [];
+          const interestBySeason = new Map();
+          [...oldInterest, ...newInterest].forEach((decision) => {
+            const key = String(decision?.seasonStartDateKey || '');
+            if (key && !interestBySeason.has(key)) interestBySeason.set(key, decision);
+          });
+          if (oldInterest.length || newInterest.length) {
+            merged.seasonInterestDecisions = [...interestBySeason.values()];
+          }
+          // An old Home tab must not undo a rate saved in Settings.
+          // Only the explicit Settings Gold-interest editor can change it.
+          if (options.allowGoldInterestRateOverwrite !== true
+            && Object.prototype.hasOwnProperty.call(savedEconomy, 'interestRatePercent')) {
+            merged.interestRatePercent = savedEconomy.interestRatePercent;
+          }
           merged.launchedAtISO = savedEconomy.launchedAtISO || merged.launchedAtISO;
           merged.launchDateKey = savedEconomy.launchDateKey || merged.launchDateKey;
           next.goldEconomy = merged;
