@@ -1840,6 +1840,7 @@ Nothing visible on the page is built here. === -->
 </script>
 <script src="/scoring_core.js"></script>  
 <script src="home_rank_percentile_line.js?v=20261104-season4-opponent-record-1"></script>
+<script src="gold_season_interest.js?v=20261111-season-interest-1"></script>
 <script>
 const STORAGE_KEY="taskpoints_v1";
 const PENDING_HABIT_DELTAS_KEY="taskpoints_pending_habit_deltas_v1";
@@ -4989,10 +4990,25 @@ function scheduleHomeDailySimulationAfterReveal() {
     // An actual paint, not merely a microtask, must separate opening Home
     // from CPU-heavy daily scoring and its non-optional protected persistence.
     requestAnimationFrame(() => {
-      setTimeout(() => {
+      setTimeout(async () => {
         if (document.hidden) { setTimeout(waitForReveal, 250); return; }
-        homeMorningSimulationScheduled = false;
         try {
+          // Season interest is explicitly approved or skipped BEFORE any
+          // opening-day game scores, Greed boosts, or Gold thefts are settled.
+          // The Home screen has already painted before showing the dialog.
+          if (window.TaskPointsGoldSeasonInterest?.seasonStartOn?.(new Date())) {
+            const outcome = await window.TaskPointsGoldSeasonInterest.ensureSeasonDecision();
+            if (outcome?.status === 'unavailable') {
+              markHomeMorningStartupPhase('interest-decision-unavailable');
+              return; // never simulate from an unverified season-opening wallet
+            }
+            // Read the authoritative post-decision snapshot. Do not generate
+            // games from the stale Gold balances held by the original Home boot.
+            storageCache.raw = null;
+            storageCache.parsed = null;
+            state = normalizeState(load());
+            markCompletionsDirty();
+          }
           const generated = maybeAutoSimToday();
           if (!generated) return;
           state = syncStateWithMatchups(state);
@@ -5002,6 +5018,8 @@ function scheduleHomeDailySimulationAfterReveal() {
         } catch (error) {
           markHomeMorningStartupPhase('simulation-error');
           console.error('TaskPoints first-of-day simulation failed; saved data was preserved.', error);
+        } finally {
+          homeMorningSimulationScheduled = false;
         }
       }, 0);
     });
@@ -15486,6 +15504,18 @@ function refreshMainPageIfChanged(reason = 'lifecycle') {
 }
 
 let hasCompletedInitialPageShow = false;
+
+// Refresh Gold displays after the commissioner decides whether to apply
+// season-start interest. The pending daily simulation stays scheduled and
+// will use the confirmed saved snapshot before generating any new games.
+window.addEventListener('taskpoints:season-gold-interest-recorded', () => {
+  storageCache.raw = null;
+  storageCache.parsed = null;
+  state = normalizeState(load());
+  markCompletionsDirty();
+  scheduleRender(renderAll);
+  markHomeLifecycleBaseline();
+});
 
 window.addEventListener('pageshow', (event) => {
   if (!hasCompletedInitialPageShow) {
