@@ -2933,7 +2933,7 @@
     "proposedOwnerAssignments": 78,
     "verifiedOwnerAssignments": 0,
     "requiredClosure": "Complete per-key and per-writer ownership, live admission + generation fencing, export/import/restore and real device tests before M01 can verify",
-    "behaviorRehearsedWriterRoutes": 51,
+    "behaviorRehearsedWriterRoutes": 60,
     "behaviorRehearsalDenominator": 78,
     "inboxReadOnlyCutoverGate": {
       "checkFunction": "inspectReadOnlyInboxJournalForCutover",
@@ -3035,6 +3035,18 @@
       "restoresAndImportsUntouched": true,
       "allProductionWritersFenced": false,
       "authorityStillV1": true,
+      "cutoverPermission": false
+    },
+    "previewRecoveryNineWriterEvidence": {
+      "testPath": "tests/state_runtime_v2_m01_preview_recovery_nine_writer_behavior_contract.test.js",
+      "behaviorTestedWriterRoutes": 9,
+      "previewAndRecoveryOnly": true,
+      "exactV2KeyAndDatabaseIsolationChecked": true,
+      "unrecoverableHoldWriteFailureObserved": true,
+      "epochReadbackVerifiedInSyntheticVM": true,
+      "WALTestMarkerOneUseVerifiedInSyntheticVM": true,
+      "productionOwnerCertified": false,
+      "oldTabGenerationFenceVerified": false,
       "cutoverPermission": false
     }
   },
@@ -4584,6 +4596,132 @@
         "exact_writer_commits_and_readback_matches_expected_bytes",
         "stale_snapshot_rejected_before_write",
         "missing_quota_refused_or_bad_readback_cannot_claim_save"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "state_v2_preview_enable.html",
+      "anchor": "localStorage.setItem(KEY, '1');",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_preview_recovery_nine_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "preview_host_only_optin",
+        "production_unknown_hosts_rejected",
+        "denied_write_does_not_redirect_or_mutate_v1"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "state_v2_preview_cleanup.html",
+      "anchor": "V2_KEYS.forEach((key) => localStorage.removeItem(key));",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_preview_recovery_nine_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "three_v2_only_keys_removed",
+        "V1_snapshot_habit_journal_and_images_untouched",
+        "production_or_refused_removal_halts"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "state_v2_preview_cleanup.html",
+      "anchor": "indexedDB.deleteDatabase(databases[index]);",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_preview_recovery_nine_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "four_v2_only_IDB_databases_deleted",
+        "V1_primary_and_secondary_databases_preserved",
+        "blocked_error_unavailable_reported"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "verified_secondary_restore.html",
+      "anchor": "localStorage.setItem('taskpoints_emergency_recovery_hold_v1', JSON.stringify({",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_preview_recovery_nine_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "preload_pending_habit_and_legacy_journals_first",
+        "verified_secondary_restore_hold_active",
+        "failed_hold_cannot_claim_restore_protection"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "verified_secondary_restore.html",
+      "anchor": "localStorage.setItem('taskpoints_phase4_storage_mode_v1', 'off');",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_preview_recovery_nine_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "mode_off_written_after_hold",
+        "refused_hold_aborts_mode_off_in_same_try",
+        "V1_snapshot_unchanged"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "emergency_recovery.html",
+      "anchor": "localStorage.setItem('taskpoints_emergency_recovery_hold_v1'",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_preview_recovery_nine_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "emergency_hold_before_core_scripts",
+        "success_sets_storage_mode_off",
+        "hold_write_failure_aborts_mode_off_in_same_try"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "state_runtime_v2_generation.js",
+      "anchor": "global.localStorage?.setItem?.(key, String(value));",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_preview_recovery_nine_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "epoch_created_and_readback_verified",
+        "rotation_distinct_and_emits_change",
+        "quota_or_silent_write_refused"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "state_runtime_v2_live_review.js",
+      "anchor": "global.sessionStorage.setItem(WAL_TEST_ARM_KEY, '1');",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_preview_recovery_nine_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "WAL_test_arming_preview_only",
+        "dark_mode_required",
+        "quota_failure_no_marker"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "state_runtime_v2_wal_bridge.js",
+      "anchor": "global.sessionStorage.removeItem(WAL_TEST_ARM_KEY);",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_preview_recovery_nine_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "WAL_marker_consumed_once",
+        "page_local_hold_after_successful_remove",
+        "production_and_failure_leave_arm_unconsumed"
       ],
       "productionOwnerVerified": false,
       "productionFenceVerified": false,
