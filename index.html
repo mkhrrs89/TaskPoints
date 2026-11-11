@@ -4996,7 +4996,17 @@ function scheduleHomeDailySimulationAfterReveal() {
           // Season interest is explicitly approved or skipped BEFORE any
           // opening-day game scores, Greed boosts, or Gold thefts are settled.
           // The Home screen has already painted before showing the dialog.
-          if (window.TaskPointsGoldSeasonInterest?.seasonStartOn?.(new Date())) {
+          // If the interest module failed to load on a season's first day,
+          // do not settle opening-day games from pre-interest Gold balances.
+          const nowForSeason = new Date();
+          const isInterestBoundary = nowForSeason.getFullYear() >= 2027
+            && nowForSeason.getDate() === 1 && nowForSeason.getMonth() % 2 === 0;
+          if (isInterestBoundary && !window.TaskPointsGoldSeasonInterest?.ensureSeasonDecision) {
+            markHomeMorningStartupPhase('interest-module-unavailable');
+            console.error('TaskPoints season interest module was not loaded; daily games were not generated.');
+            return;
+          }
+          if (window.TaskPointsGoldSeasonInterest?.seasonStartOn?.(nowForSeason)) {
             const outcome = await window.TaskPointsGoldSeasonInterest.ensureSeasonDecision();
             if (outcome?.status === 'unavailable') {
               markHomeMorningStartupPhase('interest-decision-unavailable');
