@@ -2933,7 +2933,7 @@
     "proposedOwnerAssignments": 78,
     "verifiedOwnerAssignments": 0,
     "requiredClosure": "Complete per-key and per-writer ownership, live admission + generation fencing, export/import/restore and real device tests before M01 can verify",
-    "behaviorRehearsedWriterRoutes": 22,
+    "behaviorRehearsedWriterRoutes": 28,
     "behaviorRehearsalDenominator": 78,
     "inboxReadOnlyCutoverGate": {
       "checkFunction": "inspectReadOnlyInboxJournalForCutover",
@@ -2993,6 +2993,17 @@
       "productionWriterOwnerVerified": false,
       "oldTabGenerationFenceVerified": false,
       "productionCutoverAllowed": false
+    },
+    "sixRouteSafetyEvidence": {
+      "testPaths": [
+        "tests/state_runtime_v2_m01_archive_schedule_seed_rollover_behavior_contract.test.js",
+        "tests/state_runtime_v2_m01_restore_lock_game_history_writer_behavior_contract.test.js"
+      ],
+      "behaviorTestedWriterRoutes": 6,
+      "productionOwnerCertified": false,
+      "crossTabFencingVerified": false,
+      "cutoverPermission": false,
+      "mainBranchUntouched": true
     }
   },
   "proposedWriterHandoffs": [
@@ -4123,6 +4134,102 @@
         "user_confirmed_official_bracket_save",
         "invalid_bracket_never_saves",
         "failed_save_does_not_navigate_or_activate"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "archive.html",
+      "anchor": "TaskPointsCore.saveStateSnapshot({ ...existing, ...partial }, { storageKey: STORAGE_KEY }).state;",
+      "kind": "v1_existing_behavior_synthetic",
+      "behaviorName": "archive_protected_task_history_save",
+      "testPath": "tests/state_runtime_v2_m01_archive_schedule_seed_rollover_behavior_contract.test.js",
+      "observedBehaviors": [
+        "archived_task_restore_and_completion_saves",
+        "unknown_gold_and_imported_fields_preserved",
+        "missing_save_helper_refuses_write",
+        "failed_save_keeps_original_bytes"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "schedule.html",
+      "anchor": "TaskPointsCore.saveStateSnapshot({ ...existing, ...nextState }, { storageKey: STORAGE_KEY }).state;",
+      "kind": "v1_existing_behavior_synthetic",
+      "behaviorName": "schedule_protected_full_snapshot_save",
+      "testPath": "tests/state_runtime_v2_m01_archive_schedule_seed_rollover_behavior_contract.test.js",
+      "observedBehaviors": [
+        "schedule_edit_writes_existing_v1_snapshot",
+        "other_game_gold_tasks_unknown_fields_preserved",
+        "missing_writer_does_not_persist",
+        "failed_save_marks_cache_dirty"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "season_seed_sources.js",
+      "anchor": "const saved = core.saveStateSnapshot(state, { savePath });",
+      "kind": "v1_existing_behavior_synthetic",
+      "behaviorName": "season_scoped_seed_ranking_save",
+      "testPath": "tests/state_runtime_v2_m01_archive_schedule_seed_rollover_behavior_contract.test.js",
+      "observedBehaviors": [
+        "season2_ranked_rebuild_writes_requested_scope",
+        "save_path_labels_season_scope",
+        "unrelated_gold_and_imported_data_kept",
+        "failed_write_refuses_authoritative_change"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "season3_tournament_rollover.js",
+      "anchor": "savePath: 'season3-october-auto-rollover'",
+      "kind": "v1_existing_behavior_synthetic",
+      "behaviorName": "season3_automatic_october_save",
+      "testPath": "tests/state_runtime_v2_m01_archive_schedule_seed_rollover_behavior_contract.test.js",
+      "observedBehaviors": [
+        "sixty_seed_bracket_persisted_once",
+        "automatic_rollover_idempotent",
+        "insufficient_qualifiers_or_conflicting_season_refuse_write",
+        "failed_v1_snapshot_retains_original_data"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "verified_secondary_restore_lock_guard.js",
+      "anchor": "storage.removeItem(LOCK_KEY);",
+      "kind": "v1_existing_behavior_synthetic",
+      "behaviorName": "recovery_owned_lock_cleanup",
+      "testPath": "tests/state_runtime_v2_m01_restore_lock_game_history_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "uncommitted_owned_token_released_on_page_exit",
+        "foreign_token_must_not_be_removed",
+        "committed_manual_recovery_hold_retained",
+        "expired_lock_removed_without_authorizing_old_writer"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "game_history_reconciliation_repair.js",
+      "anchor": "const saved = core.saveStateSnapshot?.(result.state, {",
+      "kind": "v1_existing_behavior_synthetic",
+      "behaviorName": "manual_game_history_repair_save",
+      "testPath": "tests/state_runtime_v2_m01_restore_lock_game_history_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "preview_and_backup_required_before_game_history_edit",
+        "confirmed_score_fixed_preserving_matchups_gold_tasks",
+        "stale_preview_blocks_writer",
+        "blocked_v1_save_reports_failure_and_preserves_history"
       ],
       "productionOwnerVerified": false,
       "productionFenceVerified": false,
