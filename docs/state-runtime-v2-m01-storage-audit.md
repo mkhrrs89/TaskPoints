@@ -173,6 +173,19 @@ The [M01 actual-page contract](../tests/state_runtime_v2_m01_log_skills_bracket_
 
 Result: **22/78** source-anchored routes with real V1 behavior witnesses, up from **17/78**. **0/78** production owners verified. Main has progressed separately since the prior V2 turn; no Main sync was requested, so this round did not sync or modify it. M01 and 67/100 readiness remain unchanged.
 
+## November 11 thirteenth pass — six distinct legacy writer-route behavior witnesses
+
+The two new M01 contracts execute **the real production sources** against isolated synthetic state/storage (not replacements for the actual writer functions):
+
+- **Archive `archive.html`:** User actions to unarchive and complete a Task use the protected V1 snapshot route. Failed or missing writer leaves stored canonical bytes unchanged; Gold, history and unknown fields are preserved.
+- **Schedule `schedule.html`:** Schedule edits write a merged full V1 snapshot and preserve unrelated imported fields. Missing or rejected writers cannot persist a replacement; failed saves invalidate the page cache.
+- **Season seed source `season_seed_sources.js`:** Scoped Season 2 preview rebuild persists through the V1 season writer. A failed save leaves the authoritative scope unchanged and reports failure; a missing helper does not silently persist state.
+- **Season 3 October rollover `season3_tournament_rollover.js`:** The automatic protected V1 writer locks 60 seeds exactly once and is idempotent. It refuses insufficient qualifiers, a conflicting active season and a failed canonical write without replacing existing data.
+- **Restore lock cleanup `verified_secondary_restore_lock_guard.js`:** Only an owned uncommitted recovery lock may be cleared. A committed/manual hold or a lock owned by a different tab is retained; expired abandoned locks cannot authorize a stale writer.
+- **Game History repair `game_history_reconciliation_repair.js`:** The actual repair panel requires a fresh preview and backup confirmation, corrects a known scored history row while retaining matchups/Gold/Tasks, and rejects a stale preview or blocked V1 save without claiming success.
+
+These six source-anchored paths raise behavior-witness coverage to **28/78**. Each explicitly remains `productionOwnerVerified:false`, `productionFenceVerified:false` and `cutoverPermission:false`. **0/78** paths are production ownership certified. These tests do not prove old background tabs are fenced, transaction admission is atomic, or on-device recovery is safe. V2 is still in dark preview, V1 remains authoritative and the migration score stays **67/100**.
+
 ## Specific next work to close M01
 
 1. Run the CI source scanner against all 170 files; triage which of the 98 uninspected files access or indirectly modify storage. Move from *inspected* to *writer ownership verified* only with a caller/writer trace, including indirect `TaskPointsCore` saves and dynamic key aliases.
