@@ -4516,14 +4516,42 @@ function makeId() {
   return "id_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2);
 }
 
+// Minimal, content-free phase markers survive an interrupted iPhone startup.
+const HOME_MORNING_TRACE_KEY = 'tp_home_morning_startup_trace_v1';
+function markHomeMorningStartupPhase(phase, details = {}) {
+  try {
+    const day = getGameDayKey(new Date());
+    const raw = localStorage.getItem(HOME_MORNING_TRACE_KEY);
+    let report = raw ? JSON.parse(raw) : null;
+    if (!report || report.dateKey !== day || phase === 'scheduled') {
+      report = { version: 1, dateKey: day, phases: [] };
+    }
+    const safe = {};
+    for (const key of ['players', 'historyRows', 'matchups', 'ledgerRows', 'saved']) {
+      if (typeof details[key] === 'boolean') safe[key] = details[key];
+      else if (Number.isFinite(details[key])) safe[key] = Math.max(0, Math.floor(details[key]));
+    }
+    report.phases.push({ name: String(phase), atMs: Math.round(performance.now()), ...safe });
+    report.phases = report.phases.slice(-16);
+    localStorage.setItem(HOME_MORNING_TRACE_KEY, JSON.stringify(report));
+  } catch (_) { /* diagnostics must never stop startup or recovery */ }
+}
+
 function simulateToday() {
   const todayKey = getGameDayKey(new Date());
+  markHomeMorningStartupPhase('simulation-start', {
+    players: state.players?.length,
+    historyRows: state.gameHistory?.length,
+    matchups: state.matchups?.length,
+    ledgerRows: state.goldLedger?.length
+  });
 
   state.gameHistory = state.gameHistory || [];
   state.matchups    = state.matchups    || [];
   state.schedule    = state.schedule    || [];
 
   ensureUpcomingSchedule();
+  markHomeMorningStartupPhase('schedule-ready');
 
   const todaysSchedule = state.schedule.find(d => d && d.date === todayKey);
   const todaysPairs = todaysSchedule && Array.isArray(todaysSchedule.matchups)
@@ -4556,6 +4584,14 @@ const effectsById = {};
     scoresById['YOU'] = youScore;
   }
 
+// Index today's first history row once, instead of re-scanning years of
+// previous days for every NPC score in the morning's simulated slate.
+const todayHistoryByPlayer = new Map();
+for (const entry of state.gameHistory) {
+  if (!entry || getHistoryDateKey(entry) !== todayKey) continue;
+  const id = String(entry.playerId || '');
+  if (id && !todayHistoryByPlayer.has(id)) todayHistoryByPlayer.set(id, entry);
+}
 const scoreNpcParticipants = () => participantIds.forEach(id => {
   if (id === 'YOU') return;
   const player = playerMap.get(id);
@@ -4582,17 +4618,19 @@ const score = simulateAiScoreForPlayer(player, todayKey, {
 scoresById[id] = score;
 effectsById[id] = capturedEffects;
   ensureOpponentDripSchedule(todayKey, id, score);
-  const existingHistory = state.gameHistory.find(g => getHistoryDateKey(g) === todayKey && String(g.playerId || '') === String(id));
+  const existingHistory = todayHistoryByPlayer.get(String(id));
   if (existingHistory) {
     if (capturedEffects && typeof capturedEffects === 'object') existingHistory.effects = capturedEffects;
   } else {
-    state.gameHistory.push({
+    const historyRow = {
       id: makeId(),
       date: todayKey,
       playerId: id,
       score,
       effects: capturedEffects
-    });
+    };
+    state.gameHistory.push(historyRow);
+    todayHistoryByPlayer.set(String(id), historyRow);
   }
 });
 
@@ -4604,6 +4642,7 @@ effectsById[id] = capturedEffects;
   } else {
     scoreNpcParticipants();
   }
+  markHomeMorningStartupPhase('npc-scores-ready');
 
   todaysPairs.forEach(pair => {
     const matchup = {
@@ -4665,7 +4704,9 @@ if (existingIndex >= 0) {
     (seasonSync.errors || []).forEach((error) => console.warn('Season result sync error:', error));
   }
 
-  save();
+  markHomeMorningStartupPhase('matchups-ready');
+  const saved = save('home-first-daily-simulation');
+  markHomeMorningStartupPhase('simulation-finished', { saved });
 }
 
 function getHistoryDateKey(g){
