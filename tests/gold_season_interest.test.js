@@ -37,7 +37,7 @@ function seed() {
       { id: 'a', playerId: 'A', type: 'opening_balance', amount: 100, balanceAfter: 100 },
       { id: 'b', playerId: 'B', type: 'opening_balance', amount: 20, balanceAfter: 20 },
       { id: 'you', playerId: 'YOU', type: 'opening_balance', amount: 11.1, balanceAfter: 11.1 },
-      { id: 'old', playerId: 'DELETED', type: 'opening_balance', amount: 0.5, balanceAfter: 0.5 }
+      { id: 'old', playerId: 'DELETED', type: 'opening_balance', amount: 2.5, balanceAfter: 2.5 }
     ]
   };
 }
@@ -140,7 +140,7 @@ test('3 percent of 100 Gold credits exactly 3 Gold; wallets of YOU, inactive and
     ['YOU', 0.3, 11.4],
     ['A', 3, 103],
     ['B', 0.6, 20.6],
-    ['DELETED', 0.1, 0.6]
+    ['DELETED', 0.1, 2.6]
   ]);
   for (const field of ['tasks', 'completions', 'habits', 'players',
     'matchups', 'gameHistory', 'seasonHistory']) {
