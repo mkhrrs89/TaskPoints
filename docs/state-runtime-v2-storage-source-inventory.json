@@ -2933,7 +2933,7 @@
     "proposedOwnerAssignments": 78,
     "verifiedOwnerAssignments": 0,
     "requiredClosure": "Complete per-key and per-writer ownership, live admission + generation fencing, export/import/restore and real device tests before M01 can verify",
-    "behaviorRehearsedWriterRoutes": 17,
+    "behaviorRehearsedWriterRoutes": 22,
     "behaviorRehearsalDenominator": 78,
     "inboxReadOnlyCutoverGate": {
       "checkFunction": "inspectReadOnlyInboxJournalForCutover",
@@ -2982,6 +2982,17 @@
       "v1AuthorityUnchanged": true,
       "directRawWriterRoutes": 3,
       "fallbackWhenWrapperUnavailableOrThrows": 2
+    },
+    "logSkillsBracketEvidence": {
+      "testPath": "tests/state_runtime_v2_m01_log_skills_bracket_writer_behavior_contract.test.js",
+      "behaviorTestedWriterRoutes": 5,
+      "rawFallbackWriterRoutes": 2,
+      "logPageReducedSnapshotMissingGoldLedger": true,
+      "logUnknownFieldLossObserved": true,
+      "logLossCorrectedInProduction": false,
+      "productionWriterOwnerVerified": false,
+      "oldTabGenerationFenceVerified": false,
+      "productionCutoverAllowed": false
     }
   },
   "proposedWriterHandoffs": [
@@ -4032,6 +4043,86 @@
         "synthetic_you_player_not_persisted_as_npc",
         "invalid_input_refused_before_write",
         "raw_save_failure_preserves_original_snapshot"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "log.html",
+      "anchor": "TaskPointsCore.saveStateSnapshot(merged, { storageKey: STORAGE_KEY }).state;",
+      "kind": "v1_existing_behavior_synthetic",
+      "behaviorName": "log_full_snapshot_save",
+      "testPath": "tests/state_runtime_v2_m01_log_skills_bracket_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "named_completion_changes_persist",
+        "snapshot_save_replaces_completions",
+        "canonical_page_cache_used",
+        "projection_omits_unrecognized_gold_ledger_fields"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "log.html",
+      "anchor": "TaskPointsCore.writeTaskPointsStoredState(merged, { storageKey: STORAGE_KEY });",
+      "kind": "v1_existing_behavior_synthetic",
+      "behaviorName": "log_direct_v1_fallback",
+      "testPath": "tests/state_runtime_v2_m01_log_skills_bracket_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "raw_snapshot_when_primary_saver_missing",
+        "completion_deletion_is_not_undone",
+        "failed_raw_save_retains_bytes",
+        "cache_invalidated_on_failure"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "skills.html",
+      "anchor": "const saved = TaskPointsCore.saveStateSnapshot(nextState, { savePath });",
+      "kind": "v1_existing_behavior_synthetic",
+      "behaviorName": "skills_protected_full_state_save",
+      "testPath": "tests/state_runtime_v2_m01_log_skills_bracket_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "new_manual_skill_persists",
+        "manual_skill_delete_persists",
+        "unrelated_gold_and_matchups_preserved",
+        "saving_reports_specific_user_save_path"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "skills.html",
+      "anchor": "TaskPointsCore.writeTaskPointsStoredState(nextState, { storageKey: STORAGE_KEY });",
+      "kind": "v1_existing_behavior_synthetic",
+      "behaviorName": "skills_direct_v1_fallback",
+      "testPath": "tests/state_runtime_v2_m01_log_skills_bracket_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "missing_snapshot_api_routes_to_raw_v1",
+        "skill_add_and_remove_via_raw_save",
+        "failed_direct_write_preserves_canonical_bytes",
+        "duplicate_name_refuses_write"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "season_bracket_builder.js",
+      "anchor": "const saved = core.saveStateSnapshot(nextState, { savePath, userInitiated: true, immediateWrite: true });",
+      "kind": "v1_existing_behavior_synthetic",
+      "behaviorName": "season_bracket_builder_protected_writer",
+      "testPath": "tests/state_runtime_v2_m01_log_skills_bracket_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "draft_save_retains_preview_without_official_games",
+        "user_confirmed_official_bracket_save",
+        "invalid_bracket_never_saves",
+        "failed_save_does_not_navigate_or_activate"
       ],
       "productionOwnerVerified": false,
       "productionFenceVerified": false,
