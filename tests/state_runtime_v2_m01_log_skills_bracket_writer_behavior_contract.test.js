@@ -272,3 +272,29 @@ test('Bracket creation requires explicit confirmation and protected save before 
   invalid.action('save-draft');
   assert.equal(invalid.saves.length,0);
 });
+
+test('five Log Skills and Bracket behavior witnesses cannot grant authority',()=>{
+  const inv=JSON.parse(fs.readFileSync(path.join(root,
+    'docs/state-runtime-v2-storage-source-inventory.json'),'utf8'));
+  const routes=inv.writerBehaviorWitnesses.filter(row=>
+    row.testPath==='tests/state_runtime_v2_m01_log_skills_bracket_writer_behavior_contract.test.js');
+  assert.equal(routes.length,5);
+  assert.deepEqual(routes.map(row=>row.path).sort(),[
+    'log.html','log.html','season_bracket_builder.js','skills.html','skills.html'
+  ]);
+  for(const route of routes){
+    assert.ok(inv.writerPathEvidence.some(row=>row.path===route.path&&row.anchor===route.anchor));
+    assert.ok(route.observedBehaviors.length>=4);
+    assert.equal(route.productionOwnerVerified,false);
+    assert.equal(route.productionFenceVerified,false);
+    assert.equal(route.cutoverPermission,false);
+  }
+  assert.equal(inv.writerOwnershipAudit.behaviorRehearsedWriterRoutes,22);
+  assert.equal(inv.writerOwnershipAudit.behaviorRehearsalDenominator,78);
+  assert.equal(inv.writerOwnershipAudit.verifiedOwnerAssignments,0);
+  assert.equal(inv.writerOwnershipAudit.productionWritersFenced,false);
+  assert.equal(inv.writerOwnershipAudit.status,'incomplete');
+  assert.equal(inv.writerOwnershipAudit.logSkillsBracketEvidence.logUnknownFieldLossObserved,true);
+  assert.equal(inv.writerOwnershipAudit.logSkillsBracketEvidence.logLossCorrectedInProduction,false);
+  assert.equal(inv.writerOwnershipAudit.logSkillsBracketEvidence.productionCutoverAllowed,false);
+});
