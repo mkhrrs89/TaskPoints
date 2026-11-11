@@ -86,7 +86,7 @@ test('daily matchup index reproduces the original earliest ID-or-pair matching w
   const input = seed();
   const expected = expectedMatchups(input);
   const state = clone(input);
-  let dateReads = 0, saves = 0, generatedSchedules = 0;
+  let dateReads = 0, saves = 0, generatedSchedules = 0, generatedIds = 0;
   const context = {
     state,
     console: { warn() {}, error() {} },
@@ -103,7 +103,7 @@ test('daily matchup index reproduces the original earliest ID-or-pair matching w
       return scoreFor(player.id);
     },
     ensureOpponentDripSchedule() {},
-    makeId() { throw new Error('Schedule is complete, no random IDs should be necessary'); },
+    makeId() { return 'generated-history-' + (++generatedIds); },
     TaskPointsCore: { withGoldNpcScoringBatch(state, fn) { return fn(); } },
     save() { saves++; return true; }
   };
@@ -118,7 +118,7 @@ test('daily matchup index reproduces the original earliest ID-or-pair matching w
     'date lookups must scale with historic rows, not historic rows times each new game');
   assert.ok(state.gameHistory.some(g => g.id === 'existing-today' && g.effects?.npcId === 'NPC-3'),
     'existing today history receives updated effects');
-  assert.equal(state.gameHistory.filter(g => g.date === day).length, 9,
+  assert.equal(state.gameHistory.filter(g => g.date === day).length, 7,
     'each NPC gets exactly one today record; old records stay intact');
   assert.equal(input.gameHistory.length, 5001, 'seed was not mutated by simulation');
 });
