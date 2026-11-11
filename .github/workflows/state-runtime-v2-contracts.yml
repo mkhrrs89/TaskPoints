@@ -84,6 +84,7 @@ jobs:
           tests/state_runtime_v2_m01_badges_trash_ratings_writer_behavior_contract.test.js
           tests/state_runtime_v2_m01_log_skills_bracket_writer_behavior_contract.test.js
           tests/state_runtime_v2_m01_archive_schedule_seed_rollover_behavior_contract.test.js
+          tests/state_runtime_v2_m01_restore_lock_game_history_writer_behavior_contract.test.js
 
       - name: Run V2 core storage contracts
         run: >-
