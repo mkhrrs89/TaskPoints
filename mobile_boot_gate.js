@@ -36,6 +36,9 @@ const COORDINATOR_SCRIPT = `<script id="tp-mobile-boot-runtime-coordinator">
   // Separate from TaskPoints' authoritative game data and safety vault.
   function bootTraceStage(name) {
     try {
+      // Settings is also transformed by the mobile boot gate, but opening
+      // Settings to inspect the Home trace must NOT overwrite the evidence.
+      if (/(^|\\/)settings(?:\\.html)?$/.test(window.location?.pathname || '')) return;
       const storage = window.localStorage;
       const key = 'tp_home_boot_timing_v1';
       const now = new Date();
@@ -46,8 +49,16 @@ const COORDINATOR_SCRIPT = `<script id="tp-mobile-boot-runtime-coordinator">
       ].join('-');
       const raw = storage.getItem(key);
       let report = raw ? JSON.parse(raw) : null;
-      if (!report || report.dateKey !== dateKey || name === 'coordinator-start') {
-        report = { version: 1, dateKey, phases: [] };
+      if (!report || report.dateKey !== dateKey || !Array.isArray(report.phases)) {
+        report = { version: 1, dateKey, phases: [], priorAttempts: [] };
+      }
+      if (name === 'coordinator-start' && report.phases.length) {
+        // Keep the previous attempts so two force-closes followed by a
+        // successful third try still leave useful troubleshooting evidence.
+        report.priorAttempts = Array.isArray(report.priorAttempts) ? report.priorAttempts : [];
+        report.priorAttempts.push(report.phases);
+        report.priorAttempts = report.priorAttempts.slice(-3);
+        report.phases = [];
       }
       report.phases.push({ name, atMs: Math.round(performance.now()) });
       report.phases = report.phases.slice(-16);
