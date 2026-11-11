@@ -192,7 +192,7 @@ test('M01 Flex witnesses remain V1 behavior only, with no production handoff', (
     assert.equal(row.productionFenceVerified, false);
     assert.equal(row.cutoverPermission, false);
   }
-  assert.equal(inv.writerOwnershipAudit.behaviorRehearsedWriterRoutes,60);
+  assert.equal(inv.writerOwnershipAudit.behaviorRehearsedWriterRoutes,69);
   assert.equal(inv.writerOwnershipAudit.verifiedOwnerAssignments, 0);
   assert.equal(inv.writerOwnershipAudit.productionWritersFenced, false);
   assert.equal(inv.writerOwnershipAudit.flexReadOnlyCutoverGate.allowsCutover, false);

@@ -223,3 +223,9 @@ Real-source, isolated VM tests in [M01 preview/recovery tests](../tests/state_ru
 **Newly visible limitation:** emergency and verified-secondary preload scripts share a single try block between the hold write and `phase4` mode-off write. A thrown hold write prevents this preload from setting mode off; separate runtime checks remain important and further production fencing is necessary. The test preserves this observed risk rather than claiming fail-closed certification.
 
 Behavioral coverage **51 → 60 / 78**; **0 / 78** V2 production owner/fence proofs. This remains M01 Working and weighted readiness **67/100**. Isolated VM evidence is not live concurrent-tab or physical Safari reliability. Main remains untouched and unsynced.
+
+## November 11 — nine more image, export, Gold and V2 WAL behavior witnesses
+
+The source-executing isolated VM tests at [M01 nine writer behavior contracts](../tests/state_runtime_v2_m01_nine_image_export_wal_writer_behavior_contract.test.js) now rehearse Toolbar image deletion, Storage Diagnostics image deletion, the guarded manual image cleanup transaction, Home export Notes location synchronization, SCWM's deferred original save, V2 WAL shared append and verified removal with independent recovery evidence, retroactive Gold/Matchups score-adjustment save routing, and secondary-page export's schedule-preparation save. No changes were made to live production writer code.
+
+These tests separately assert no unexpected `taskpoints_v1` writes, quota/denial behavior, readback-based WAL durability, cleanup transaction handling, idempotent/no-op branches, and paths where saving may not be available. **Witnessed source routes: 60 → 69/78; verified production owner assignments still 0/78.** M01 remains Working, overall weighted readiness **67/100**. This is not a device-level verification, atomic multi-tab handoff, migration, or permission to cut over. Main was not modified or synced.

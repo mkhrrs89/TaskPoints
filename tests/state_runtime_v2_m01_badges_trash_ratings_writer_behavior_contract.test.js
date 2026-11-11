@@ -250,7 +250,7 @@ test('M01 badges, Trash and Ratings behavior witness coverage cannot grant cutov
     assert.equal(row.productionFenceVerified,false);
     assert.equal(row.cutoverPermission,false);
   }
-  assert.equal(inv.writerOwnershipAudit.behaviorRehearsedWriterRoutes,60);
+  assert.equal(inv.writerOwnershipAudit.behaviorRehearsedWriterRoutes,69);
   assert.equal(inv.writerOwnershipAudit.behaviorRehearsalDenominator,78);
   assert.equal(inv.writerOwnershipAudit.verifiedOwnerAssignments,0);
   assert.equal(inv.writerOwnershipAudit.productionWritersFenced,false);

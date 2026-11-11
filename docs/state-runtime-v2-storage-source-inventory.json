@@ -2933,7 +2933,7 @@
     "proposedOwnerAssignments": 78,
     "verifiedOwnerAssignments": 0,
     "requiredClosure": "Complete per-key and per-writer ownership, live admission + generation fencing, export/import/restore and real device tests before M01 can verify",
-    "behaviorRehearsedWriterRoutes": 60,
+    "behaviorRehearsedWriterRoutes": 69,
     "behaviorRehearsalDenominator": 78,
     "inboxReadOnlyCutoverGate": {
       "checkFunction": "inspectReadOnlyInboxJournalForCutover",
@@ -3047,6 +3047,17 @@
       "WALTestMarkerOneUseVerifiedInSyntheticVM": true,
       "productionOwnerCertified": false,
       "oldTabGenerationFenceVerified": false,
+      "cutoverPermission": false
+    },
+    "imageExportWalNineWriterEvidence": {
+      "testPath": "tests/state_runtime_v2_m01_nine_image_export_wal_writer_behavior_contract.test.js",
+      "behaviorTestedWriterRoutes": 9,
+      "includesImageDeletionTransactions": true,
+      "includesWALExactReadbackAndCleanup": true,
+      "includesExportScheduleAndNotes": true,
+      "includesRetroactiveGoldSaveWrapper": true,
+      "productionOwnerCertified": false,
+      "concurrentCrossTabSafetyVerified": false,
       "cutoverPermission": false
     }
   },
@@ -4722,6 +4733,132 @@
         "WAL_marker_consumed_once",
         "page_local_hold_after_successful_remove",
         "production_and_failure_leave_arm_unconsumed"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "toolbar.js",
+      "anchor": "store.delete(imageId)",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_nine_image_export_wal_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "image_delete_uses_images_readwrite_store",
+        "missing_id_is_noop",
+        "transaction_failure_does_not_mutate_v1_snapshot"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "storage_diagnostics.js",
+      "anchor": "store.delete(key)",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_nine_image_export_wal_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "delete_image_ids_deduplicated",
+        "success_only_after_transaction_completion",
+        "missing_database_rejected"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "storage_diagnostics_cleanup_controller.js",
+      "anchor": "keys.forEach((key) => store.delete(key));",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_nine_image_export_wal_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "manual_cleanup_deduplicates_image_ids",
+        "requires_transaction_completion",
+        "failure_closes_database_and_preserves_snapshot"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "home_export_responsiveness.js",
+      "anchor": "global.syncNotesStorageLocations('responsive-export-sync')",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_nine_image_export_wal_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "export_sync_notes_locations_preferred",
+        "dirty_notes_cache_is_fallback",
+        "V1_main_snapshot_untouched"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "scwm_interaction_fast_path.js",
+      "anchor": "originals.save.apply(queued.thisArg, queued.args);",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_nine_image_export_wal_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "deferred_save_calls_original_once",
+        "preserves_original_arguments",
+        "no_pending_save_is_noop"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "state_runtime_v2_wal.js",
+      "anchor": "setWalStorageVerified(KEY, text, 'state_runtime_v2_wal_write_failed');",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_nine_image_export_wal_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "WAL_appends_independent_recoverable_entry",
+        "shared_log_verifies_exact_readback",
+        "silent_ignored_write_rejected"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "state_runtime_v2_wal.js",
+      "anchor": "removeWalStorageVerified(KEY, 'state_runtime_v2_wal_remove_failed');",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_nine_image_export_wal_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "verified_WAL_cleanup_removes_matching_recovery_entries",
+        "removal_requires_durable_same_key_readback",
+        "failed_remove_retains_evidence"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "gold_theft_top50_notifications.js",
+      "anchor": "core.saveStateSnapshot = function saveStateSnapshotWithRetroactiveGoldAdjustments",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_nine_image_export_wal_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "only_matchups_result_edits_trigger_reconciliation",
+        "nonmatchups_saves_delegate_unchanged",
+        "missing_or_invalid_economy_does_not_create_gold_records"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "inbox_count_badge.js",
+      "anchor": "core.saveValidatedSnapshot(normalized, {",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_nine_image_export_wal_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "secondary_export_schedule_prep_uses_validated_writer",
+        "no_schedule_change_is_noop",
+        "no_persistence_api_does_not_claim_save"
       ],
       "productionOwnerVerified": false,
       "productionFenceVerified": false,
