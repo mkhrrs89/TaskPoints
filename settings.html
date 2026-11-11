@@ -124,6 +124,23 @@
 
 
 
+      <details class="glass space-y-3" id="morningStartupDiagnosticsSection">
+        <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
+          <div>
+            <div class="text-lg font-semibold">Morning Startup Diagnostics</div>
+            <div class="muted text-sm">Check where the last iPhone Home opening slowed or stopped. No task or player details are recorded.</div>
+          </div>
+        </summary>
+        <div class="space-y-3 pt-4">
+          <div class="flex flex-wrap gap-2">
+            <button id="showMorningStartupReportBtn" type="button" class="btn btn-ghost btn-toolbar nav-btn">Show Last Startup Report</button>
+            <button id="copyMorningStartupReportBtn" type="button" class="btn btn-ghost btn-toolbar nav-btn">Copy Report</button>
+          </div>
+          <pre id="morningStartupReport" class="muted text-xs hidden" style="max-height:320px;white-space:pre-wrap;overflow-wrap:anywhere;overflow:auto;"></pre>
+          <div id="morningStartupReportStatus" class="muted text-xs" role="status" aria-live="polite"></div>
+        </div>
+      </details>
+
       <section class="glass space-y-3" aria-labelledby="shadowMigrationTitle">
         <div>
           <div id="shadowMigrationTitle" class="text-lg font-semibold">Shadow IndexedDB Migration</div>
@@ -5132,5 +5149,69 @@ return;
     <span>Top</span>
   </button>
   <div id="bottomToolbarMount"></div>
+  <script>
+  (function enableMorningStartupDiagnostics() {
+    function summaryOf(key, title) {
+      let data = null;
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw) data = JSON.parse(raw);
+      } catch (_) {}
+      if (!data || !Array.isArray(data.phases) || !data.phases.length) {
+        return title + ': No saved phase information yet.';
+      }
+      const lines = [title + ' (' + String(data.dateKey || 'date unknown') + ')'];
+      let last = null;
+      for (const phase of data.phases) {
+        const time = Number(phase.atMs);
+        const gap = Number.isFinite(time) && last !== null
+          ? ' | +' + Math.max(0, Math.round(time - last)) + ' ms since previous step'
+          : '';
+        const detail = ['players', 'historyRows', 'matchups', 'ledgerRows', 'saved']
+          .filter(key => phase[key] !== undefined)
+          .map(key => key + '=' + String(phase[key]))
+          .join(', ');
+        lines.push('  ' + String(phase.name || 'step') +
+          (Number.isFinite(time) ? ' at ' + Math.round(time) + ' ms' : '') +
+          gap + (detail ? ' (' + detail + ')' : ''));
+        if (Number.isFinite(time)) last = time;
+      }
+      return lines.join(String.fromCharCode(10));
+    }
+    function buildReport() {
+      return summaryOf('tp_home_boot_timing_v1', 'Home boot/loading') +
+        String.fromCharCode(10, 10) +
+        summaryOf('tp_home_morning_startup_trace_v1', 'First-of-day games');
+    }
+    function bind() {
+      const show = document.getElementById('showMorningStartupReportBtn');
+      const copy = document.getElementById('copyMorningStartupReportBtn');
+      const output = document.getElementById('morningStartupReport');
+      const status = document.getElementById('morningStartupReportStatus');
+      if (!show || !copy || !output || !status) return;
+      show.addEventListener('click', function () {
+        output.textContent = buildReport();
+        output.classList.remove('hidden');
+        status.textContent = 'Read-only report. Saved game data was not accessed or changed.';
+      });
+      copy.addEventListener('click', async function () {
+        const report = buildReport();
+        output.textContent = report;
+        output.classList.remove('hidden');
+        try {
+          if (!navigator.clipboard || !navigator.clipboard.writeText) {
+            throw new Error('Clipboard unavailable');
+          }
+          await navigator.clipboard.writeText(report);
+          status.textContent = 'Startup report copied.';
+        } catch (_) {
+          status.textContent = 'Copy is unavailable here; the report is displayed above for manual copying.';
+        }
+      });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind, { once: true });
+    else bind();
+  })();
+  </script>
 </body>
 </html>
