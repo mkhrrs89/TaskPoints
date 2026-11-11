@@ -4914,6 +4914,61 @@ function maybeAutoSimToday(){
 }
 
 
+// Allow the iPhone to finish showing Home before its first 5 AM+ daily
+// simulation. Previously DOMContentLoaded generated every NPC, reconciled
+// Gold and performed a full protected save *inside* the boot gate, keeping
+// the splash visible and making a long task look like an app hang.
+// The same simulation, rules and protected save still run automatically.
+let homeMorningSimulationScheduled = false;
+function scheduleHomeDailySimulationAfterReveal() {
+  const now = new Date();
+  const dayKey = getGameDayKey(now);
+  if (homeMorningSimulationScheduled || now.getHours() < 5) return false;
+  if (!Array.isArray(state.players) || state.players.length === 0) return false;
+  if (Array.isArray(state.matchups)
+    && state.matchups.some(m => getMatchupDateKeyLocal(m) === dayKey)) return false;
+
+  homeMorningSimulationScheduled = true;
+  markHomeMorningStartupPhase('scheduled', {
+    players: state.players.length,
+    historyRows: state.gameHistory?.length,
+    matchups: state.matchups?.length
+  });
+
+  const waitForReveal = () => {
+    const coordinator = window.__tpMobileBootCoordinator;
+    const revealed = coordinator
+      ? coordinator.isRevealed()
+      : (window.__tpBootViewFinished || !document.documentElement.classList.contains('tp-boot-pending'));
+    if (!revealed || document.hidden) {
+      setTimeout(waitForReveal, 250);
+      return;
+    }
+
+    // An actual paint, not merely a microtask, must separate opening Home
+    // from CPU-heavy daily scoring and its non-optional protected persistence.
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        if (document.hidden) { setTimeout(waitForReveal, 250); return; }
+        homeMorningSimulationScheduled = false;
+        try {
+          const generated = maybeAutoSimToday();
+          if (!generated) return;
+          state = syncStateWithMatchups(state);
+          markCompletionsDirty();
+          scheduleRender(renderAll);
+          markHomeLifecycleBaseline();
+        } catch (error) {
+          markHomeMorningStartupPhase('simulation-error');
+          console.error('TaskPoints first-of-day simulation failed; saved data was preserved.', error);
+        }
+      }, 0);
+    });
+  };
+  setTimeout(waitForReveal, 0);
+  return true;
+}
+
 function normalizeState(s) {
   const src = (s && typeof s === "object") ? s : {};
   const normalized = {
@@ -15310,8 +15365,9 @@ try {
 updateWeekToggleButtons();
 updateFlexDayToggleButton();
 
-// Preserve first-load daily initialization without re-reading storage.
-maybeAutoSimToday();
+// Paint the saved Home state first; then generate today's games without
+// trapping the splash behind a full simulation and protected save.
+scheduleHomeDailySimulationAfterReveal();
 state = syncStateWithMatchups(state);
 markHomeLifecycleBaseline();
 
