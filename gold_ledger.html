@@ -247,6 +247,7 @@
               <option value="matchup_theft">Gold Theft</option>
               <option value="champion_bonus">Champion Bonus</option>
               <option value="manual_adjustment">Manual Adjustment</option>
+              <option value="season_interest">Season Interest</option>
             </select>
           </div>
         </div>
@@ -335,7 +336,8 @@
       matchup_margin: 'Matchup Margin',
       matchup_theft: 'Gold Theft',
       champion_bonus: 'Champion Bonus',
-      manual_adjustment: 'Manual Adjustment'
+      manual_adjustment: 'Manual Adjustment',
+      season_interest: 'Season Interest'
     }[type] || type || 'Transaction');
 
     function formatLedgerDate(value) {
@@ -355,6 +357,11 @@
         const mode = { add: 'Gold added', subtract: 'Gold removed', set: 'Balance set' }[row.meta?.mode] || 'Manual change';
         const note = String(row.meta?.note || '').trim();
         return mode + (note ? ': ' + note : '.');
+      }
+      if (row.type === 'season_interest') {
+        const rate = Number(row.meta?.interestRatePercent);
+        return 'Season ' + String(row.meta?.seasonStartDateKey || row.seasonId || row.dateKey || '')
+          + (Number.isFinite(rate) ? ' · ' + rate + '% interest.' : ' · interest.');
       }
       if (row.type === 'champion_bonus') return `Season championship bonus${row.seasonId ? ` · ${row.seasonId}` : ''}.`;
       if (row.type === 'matchup_margin') {
