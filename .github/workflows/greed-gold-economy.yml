@@ -22,6 +22,7 @@ on:
       - tests/rankings_three_digit_fit.test.js
       - tests/gold_manual_adjustment.test.js
       - tests/gold_season_interest.test.js
+      - tests/gold_season_interest_core_integration.test.js
       - tests/gold_circulation_total.test.js
       - tests/gold_manual_adjustment_core_integration.test.js
       - tests/greed_gold_economy.test.js
@@ -61,6 +62,7 @@ jobs:
           tests/greed_gold_daily_scoring_batch.test.js
           tests/gold_manual_adjustment.test.js
           tests/gold_season_interest.test.js
+          tests/gold_season_interest_core_integration.test.js
           tests/gold_circulation_total.test.js
           tests/gold_manual_adjustment_core_integration.test.js
           tests/greed_rating.test.js
