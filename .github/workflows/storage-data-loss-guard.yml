@@ -7,6 +7,7 @@ on:
       - 'index.html'
       - 'mobile_boot_gate.js'
       - 'tests/home_worker_route_contract.test.js'
+      - 'tests/home_morning_startup_deferred.test.js'
       - 'tests/home_weekly_work_hours.test.js'
       - 'tests/habit_manual_streak_freezes.test.js'
       - 'tests/mobile_boot_recovery_notice.test.js'
@@ -87,6 +88,9 @@ jobs:
 
       - name: Verify the Habits Week / This toggle without the Older button
         run: node --test tests/habit_manual_streak_freezes.test.js
+
+      - name: Verify first-of-day Home opens before NPC simulation and keeps recovery safe
+        run: node --test tests/home_morning_startup_deferred.test.js
 
       - name: Run full TaskPoints suite
         run: npm test
