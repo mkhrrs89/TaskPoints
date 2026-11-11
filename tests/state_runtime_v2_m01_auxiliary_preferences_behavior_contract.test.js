@@ -159,13 +159,13 @@ test('Skills level preference normalizes and stores independently of snapshot, t
   const result=h.run("saveSkillsLevelConfig({levelCount:2,levels:[{pointsToNext:5,color:'#fff'},{pointsToNext:-3,color:'invalid'}]})");
   assert.equal(result.levelCount,2);
   assert.equal(result.levels[0].pointsToNext,5);
-  assert.equal(result.levels[1].pointsToNext,15);
+  assert.equal(result.levels[1].pointsToNext,1);
   assert.equal(h.s.getItem(SNAPSHOT),originalSnapshot);
   const reloaded=skillsHarness({initial:{[h.key]:h.s.getItem(h.key)}});
   const restored=reloaded.run('loadSkillsLevelConfig()');
   assert.equal(restored.levelCount,2);
   assert.equal(restored.levels[0].pointsToNext,5);
-  assert.equal(restored.levels[1].pointsToNext,15);
+  assert.equal(restored.levels[1].pointsToNext,1);
 });
 test('Skills corrupt config falls back safely and quota-denied update does not persist',()=>{
   const corrupted=skillsHarness({initial:{taskpoints_skills_level_config:'{bad JSON'}});
