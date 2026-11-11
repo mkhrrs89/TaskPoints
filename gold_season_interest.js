@@ -442,7 +442,8 @@
   function install() {
     installSettings();
     const pathname = String(global.location?.pathname || '');
-    if (pathname === '/' || pathname === '/index.html' || pathname === '') {
+    if (global.document?.body && typeof global.setTimeout === 'function'
+      && (pathname === '/' || pathname === '/index.html' || pathname === '')) {
       if (seasonStartOn(new Date())) global.setTimeout(() => ensureSeasonDecision(), 0);
     }
   }
