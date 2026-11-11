@@ -32,6 +32,31 @@ const COORDINATOR_SCRIPT = `<script id="tp-mobile-boot-runtime-coordinator">
   const nativeWindowRemove = window.removeEventListener.bind(window);
   let captureLateReady = true;
 
+  // Tiny, content-free boot timeline survives a killed/suspended iPhone tab.
+  // Separate from TaskPoints' authoritative game data and safety vault.
+  function bootTraceStage(name) {
+    try {
+      const storage = window.localStorage;
+      const key = 'tp_home_boot_timing_v1';
+      const now = new Date();
+      const dateKey = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0')
+      ].join('-');
+      const raw = storage.getItem(key);
+      let report = raw ? JSON.parse(raw) : null;
+      if (!report || report.dateKey !== dateKey || name === 'coordinator-start') {
+        report = { version: 1, dateKey, phases: [] };
+      }
+      report.phases.push({ name, atMs: Math.round(performance.now()) });
+      report.phases = report.phases.slice(-16);
+      storage.setItem(key, JSON.stringify(report));
+    } catch (_) {}
+  }
+  window.__tpBootTraceStage = bootTraceStage;
+  bootTraceStage('coordinator-start');
+
   function passedReadyEvent(type) {
     if (type === "DOMContentLoaded") return document.readyState !== "loading";
     if (type === "load") return document.readyState === "complete";
@@ -72,6 +97,7 @@ const COORDINATOR_SCRIPT = `<script id="tp-mobile-boot-runtime-coordinator">
   };
 
   function flushLateReadyListeners() {
+    bootTraceStage('ready-listeners-start');
     captureLateReady = false;
     document.addEventListener = nativeDocumentAdd;
     document.removeEventListener = nativeDocumentRemove;
@@ -88,6 +114,7 @@ const COORDINATOR_SCRIPT = `<script id="tp-mobile-boot-runtime-coordinator">
         setTimeout(() => { throw error; });
       }
     }
+    bootTraceStage('ready-listeners-finished');
   }
 
   function titleIsFinal() {
@@ -146,6 +173,7 @@ const COORDINATOR_SCRIPT = `<script id="tp-mobile-boot-runtime-coordinator">
     }
 
     revealed = true;
+    bootTraceStage('home-revealed');
     cleanup();
     document.getElementById("tp-boot-recovery-notice")?.remove();
     if (typeof originalCompleteBootView === "function") {
@@ -155,16 +183,19 @@ const COORDINATOR_SCRIPT = `<script id="tp-mobile-boot-runtime-coordinator">
 
   function startRuntime() {
     if (runtimePromise) return runtimePromise;
+    bootTraceStage('runtime-start');
     runtimePromise = (runtimeStarter ? Promise.resolve(runtimeStarter) : runtimeStarterReady)
       .then(starter => starter())
       .then(() => {
         // Only reveal Home after the complete runtime successfully starts.
         // A failed script must leave the existing read-only Recovery route visible.
         runtimeReady = true;
+        bootTraceStage('runtime-ready');
         performReveal();
       })
       .catch(error => {
         console.error("TaskPoints deferred Home startup failed", error);
+        bootTraceStage('runtime-error');
         showStartupRecovery("failed");
       });
     return runtimePromise;
@@ -480,10 +511,12 @@ const RUNTIME_LOADER_SCRIPT = `<script id="tp-mobile-boot-runtime-loader">
   }
 
   async function replayDeferredRuntime() {
+    window.__tpBootTraceStage?.('scripts-replay-start');
     const runtime = Array.from(document.querySelectorAll('script[data-tp-boot-deferred="runtime"]'));
     const afterRuntime = Array.from(document.querySelectorAll('script[data-tp-boot-deferred="after-runtime"]'));
     for (const node of runtime) await replayScript(node);
     for (const node of afterRuntime) await replayScript(node);
+    window.__tpBootTraceStage?.('scripts-replay-finished');
   }
 
   function installSettingsLazyInitializers() {
