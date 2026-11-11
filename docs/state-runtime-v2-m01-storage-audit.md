@@ -195,3 +195,11 @@ These six source-anchored paths raise behavior-witness coverage to **28/78**. Ea
 5. Compare the full inventory to each proposed V2 owner. M01 is verified **only** when every authoritative source/writer has a reviewed owner or an explicitly preserved auxiliary path, and tests fail if coverage regresses.
 
 **Safety boundary:** none of this changes production storage or a user's data. V1 remains primary; no V2 writer cutover or completed 12-point migration gate is implied. A raw file-count ratio is *not* an engineering-completion percentage.
+
+## November 11 — six independent preferences and rollover routes behavior-rehearsed
+
+The source-executing isolated Node VM tests in [M01 auxiliary preference behavior contracts](../tests/state_runtime_v2_m01_auxiliary_preferences_behavior_contract.test.js) now cover six additional reviewed writer-path anchors: Rankings season-scope selection and Season 4 rollover flag, Standings season-scope selection and rollover flag, Game Ratings inactive-player preference, and Skills level configuration.
+
+Tests check that explicit historical/lifetime/overall choices remain preserved during season transition; season markers are written once; preference choices survive a simulated fresh page; Skills configuration normalizes invalid levels and falls back on damaged JSON; quota-denied writes do **not** change the independent key or `taskpoints_v1` snapshot bytes. Importantly, some existing page UI handlers change their in-memory view even when a preference write fails: this is **not** a durability guarantee and remains an actual handoff design requirement.
+
+M01 behavior witnesses increase **28 → 34 of 78 known routes**, but actual verified V2 ownership and production generation-fenced writer admission remain **0/78**. The 170-file root source pass is not proof of an exhaustive indirect callgraph. V1 is still authoritative; V2 stays preview-only; nothing in this test authorizes migration, Main sync, or cutover. Weighted readiness remains **67/100**.
