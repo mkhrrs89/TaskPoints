@@ -5161,21 +5161,26 @@ return;
         return title + ': No saved phase information yet.';
       }
       const lines = [title + ' (' + String(data.dateKey || 'date unknown') + ')'];
-      let last = null;
-      for (const phase of data.phases) {
-        const time = Number(phase.atMs);
-        const gap = Number.isFinite(time) && last !== null
-          ? ' | +' + Math.max(0, Math.round(time - last)) + ' ms since previous step'
-          : '';
-        const detail = ['players', 'historyRows', 'matchups', 'ledgerRows', 'saved']
-          .filter(key => phase[key] !== undefined)
-          .map(key => key + '=' + String(phase[key]))
-          .join(', ');
-        lines.push('  ' + String(phase.name || 'step') +
-          (Number.isFinite(time) ? ' at ' + Math.round(time) + ' ms' : '') +
-          gap + (detail ? ' (' + detail + ')' : ''));
-        if (Number.isFinite(time)) last = time;
-      }
+      const attempts = [...(Array.isArray(data.priorAttempts) ? data.priorAttempts : []), data.phases];
+      attempts.forEach((phases, index) => {
+        if (!Array.isArray(phases) || !phases.length) return;
+        if (attempts.length > 1) lines.push('Attempt ' + (index + 1) + ' of ' + attempts.length + ':');
+        let last = null;
+        for (const phase of phases) {
+          const time = Number(phase.atMs);
+          const gap = Number.isFinite(time) && last !== null
+            ? ' | +' + Math.max(0, Math.round(time - last)) + ' ms since previous step'
+            : '';
+          const detail = ['players', 'historyRows', 'matchups', 'ledgerRows', 'saved']
+            .filter(key => phase[key] !== undefined)
+            .map(key => key + '=' + String(phase[key]))
+            .join(', ');
+          lines.push('  ' + String(phase.name || 'step') +
+            (Number.isFinite(time) ? ' at ' + Math.round(time) + ' ms' : '') +
+            gap + (detail ? ' (' + detail + ')' : ''));
+          if (Number.isFinite(time)) last = time;
+        }
+      });
       return lines.join(String.fromCharCode(10));
     }
     function buildReport() {
