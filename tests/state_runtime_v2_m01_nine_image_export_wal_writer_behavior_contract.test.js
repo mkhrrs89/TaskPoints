@@ -109,12 +109,12 @@ test('SCWM deferred writer flushes original exactly once with preserved argument
  assert.equal(h.c.flushSave(),true);
  assert.equal(h.c.flushSave(),false);
  assert.equal(h.calls.length,1);assert.equal(h.calls[0][0],'a');
- assert.equal(h.c.status.savesFlushed,1);unchanged(h.s);
+ assert.equal(vm.runInContext('status.savesFlushed',h.c),1);unchanged(h.s);
 });
 test('SCWM deferred writer declines to claim a flush if no pending save or owner',()=>{
  const h=scwm();
  assert.equal(h.c.flushSave(),false);
- assert.equal(h.c.status.savesFlushed,0);unchanged(h.s);
+ assert.equal(vm.runInContext('status.savesFlushed',h.c),0);unchanged(h.s);
 });
 // 6+7 V2 dark WAL: run entire production module and its real append and delete API.
 function wal({failSet=null,ignoreSet=null,failRemove=null,ignoreRemove=null,failRead=null}={}){
