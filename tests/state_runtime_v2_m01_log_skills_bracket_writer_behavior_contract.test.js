@@ -289,7 +289,7 @@ test('five Log Skills and Bracket behavior witnesses cannot grant authority',()=
     assert.equal(route.productionFenceVerified,false);
     assert.equal(route.cutoverPermission,false);
   }
-  assert.equal(inv.writerOwnershipAudit.behaviorRehearsedWriterRoutes,42);
+  assert.equal(inv.writerOwnershipAudit.behaviorRehearsedWriterRoutes,51);
   assert.equal(inv.writerOwnershipAudit.behaviorRehearsalDenominator,78);
   assert.equal(inv.writerOwnershipAudit.verifiedOwnerAssignments,0);
   assert.equal(inv.writerOwnershipAudit.productionWritersFenced,false);

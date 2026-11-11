@@ -2933,7 +2933,7 @@
     "proposedOwnerAssignments": 78,
     "verifiedOwnerAssignments": 0,
     "requiredClosure": "Complete per-key and per-writer ownership, live admission + generation fencing, export/import/restore and real device tests before M01 can verify",
-    "behaviorRehearsedWriterRoutes": 42,
+    "behaviorRehearsedWriterRoutes": 51,
     "behaviorRehearsalDenominator": 78,
     "inboxReadOnlyCutoverGate": {
       "checkFunction": "inspectReadOnlyInboxJournalForCutover",
@@ -3024,6 +3024,17 @@
       "failuresCannotClaimDurableMutation": true,
       "productionOwnerCertified": false,
       "oldTabFenceProductionVerified": false,
+      "cutoverPermission": false
+    },
+    "nineLiveWriterBehaviorEvidence": {
+      "testPath": "tests/state_runtime_v2_m01_nine_live_writer_behavior_contract.test.js",
+      "behaviorTestedWriterRoutes": 9,
+      "realInlinePages": 3,
+      "sourceModulesAndFragmentsRehearsed": true,
+      "unapprovedProductionOwnerHandoffs": 9,
+      "restoresAndImportsUntouched": true,
+      "allProductionWritersFenced": false,
+      "authorityStillV1": true,
       "cutoverPermission": false
     }
   },
@@ -4447,6 +4458,132 @@
         "expired_uncommitted_lock_removed_by_real_home_guard",
         "committed_recovery_lock_retained_even_if_old",
         "stale_tab_snapshot_and_habit_journal_writes_rejected"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "week.html",
+      "anchor": "TaskPointsCore.saveStateSnapshot(",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_nine_live_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "week_save_merged_uses_actual_core_snapshot_writer",
+        "immediate_write_preserves_gold_and_imported_fields",
+        "failed_or_missing_core_writer_does_not_mutate_snapshot"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "matchups.html",
+      "anchor": "TaskPointsCore.mergeAndSaveState(fullState",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_nine_live_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "matchups_merge_preserves_latest_unrelated_histories",
+        "writer_error_or_missing_api_returns_nondurable_partial",
+        "no_clobber_of_gold_and_imported_extension_fields"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "tournament.html",
+      "anchor": "const saved = TaskPointsCore.saveStateSnapshot(nextState, {",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_nine_live_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "deferred_tournament_write_waits_for_idle_callback",
+        "source_raw_change_cancels_stale_queued_write",
+        "quota_refusal_preserves_previous_snapshot"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "audit.html",
+      "anchor": "TaskPointsCore.saveStateSnapshot(state, { savePath: 'season-repair-sync-results' });",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_nine_live_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "season_series_repair_writes_only_on_changed_result",
+        "protected_writer_preserves_imported_and_gold_data",
+        "no_op_or_failed_writer_keeps_existing_snapshot"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "audit.html",
+      "anchor": "TaskPointsCore.saveStateSnapshot(nextState, { savePath: 'season-result-resync' });",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_nine_live_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "manual_matchup_resync_only_writes_changed_result",
+        "preserves_imported_extension_fields",
+        "missing_writer_cannot_persist_manual_resync"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "phase3_navigation_cache.js",
+      "anchor": "global.sessionStorage?.setItem?.(SESSION_CACHE_KEY, JSON.stringify(record));",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_nine_live_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "verified_session_projection_contains_hash_and_counts",
+        "quota_denied_session_write_reports_failure",
+        "independent_sidecar_does_not_rewrite_v1"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "home_yesterday_result_consistency.js",
+      "anchor": "storage.removeItem(ATTEMPT_LOCK_KEY);",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_nine_live_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "stale_attempt_lock_ages_out_after_ttl",
+        "fresh_attempt_lock_blocks_snapshot_write",
+        "fresh_attempt_lock_blocks_pending_habit_journal_removal"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "performance_diagnostics.js",
+      "anchor": "global.sessionStorage?.setItem?.(k,v)",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_nine_live_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "trace_query_flag_sets_session_optin",
+        "persisted_page_event_history_is_independent",
+        "denied_trace_session_flag_does_not_claim_persistence"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "storage_diagnostics_season_image_repair_controller.js",
+      "anchor": "core.writeTaskPointsStoredState(nextState, {",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_nine_live_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "exact_writer_commits_and_readback_matches_expected_bytes",
+        "stale_snapshot_rejected_before_write",
+        "missing_quota_refused_or_bad_readback_cannot_claim_save"
       ],
       "productionOwnerVerified": false,
       "productionFenceVerified": false,

@@ -341,7 +341,7 @@ test('M01 four cross-domain writer witnesses remain provisional', () => {
     assert.equal(row.productionFenceVerified,false);
     assert.equal(row.cutoverPermission,false);
   }
-  assert.equal(inv.writerOwnershipAudit.behaviorRehearsedWriterRoutes,42);
+  assert.equal(inv.writerOwnershipAudit.behaviorRehearsedWriterRoutes,51);
   assert.equal(inv.writerOwnershipAudit.verifiedOwnerAssignments,0);
   assert.equal(inv.writerOwnershipAudit.productionWritersFenced,false);
   assert.equal(inv.writerOwnershipAudit.status,'incomplete');
