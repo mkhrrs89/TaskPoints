@@ -159,6 +159,20 @@ The [M01 page-write behavior contract](../tests/state_runtime_v2_m01_badges_tras
 
 This raises behavior-tested writer routes **12 → 17 of 78**. Still **0/78 V2 owner/fence proofs**, so the M01 milestone and 67/100 weighted readiness remain unchanged. Tests are synthetic VM rehearsals, not proof of cross-tab stale-write rejection, true device persistence, or safe V2 production authority.
 
+## November 11 twelfth pass — Log, Skills and Bracket page-save behavior
+
+The [M01 actual-page contract](../tests/state_runtime_v2_m01_log_skills_bracket_writer_behavior_contract.test.js) executes the **real inline JS** from `log.html` and `skills.html`, plus `season_bracket_builder.js`, against disposable browser storage and DOM stubs. It covers five previously source-inventoried routes:
+
+- **Log protected snapshot writer:** saves edits through `saveStateSnapshot`, replacing completion lists so deletions stick, and updates its cache.
+- **Log raw V1 fallback:** if the snapshot-save helper is missing, saves directly with `writeTaskPointsStoredState`; rejected raw saves retain stored bytes and invalidate cache.
+- **Skills protected snapshot writer:** adds/deletes manually configured skills with distinct save paths, retaining other stored Game, Gold and Task fields.
+- **Skills raw V1 fallback:** if the protected snapshot helper is unavailable, direct V1 writes add/remove skills; storage failure cannot persist false data.
+- **Season Bracket Builder protected writer:** saves an editable draft without activating the tournament; the official bracket requires confirmation, refuses invalid settings, and does not navigate if the protected save throws.
+
+**Important source-level data-loss finding:** `log.html` uses `readPageStateFresh()` to project a fixed set of legacy top-level fields; `goldLedger` and other unrecognized/forward-compatible fields are absent from that projection. Subsequent Log `saveMerged()` uses this reduced state for an entire `saveStateSnapshot()`. The synthetic test demonstrates the missing `goldLedger` in the saved data. This is a V1 path hazard we must fence or make lossless in any V2 migration. **No production Log or V1 Main code was modified** and no migration authority is granted. Do not disable the Log or other features; future remediation must preserve all functionality.
+
+Result: **22/78** source-anchored routes with real V1 behavior witnesses, up from **17/78**. **0/78** production owners verified. Main has progressed separately since the prior V2 turn; no Main sync was requested, so this round did not sync or modify it. M01 and 67/100 readiness remain unchanged.
+
 ## Specific next work to close M01
 
 1. Run the CI source scanner against all 170 files; triage which of the 98 uninspected files access or indirectly modify storage. Move from *inspected* to *writer ownership verified* only with a caller/writer trace, including indirect `TaskPointsCore` saves and dynamic key aliases.
