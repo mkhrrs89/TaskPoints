@@ -123,7 +123,7 @@ function ratingsHarness({saved='1',fail=false}={}) {
   const keySource=between(src,'const RATINGS_SHOW_INACTIVE_KEY','let latestState');
   const initial=between(src,'let showInactivePlayers =','let sortKey =');
   const callback=between(src,'const showInactiveToggle = $("showInactiveToggle");','const headers = document.querySelectorAll("th[data-sort]");');
-  vm.runInContext(keySource + '\n' + initial + '\nconst $ = id => document.getElementById(id);\n' + callback,ctx);
+  vm.runInContext(keySource + '\n' + initial + '\n' + callback,ctx);
   return {s,toggle,renders:()=>renders,visible:()=>vm.runInContext('showInactivePlayers',ctx),key};
 }
 test('Ratings inactive-player preference toggles and survives reload without modifying V1',()=>{
