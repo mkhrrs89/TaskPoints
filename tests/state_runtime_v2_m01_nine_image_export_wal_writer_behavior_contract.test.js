@@ -105,7 +105,7 @@ function scwm(){
  return {c,s,callbacks,calls};
 }
 test('SCWM deferred writer flushes original exactly once with preserved arguments',()=>{
- const h=scwm();h.c.pendingSave={thisArg:null,args:['a',{b:2}]};
+ const h=scwm();vm.runInContext("pendingSave={thisArg:null,args:['a',{b:2}]}",h.c);
  assert.equal(h.c.flushSave(),true);
  assert.equal(h.c.flushSave(),false);
  assert.equal(h.calls.length,1);assert.equal(h.calls[0][0],'a');
