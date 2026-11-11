@@ -178,8 +178,8 @@ test('Log derived-points save shares the full-snapshot preservation path',()=>{
   const page=pageScript('log.html','function saveMerged(partial)');
   const sync=page.slice(page.indexOf('function syncDerivedPointsIfNeeded()'),
     page.indexOf('function migrateSleepEntriesForBonus()'));
-  assert.match(sync,/state\\s*=\\s*saveMerged\\(state\\)/);
-  assert.doesNotMatch(sync,/TaskPointsCore\\.saveStateSnapshot\\(state\\)/);
+  assert.match(sync,/state\s*=\s*saveMerged\(state\)/);
+  assert.doesNotMatch(sync,/TaskPointsCore\.saveStateSnapshot\(state\)/);
 });
 
 test('Skills protected writer saves manual skill and keeps unrelated state',()=>{
