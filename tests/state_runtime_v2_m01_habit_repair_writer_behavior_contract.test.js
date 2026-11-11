@@ -280,7 +280,7 @@ test('M01 certifies three Habit writer behavior rehearsals but zero production o
     assert.equal(route.productionFenceVerified,false);
     assert.equal(route.cutoverPermission,false);
   }
-  assert.equal(inv.writerOwnershipAudit.behaviorRehearsedWriterRoutes,69);
+  assert.equal(inv.writerOwnershipAudit.behaviorRehearsedWriterRoutes,78);
   assert.equal(inv.writerOwnershipAudit.verifiedOwnerAssignments,0);
   assert.equal(inv.writerOwnershipAudit.productionWritersFenced,false);
   assert.equal(inv.writerOwnershipAudit.status,'incomplete');

@@ -90,6 +90,7 @@ jobs:
           tests/state_runtime_v2_m01_nine_live_writer_behavior_contract.test.js
           tests/state_runtime_v2_m01_preview_recovery_nine_writer_behavior_contract.test.js
           tests/state_runtime_v2_m01_nine_image_export_wal_writer_behavior_contract.test.js
+          tests/state_runtime_v2_m01_final_nine_writer_behavior_contract.test.js
 
       - name: Run V2 core storage contracts
         run: >-

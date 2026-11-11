@@ -2933,7 +2933,7 @@
     "proposedOwnerAssignments": 78,
     "verifiedOwnerAssignments": 0,
     "requiredClosure": "Complete per-key and per-writer ownership, live admission + generation fencing, export/import/restore and real device tests before M01 can verify",
-    "behaviorRehearsedWriterRoutes": 69,
+    "behaviorRehearsedWriterRoutes": 78,
     "behaviorRehearsalDenominator": 78,
     "inboxReadOnlyCutoverGate": {
       "checkFunction": "inspectReadOnlyInboxJournalForCutover",
@@ -3058,6 +3058,18 @@
       "includesRetroactiveGoldSaveWrapper": true,
       "productionOwnerCertified": false,
       "concurrentCrossTabSafetyVerified": false,
+      "cutoverPermission": false
+    },
+    "finalNineWriterBehaviorEvidence": {
+      "testPath": "tests/state_runtime_v2_m01_final_nine_writer_behavior_contract.test.js",
+      "behaviorTestedWriterRoutes": 9,
+      "sourceInventoryCoverageComplete": true,
+      "productionOwnerCertified": false,
+      "fullIndirectCallgraphCertified": false,
+      "crossTabAtomicWriterFenceVerified": false,
+      "secondaryReplicaPromotionSourceChecksProbed": true,
+      "verifiedSecondaryRestoreLockReadbackProbed": true,
+      "originalToolbarAndRepairWritersRehearsed": true,
       "cutoverPermission": false
     }
   },
@@ -4859,6 +4871,132 @@
         "secondary_export_schedule_prep_uses_validated_writer",
         "no_schedule_change_is_noop",
         "no_persistence_api_does_not_claim_save"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "toolbar.js",
+      "anchor": "TaskPointsCore.mergeAndSaveState({",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_final_nine_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "inbox_auto_population_updates_only_inbox_domains",
+        "changed_saves_immediate_and_preserves_unrelated_v1",
+        "denied_core_write_reports_failure"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "toolbar.js",
+      "anchor": "core.mergeAndSaveState = debouncedMerge;",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_final_nine_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "trailing_merges_replace_only_latest_queued_domain",
+        "flushes_exact_full_snapshot_without_losing_unknown_fields",
+        "failed_delayed_write_does_not_claim_durable_save"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "verified_secondary_restore.js",
+      "anchor": "localStorage.setItem(LOCK_KEY, JSON.stringify(lock));",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_final_nine_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "cross_tab_restore_lock_requires_exact_token_readback",
+        "write_boundary_quarantine_retained_before_replace",
+        "committed_lock_survives_uncommitted_cleanup"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "phase5b_deferred_mirror.js",
+      "anchor": "global.indexedDB.open(DB, 1);",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_final_nine_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "isolated_secondary_indexeddb_open_and_store_upgrade",
+        "stable_authoritative_state_allows_latest_and_native_promotion",
+        "stale_authoritative_state_aborts_before_promotion"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "storage_maintenance_idle.js",
+      "anchor": "core.saveStateSnapshot = wrapped;",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_final_nine_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "identical_startup_snapshot_skip_does_not_rewrite_v1",
+        "manual_repair_bypasses_startup_suppression",
+        "pending_journal_or_changed_state_not_suppressed"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "indexeddb_requalification.js",
+      "anchor": "const set = (key, value) => localStorage.setItem(key, value);",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_final_nine_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "healthy_short_test_sets_awaiting_smoke_test_gate",
+        "storage_mode_only_verify_primary_writes_before_fresh_reopen",
+        "failed_preflight_forces_mode_off_and_records_failure"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "indexeddb_requalification_session_compat.js",
+      "anchor": "storage.setItem(GATE_KEY, JSON.stringify({",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_final_nine_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "proven_fresh_reopen_updates_stale_gate_hash",
+        "prepared_and_fresh_session_ids_preserved",
+        "unproven_reopen_does_not_fabricate_gate"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "phase4_cache_guard.js",
+      "anchor": "storage.setItem(GATE_KEY, JSON.stringify({",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_final_nine_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "fresh_page_lock_witness_requires_exclusive_lock",
+        "verified_restore_required_before_witness_record",
+        "pending_habit_journal_denies_witness"
+      ],
+      "productionOwnerVerified": false,
+      "productionFenceVerified": false,
+      "cutoverPermission": false
+    },
+    {
+      "path": "habit_ledger_score_reconciliation_hardening.js",
+      "anchor": "const saved = core.saveStateSnapshot(result.state, {",
+      "kind": "v1_existing_behavior_synthetic",
+      "testPath": "tests/state_runtime_v2_m01_final_nine_writer_behavior_contract.test.js",
+      "observedBehaviors": [
+        "repair_requires_preview_and_backup_confirmation",
+        "save_refusal_keeps_authoritative_snapshot_and_reports_failure",
+        "post_save_readback_and_repair_plan_check_required"
       ],
       "productionOwnerVerified": false,
       "productionFenceVerified": false,
