@@ -151,7 +151,7 @@ function secondaryMirrorHarness({journalPending=false,sourceChanged=false}={}){
   const s=storage({'taskpoints_state_revision_v1':'revision-1'}),records=new Map(),
     puts=[],deletes=[],transactions=[],requests=[];
   const db={
-    objectStoreNames:{contains(name){return name==='snapshots'}},
+    objectStoreNames:{contains(){return false}},
     createObjectStore(name,opts){db.created={name,opts}},
     transaction(name,mode){
       assert.equal(name,'snapshots');
