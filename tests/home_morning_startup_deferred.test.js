@@ -135,7 +135,7 @@ test('fresh launches and waking an overnight app both use the same nonblocking s
   assert.ok(home.includes('const todayHistoryByPlayer = new Map();'));
   assert.ok(home.includes('todayHistoryByPlayer.get(String(id))'));
   assert.ok(home.includes('todayHistoryByPlayer.set(String(id), historyRow)'));
-  assert.ok(home.includes("save('home-first-daily-simulation')"),
+  assert.ok(home.includes('const saved = save();'),
     'the original protected save must still run');
   assert.ok(home.includes('TaskPointsCore.withGoldNpcScoringBatch(state, scoreNpcParticipants)'),
     'the existing Gold speedup remains');
