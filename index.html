@@ -15408,14 +15408,10 @@ function refreshMainPageFromStorage() {
   // revision number is unchanged or completion count happens to match.
   markCompletionsDirty();
 
-  const autoSimRan = maybeAutoSimToday();
-
-  if (autoSimRan) {
-    storageCache.raw = null;
-    storageCache.parsed = null;
-    state = normalizeState(load());
-    markCompletionsDirty();
-  }
+  // A sleeping iPhone returning on a new day must also avoid blocking the
+  // page lifecycle with the complete Gold/scoring/save pass. The same
+  // protected simulation now runs once Home is visible and responsive.
+  scheduleHomeDailySimulationAfterReveal();
 
   state = syncStateWithMatchups(state);
   markCompletionsDirty();
