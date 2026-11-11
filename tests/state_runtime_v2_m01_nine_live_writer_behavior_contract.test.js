@@ -65,7 +65,7 @@ function weekHarness({fail=false,withWriter=true}={}){
     if(fail)throw Error('V1 save refused');s.setItem(KEY,JSON.stringify(next));return {state:next};}};
   if(withWriter)core.saveAppState=()=>{};
   const c=context({TaskPointsCore:core,localStorage:s,STORAGE_KEY:KEY,
-    load(){return state(s)},invalidatePageStateCache(){this.invalidated=true},
+    load(){return state(s)},invalidatePageStateCache(){},
     pageStateCache:null,pageStateCacheDirty:false});
   execute(c,segment(inline('week.html','function saveMerged(partial'), 'function saveMerged(partial','function getCompletionPoints('),'week.html');
   return {s,c,saves,invoke:(partial,options)=>vm.runInContext('saveMerged('+JSON.stringify(partial)+','+JSON.stringify(options||{})+')',c)};
@@ -101,7 +101,7 @@ function matchupsHarness({fail=false,withWriter=true}={}){
     s.setItem(KEY,JSON.stringify(next));return {state:next};}};
   if(!withWriter)delete core.mergeAndSaveState;
   const c=context({TaskPointsCore:core,STORAGE_KEY:KEY,localStorage:s,
-    load(){return state(s)},invalidatePageStateCache(){this.invalidated=true},
+    load(){return state(s)},invalidatePageStateCache(){},
     pageStateCache:null,pageStateCacheDirty:false});
   execute(c,segment(inline('matchups.html','function save(nextState'), 'function save(nextState', 'document.addEventListener("DOMContentLoaded", renderMatchups)'), 'matchups.html');
   return {s,c,calls,save:(partial,path='matchups-save')=>vm.runInContext('save('+JSON.stringify(partial)+','+JSON.stringify(path)+')',c)};
@@ -248,7 +248,7 @@ function navigationHarness({fail=false}={}){
   const c=context({sessionStorage:s});
   const snippet=segment(source('phase3_navigation_cache.js'),
     'function persistSessionRecord(state, cache) {','async function rebuildNavigationCache()');
-  execute(c,"const SESSION_CACHE_KEY = '"+key+"';\n"+snippet,'phase3_navigation_cache.js');
+  execute(c,"const global = window;\nconst SESSION_CACHE_KEY = '"+key+"';\n"+snippet,'phase3_navigation_cache.js');
   return {s,c,key,invoke:(st,cache)=>vm.runInContext('persistSessionRecord('+JSON.stringify(st)+','+JSON.stringify(cache)+')',c)};
 }
 test('Phase3 navigation session writer persists exact verification receipt without modifying main snapshot',()=>{
@@ -359,7 +359,7 @@ test('Season image repair exact writer rechecks prior bytes, writer output and u
 test('Season image repair rejects stale, missing, failed and unverifiable exact writes',()=>{
   for(const mode of [{stale:true},{noWriter:true},{fail:true},{mismatch:true}]){
     const h=imageRepairHarness(mode),raw=h.s.getItem(KEY);
-    assert.throws(()=>h.invoke(fixture()),/changed immediately|writer is unavailable|quota exceeded|did not retain/);
+    assert.throws(()=>h.invoke({...fixture(),seasonHistory:[{id:'past-season',imageId:'updated-image'}]}),/changed immediately|writer is unavailable|quota exceeded|did not retain/);
     assert.equal(h.s.getItem(KEY),raw,'failed exact repair never silently replaces snapshot');
   }
 });
