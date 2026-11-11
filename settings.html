@@ -150,6 +150,25 @@
         <div class="flex flex-wrap gap-2"><button id="runShadowMigrationBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">Run Shadow Migration</button><button id="downloadShadowMigrationDiagnosticsBtn" class="btn btn-ghost btn-toolbar nav-btn hidden" type="button">Download Diagnostic JSON</button></div>
       </section>
 
+      <details class="glass space-y-3" id="goldInterestSettingsSection">
+        <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
+          <div>
+            <div class="text-lg font-semibold">Gold Interest Rate</div>
+            <div class="muted text-sm">Set the optional Gold interest applied at the start of each two-month season.</div>
+          </div>
+        </summary>
+        <form id="goldInterestRateForm" class="space-y-3 pt-4">
+          <label for="goldInterestRateInput" class="block text-sm font-semibold">Interest rate (%)</label>
+          <div class="flex flex-wrap gap-2 items-center">
+            <input id="goldInterestRateInput" type="number" inputmode="decimal" min="0" max="100" step="0.01" value="0" required
+              class="input" style="max-width:150px" aria-describedby="goldInterestRateExplanation" />
+            <button id="goldInterestRateSaveBtn" type="submit" class="btn btn-teal btn-toolbar nav-btn">Save Interest Rate</button>
+          </div>
+          <p id="goldInterestRateExplanation" class="muted text-xs">Next season: <strong id="goldInterestNextSeasonDate">2027-01-01</strong>. Seasons begin every January, March, May, July, September, and November 1. Nothing accrues automatically: you'll choose Yes or No when a new season starts. Each wallet's interest is rounded to 0.1 Gold.</p>
+          <div id="goldInterestRateStatus" class="muted text-xs" role="status" aria-live="polite"></div>
+        </form>
+      </details>
+
       <details class="glass space-y-3" id="seasonChampionshipRepairSection">
         <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
           <div>
@@ -663,6 +682,7 @@
   </div>
 
   <script src="scoring_core.js"></script>
+  <script src="gold_season_interest.js?v=20261111-season-interest-1"></script>
 <script>
     const SETTINGS_STORAGE_KEY = (window.TaskPointsCore && TaskPointsCore.STORAGE_KEY) || "taskpoints_v1";
 
