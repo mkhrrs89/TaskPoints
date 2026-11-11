@@ -24,7 +24,7 @@ function imageDb({failOn=null,failTransaction=false}={}){
   if(failTransaction)throw Error('transaction denied');
   return Object.assign(tx,{objectStore(){return {delete(key){if(key===failOn)throw Error('image delete failed');deleted.push(key);return {}}}}});
  }};
- const schedule=()=>{queueMicrotask(()=>{tx.oncomplete?.()})};
+ const schedule=()=>{setImmediate(()=>{if(typeof tx.oncomplete!=='function')throw Error('test database transaction never installed completion handler');tx.oncomplete();})};
  return {db,tx,deleted,schedule};
 }
 // 1 toolbar fallback image deletion (actual production function).
