@@ -557,10 +557,28 @@ function normalizeState(s) {
 
 function saveMerged(partial) {
   try {
-    const existing = getPageState() || {};
+    // Log intentionally loads a reduced projection for display. Never replace
+    // the complete V1 snapshot with that projection: it omits Gold, Seasons,
+    // manual skills, imported extension fields and other unrelated domains.
+    // Read the full authoritative source immediately before each write.
+    const raw = localStorage.getItem(STORAGE_KEY);
+    let current;
+    if (raw === null) {
+      current = {};
+    } else if (typeof window.TaskPointsCore?.readTaskPointsStoredState === 'function') {
+      current = TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, null);
+    } else if (typeof window.TaskPointsCore?.parseTaskPointsStorageJson === 'function') {
+      current = TaskPointsCore.parseTaskPointsStorageJson(raw, null);
+    } else {
+      current = JSON.parse(raw);
+    }
+    if (!current || typeof current !== 'object' || Array.isArray(current)) {
+      throw new Error('Log cannot verify the full saved state; refusing a partial overwrite.');
+    }
 
-    // Merge top-level keys so we don't wipe fields this page didn't load
-    const merged = { ...existing, ...partial };
+    // Apply only the requested changes to the latest full snapshot. Replacing
+    // arrays remains intentional, so Log deletions still persist.
+    const merged = { ...current, ...partial };
 
     // IMPORTANT: snapshot-save (no union merge), so deletions stick
     if (window.TaskPointsCore?.saveStateSnapshot) {
@@ -619,13 +637,10 @@ function syncDerivedPointsIfNeeded() {
   const derivedSync = TaskPointsCore.syncDerivedPoints(state);
   state = derivedSync.state;
   if (!derivedSync.changed) return false;
-  if (window.TaskPointsCore?.saveAppState) {
-    state = TaskPointsCore.saveStateSnapshot(state).state;
-  } else if (window.TaskPointsCore?.mergeAndSaveState) {
-    state = TaskPointsCore.saveStateSnapshot(state).state;
-  } else {
-    state = saveMerged(state);
-  }
+  // Derived-point repairs must use the same full-source-preserving writer as
+  // interactive Log edits. Saving the reduced display state directly loses
+  // unrelated V1 fields even when the core snapshot saver is available.
+  state = saveMerged(state);
   return true;
 }
 

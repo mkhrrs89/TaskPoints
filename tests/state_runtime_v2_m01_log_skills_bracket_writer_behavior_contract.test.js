@@ -28,7 +28,8 @@ function initialState() {
     players: [{ id: 'npc', name: 'Player' }],
     matchups: [{ id: 'match-one', dateKey: '2026-11-01' }],
     goldLedger: [{ id: 'gold-one', playerId: 'YOU', amount: 3 }],
-    seasonHistory: [{ id: 'archived-season' }]
+    seasonHistory: [{ id: 'archived-season' }],
+    unknownImportedField: { keep: 'future-import-metadata' }
   };
 }
 function fakeDom() {
@@ -108,8 +109,10 @@ test('Log protected writer merges named history and writes one canonical snapsho
   assert.equal(h.writes.safe[0].options.storageKey,KEY);
   assert.equal(h.state().completions[0].id,'new');
   assert.equal(h.state().tasks[0].id,'task-one');
-  assert.equal(h.state().goldLedger?.length,undefined,
-    'current Log projection omits Gold Ledger: this is a migration risk, not ownership proof');
+  assert.equal(h.state().goldLedger[0].id,'gold-one');
+  assert.equal(h.state().seasonHistory[0].id,'archived-season');
+  assert.equal(h.state().manualSkills[0].id,'skill-original');
+  assert.equal(h.state().unknownImportedField.keep,'future-import-metadata');
   assert.equal(result.completions[0].id,'new');
   assert.equal(h.run('pageStateCacheDirty'),false);
 });
@@ -123,6 +126,8 @@ test('Log fallback directly writes V1 when snapshot interface is missing and pre
   assert.equal(h.writes.raw.length,2);
   assert.equal(h.state().completions.length,0);
   assert.equal(h.state().tasks[0].id,'task-one');
+  assert.equal(h.state().goldLedger[0].id,'gold-one');
+  assert.equal(h.state().unknownImportedField.keep,'future-import-metadata');
   assert.equal(h.writes.safe.length,0);
 });
 test('Log declined direct write never changes storage bytes or pretends cache clean',()=>{
@@ -132,6 +137,49 @@ test('Log declined direct write never changes storage bytes or pretends cache cl
   assert.equal(h.writes.raw.length,1);
   assert.equal(h.storage.getItem(KEY),raw);
   assert.equal(h.run('pageStateCacheDirty'),true);
+});
+
+
+test('Log merges into a NEWER authoritative snapshot, never the stale reduced page projection',()=>{
+  const h=pageHarness('log.html');
+  const original=h.state();
+  const next={...original,
+    goldLedger:[{id:'gold-newer',playerId:'YOU',amount:77}],
+    importedAfterLogOpened:{source:'another-tab'}};
+  h.storage.setItem(KEY,JSON.stringify(next));
+  h.run("saveMerged({completions:[{id:'log-new',points:5}]})");
+  assert.equal(h.state().completions[0].id,'log-new');
+  assert.equal(h.state().goldLedger[0].id,'gold-newer');
+  assert.equal(h.state().importedAfterLogOpened.source,'another-tab');
+});
+
+test('Log refuses a lossy save if the full stored snapshot cannot be read',()=>{
+  const h=pageHarness('log.html');
+  h.core.readTaskPointsStoredState=()=>null;
+  const raw=h.storage.getItem(KEY);
+  h.run("saveMerged({completions:[{id:'unsafe-overwrite'}]})");
+  assert.equal(h.storage.getItem(KEY),raw);
+  assert.equal(h.writes.safe.length,0);
+  assert.equal(h.writes.raw.length,0);
+  assert.equal(h.run('pageStateCacheDirty'),true);
+});
+
+test('Log direct fallback preserves all unrelated fields after external update',()=>{
+  const h=pageHarness('log.html',{protectedSave:false});
+  h.storage.setItem(KEY,JSON.stringify({...h.state(),unknownAddedLater:{version:2}}));
+  h.run("saveMerged({completions:[]})");
+  assert.equal(h.state().completions.length,0);
+  assert.equal(h.state().unknownAddedLater.version,2);
+  assert.equal(h.state().goldLedger[0].id,'gold-one');
+  assert.equal(h.writes.raw.length,1);
+});
+
+test('Log derived-points save shares the full-snapshot preservation path',()=>{
+  const page=pageScript('log.html','function saveMerged(partial)');
+  const sync=page.slice(page.indexOf('function syncDerivedPointsIfNeeded()'),
+    page.indexOf('function migrateSleepEntriesForBonus()'));
+  assert.match(sync,/state\\s*=\\s*saveMerged\\(state\\)/);
+  assert.doesNotMatch(sync,/TaskPointsCore\\.saveStateSnapshot\\(state\\)/);
 });
 
 test('Skills protected writer saves manual skill and keeps unrelated state',()=>{
@@ -295,6 +343,6 @@ test('five Log Skills and Bracket behavior witnesses cannot grant authority',()=
   assert.equal(inv.writerOwnershipAudit.productionWritersFenced,false);
   assert.equal(inv.writerOwnershipAudit.status,'incomplete');
   assert.equal(inv.writerOwnershipAudit.logSkillsBracketEvidence.logUnknownFieldLossObserved,true);
-  assert.equal(inv.writerOwnershipAudit.logSkillsBracketEvidence.logLossCorrectedInProduction,false);
+  assert.equal(inv.writerOwnershipAudit.logSkillsBracketEvidence.logLossCorrectedInProduction,true);
   assert.equal(inv.writerOwnershipAudit.logSkillsBracketEvidence.productionCutoverAllowed,false);
 });
