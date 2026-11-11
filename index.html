@@ -4523,8 +4523,14 @@ function markHomeMorningStartupPhase(phase, details = {}) {
     const day = getGameDayKey(new Date());
     const raw = localStorage.getItem(HOME_MORNING_TRACE_KEY);
     let report = raw ? JSON.parse(raw) : null;
-    if (!report || report.dateKey !== day || phase === 'scheduled') {
-      report = { version: 1, dateKey: day, phases: [] };
+    if (!report || report.dateKey !== day || !Array.isArray(report.phases)) {
+      report = { version: 1, dateKey: day, phases: [], priorAttempts: [] };
+    }
+    if (phase === 'scheduled' && report.phases.length) {
+      report.priorAttempts = Array.isArray(report.priorAttempts) ? report.priorAttempts : [];
+      report.priorAttempts.push(report.phases);
+      report.priorAttempts = report.priorAttempts.slice(-3);
+      report.phases = [];
     }
     const safe = {};
     for (const key of ['players', 'historyRows', 'matchups', 'ledgerRows', 'saved']) {
