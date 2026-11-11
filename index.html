@@ -4705,7 +4705,7 @@ if (existingIndex >= 0) {
   }
 
   markHomeMorningStartupPhase('matchups-ready');
-  const saved = save('home-first-daily-simulation');
+  const saved = save(); // preserve the original daily save path and safeguards
   markHomeMorningStartupPhase('simulation-finished', { saved });
 }
 
