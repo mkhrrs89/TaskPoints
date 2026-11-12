@@ -425,9 +425,16 @@
     catch (_) { return false; }
   }
 
-  function clearVerifiedSnapshot(snapshot) {
+  function clearVerifiedSnapshot(snapshot, expectedSourceRaw = undefined) {
     const current = readRecord();
     if (current.malformed) return false;
+    // A peer journal update detected even before cleanup starts must remain
+    // pending; acknowledging the older batch as fully compacted would mask
+    // an interleaving that this tab never verified.
+    if (expectedSourceRaw !== undefined && current.raw !== expectedSourceRaw) {
+      journalSourceConflicts += 1;
+      return false;
+    }
     const record = current.record;
     record.tasks = record.tasks.filter((row) => !snapshot.tasks.some((saved) => String(saved.id) === String(row.id) && sameRow(saved, row)));
     record.completionUpserts = record.completionUpserts.filter((row) => !snapshot.completionUpserts.some((saved) => String(saved.id) === String(row.id) && sameRow(saved, row)));
@@ -676,7 +683,7 @@
       // replaced the pending journal with malformed or newer evidence.
       // Decline completion unless cleanup explicitly succeeded; an older
       // "false" return must never become an acknowledged compacted edit.
-      if (clearVerifiedSnapshot(snapshot) !== true)
+      if (clearVerifiedSnapshot(snapshot, current.raw) !== true)
         throw new Error('Task mutation journal cleanup could not be confirmed; pending changes retained.');
       retryCount = 0;
       compactionsCompleted += 1;
@@ -856,7 +863,7 @@
       if (!current.malformed && !isEmpty(current.record) && !result?.skipped && !result?.blockedByQuotaCircuit && result?.state) {
         try {
           const saved = persistedState();
-          if (snapshotVerified(saved, current.record, result.state)) clearVerifiedSnapshot(current.record);
+          if (snapshotVerified(saved, current.record, result.state)) clearVerifiedSnapshot(current.record, current.raw);
         } catch (_) {}
       }
       return result;
