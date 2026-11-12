@@ -3145,6 +3145,19 @@
       "atomicCrossTabCompareAndSwap": false,
       "productionV2OwnerCertified": false,
       "v1AuthorityUnchanged": true
+    },
+    "taskJournalSourceConflictSafetyEvidence": {
+      "sourcePath": "task_mutation_journal.js",
+      "testPath": "tests/task_mutation_journal_contract.test.js",
+      "sourceBytesComparedBeforeForegroundCommit": true,
+      "peerWriteBetweenReadAndWriteRefused": true,
+      "sourceReadFailureRefused": true,
+      "compactionCleanupDetectablePeerEditPreserved": true,
+      "sequentialSameTabWritesPreserved": true,
+      "atomicCrossTabCompareAndSwap": false,
+      "olderUncooperativeTabsFenced": false,
+      "v2TransactionOwnerCertified": false,
+      "mainUnchanged": true
     }
   },
   "proposedWriterHandoffs": [
