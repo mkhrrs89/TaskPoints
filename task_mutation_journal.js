@@ -43,6 +43,53 @@
   let journalSourceConflicts = 0;
   let snapshotSourceConflicts = 0;
   let fullSaveSourceRefusals = 0;
+  // Preview-only stale-tab admission: bind this Task journal instance to
+  // the V2 generation it was opened under. No IndexedDB wait or V1 schema
+  // change; deployed/production hosts never enter this check.
+  const PREVIEW_GENERATION_KEY = 'taskpoints_state_v2_generation_v1';
+  const PREVIEW_DARK_KEY = 'taskpoints_state_v2_dark_mode_v1';
+  const previewHost = (() => {
+    const host = String(global.location?.hostname || '').toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1'
+      || (host.endsWith('.taskpoints.pages.dev')
+        && host !== 'taskpoints.pages.dev'
+        && host !== 'www.taskpoints.pages.dev');
+  })();
+  let previewGenerationAtOpen = null;
+  let previewGenerationEnforced = false;
+  let previewGenerationBlocks = 0;
+  if (previewHost) {
+    try {
+      if (storage.getItem(PREVIEW_DARK_KEY) === '1') {
+        previewGenerationEnforced = true;
+        const token = storage.getItem(PREVIEW_GENERATION_KEY);
+        previewGenerationAtOpen = typeof token === 'string' && token ? token : null;
+      }
+    } catch (_) {
+      // A denied read during preview bootstrap is not permission for an
+      // unbound preview tab to write across a potentially rotated reset.
+      previewGenerationEnforced = true;
+    }
+  }
+
+  function assertPreviewTaskGeneration() {
+    if (!previewGenerationEnforced) return;
+    let live = null, enabled = null;
+    try {
+      enabled = storage.getItem(PREVIEW_DARK_KEY);
+      live = storage.getItem(PREVIEW_GENERATION_KEY);
+    } catch (_) {}
+    // Explicitly turning off the preview returns to unchanged V1 behavior.
+    // Otherwise, an old preview tab must reload before a Task mutation.
+    if (enabled === '0' || enabled === null) return;
+    if (!previewGenerationAtOpen || typeof live !== 'string'
+      || !live || live !== previewGenerationAtOpen) {
+      previewGenerationBlocks += 1;
+      const error = new Error('TaskPoints preview tab has an outdated reset/restore generation. Reload before editing Tasks.');
+      error.code = 'TASKPOINTS_TASK_PREVIEW_GENERATION_CHANGED';
+      throw error;
+    }
+  }
 
   function emptyRecord() {
     return { schemaVersion: 1, tasks: [], completionUpserts: [], completionDeletes: [], updatedAtISO: null };
@@ -138,6 +185,7 @@
   }
 
   function assertJournalWritable() {
+    assertPreviewTaskGeneration();
     if (!recoveryWriteAllowed()) {
       const error = new Error('TaskPoints paused task changes while recovery protection is active.');
       error.code = 'TASKPOINTS_TASK_MUTATION_JOURNAL_WRITE_LOCKED';
@@ -153,6 +201,7 @@
   }
 
   function writeRecord(record, alreadyNormalized = false, expectedPriorRaw = undefined) {
+    assertPreviewTaskGeneration();
     if (!recoveryWriteAllowed()) {
       const error = new Error('TaskPoints paused task changes while recovery protection is active.');
       error.code = 'TASKPOINTS_TASK_MUTATION_JOURNAL_WRITE_LOCKED';
@@ -644,6 +693,9 @@
 
   function persistPending(reason = 'quiet') {
     if (compactionRunning || !originalSaveStateSnapshot) return false;
+    // A resumed idle callback from a pre-reset preview tab may not
+    // compact its stale Task journal into the newly restored V1 snapshot.
+    try { assertPreviewTaskGeneration(); } catch (_) { return false; }
     const current = readRecord();
     if (current.malformed || isEmpty(current.record)) return false;
     compactionRunning = true;
@@ -682,6 +734,9 @@
         snapshotSourceConflicts += 1;
         throw new Error('V1 snapshot changed during Task compaction preparation; pending journal retained for retry.');
       }
+      // The V1 generation can rotate while a large Task snapshot is being
+      // decoded. Refuse immediately before the underlying full-state write.
+      assertPreviewTaskGeneration();
       const result = originalSaveStateSnapshot(candidate, {
         storageKey: STORAGE_KEY,
         immediateWrite: true,
@@ -980,7 +1035,9 @@
       journalWritesUnverified,
       journalSourceConflicts,
       snapshotSourceConflicts,
-      fullSaveSourceRefusals
+      fullSaveSourceRefusals,
+      previewGenerationEnforced,
+      previewGenerationBlocks
     };
   };
 
