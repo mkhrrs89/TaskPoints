@@ -59,6 +59,7 @@ function makeHarness(storageRows = {}, options = {}) {
     console,
     TaskPointsCore: core,
     localStorage: storage,
+    location:{hostname:options.hostname || ''},
     setTimeout(fn) { timers.push(fn); return timers.length; },
     clearTimeout() {},
     requestIdleCallback(fn) { fn(); return 1; },
@@ -200,6 +201,113 @@ test('successful synchronous Task journal write is verified before action acknow
   assert.equal(h.core.getTaskMutationJournalStatus().journalWritesUnverified, 0);
   assert.equal(h.core.getTaskMutationJournalStatus().mutationGeneration, 1);
   assert.equal(JSON.parse(h.storage.getItem(JOURNAL_KEY)).tasks[0].title, 'Committed real edit');
+});
+
+test('preview Task writer refuses old-tab edits and idle compaction after reset generation rotates',()=>{
+  const generationKey='taskpoints_state_v2_generation_v1';
+  const darkKey='taskpoints_state_v2_dark_mode_v1';
+  const shared=new FakeStorage({
+    [STORAGE_KEY]:JSON.stringify({tasks:[{id:'t1',title:'Original',status:'active'}],completions:[]}),
+    [generationKey]:'preview-generation-A',
+    [darkKey]:'1'
+  });
+  const old=makeHarness({}, {storage:shared,hostname:'localhost'});
+  assert.equal(old.core.getTaskMutationJournalStatus().previewGenerationEnforced,true);
+  old.core.journalTaskMutation({task:{id:'t1',title:'Pending before rotation'}});
+  const pending=shared.getItem(JOURNAL_KEY);
+  const baseline=shared.getItem(STORAGE_KEY);
+  // A reset/import in another cooperating tab rotated the generation.
+  shared.setItem(generationKey,'preview-generation-B');
+  assert.throws(()=>old.core.journalTaskMutation({task:{id:'t1',title:'Stale after rotation'}}),
+    error=>error.code==='TASKPOINTS_TASK_PREVIEW_GENERATION_CHANGED');
+  assert.equal(old.core.flushPendingTaskMutations(),false);
+  assert.equal(old.getSaveCalls(),0);
+  assert.equal(shared.getItem(STORAGE_KEY),baseline);
+  assert.equal(shared.getItem(JOURNAL_KEY),pending);
+  const status=old.core.getTaskMutationJournalStatus();
+  assert.equal(status.previewGenerationBlocks,2);
+  assert.equal(status.mutationGeneration,1);
+  // The valid reset path has quarantined/cleared old pending journal bytes.
+  // A *newly loaded* preview tab binds to the rotated epoch and remains usable.
+  shared.removeItem(JOURNAL_KEY);
+  const fresh=makeHarness({}, {storage:shared,hostname:'localhost'});
+  assert.equal(fresh.core.getTaskMutationJournalStatus().previewGenerationEnforced,true);
+  fresh.core.journalTaskMutation({task:{id:'t1',title:'New epoch Task'}});
+  assert.equal(fresh.core.flushPendingTaskMutations(),true);
+  assert.equal(JSON.parse(shared.getItem(STORAGE_KEY)).tasks[0].title,'New epoch Task');
+});
+
+test('preview Task journal fences a rotation between read and the synchronous write',()=>{
+  const generationKey='taskpoints_state_v2_generation_v1';
+  const darkKey='taskpoints_state_v2_dark_mode_v1';
+  const h=makeHarness({[generationKey]:'epoch-A',[darkKey]:'1'},{hostname:'localhost'});
+  const before=h.storage.getItem(STORAGE_KEY);
+  const get=h.storage.getItem.bind(h.storage);
+  let generations=0;
+  h.storage.getItem=key=>{
+    if(key===generationKey && ++generations===2){
+      h.storage.setItem(generationKey,'epoch-B');
+    }
+    return get(key);
+  };
+  assert.throws(()=>h.core.journalTaskMutation({task:{id:'t1',title:'Must not save'}}),
+    e=>e.code==='TASKPOINTS_TASK_PREVIEW_GENERATION_CHANGED');
+  assert.equal(generations,2);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+  assert.equal(h.storage.getItem(STORAGE_KEY),before);
+  assert.equal(h.getSaveCalls(),0);
+  assert.equal(h.core.getTaskMutationJournalStatus().mutationGeneration,0);
+});
+
+test('preview Task compaction blocks a generation rotation during snapshot parsing',()=>{
+  const generationKey='taskpoints_state_v2_generation_v1';
+  const darkKey='taskpoints_state_v2_dark_mode_v1';
+  const h=makeHarness({[generationKey]:'epoch-A',[darkKey]:'1'},{hostname:'localhost'});
+  h.core.journalTaskMutation({task:{id:'t1',title:'Durable before reset'}});
+  const before=h.storage.getItem(STORAGE_KEY);
+  const pending=h.storage.getItem(JOURNAL_KEY);
+  h.core.parseTaskPointsStorageJson=raw=>{
+    h.storage.setItem(generationKey,'epoch-B');
+    return JSON.parse(raw);
+  };
+  assert.equal(h.core.flushPendingTaskMutations(),false);
+  assert.equal(h.getSaveCalls(),0);
+  assert.equal(h.storage.getItem(STORAGE_KEY),before);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),pending);
+  assert.equal(h.core.getTaskMutationJournalStatus().previewGenerationBlocks,1);
+});
+
+test('production and explicitly disabled V2 preview keep unchanged V1 Task journal behavior',()=>{
+  const generationKey='taskpoints_state_v2_generation_v1';
+  const darkKey='taskpoints_state_v2_dark_mode_v1';
+  const production=makeHarness({[generationKey]:'A',[darkKey]:'1'},
+    {hostname:'taskpoints.pages.dev'});
+  assert.equal(production.core.getTaskMutationJournalStatus().previewGenerationEnforced,false);
+  production.storage.setItem(generationKey,'B');
+  production.core.journalTaskMutation({task:{id:'t1',title:'Production V1 still works'}});
+  assert.equal(production.core.flushPendingTaskMutations(),true);
+  const local=makeHarness({[generationKey]:'A',[darkKey]:'1'},{hostname:'localhost'});
+  local.storage.setItem(darkKey,'0');
+  local.storage.setItem(generationKey,'B');
+  local.core.journalTaskMutation({task:{id:'t1',title:'Disabled preview is V1'}});
+  assert.equal(local.core.flushPendingTaskMutations(),true);
+});
+
+test('unreadable preview generation blocks edits and cannot be mistaken for dark-mode disable',()=>{
+  const generationKey='taskpoints_state_v2_generation_v1';
+  const darkKey='taskpoints_state_v2_dark_mode_v1';
+  const h=makeHarness({[generationKey]:'epoch-A',[darkKey]:'1'},{hostname:'localhost'});
+  const prior=h.storage.getItem(STORAGE_KEY);
+  const original=h.storage.getItem.bind(h.storage);
+  h.storage.getItem=key=>{
+    if(key===darkKey)throw Error('denied dark-mode read');
+    return original(key);
+  };
+  assert.throws(()=>h.core.journalTaskMutation({task:{id:'t1',title:'Should refuse'}}),
+    e=>e.code==='TASKPOINTS_TASK_PREVIEW_GENERATION_CHANGED');
+  assert.equal(h.getSaveCalls(),0);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+  assert.equal(h.storage.getItem(STORAGE_KEY),prior);
 });
 
 test('two real Task journal tabs reject a detectable peer edit instead of overwriting it', () => {
