@@ -105,7 +105,11 @@
 
   function readRecord() {
     const raw = storage.getItem(JOURNAL_KEY);
-    if (!raw) return { raw: '', malformed: false, record: emptyRecord() };
+    // Only a genuinely absent key is an empty journal. A present but empty
+    // string (or a nonstandard storage shim returning undefined) is
+    // unreadable evidence: treating it as absent would let the next Task tap
+    // overwrite potentially interrupted/corrupt pending work.
+    if (raw === null) return { raw: '', malformed: false, record: emptyRecord() };
     let parsed;
     try { parsed = JSON.parse(raw); }
     catch (_) { return { raw, malformed: true, record: emptyRecord() }; }
