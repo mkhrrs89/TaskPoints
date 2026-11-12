@@ -9,6 +9,7 @@ on:
       - 'tests/home_worker_route_contract.test.js'
       - 'tests/home_morning_startup_deferred.test.js'
       - 'tests/home_morning_matchup_index.test.js'
+      - 'tests/home_morning_matchup_repair.test.js'
       - 'tests/home_weekly_work_hours.test.js'
       - 'tests/habit_manual_streak_freezes.test.js'
       - 'tests/mobile_boot_recovery_notice.test.js'
@@ -94,6 +95,7 @@ jobs:
         run: |
           node --test tests/home_morning_startup_deferred.test.js
           node --test tests/home_morning_matchup_index.test.js
+          node --test tests/home_morning_matchup_repair.test.js
 
       - name: Run full TaskPoints suite
         run: npm test
