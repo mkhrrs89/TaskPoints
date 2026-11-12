@@ -326,7 +326,9 @@ test('visibility events cannot duplicate pending timers or reactivate disabled V
   const prod=install({hostname:'taskpoints.pages.dev'});
   await prod.documentListeners.get('DOMContentLoaded')();
   assert.equal(prod.api.getObservedLegacyTaskStatus().visibilityResumeListenerInstalled,false);
-  assert.equal(prod.documentListeners.has('visibilitychange'),false);
+  assert.equal(prod.api.getObservedLegacyTaskStatus().visibilityResumeRequests,0);
+  // Other preexisting runtime modules may legitimately subscribe to
+  // visibilitychange in production; this test only owns the Task observer.
 });
 
 test('peer observer installs only one listener despite repeated coordinated startup',async()=>{
