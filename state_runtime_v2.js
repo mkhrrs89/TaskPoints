@@ -15784,10 +15784,30 @@
     installPreviewPeerResponder();
     installHabitJournalHook();
     const bridge = global.TaskPointsStateRuntimeV2WalBridge;
-    if (bridge?.__installedModule && typeof bridge.start === 'function') {
-      return bridge.start();
+    const startup = bridge?.__installedModule && typeof bridge.start === 'function'
+      ? bridge.start() : startDarkMirror();
+    // V2 preview only: a page can close after V1 Task compaction but BEFORE
+    // the quiet-window Task observer ran. The next preview load therefore
+    // needs one background reconciliation opportunity even with no pending
+    // Task journal remaining. Wait until dark startup settles and never add
+    // IndexedDB/large state reads to the foreground bootstrap path.
+    if (isWalTestPreviewHost()) {
+      const startupGeneration = currentGeneration({ create: false });
+      const startupEpoch = darkMirrorModeEpoch;
+      Promise.resolve(startup).then(() => {
+        if (startupGeneration !== currentGeneration({ create: false })
+          || startupEpoch !== darkMirrorModeEpoch
+          || !observedTaskPreviewAllowed()) return;
+        const startupKey = startupGeneration + ':' + startupEpoch;
+        if (observedTaskStartupKey === startupKey) return;
+        observedTaskStartupKey = startupKey;
+        observedTaskStartupRequests += 1;
+        queueObservedLegacyTaskJournal();
+      }).catch(() => {
+        // A failed dark startup is not permission to touch the V1 authority.
+      });
     }
-    return startDarkMirror();
+    return startup;
   }
 
   function enableDarkMirror() {
@@ -19099,6 +19119,10 @@
   const OBSERVED_TASK_IDLE_MS = 7000;
   const OBSERVED_TASK_TIMER_MS = 9000;
   let observedTaskRequested = false;
+  // Tracks one low-priority catch-up opportunity per preview startup epoch.
+  // No persistence, no V1 writes, no authority handoff.
+  let observedTaskStartupKey = null;
+  let observedTaskStartupRequests = 0;
   let observedTaskTimer = null;
   let observedTaskTimerGeneration = 0;
   let observedTaskRun = null;
@@ -19231,6 +19255,7 @@
     return {
       previewOnly:true,productionWritersFenced:false,
       pending:observedTaskRequested,running:Boolean(observedTaskRun),
+      startupCatchupRequests:observedTaskStartupRequests,
       attempts:observedTaskAttempts,verified:observedTaskVerified,
       refused:observedTaskRefused,lastReason:observedTaskLastReason,
       idleDeferrals:observedTaskIdleDeferrals,
