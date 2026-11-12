@@ -843,7 +843,17 @@
 
   if (originalSaveStateSnapshot) {
     core.saveStateSnapshot = function saveStateSnapshotWithTaskJournal(state, options = {}) {
-      const current = readRecord();
+      let current;
+      try { current = readRecord(); }
+      catch (error) {
+        // Home's save() catch branch may use a direct last-ditch writer that
+        // bypasses the Task overlay. A denied journal read is not evidence of
+        // an empty journal. Return a *skipped* result instead of throwing
+        // into that unsafe fallback; do not change or acknowledge V1 bytes.
+        fullSaveSourceRefusals += 1;
+        console.warn('TaskPoints postponed full save because the pending Task journal could not be read.', error);
+        return { state, skipped:true, blockedByTaskJournalUnreadable:true };
+      }
       // Read the persisted snapshot once for both stale-task and stale-SCWM
       // guards; large TaskPoints datasets should not be parsed twice.
       let savedForProtection = null;
