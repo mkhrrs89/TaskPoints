@@ -3851,6 +3851,8 @@ try {
     if(!await page.evaluate(()=>typeof navigator.locks?.request==='function'))
       return {unsupportedFailClosed:true};
     const cases=[
+      {label:'present-but-empty-journal',record:''},
+      {label:'whitespace-only-journal',record:' '},
       {label:'malformed-pending-row',record:{
         schemaVersion:1,tasks:[{id:'safe-old-task',name:'Keep'}],
         completionUpserts:[{noId:true}],completionDeletes:[],updatedAtISO:null}},
@@ -3869,7 +3871,7 @@ try {
     for(const testcase of cases){
       const result=await page.evaluate(async ({record})=>{
         const key='taskpoints_pending_task_mutations_v1';
-        const before=JSON.stringify(record);
+        const before=typeof record==='string'?record:JSON.stringify(record);
         localStorage.setItem(key,before);
         const initialState=localStorage.getItem('taskpoints_v1');
         const keys=[];
