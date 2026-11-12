@@ -124,6 +124,24 @@ test('automatic Task observer yields to user activity and never blocks the foreg
   assert.equal(app.core.getTaskMutationJournalStatus().journalWritesVerified,1);
 });
 
+test('unrelated Work/SCWM completion batches do not start unnecessary V2 Task scans',async()=>{
+  const app=install();
+  await app.api.seedFromLegacy();
+  app.core.journalTaskCompletionBatch([
+    {id:'work-metric',title:'Work Score',source:'work',points:8},
+    {id:'sleep-metric',title:'Sleep Score',source:'metric',points:7}
+  ]);
+  assert.equal(app.api.getObservedLegacyTaskStatus().pending,false);
+  assert.equal(app.timers.some(t=>t.ms===9000),false);
+  assert.equal(app.indexedDB.dump(DB).tasks.length,0);
+  // Real Task-associated completion edits should still be observable.
+  app.core.journalTaskCompletionBatch([
+    {id:'task-completion',taskId:'a',points:3}
+  ]);
+  assert.equal(app.api.getObservedLegacyTaskStatus().pending,true);
+  assert.equal(app.timers.some(t=>t.ms===9000),true);
+});
+
 test('production hostname and dark-disabled mode never queue preview Task work',()=>{
   for(const options of [{hostname:'taskpoints.pages.dev',dark:true},
                        {hostname:'localhost',dark:false}]){
