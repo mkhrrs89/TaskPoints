@@ -7,6 +7,7 @@ const vm = require('node:vm');
 const moduleSource = fs.readFileSync(path.join(__dirname, '..', 'task_mutation_journal.js'), 'utf8');
 const workerSource = fs.readFileSync(path.join(__dirname, '..', '_worker.js'), 'utf8');
 const homeSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+const settingsSource = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
 const logSource = fs.readFileSync(path.join(__dirname, '..', 'log.html'), 'utf8');
 const resetSource = fs.readFileSync(path.join(__dirname, '..', 'phase2_reset_hook.js'), 'utf8');
 const STORAGE_KEY = 'taskpoints_v1';
@@ -1014,6 +1015,25 @@ test('ordinary full save with missing Task journal still succeeds without source
   assert.notEqual(result.skipped,true);
   assert.equal(JSON.parse(h.storage.getItem(STORAGE_KEY)).notes,'Normal operation unchanged');
   assert.equal(h.core.getTaskMutationJournalStatus().fullSaveSourceRefusals,0);
+});
+
+test('Settings game reset and skills clear reject skipped guarded Task-safe snapshots',()=>{
+  const resetAt=settingsSource.indexOf('function resetOldGameStats');
+  const resetSaveAt=settingsSource.indexOf('const resetSaved = TaskPointsCore.saveStateSnapshot(');
+  const resetGuardAt=settingsSource.indexOf('if (resetSaved?.skipped || resetSaved?.blockedByQuotaCircuit)');
+  assert.ok(resetSaveAt>0&&resetGuardAt>resetSaveAt,
+    'Settings Game reset must test the guarded full-save result');
+  assert.match(settingsSource.slice(resetGuardAt,resetGuardAt+270),
+    /throw new Error/,
+    'Settings Game reset must not show success after a skipped save');
+  const clearStart=settingsSource.indexOf('function saveSkillsClearedState(');
+  const clearEnd=settingsSource.indexOf('function handleClearAllSkills()',clearStart);
+  assert.ok(clearStart>0&&clearEnd>clearStart);
+  const clearSource=settingsSource.slice(clearStart,clearEnd);
+  assert.match(clearSource,/if \(saved\?\.skipped \|\| saved\?\.blockedByQuotaCircuit\)/,
+    'Settings Skills clear must notice a skipped full save');
+  assert.match(clearSource,/throw new Error\('Skills clear was not saved/,
+    'Settings Skills clear must use its existing user-visible error path');
 });
 
 test('full saves automatically include pending mutations before verification clears them', () => {
