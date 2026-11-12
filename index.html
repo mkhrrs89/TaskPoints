@@ -4401,6 +4401,27 @@ function ensureUpcomingSchedule(days = 7){
       used.add(m.playerAId);
       used.add(m.playerBId);
     });
+    // An idle season job can materialize some NPC results before the morning
+    // simulation. Retain already scheduled, not-yet-recorded pairings (notably
+    // YOU's) instead of replacing the whole daily slate with those NPC rows.
+    // Never replace a scored pairing or schedule someone twice.
+    const storedIds = new Set(safePairs.map(m => String(m.id || m.matchupId || '')).filter(Boolean));
+    const planned = Array.isArray(existing?.matchups) ? existing.matchups : [];
+    planned.forEach(m => {
+      if (!m?.playerAId || !m?.playerBId || used.has(m.playerAId) || used.has(m.playerBId)) return;
+      const id = String(m.id || m.matchupId || '');
+      if (id && storedIds.has(id)) return;
+      const row = { ...m, dateKey: m.dateKey || todayKey };
+      const safe = seasonControlApplies && window.TaskPointsCore?.sanitizeSeasonMatchupMetadataForDate
+        ? TaskPointsCore.sanitizeSeasonMatchupMetadataForDate(state, row, todayKey)
+        : row;
+      if (!safe?.playerAId || !safe?.playerBId) return;
+      if (used.has(safe.playerAId) || used.has(safe.playerBId)) return;
+      safePairs.push(safe);
+      used.add(safe.playerAId);
+      used.add(safe.playerBId);
+      if (id) storedIds.add(id);
+    });
 
     const preservedByeIds = Array.isArray(existing?.byeIds)
       ? existing.byeIds.filter((id) => id && !used.has(id))
