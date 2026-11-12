@@ -223,5 +223,5 @@ test('Task parity checks identity, payload, source inventory and generation with
   assert.match(source,/String\(row\.value\.id\) !== row\.id/);
   assert.match(source,/stableJson\(row\.value\) !== stableJson\(tasks\[index\]\)/);
   assert.match(source,/if \(!sourceCurrent\(\)\) return refuse\('legacy_changed_during_inspection'\)/);
-  assert.match(runtime,/rehearsePreviewTaskCollectionSeed,\s*rehearsePreviewTaskCollectionReconcile,\s*inspectPreviewTaskCollectionParity,/);
+  assert.match(runtime,/rehearsePreviewTaskCollectionSeed,\s*rehearsePreviewTaskCollectionReconcile,\s*queueObservedLegacyTaskJournal,\s*flushObservedLegacyTaskJournal,\s*getObservedLegacyTaskStatus,\s*inspectPreviewTaskCollectionParity,/);
 });
