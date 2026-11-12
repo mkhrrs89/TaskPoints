@@ -315,6 +315,92 @@ test('compaction cannot report success if pending journal becomes malformed duri
     'Pending original edit');
 });
 
+test('Task compaction refuses a stale candidate if a peer clears the journal after persisting a newer snapshot', () => {
+  const pending={
+    schemaVersion:1,
+    tasks:[{id:'t1',title:'Task from old pending journal',status:'active'}],
+    completionUpserts:[],completionDeletes:[],updatedAtISO:'2026-11-12T12:00:00.000Z'
+  };
+  const h=makeHarness({[JOURNAL_KEY]:JSON.stringify(pending)});
+  const newer=JSON.parse(h.storage.getItem(STORAGE_KEY));
+  newer.tasks[0]={id:'t1',title:'Peer already compacted newer edit',status:'completed'};
+  newer.extraImportedField={keep:true};
+  let injected=false;
+  h.core.parseTaskPointsStorageJson=raw=>{
+    if(!injected){
+      injected=true;
+      // Simulate another tab completing compaction while our tab is
+      // decoding an older V1 snapshot for its own pending journal.
+      h.storage.setItem(STORAGE_KEY,JSON.stringify(newer));
+      h.storage.removeItem(JOURNAL_KEY);
+    }
+    return JSON.parse(raw);
+  };
+  assert.equal(h.core.flushPendingTaskMutations(),false);
+  assert.equal(injected,true);
+  assert.equal(h.getSaveCalls(),0,'stale compaction may not invoke the full-state writer');
+  assert.deepEqual(JSON.parse(h.storage.getItem(STORAGE_KEY)),newer);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null,
+    'a peer-verified cleanup must not be resurrected by stale compaction');
+  assert.equal(h.core.getTaskMutationJournalStatus().journalSourceConflicts,1);
+  assert.equal(h.core.getTaskMutationJournalStatus().compactionsCompleted,0);
+});
+
+test('Task compaction retains newer peer edits and can safely retry after a source change', () => {
+  const pending={
+    schemaVersion:1,
+    tasks:[{id:'t1',title:'First pending edit'}],
+    completionUpserts:[],completionDeletes:[],updatedAtISO:'2026-11-12T12:00:00.000Z'
+  };
+  const h=makeHarness({[JOURNAL_KEY]:JSON.stringify(pending)});
+  const newer={...pending,
+    tasks:[...pending.tasks,{id:'t2',title:'New edit from other tab'}],
+    updatedAtISO:'2026-11-12T12:00:01.000Z'
+  };
+  let injected=false;
+  h.core.parseTaskPointsStorageJson=raw=>{
+    if(!injected){
+      injected=true;
+      h.storage.setItem(JOURNAL_KEY,JSON.stringify(newer));
+    }
+    return JSON.parse(raw);
+  };
+  assert.equal(h.core.flushPendingTaskMutations(),false);
+  assert.equal(h.getSaveCalls(),0);
+  assert.deepEqual(JSON.parse(h.storage.getItem(JOURNAL_KEY)),newer);
+  assert.equal(h.core.getTaskMutationJournalStatus().journalSourceConflicts,1);
+  h.core.parseTaskPointsStorageJson=raw=>JSON.parse(raw);
+  assert.equal(h.core.flushPendingTaskMutations(),true,
+    'fresh retry can compact both edits without losing the peer row');
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+  const persisted=JSON.parse(h.storage.getItem(STORAGE_KEY));
+  assert.equal(persisted.tasks.find(row=>row.id==='t1').title,'First pending edit');
+  assert.equal(persisted.tasks.find(row=>row.id==='t2').title,'New edit from other tab');
+});
+
+test('Task compaction fails closed on an unreadable final pre-save journal check', () => {
+  const pending={
+    schemaVersion:1,
+    tasks:[{id:'t1',title:'Still pending after denied read'}],
+    completionUpserts:[],completionDeletes:[],updatedAtISO:'2026-11-12T12:00:00.000Z'
+  };
+  const h=makeHarness({[JOURNAL_KEY]:JSON.stringify(pending)});
+  const oldGet=h.storage.getItem.bind(h.storage);
+  let reads=0;
+  h.storage.getItem=key=>{
+    if(key===JOURNAL_KEY && ++reads===2)throw Error('injected unreadable source');
+    return oldGet(key);
+  };
+  assert.equal(h.core.flushPendingTaskMutations(),false);
+  assert.equal(h.getSaveCalls(),0);
+  assert.equal(JSON.parse(oldGet(JOURNAL_KEY)).tasks[0].title,
+    'Still pending after denied read');
+  assert.equal(h.core.getTaskMutationJournalStatus().journalSourceConflicts,1);
+  h.storage.getItem=oldGet;
+  assert.equal(h.core.flushPendingTaskMutations(),true);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+});
+
 test('sequential same-tab Task journal updates still merge and flush without a conflict', () => {
   const h=makeHarness();
   h.core.journalTaskMutation({task:{id:'t1',title:'First edit'}});
