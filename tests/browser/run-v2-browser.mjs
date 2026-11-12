@@ -3846,6 +3846,59 @@ try {
       originalV1Authoritative:true};
   });
 
+  await run('preview Task collection catches up compacted legacy snapshot after browser reload',async context=>{
+    const page=await open(context);
+    const initial=await page.evaluate(async()=>
+      window.TaskPointsStateRuntimeV2.rehearsePreviewTaskCollectionSeed());
+    assert.equal(initial.verified,true,initial.reason);
+    const durable=await page.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const key='taskpoints_v1';
+      const snapshot=core.parseTaskPointsStorageJson(localStorage.getItem(key),{});
+      snapshot.tasks[0].title='Changed before reopened preview';
+      snapshot.tasks.push({id:'new-after-last-preview',
+        title:'Added to V1 before restart',status:'active'});
+      localStorage.setItem(key,JSON.stringify(snapshot));
+      return {
+        raw:localStorage.getItem(key),
+        pendingJournal:localStorage.getItem('taskpoints_pending_task_mutations_v1')
+      };
+    });
+    assert.equal(durable.pendingJournal,null,
+      'a previous page may already have compacted and cleared the V1 journal');
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>
+      Boolean(window.V2BrowserFixture?.status()?.runtime?.installed));
+    await page.evaluate(()=>window.V2BrowserFixture.start());
+    await page.waitForFunction(()=>
+      window.TaskPointsStateRuntimeV2?.getObservedLegacyTaskStatus?.().pending===true,
+      null,{timeout:12000});
+    const before=await page.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.getObservedLegacyTaskStatus());
+    assert.equal(before.attempts,0,'no full Task scan during foreground reload');
+    assert.equal(before.startupCatchupRequests,1);
+    const caught=await page.evaluate(()=>
+      window.TaskPointsStateRuntimeV2.flushObservedLegacyTaskJournal());
+    assert.equal(caught.verified,true,caught.reason);
+    const proof=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      return {
+        parity:await api.inspectPreviewTaskCollectionParity(),
+        saved:localStorage.getItem('taskpoints_v1'),
+        pending:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        status:api.getObservedLegacyTaskStatus(),
+        authority:api.getStatus().readAuthority
+      };
+    });
+    assert.equal(proof.parity.match,true,proof.parity.reason);
+    assert.equal(proof.saved,durable.raw);
+    assert.equal(proof.pending,null);
+    assert.equal(proof.authority,'legacy_only');
+    assert.equal(proof.status.verified,1);
+    return {coldReloadCatchesCompactedTasks:true,fullV1BytesPreserved:true,
+      noForegroundTaskScan:true,authorityUnchanged:true};
+  });
+
   await run('preview Task admission refuses a lossy legacy journal before writing',async context=>{
     const page=await open(context);
     if(!await page.evaluate(()=>typeof navigator.locks?.request==='function'))
