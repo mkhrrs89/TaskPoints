@@ -963,16 +963,23 @@ test('Main Work action batches atomic V1 journal writes without removing fallbac
   assert.match(core,/TASKPOINTS_TASK_COMPLETION_BATCH_INVALID/);
   // One single synchronous journal commit after every validated row is
   // merged. The writeRecord helper itself performs the only setItem.
-  const writeStart=journal.indexOf('function writeRecord(record, alreadyNormalized = false)');
+  const writeStart=journal.indexOf('function writeRecord(record, alreadyNormalized = false, expectedPriorRaw = undefined)');
   const writeEnd=journal.indexOf('function mergeById(',writeStart);
   assert.ok(writeStart>0&&writeEnd>writeStart);
-  assert.equal((core.match(/writeRecord\(record, true\)/g)||[]).length,1);
+  assert.equal((core.match(/writeRecord\(record, true, current\.raw\)/g)||[]).length,1);
   const writer = journal.slice(writeStart,writeEnd);
   assert.match(writer, /const expectedRaw = isEmpty\(normalized\) \? null : JSON\.stringify\(normalized\)/);
   assert.match(writer, /storage\.setItem\(JOURNAL_KEY, expectedRaw\)/);
   assert.match(writer, /storage\.getItem\(JOURNAL_KEY\)/);
   assert.match(writer, /actualRaw !== expectedRaw/);
   assert.match(writer, /TASKPOINTS_TASK_MUTATION_JOURNAL_UNVERIFIED_WRITE/);
+  assert.match(writer, /expectedPriorRaw !== undefined/);
+  assert.match(writer, /storage\.getItem\(JOURNAL_KEY\)/);
+  assert.match(writer, /TASKPOINTS_TASK_MUTATION_JOURNAL_SOURCE_CHANGED/);
+  assert.match(writer, /TASKPOINTS_TASK_MUTATION_JOURNAL_SOURCE_UNREADABLE/);
+  assert.ok(writer.indexOf("storage.getItem(JOURNAL_KEY)") <
+    writer.indexOf("storage.setItem(JOURNAL_KEY, expectedRaw)"),
+    'journal source bytes must be checked before a foreground save');
   assert.ok(writer.indexOf('storage.getItem(JOURNAL_KEY)') <
     writer.indexOf('invalidateReadCaches()'),
     'a Task action must read back exact journal bytes before invalidating cache or acknowledging durability');
