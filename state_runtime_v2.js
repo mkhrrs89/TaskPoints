@@ -11316,11 +11316,13 @@
         const metaStore = tx.objectStore('meta');
         const req = metaStore.get(RUNTIME_META_ID);
         const evidenceReq = metaStore.get('task-preview');
-        let have = 0, currentMeta, currentEvidence;
+        const rowsReq = tx.objectStore('tasks').getAll();
+        const lifecycleReq = metaStore.get('task-preview-lifecycle-state');
+        let have = 0, currentMeta, currentEvidence, currentRows, currentLifecycle;
         const check = () => {
-          if (++have !== 2) return;
+          if (++have !== 4) return;
           if (stableJson(currentMeta || null) !== stableJson(initialMeta)
-            || currentEvidence
+            || currentEvidence || currentRows?.length || currentLifecycle
             || !isDarkEnabled()
             || darkMirrorModeEpoch !== expectedEpoch
             || currentGeneration({ create: false }) !== generation) {
@@ -11351,6 +11353,8 @@
         };
         req.onsuccess = () => { currentMeta=req.result; check(); };
         evidenceReq.onsuccess = () => { currentEvidence=evidenceReq.result; check(); };
+        rowsReq.onsuccess = () => { currentRows=rowsReq.result; check(); };
+        lifecycleReq.onsuccess = () => { currentLifecycle=lifecycleReq.result; check(); };
         await transactionPromise(tx);
       } catch (_) { return refuse(commitError || 'task_preview_write_failed'); }
     }
