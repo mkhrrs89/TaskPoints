@@ -11289,11 +11289,20 @@
       return refuse('pilot_meta_not_ready');
     try { if (!stillSameSource()) return refuse('legacy_changed_before_seed'); }
     catch (_) { return refuse('legacy_unreadable_before_seed'); }
-    let priorEvidence = null;
+    let priorEvidence = null, unownedTaskRows = [], lifecycleCursor = null;
     try {
       const tx = db.transaction(['tasks','meta'], 'readonly');
-      priorEvidence = await requestPromise(tx.objectStore('meta').get('task-preview'));
+      [priorEvidence,unownedTaskRows,lifecycleCursor] = await Promise.all([
+        requestPromise(tx.objectStore('meta').get('task-preview')),
+        requestPromise(tx.objectStore('tasks').getAll()),
+        requestPromise(tx.objectStore('meta').get('task-preview-lifecycle-state'))
+      ]);
     } catch (_) { return refuse('task_preview_evidence_unreadable'); }
+    // An older preview experiment may have written a Task record without
+    // the Task collection seed receipt. Never clear unowned preview bytes
+    // during the optional live-Task mirror's first seed.
+    if (!priorEvidence && (unownedTaskRows.length || lifecycleCursor))
+      return refuse('task_preview_unowned_rows_preserved');
     const sameEvidence = priorEvidence?.resetGeneration === generation
       && priorEvidence?.taskFingerprint === taskFingerprint
       && priorEvidence?.sourceInventory === `${fnv1a(inventoryBefore)}:${inventoryBefore.length}`;
@@ -19079,6 +19088,143 @@
     return result;
   }
 
+  // V2 PREVIEW ONLY: observe real, already-durable V1 Task journal edits.
+  // Never put IndexedDB work on the foreground Task save path: the real
+  // synchronous V1 journal is still authoritative and durable before paint.
+  // A cooperative preview mirror is not an atomic old-tab fence or cutover.
+  const OBSERVED_TASK_IDLE_MS = 7000;
+  const OBSERVED_TASK_TIMER_MS = 9000;
+  let observedTaskRequested = false;
+  let observedTaskTimer = null;
+  let observedTaskTimerGeneration = 0;
+  let observedTaskRun = null;
+  let observedTaskAttempts = 0;
+  let observedTaskVerified = 0;
+  let observedTaskRefused = 0;
+  let observedTaskLastReason = 'not_started';
+
+  function observeTaskResult(reason, verified = false) {
+    observedTaskLastReason = reason;
+    if (verified) observedTaskVerified += 1;
+    else observedTaskRefused += 1;
+    return {
+      checked:true, previewOnly:true, verified, reason,
+      canPromote:false, productionWritersFenced:false,
+      readAuthority:'legacy_only', mutationAuthority:'legacy_only'
+    };
+  }
+
+  function observedTaskPreviewAllowed() {
+    return isWalTestPreviewHost() && isDarkEnabled()
+      && Boolean(currentGeneration({create:false}));
+  }
+
+  async function flushObservedLegacyTaskJournal() {
+    if (!observedTaskPreviewAllowed())
+      return observeTaskResult('preview_not_admitted');
+    if (observedTaskRun) return observedTaskRun;
+    if (!observedTaskRequested)
+      return {
+        checked:true,previewOnly:true,verified:false,
+        reason:'no_pending_task_observation',canPromote:false,
+        productionWritersFenced:false
+      };
+    observedTaskRequested = false;
+    observedTaskAttempts += 1;
+    const generation = currentGeneration({create:false});
+    const epoch = darkMirrorModeEpoch;
+    observedTaskRun = (async () => {
+      try {
+        if (!observedTaskPreviewAllowed()
+          || currentGeneration({create:false}) !== generation
+          || darkMirrorModeEpoch !== epoch)
+          return observeTaskResult('preview_generation_changed');
+        // Do not copy unreadable or malformed V1 pending Task evidence.
+        const pending = core.readPendingTaskMutations?.();
+        if (!pending || pending.malformed
+          || !Array.isArray(pending.record?.tasks)
+          || !Array.isArray(pending.record?.completionUpserts)
+          || !Array.isArray(pending.record?.completionDeletes))
+          return observeTaskResult('legacy_task_journal_unreadable');
+        const seeded = await rehearsePreviewTaskCollectionSeed();
+        let result = seeded;
+        if (!seeded.verified && seeded.reason === 'task_preview_existing_evidence_preserved') {
+          if (!observedTaskPreviewAllowed()
+            || currentGeneration({create:false}) !== generation
+            || darkMirrorModeEpoch !== epoch)
+            return observeTaskResult('preview_generation_changed');
+          let token;
+          try { token = captureReadOnlyFullStorageInventory(); }
+          catch (_) { return observeTaskResult('full_origin_unreadable'); }
+          const id = 'observed-task-'+String(global.crypto?.randomUUID?.()
+            || (Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)));
+          result = await rehearsePreviewTaskCollectionReconcile(token,id);
+        }
+        if (!(result?.verified === true
+          || (result?.confirmedDurable === true && result?.collectionParityVerified === true)))
+          return observeTaskResult(result?.reason || 'task_preview_reconcile_refused');
+        // Independent post-action parity; V1 journal may have changed again
+        // during the async mirror. Never count a stale preview as verified.
+        const parity = await inspectPreviewTaskCollectionParity();
+        if (parity?.match !== true)
+          return observeTaskResult(parity?.reason || 'task_preview_parity_unverified');
+        if (!observedTaskPreviewAllowed()
+          || currentGeneration({create:false}) !== generation
+          || darkMirrorModeEpoch !== epoch)
+          return observeTaskResult('preview_generation_changed');
+        return observeTaskResult('observed_legacy_task_parity_verified',true);
+      } catch (_) {
+        return observeTaskResult('task_preview_observation_failed');
+      }
+    })().finally(() => {
+      observedTaskRun = null;
+      if (observedTaskRequested) scheduleObservedTaskMirror();
+    });
+    return observedTaskRun;
+  }
+
+  function scheduleObservedTaskMirror() {
+    if (!observedTaskPreviewAllowed() || !observedTaskRequested
+      || typeof global.setTimeout !== 'function') return false;
+    const serial = ++observedTaskTimerGeneration;
+    if (observedTaskTimer != null) global.clearTimeout?.(observedTaskTimer);
+    observedTaskTimer = global.setTimeout(() => {
+      if (serial !== observedTaskTimerGeneration) return;
+      observedTaskTimer = null;
+      if (!observedTaskPreviewAllowed() || !observedTaskRequested) return;
+      // Background-only. If the user is active, leave the request for their
+      // next quiet interval or an explicit preview diagnostic flush.
+      const idle = core.getStorageMaintenanceIdleStatus?.() || null;
+      if (global.document?.hidden || global.document?.visibilityState === 'hidden'
+        || idle?.pageLeaving === true || idle?.activeEditor === true
+        || (idle && Number(idle.lastInteractionAgoMs || 0) < OBSERVED_TASK_IDLE_MS)
+        || (typeof core.isStorageMaintenanceQuiet === 'function'
+          && core.isStorageMaintenanceQuiet() !== true)) {
+        observedTaskLastReason = 'waiting_for_idle';
+        return;
+      }
+      void flushObservedLegacyTaskJournal();
+    },OBSERVED_TASK_TIMER_MS);
+    return true;
+  }
+
+  function queueObservedLegacyTaskJournal() {
+    if (!observedTaskPreviewAllowed()) return false;
+    observedTaskRequested = true;
+    scheduleObservedTaskMirror();
+    return true;
+  }
+
+  function getObservedLegacyTaskStatus() {
+    return {
+      previewOnly:true,productionWritersFenced:false,
+      pending:observedTaskRequested,running:Boolean(observedTaskRun),
+      attempts:observedTaskAttempts,verified:observedTaskVerified,
+      refused:observedTaskRefused,lastReason:observedTaskLastReason,
+      automaticIdleMs:OBSERVED_TASK_IDLE_MS
+    };
+  }
+
   const api = {
     __installedModule: true,
     DB_NAME,
@@ -19239,6 +19385,9 @@
     inspectPreviewGoldTransactionIntegrity,
     rehearsePreviewTaskCollectionSeed,
     rehearsePreviewTaskCollectionReconcile,
+    queueObservedLegacyTaskJournal,
+    flushObservedLegacyTaskJournal,
+    getObservedLegacyTaskStatus,
     inspectPreviewTaskCollectionParity,
     inspectPreviewTaskRecord,
     rehearsePreviewTaskRecordUpdate,
