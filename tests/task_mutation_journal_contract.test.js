@@ -264,7 +264,9 @@ test('compaction cleanup does not erase an edit another tab saved after the clea
   const set=h.storage.setItem.bind(h.storage);
   let reads=0,peerWritten=false;
   h.storage.getItem=key=>{
-    if(key===JOURNAL_KEY && ++reads===3 && !peerWritten){
+    // Pre-save compaction now performs a second read. Inject AFTER the
+    // cleanup read, at the exact writeRecord source recheck.
+    if(key===JOURNAL_KEY && ++reads===4 && !peerWritten){
       peerWritten=true;
       set(JOURNAL_KEY,JSON.stringify({
         ...initial,
