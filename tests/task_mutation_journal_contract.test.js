@@ -403,6 +403,84 @@ test('Task compaction fails closed on an unreadable final pre-save journal check
   assert.equal(h.storage.getItem(JOURNAL_KEY),null);
 });
 
+test('Task compaction refuses a stale V1 snapshot when a peer saves while old bytes decode', () => {
+  const h=makeHarness();
+  h.core.journalTaskMutation({
+    task:{id:'t1',title:'Pending Task edit',status:'completed'},
+    completionUpsert:{id:'pending-completion',taskId:'t1',source:'task',points:7}
+  });
+  const originalJournal=h.storage.getItem(JOURNAL_KEY);
+  const before=JSON.parse(h.storage.getItem(STORAGE_KEY));
+  const peerSaved={...before,
+    notes:'Newer unrelated Notes data from another tab',
+    completions:[...before.completions,{
+      id:'peer-completion',title:'Peer committed',source:'work',points:13
+    }]
+  };
+  const peerRaw=JSON.stringify(peerSaved);
+  let injected=0;
+  h.core.parseTaskPointsStorageJson=raw=>{
+    if(!injected++){
+      // A peer commits *after* this tab read the raw V1 snapshot but
+      // before decompression/parsing and journal compaction finish.
+      h.storage.setItem(STORAGE_KEY,peerRaw);
+    }
+    return JSON.parse(raw);
+  };
+  const result=h.core.flushPendingTaskMutations();
+  assert.equal(result,false);
+  assert.equal(injected,1);
+  assert.equal(h.getSaveCalls(),0,
+    'a stale candidate must never reach the canonical full-state writer');
+  assert.equal(h.storage.getItem(STORAGE_KEY),peerRaw);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),originalJournal,
+    'the durable Task intent must remain for a safe retry');
+  assert.equal(h.core.getTaskMutationJournalStatus().snapshotSourceConflicts,1);
+  h.core.parseTaskPointsStorageJson=raw=>JSON.parse(raw);
+  assert.equal(h.core.flushPendingTaskMutations(),true,
+    'retry from the peer snapshot must preserve both sets of changes');
+  const final=JSON.parse(h.storage.getItem(STORAGE_KEY));
+  assert.equal(final.notes,peerSaved.notes);
+  assert.ok(final.completions.some(row=>row.id==='peer-completion'));
+  assert.equal(final.completions.find(row=>row.id==='pending-completion').points,7);
+  assert.equal(final.tasks.find(row=>row.id==='t1').title,'Pending Task edit');
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+});
+
+test('Task compaction refuses V1 snapshot removal while preparing and retains pending edit', () => {
+  const h=makeHarness();
+  h.core.journalTaskMutation({task:{id:'t1',title:'Not to lose'}});
+  const originalJournal=h.storage.getItem(JOURNAL_KEY);
+  const original=h.storage.getItem(STORAGE_KEY);
+  h.core.parseTaskPointsStorageJson=raw=>{
+    h.storage.removeItem(STORAGE_KEY);
+    return JSON.parse(raw);
+  };
+  assert.equal(h.core.flushPendingTaskMutations(),false);
+  assert.equal(h.getSaveCalls(),0);
+  assert.equal(h.storage.getItem(STORAGE_KEY),null);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),originalJournal);
+  assert.equal(h.core.getTaskMutationJournalStatus().snapshotSourceConflicts,1);
+  h.storage.setItem(STORAGE_KEY,original);
+  h.core.parseTaskPointsStorageJson=raw=>JSON.parse(raw);
+  assert.equal(h.core.flushPendingTaskMutations(),true);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+});
+
+test('Task compaction refuses an unreadable V1 snapshot source without writing', () => {
+  const h=makeHarness();
+  h.core.journalTaskMutation({task:{id:'t1',title:'Keep pending'}});
+  const originalJournal=h.storage.getItem(JOURNAL_KEY);
+  const realGet=h.storage.getItem.bind(h.storage);
+  h.storage.getItem=key=>key===STORAGE_KEY?undefined:realGet(key);
+  assert.equal(h.core.flushPendingTaskMutations(),false);
+  assert.equal(h.getSaveCalls(),0);
+  assert.equal(realGet(JOURNAL_KEY),originalJournal);
+  h.storage.getItem=realGet;
+  assert.equal(h.core.flushPendingTaskMutations(),true);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+});
+
 test('sequential same-tab Task journal updates still merge and flush without a conflict', () => {
   const h=makeHarness();
   h.core.journalTaskMutation({task:{id:'t1',title:'First edit'}});
