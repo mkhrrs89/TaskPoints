@@ -12779,6 +12779,16 @@ try {
       first.evaluate(()=>window.V2BrowserFixture.delta('h1','2026-10-20','full',1)),
       second.evaluate(()=>window.V2BrowserFixture.delta('h2','2026-10-20','full',2))
     ]);
+    // Concurrent browser contexts do not promise that a storage event from
+    // the other tab is visible in the first tab at the exact instant its own
+    // evaluate resolves. Require BOTH writes to become observable, then check
+    // the full durable journal strictly. A genuinely missing write must still
+    // fail this test rather than being silently accepted.
+    await first.waitForFunction(()=>{
+      const rows=window.TaskPointsCore.readPendingHabitDeltas();
+      const ids=new Set(rows.map(row=>row.habitId));
+      return ids.has('h1') && ids.has('h2');
+    },null,{timeout:12000});
     const original=await first.evaluate(()=>window.TaskPointsCore.readPendingHabitDeltas());
     assert.deepEqual(original.map(row=>row.habitId).sort(),['h1','h2']);
     await first.waitForTimeout(350);
