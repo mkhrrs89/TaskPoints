@@ -3176,7 +3176,10 @@
       "v2ProductionAuthoritative": false,
       "atomicCrossTabWriterAdmissionCertified": false,
       "productionWriterOwnerCertified": false,
-      "canPromote": false
+      "canPromote": false,
+      "unrelatedWorkScwmBatchesIgnored": true,
+      "boundedIdleDeferralRetries": true,
+      "liveBridgeRegressionCases": 7
     }
   },
   "proposedWriterHandoffs": [
