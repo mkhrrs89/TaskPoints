@@ -96,10 +96,14 @@ async function runNextTimer(harness) {
   await Promise.resolve();
 }
 
-test('worker bundles the task mutation journal before state hot cache', () => {
+test('worker boots V2 generation before Task journal and preserves hot cache order', () => {
+  const generationAt = workerSource.indexOf("'/state_runtime_v2_generation.js'");
   const journalAt = workerSource.indexOf("'/task_mutation_journal.js'");
   const hotCacheAt = workerSource.indexOf("'/state_hot_cache.js'");
-  assert.ok(journalAt >= 0 && hotCacheAt > journalAt);
+  assert.ok(generationAt >= 0 && journalAt > generationAt,
+    'preview Task epoch must be available before the journal captures it');
+  assert.ok(hotCacheAt > journalAt,
+    'the journal must still load before state hot cache');
   assert.match(workerSource, /taskMutationJournalSource/);
 });
 
