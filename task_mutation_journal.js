@@ -41,6 +41,7 @@
   let journalWritesVerified = 0;
   let journalWritesUnverified = 0;
   let journalSourceConflicts = 0;
+  let snapshotSourceConflicts = 0;
 
   function emptyRecord() {
     return { schemaVersion: 1, tasks: [], completionUpserts: [], completionDeletes: [], updatedAtISO: null };
@@ -441,8 +442,10 @@
     return true;
   }
 
-  function persistedState() {
-    const raw = storage.getItem(STORAGE_KEY);
+  function persistedState(rawOverride) {
+    // Allow compaction to parse the exact V1 bytes it first observed. A
+    // second implicit getItem here would hide a peer change during preparation.
+    const raw = arguments.length ? rawOverride : storage.getItem(STORAGE_KEY);
     if (!raw) return {};
     if (typeof core.parseTaskPointsStorageJson === 'function') return core.parseTaskPointsStorageJson(raw, {}) || {};
     return JSON.parse(raw) || {};
@@ -647,7 +650,14 @@
     try { global.TaskPointsPerf?.mark?.('taskMutation.compactionStart', { reason }); } catch (_) {}
     const snapshot = clone(current.record);
     try {
-      const candidate = applyRecord(persistedState(), snapshot);
+      // Freeze the *raw* V1 snapshot used to build this candidate. Reading
+      // and decoding a large compressed snapshot can give a peer tab time
+      // to commit a newer full-state save even if the Task journal is unchanged.
+      const snapshotSourceRaw = storage.getItem(STORAGE_KEY);
+      if (snapshotSourceRaw === undefined
+        || (snapshotSourceRaw !== null && typeof snapshotSourceRaw !== 'string'))
+        throw new Error('Task compaction source snapshot is unreadable.');
+      const candidate = applyRecord(persistedState(snapshotSourceRaw), snapshot);
       // Another tab may finish a Task edit or compact/clear its journal
       // while this tab decodes the full V1 snapshot. Refuse to overwrite
       // that peer's newer snapshot using a candidate based on older journal
@@ -660,6 +670,16 @@
         || (latestJournalRaw === null ? '' : latestJournalRaw) !== current.raw) {
         journalSourceConflicts += 1;
         throw new Error('Task journal changed during compaction preparation; older snapshot was not saved.');
+      }
+      // Refuse a stale full-state candidate before invoking the writer. This
+      // detects peer V1 saves that contain new Task, completion, or unrelated
+      // app data not represented in this pending Task journal.
+      let latestSnapshotRaw;
+      try { latestSnapshotRaw = storage.getItem(STORAGE_KEY); }
+      catch (_) { latestSnapshotRaw = undefined; }
+      if (latestSnapshotRaw === undefined || latestSnapshotRaw !== snapshotSourceRaw) {
+        snapshotSourceConflicts += 1;
+        throw new Error('V1 snapshot changed during Task compaction preparation; pending journal retained for retry.');
       }
       const result = originalSaveStateSnapshot(candidate, {
         storageKey: STORAGE_KEY,
@@ -912,7 +932,8 @@
       mutationGeneration,
       journalWritesVerified,
       journalWritesUnverified,
-      journalSourceConflicts
+      journalSourceConflicts,
+      snapshotSourceConflicts
     };
   };
 
