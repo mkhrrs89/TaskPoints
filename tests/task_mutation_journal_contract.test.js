@@ -1058,6 +1058,94 @@ test('ordinary full save fails closed when pending Task source cannot be recheck
   assert.equal(h.storage.getItem(JOURNAL_KEY),null);
 });
 
+test('stale preview tab cannot use an ordinary full-state save to overwrite a reset generation', () => {
+  const generationKey = 'taskpoints_state_v2_generation_v1';
+  const darkKey = 'taskpoints_state_v2_dark_mode_v1';
+  const h = makeHarness({ [generationKey]: 'epoch-A', [darkKey]: '1' },
+    { hostname: 'localhost' });
+  const original = h.storage.getItem(STORAGE_KEY);
+  h.storage.setItem(generationKey, 'epoch-B');
+  const candidate = { ...JSON.parse(original), notes: 'Stale preview overwrite' };
+  const blocked = h.core.saveStateSnapshot(candidate, { savePath: 'home-normal-save' });
+  assert.equal(blocked.skipped, true);
+  assert.equal(blocked.blockedByTaskPreviewGenerationChanged, true);
+  assert.equal(h.getSaveCalls(), 0);
+  assert.equal(h.storage.getItem(STORAGE_KEY), original);
+  assert.equal(h.core.getTaskMutationJournalStatus().fullSaveSourceRefusals, 1);
+  assert.equal(h.core.getTaskMutationJournalStatus().previewGenerationBlocks, 1);
+
+  // A fresh tab loaded after the reset binds to the new token and can save.
+  const fresh = makeHarness({}, { storage: h.storage, hostname: 'localhost' });
+  const allowed = fresh.core.saveStateSnapshot(candidate, { savePath: 'home-normal-save' });
+  assert.notEqual(allowed.skipped, true);
+  assert.equal(fresh.getSaveCalls(), 1);
+  assert.equal(JSON.parse(h.storage.getItem(STORAGE_KEY)).notes, 'Stale preview overwrite');
+});
+
+test('preview full save refuses a reset rotation during full-snapshot preparation and retains pending Task edits', () => {
+  const generationKey = 'taskpoints_state_v2_generation_v1';
+  const darkKey = 'taskpoints_state_v2_dark_mode_v1';
+  const h = makeHarness({ [generationKey]: 'epoch-A', [darkKey]: '1' },
+    { hostname: 'localhost' });
+  h.core.journalTaskMutation({ task: { id: 't1', title: 'Durable journal edit' } });
+  const original = h.storage.getItem(STORAGE_KEY);
+  const pending = h.storage.getItem(JOURNAL_KEY);
+  let parsed = false;
+  h.core.parseTaskPointsStorageJson = raw => {
+    parsed = true;
+    h.storage.setItem(generationKey, 'epoch-B');
+    return JSON.parse(raw);
+  };
+  const blocked = h.core.saveStateSnapshot(
+    { ...JSON.parse(original), notes: 'Must not overwrite restored state' },
+    { savePath: 'home-normal-save' }
+  );
+  assert.equal(parsed, true, 'generation rotated after snapshot preparation began');
+  assert.equal(blocked.skipped, true);
+  assert.equal(blocked.blockedByTaskPreviewGenerationChanged, true);
+  assert.equal(h.getSaveCalls(), 0, 'do not invoke the underlying full-state writer');
+  assert.equal(h.storage.getItem(STORAGE_KEY), original);
+  assert.equal(h.storage.getItem(JOURNAL_KEY), pending,
+    'uncompacted Task evidence must survive stale-tab refusal');
+});
+
+test('unreadable preview generation refuses ordinary full-state saves without entering a fallback', () => {
+  const generationKey = 'taskpoints_state_v2_generation_v1';
+  const darkKey = 'taskpoints_state_v2_dark_mode_v1';
+  const h = makeHarness({ [generationKey]: 'epoch-A', [darkKey]: '1' },
+    { hostname: 'localhost' });
+  const original = h.storage.getItem(STORAGE_KEY);
+  const normalGet = h.storage.getItem.bind(h.storage);
+  h.storage.getItem = key => {
+    if (key === generationKey) throw new Error('generation read denied');
+    return normalGet(key);
+  };
+  const blocked = h.core.saveStateSnapshot(
+    { ...JSON.parse(original), notes: 'Must not save' },
+    { savePath: 'home-normal-save' }
+  );
+  assert.equal(blocked.skipped, true);
+  assert.equal(blocked.blockedByTaskPreviewGenerationChanged, true);
+  assert.equal(h.getSaveCalls(), 0);
+  assert.equal(normalGet(STORAGE_KEY), original);
+});
+
+test('production and explicitly disabled preview preserve the existing ordinary V1 full-save path', () => {
+  const generationKey = 'taskpoints_state_v2_generation_v1';
+  const darkKey = 'taskpoints_state_v2_dark_mode_v1';
+  for (const hostname of ['taskpoints.pages.dev', 'localhost']) {
+    const h = makeHarness({ [generationKey]: 'epoch-A', [darkKey]: '1' },
+      { hostname });
+    if (hostname === 'localhost') h.storage.setItem(darkKey, '0');
+    h.storage.setItem(generationKey, 'epoch-B');
+    const candidate = { ...JSON.parse(h.storage.getItem(STORAGE_KEY)), notes: hostname };
+    const result = h.core.saveStateSnapshot(candidate, { savePath: 'home-normal-save' });
+    assert.notEqual(result.skipped, true, hostname);
+    assert.equal(h.getSaveCalls(), 1, hostname);
+    assert.equal(JSON.parse(h.storage.getItem(STORAGE_KEY)).notes, hostname);
+  }
+});
+
 test('full saves without pending Task journal still retain ordinary V1 save behavior',()=>{
   const h=makeHarness();
   const state=JSON.parse(h.storage.getItem(STORAGE_KEY));
