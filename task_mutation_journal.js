@@ -74,14 +74,14 @@
 
   function assertPreviewTaskGeneration() {
     if (!previewGenerationEnforced) return;
-    let live = null, enabled = null;
+    let live = null, enabled = null, readable = true;
     try {
       enabled = storage.getItem(PREVIEW_DARK_KEY);
       live = storage.getItem(PREVIEW_GENERATION_KEY);
-    } catch (_) {}
+    } catch (_) { readable = false; }
     // Explicitly turning off the preview returns to unchanged V1 behavior.
-    // Otherwise, an old preview tab must reload before a Task mutation.
-    if (enabled === '0' || enabled === null) return;
+    // Denied reads must not masquerade as a deliberate dark-mode disable.
+    if (readable && (enabled === '0' || enabled === null)) return;
     if (!previewGenerationAtOpen || typeof live !== 'string'
       || !live || live !== previewGenerationAtOpen) {
       previewGenerationBlocks += 1;
