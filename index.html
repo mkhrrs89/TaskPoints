@@ -4735,12 +4735,32 @@ playerBEffects: effectsById[pair.playerBId] ?? null
       const existing = state.matchups[existingIndex];
       const oldId = String(existing.id || existing.matchupId || '');
       const oldPair = matchupPairKey(existing);
-      state.matchups[existingIndex] = {
+      const updatedMatchup = {
         ...matchup,
         ...existing,
         playerAEffects: existing.playerAEffects ?? matchup.playerAEffects ?? null,
         playerBEffects: existing.playerBEffects ?? matchup.playerBEffects ?? null
       };
+      if (!hasRecordedMatchupScore(existing)) {
+        // An idle season job may have created an unscored placeholder. Keep
+        // its matchup identity and metadata, but populate ONLY missing scores
+        // from the actual simulation. Never rewrite a completed game.
+        const validScore = value => value != null && value !== ''
+          && Number.isFinite(Number(value));
+        for (const side of ['A', 'B']) {
+          const field = 'score' + side;
+          const alias = 'player' + side + 'Score';
+          const recorded = validScore(existing[field]) ? existing[field] : existing[alias];
+          if (!validScore(recorded)) {
+            updatedMatchup[field] = matchup[field];
+            updatedMatchup[alias] = matchup[field];
+          } else {
+            updatedMatchup[field] = recorded;
+            updatedMatchup[alias] = recorded;
+          }
+        }
+      }
+      state.matchups[existingIndex] = updatedMatchup;
       const updated = state.matchups[existingIndex];
       if (oldId !== String(updated.id || updated.matchupId || '')
         || oldPair !== matchupPairKey(updated)
