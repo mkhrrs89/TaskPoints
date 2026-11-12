@@ -75,12 +75,42 @@
     };
   }
 
+  // The V1 Task journal is an authoritative pending-write record. On a
+  // reload, parsing must be lossless: normalizeRecord used to drop malformed
+  // rows, unexpected fields and missing arrays, and the next edit could then
+  // overwrite the original bytes with a silently reduced journal.
+  // Preserve, quarantine and report unsupported shapes instead.
+  function validStoredTaskJournal(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)
+      || value.schemaVersion !== 1
+      || !Array.isArray(value.tasks)
+      || !Array.isArray(value.completionUpserts)
+      || !Array.isArray(value.completionDeletes)) return false;
+    const known = new Set([
+      'schemaVersion','tasks','completionUpserts',
+      'completionDeletes','updatedAtISO'
+    ]);
+    if (Object.keys(value).some((key) => !known.has(key))) return false;
+    if (value.updatedAtISO !== undefined && value.updatedAtISO !== null
+      && typeof value.updatedAtISO !== 'string') return false;
+    const validRow = row => row && typeof row === 'object'
+      && !Array.isArray(row) && row.id != null
+      && String(row.id).trim() !== '' && row.id !== false;
+    if (!value.tasks.every(validRow)
+      || !value.completionUpserts.every(validRow)) return false;
+    if (value.completionDeletes.some(id =>
+      typeof id !== 'string' || !id.trim())) return false;
+    return true;
+  }
+
   function readRecord() {
     const raw = storage.getItem(JOURNAL_KEY);
     if (!raw) return { raw: '', malformed: false, record: emptyRecord() };
     let parsed;
     try { parsed = JSON.parse(raw); }
     catch (_) { return { raw, malformed: true, record: emptyRecord() }; }
+    if (!validStoredTaskJournal(parsed))
+      return { raw, malformed: true, record: emptyRecord() };
     const record = normalizeRecord(parsed);
     return record ? { raw, malformed: false, record } : { raw, malformed: true, record: emptyRecord() };
   }
