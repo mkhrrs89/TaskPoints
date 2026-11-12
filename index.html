@@ -4950,6 +4950,22 @@ playerBEffects: effectsById[pair.playerBId] ?? null
   return true;
 }
 
+// Today can have finished NPC matchups before the YOUR matchup is created
+// (season slate materialization runs independently after Home paints).
+// Treat a partially materialized day as INCOMPLETE, not as the whole slate.
+function homeDailyMatchupsReady(dayKey) {
+  const todayRows = (Array.isArray(state.matchups) ? state.matchups : [])
+    .filter(m => m && getMatchupDateKeyLocal(m) === dayKey);
+  if (!todayRows.length) return false;
+  const scheduledDay = (Array.isArray(state.schedule) ? state.schedule : [])
+    .find(day => day && String(day.date || day.dateKey || '') === dayKey);
+  const plannedUserPair = (Array.isArray(scheduledDay?.matchups) ? scheduledDay.matchups : [])
+    .some(m => m && (m.playerAId === 'YOU' || m.playerBId === 'YOU'));
+  if (!plannedUserPair) return true; // genuinely unscheduled/bye, preserve old behavior
+  return todayRows.some(m => (m.playerAId === 'YOU' || m.playerBId === 'YOU')
+    && hasRecordedMatchupScore(m));
+}
+
 function maybeAutoSimToday(){
   const now = new Date();
   const todayKey = getGameDayKey(now);
@@ -4960,11 +4976,7 @@ function maybeAutoSimToday(){
   state.gameHistory = state.gameHistory || [];
   state.matchups = state.matchups || [];
 
-  const hasTodayMatchup = state.matchups.some(m => {
-    const key = getMatchupDateKeyLocal(m);
-    return key === todayKey;
-  });
-  if (hasTodayMatchup) return false;
+  if (homeDailyMatchupsReady(todayKey)) return false;
 
   const hasTodayHistory = state.gameHistory.some(g => getHistoryDateKey(g) === todayKey);
   if (hasTodayHistory) {
@@ -4988,8 +5000,7 @@ function scheduleHomeDailySimulationAfterReveal() {
   const dayKey = getGameDayKey(now);
   if (homeMorningSimulationScheduled || now.getHours() < 5) return false;
   if (!Array.isArray(state.players) || state.players.length === 0) return false;
-  if (Array.isArray(state.matchups)
-    && state.matchups.some(m => getMatchupDateKeyLocal(m) === dayKey)) return false;
+  if (homeDailyMatchupsReady(dayKey)) return false;
 
   homeMorningSimulationScheduled = true;
   markHomeMorningStartupPhase('scheduled', {
@@ -5045,6 +5056,10 @@ function scheduleHomeDailySimulationAfterReveal() {
           state = syncStateWithMatchups(state);
           markCompletionsDirty();
           scheduleRender(renderAll);
+          // renderAll only refreshes the Home cards. The matchup normally
+          // refreshes on its separate 45-second timer; update it immediately
+          // after today's games finish rather than leaving  —  placeholders.
+          refreshHomeMatchupAfterSimulation();
           markHomeLifecycleBaseline();
         } catch (error) {
           markHomeMorningStartupPhase('simulation-error');
@@ -5753,6 +5768,15 @@ function todaysPointsTotal(){
   const { dailyTotals } = getDerived().agg;
   const { todayPoints } = deriveTodayWithInertia(dailyTotals, todayK);
   return todayPoints;
+}
+
+function refreshHomeMatchupAfterSimulation() {
+  const matchupKey = getGameDayKey(new Date());
+  const { dailyTotals } = getDerived().agg;
+  const { todayPoints: matchupPoints } = deriveTodayWithInertia(dailyTotals, matchupKey);
+  if (typeof window.renderTodaysMatchup === 'function') {
+    window.renderTodaysMatchup(matchupKey, matchupPoints);
+  }
 }
 
 function startOpponentDripTicker(){
