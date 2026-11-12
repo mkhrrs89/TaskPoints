@@ -6,6 +6,7 @@ const vm = require('node:vm');
 
 const moduleSource = fs.readFileSync(path.join(__dirname, '..', 'task_mutation_journal.js'), 'utf8');
 const workerSource = fs.readFileSync(path.join(__dirname, '..', '_worker.js'), 'utf8');
+const browserFixtureSource = fs.readFileSync(path.join(__dirname, 'browser', 'v2-storage-fixture.html'), 'utf8');
 const homeSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const settingsSource = fs.readFileSync(path.join(__dirname, '..', 'settings.html'), 'utf8');
 const logSource = fs.readFileSync(path.join(__dirname, '..', 'log.html'), 'utf8');
@@ -105,6 +106,12 @@ test('worker boots V2 generation before Task journal and preserves hot cache ord
   assert.ok(hotCacheAt > journalAt,
     'the journal must still load before state hot cache');
   assert.match(workerSource, /taskMutationJournalSource/);
+  const fixtureGeneration = browserFixtureSource.indexOf('src="../../state_runtime_v2_generation.js"');
+  const fixtureRuntime = browserFixtureSource.indexOf('src="../../state_runtime_v2.js"');
+  const fixtureJournal = browserFixtureSource.indexOf('src="../../task_mutation_journal.js"');
+  assert.ok(fixtureGeneration >= 0 && fixtureGeneration < fixtureRuntime
+    && fixtureRuntime < fixtureJournal,
+    'real-browser fixture must match the shipped generation/runtime-before-Task-journal order');
 });
 
 test('task completion mutation is durable immediately and replays without a full snapshot save', () => {
