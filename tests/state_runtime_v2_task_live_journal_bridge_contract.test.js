@@ -28,6 +28,7 @@ function install({hostname='localhost',dark=true}={}){
   });
   const indexedDB=new FakeIndexedDB();
   const timers=[];
+  const documentListeners=new Map();
   let idleAgo=10000,uuid=0,snapshotSaves=0;
   const core={
     STORAGE_KEY:KEY,
@@ -57,19 +58,79 @@ function install({hostname='localhost',dark=true}={}){
     JSON,Date,Math,String,Number,Boolean,Array,Object,Map,Set,Promise,
     setTimeout(fn,ms){timers.push({fn,ms});return timers.length},
     clearTimeout(){},
-    document:{readyState:'loading',hidden:false,addEventListener(){}}
+    document:{readyState:'loading',hidden:false,
+      addEventListener(type,fn){documentListeners.set(type,fn)}}
   };
   context.window=context;
   context.globalThis=context;
   vm.runInNewContext(V2,context,{filename:'state_runtime_v2.js'});
   vm.runInNewContext(JOURNAL,context,{filename:'task_mutation_journal.js'});
   return {
-    core,context,indexedDB,localStorage,timers,
+    core,context,indexedDB,localStorage,timers,documentListeners,
     api:context.TaskPointsStateRuntimeV2,
     setIdleAgo(value){idleAgo=value},
     snapshotSaves(){return snapshotSaves}
   };
 }
+
+test('preview restart queues a bounded idle Task catch-up after V1 journal already compacted',async()=>{
+  const app=install();
+  // A previous page closed after V1 Task data was committed, but before
+  // the optional V2 background observer ran. There is no pending journal
+  // left to notify V2 of the task change.
+  const saved=JSON.parse(app.localStorage.getItem(KEY));
+  saved.tasks[0].title='Durable task from previous closed page';
+  app.localStorage.setItem(KEY,JSON.stringify(saved));
+  assert.equal(app.localStorage.getItem(PENDING),null);
+  const initialV1=app.localStorage.getItem(KEY);
+  const start=app.documentListeners.get('DOMContentLoaded');
+  assert.equal(typeof start,'function');
+  await start();
+  // The DOM bootstrap returns the dark-startup promise; its catch-up
+  // continuation is a microtask and schedules only the low-priority timer.
+  await Promise.resolve();
+  assert.equal(app.api.getObservedLegacyTaskStatus().startupCatchupRequests,1);
+  assert.equal(app.api.getObservedLegacyTaskStatus().pending,true);
+  assert.equal(app.api.getObservedLegacyTaskStatus().attempts,0,
+    'no Task collection scan runs as part of startup/foreground paint');
+  assert.equal(app.indexedDB.dump(DB).tasks.length,0);
+  assert.equal(app.timers.some(t=>t.ms===9000),true);
+  const outcome=await app.api.flushObservedLegacyTaskJournal();
+  assert.equal(outcome.verified,true,outcome.reason);
+  assert.equal(app.indexedDB.dump(DB).tasks[0].value.title,
+    'Durable task from previous closed page');
+  assert.equal(app.localStorage.getItem(KEY),initialV1);
+  assert.equal(app.localStorage.getItem(PENDING),null);
+  assert.equal(app.snapshotSaves(),0);
+  assert.equal(app.api.getObservedLegacyTaskStatus().verified,1);
+});
+
+test('one preview Task catch-up is scheduled per startup generation without duplicate loops',async()=>{
+  const app=install();
+  const start=app.documentListeners.get('DOMContentLoaded');
+  await start();
+  await Promise.resolve();
+  const before=app.timers.filter(t=>t.ms===9000).length;
+  assert.equal(before,1);
+  await start();
+  await Promise.resolve();
+  assert.equal(app.timers.filter(t=>t.ms===9000).length,before);
+  assert.equal(app.api.getObservedLegacyTaskStatus().startupCatchupRequests,1);
+  assert.equal(app.api.getObservedLegacyTaskStatus().pending,true);
+});
+
+test('production or dark-disabled startup never schedules preview Task catch-up',async()=>{
+  for(const config of [{hostname:'taskpoints.pages.dev',dark:true},
+    {hostname:'localhost',dark:false}]){
+    const app=install(config);
+    const start=app.documentListeners.get('DOMContentLoaded');
+    if(start)await start();
+    await Promise.resolve();
+    assert.equal(app.api.getObservedLegacyTaskStatus().startupCatchupRequests,0);
+    assert.equal(app.api.getObservedLegacyTaskStatus().pending,false);
+    assert.equal(app.timers.some(t=>t.ms===9000),false);
+  }
+});
 
 test('real, already-verified V1 Task edits populate preview Tasks without switching authority',async()=>{
   const app=install();
