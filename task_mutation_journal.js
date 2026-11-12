@@ -42,6 +42,7 @@
   let journalWritesUnverified = 0;
   let journalSourceConflicts = 0;
   let snapshotSourceConflicts = 0;
+  let fullSaveSourceRefusals = 0;
 
   function emptyRecord() {
     return { schemaVersion: 1, tasks: [], completionUpserts: [], completionDeletes: [], updatedAtISO: null };
@@ -846,7 +847,12 @@
       // Read the persisted snapshot once for both stale-task and stale-SCWM
       // guards; large TaskPoints datasets should not be parsed twice.
       let savedForProtection = null;
-      try { savedForProtection = persistedState(); } catch (_) {}
+      let fullSaveSourceRaw;
+      try {
+        fullSaveSourceRaw = storage.getItem(STORAGE_KEY);
+        if (fullSaveSourceRaw === null || typeof fullSaveSourceRaw === 'string')
+          savedForProtection = persistedState(fullSaveSourceRaw);
+      } catch (_) {}
       const protectedTasks = protectNewerPersistedTaskRows(state, options, savedForProtection);
       const protectedState = protectRecentScwmRowsFromStaleHomeSave(protectedTasks, savedForProtection, options);
       let habitSafeState;
@@ -876,6 +882,36 @@
       const protectedSaveOptions = pendingTaskCompletionDeleteIds
         ? { ...options, pendingTaskCompletionDeleteIds }
         : options;
+      // A full Home/Today/Season save may spend time parsing/merging a large
+      // V1 snapshot. If another tab replaced the pending Task journal or the
+      // V1 snapshot during that work, the candidate is no longer safe to save.
+      // Refuse rather than throwing into Home's unguarded fallback writer.
+      // This is a best-effort synchronous check, not an atomic old-tab fence.
+      if (!current.malformed && !isEmpty(current.record)) {
+        let nowJournalRaw, nowSnapshotRaw;
+        try {
+          nowJournalRaw = storage.getItem(JOURNAL_KEY);
+          nowSnapshotRaw = storage.getItem(STORAGE_KEY);
+        } catch (_) {
+          nowJournalRaw = undefined;
+          nowSnapshotRaw = undefined;
+        }
+        const journalChanged = nowJournalRaw === undefined
+          || (nowJournalRaw === null ? '' : nowJournalRaw) !== current.raw;
+        const snapshotChanged = fullSaveSourceRaw === undefined
+          || nowSnapshotRaw === undefined || nowSnapshotRaw !== fullSaveSourceRaw
+          || savedForProtection === null;
+        if (journalChanged || snapshotChanged) {
+          fullSaveSourceRefusals += 1;
+          if (journalChanged) journalSourceConflicts += 1;
+          if (snapshotChanged) snapshotSourceConflicts += 1;
+          return {
+            state, skipped: true, blockedByTaskSourceChanged: true,
+            taskJournalSourceChanged: journalChanged,
+            taskSnapshotSourceChanged: snapshotChanged
+          };
+        }
+      }
       const result = originalSaveStateSnapshot(candidate, protectedSaveOptions);
       if (!current.malformed && !isEmpty(current.record) && !result?.skipped && !result?.blockedByQuotaCircuit && result?.state) {
         try {
@@ -933,7 +969,8 @@
       journalWritesVerified,
       journalWritesUnverified,
       journalSourceConflicts,
-      snapshotSourceConflicts
+      snapshotSourceConflicts,
+      fullSaveSourceRefusals
     };
   };
 
