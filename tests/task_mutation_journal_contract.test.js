@@ -290,6 +290,31 @@ test('compaction cleanup does not erase an edit another tab saved after the clea
   assert.equal(h.core.getTaskMutationJournalStatus().compactionsCompleted,0);
 });
 
+test('compaction cannot report success if pending journal becomes malformed during snapshot write', () => {
+  const pending={
+    schemaVersion:1,
+    tasks:[{id:'t1',title:'Pending original edit'}],
+    completionUpserts:[],completionDeletes:[],
+    updatedAtISO:'2026-11-11T12:00:00.000Z'
+  };
+  const h=makeHarness({[JOURNAL_KEY]:JSON.stringify(pending)});
+  const originalSet=h.storage.setItem.bind(h.storage);
+  h.storage.setItem=(key,value)=>{
+    const result=originalSet(key,value);
+    if(key===STORAGE_KEY) originalSet(JOURNAL_KEY,'{malformed:');
+    return result;
+  };
+  assert.equal(h.core.flushPendingTaskMutations(),false,
+    'a verified main snapshot cannot make an uncleaned journal look finished');
+  assert.equal(h.getSaveCalls(),1);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),'{malformed:',
+    'malformed evidence must be retained rather than removed or normalized');
+  assert.equal(h.core.getTaskMutationJournalStatus().malformed,true);
+  assert.equal(h.core.getTaskMutationJournalStatus().compactionsCompleted,0);
+  assert.equal(JSON.parse(h.storage.getItem(STORAGE_KEY)).tasks[0].title,
+    'Pending original edit');
+});
+
 test('sequential same-tab Task journal updates still merge and flush without a conflict', () => {
   const h=makeHarness();
   h.core.journalTaskMutation({task:{id:'t1',title:'First edit'}});
