@@ -3160,6 +3160,23 @@
       "mainUnchanged": true,
       "compactionMalformedCleanupReportsFailure": true,
       "completedCounterNotAdvancedOnFailedCleanup": true
+    },
+    "observedLiveTaskMirrorEvidence": {
+      "v1SourcePath": "task_mutation_journal.js",
+      "v2PreviewPath": "state_runtime_v2.js",
+      "testsPath": "tests/state_runtime_v2_task_live_journal_bridge_contract.test.js",
+      "storedJournalShapeTests": "tests/task_mutation_journal_contract.test.js",
+      "sourceIsRealLiveJournalAction": true,
+      "v1SynchronousDurabilityPrecedesPreviewWork": true,
+      "previewRequiresExplicitDarkModeAndPreviewHost": true,
+      "previewAutomaticOnlyAfterDeepIdle": true,
+      "independentPostMirrorTaskParity": true,
+      "preservesUnownedV2Rows": true,
+      "malformedTaskJournalPreservedWithoutLossyNormalization": true,
+      "v2ProductionAuthoritative": false,
+      "atomicCrossTabWriterAdmissionCertified": false,
+      "productionWriterOwnerCertified": false,
+      "canPromote": false
     }
   },
   "proposedWriterHandoffs": [
