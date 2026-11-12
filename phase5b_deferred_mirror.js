@@ -297,18 +297,42 @@
     } finally { try { db?.close?.(); } catch (_) {} }
   }
 
+  // A failed mirror is not a completed backup. Keep the latest durable V1
+  // source queued so an explicit flush or later normal save can retry. Do not
+  // create an automatic retry loop for an unchanged source: storage failures
+  // (including quota and Safari IndexedDB denial) can persist indefinitely.
+  let failedMirrorAttemptsRetained = 0;
+  let mirrorRetrySuccesses = 0;
+  let lastFailedMirrorRaw = null;
   async function run() {
+    let attemptedRaw = null;
+    let verified = false;
     try {
       if (pending === null) return true;
-      const raw = pending;
+      attemptedRaw = pending;
       pending = null;
-      activeRaw = raw;
-      await mirror(raw);
+      activeRaw = attemptedRaw;
+      verified = await mirror(attemptedRaw) === true;
+      if (!verified) {
+        const currentRaw = get(KEY);
+        if (pending === null && currentRaw && journalCount() === 0) {
+          pending = currentRaw;
+          failedMirrorAttemptsRetained += 1;
+          status({ phase5cPendingWrite: true });
+        }
+        lastFailedMirrorRaw = attemptedRaw;
+        return false;
+      }
+      if (lastFailedMirrorRaw === attemptedRaw) mirrorRetrySuccesses += 1;
+      lastFailedMirrorRaw = null;
       return true;
     } finally {
       activeRaw = null;
       running = false;
-      if (pending !== null) scheduleFlush();
+      // Newer bytes arriving while a mirror is running deserve another pass.
+      // The same failed bytes remain available to explicit flush, without
+      // scheduling unbounded automatic retries.
+      if (pending !== null && pending !== attemptedRaw) scheduleFlush();
     }
   }
 
@@ -498,7 +522,9 @@
       homeLongQuietMs: homeLongQuietEnabled ? HOME_LONG_QUIET_MS : 0,
       homeLongQuietDeferred,
       sharedSourceReuseCount,
-      sharedSourceFallbackCount
+      sharedSourceFallbackCount,
+      failedMirrorAttemptsRetained,
+      mirrorRetrySuccesses
     };
   };
 
