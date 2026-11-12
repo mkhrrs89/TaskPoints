@@ -841,6 +841,114 @@ test('malformed journal is preserved and blocks a new journal mutation', () => {
   assert.equal(h.getSaveCalls(), 0);
 });
 
+test('ordinary full save refuses a peer Task journal edit during snapshot parsing',()=>{
+  const h=makeHarness();
+  h.core.journalTaskMutation({task:{id:'t1',title:'First pending edit'}});
+  const beforeSnapshot=h.storage.getItem(STORAGE_KEY);
+  const initialRaw=h.storage.getItem(JOURNAL_KEY);
+  const newer=JSON.parse(initialRaw);
+  newer.tasks[0].title='Newer edit from peer tab';
+  const peerRaw=JSON.stringify(newer);
+  let injected=false;
+  h.core.parseTaskPointsStorageJson=raw=>{
+    if(!injected){
+      injected=true;
+      h.storage.setItem(JOURNAL_KEY,peerRaw);
+    }
+    return JSON.parse(raw);
+  };
+  const stale=JSON.parse(beforeSnapshot);
+  stale.notes='Ordinary Home save';
+  const result=h.core.saveStateSnapshot(stale,{savePath:'home-normal-save'});
+  assert.equal(injected,true);
+  assert.equal(result.skipped,true);
+  assert.equal(result.blockedByTaskSourceChanged,true);
+  assert.equal(result.taskJournalSourceChanged,true);
+  assert.equal(result.taskSnapshotSourceChanged,false);
+  assert.equal(h.getSaveCalls(),0);
+  assert.equal(h.storage.getItem(STORAGE_KEY),beforeSnapshot);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),peerRaw);
+  assert.equal(h.core.getTaskMutationJournalStatus().fullSaveSourceRefusals,1);
+  h.core.parseTaskPointsStorageJson=raw=>JSON.parse(raw);
+  const retried=h.core.saveStateSnapshot(stale,{savePath:'home-normal-retry'});
+  assert.equal(retried.skipped,undefined);
+  assert.equal(h.getSaveCalls(),1);
+  const persisted=JSON.parse(h.storage.getItem(STORAGE_KEY));
+  assert.equal(persisted.tasks.find(t=>t.id==='t1').title,'Newer edit from peer tab');
+  assert.equal(persisted.notes,'Ordinary Home save');
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+});
+
+test('ordinary full save refuses a peer full V1 snapshot save while Task journal is pending',()=>{
+  const h=makeHarness();
+  h.core.journalTaskMutation({task:{id:'t1',title:'Pending Task'}});
+  const pending=h.storage.getItem(JOURNAL_KEY);
+  const initial=JSON.parse(h.storage.getItem(STORAGE_KEY));
+  const newer={...initial,notes:'Peer Notes that must survive',
+    completions:[...initial.completions,{id:'peer-history',source:'work',points:7}]};
+  const newerRaw=JSON.stringify(newer);
+  let injected=false;
+  h.core.parseTaskPointsStorageJson=raw=>{
+    if(!injected){
+      injected=true;
+      h.storage.setItem(STORAGE_KEY,newerRaw);
+    }
+    return JSON.parse(raw);
+  };
+  const stale={...initial,notes:'Stale Notes must not win'};
+  const result=h.core.saveStateSnapshot(stale,{savePath:'home-normal-save'});
+  assert.equal(result.skipped,true);
+  assert.equal(result.blockedByTaskSourceChanged,true);
+  assert.equal(result.taskSnapshotSourceChanged,true);
+  assert.equal(result.taskJournalSourceChanged,false);
+  assert.equal(h.getSaveCalls(),0);
+  assert.equal(h.storage.getItem(STORAGE_KEY),newerRaw);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),pending);
+  h.core.parseTaskPointsStorageJson=raw=>JSON.parse(raw);
+  const safeRetry=h.core.saveStateSnapshot({...newer,notes:'Peer Notes that must survive'},
+    {savePath:'home-normal-retry'});
+  assert.equal(safeRetry.skipped,undefined);
+  const persisted=JSON.parse(h.storage.getItem(STORAGE_KEY));
+  assert.equal(persisted.notes,'Peer Notes that must survive');
+  assert.equal(persisted.completions.find(x=>x.id==='peer-history').points,7);
+  assert.equal(persisted.tasks.find(x=>x.id==='t1').title,'Pending Task');
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+});
+
+test('ordinary full save fails closed when pending Task source cannot be rechecked',()=>{
+  const h=makeHarness();
+  h.core.journalTaskMutation({task:{id:'t1',title:'Durable pending'}});
+  const pending=h.storage.getItem(JOURNAL_KEY);
+  const baseline=h.storage.getItem(STORAGE_KEY);
+  const realGet=h.storage.getItem.bind(h.storage);
+  let journalReads=0;
+  h.storage.getItem=key=>{
+    if(key===JOURNAL_KEY&&++journalReads===2)throw Error('denied read');
+    return realGet(key);
+  };
+  const result=h.core.saveStateSnapshot(JSON.parse(baseline),{savePath:'home-normal-save'});
+  assert.equal(result.skipped,true);
+  assert.equal(result.blockedByTaskSourceChanged,true);
+  assert.equal(result.taskJournalSourceChanged,true);
+  assert.equal(h.getSaveCalls(),0);
+  assert.equal(realGet(JOURNAL_KEY),pending);
+  assert.equal(realGet(STORAGE_KEY),baseline);
+  h.storage.getItem=realGet;
+  assert.equal(h.core.saveStateSnapshot(JSON.parse(baseline)).skipped,undefined);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+});
+
+test('full saves without pending Task journal still retain ordinary V1 save behavior',()=>{
+  const h=makeHarness();
+  const state=JSON.parse(h.storage.getItem(STORAGE_KEY));
+  state.notes='Unrelated fresh Notes save';
+  const result=h.core.saveStateSnapshot(state,{savePath:'home-normal-save'});
+  assert.equal(result.skipped,undefined);
+  assert.equal(h.getSaveCalls(),1);
+  assert.equal(JSON.parse(h.storage.getItem(STORAGE_KEY)).notes,'Unrelated fresh Notes save');
+  assert.equal(h.core.getTaskMutationJournalStatus().fullSaveSourceRefusals,0);
+});
+
 test('full saves automatically include pending mutations before verification clears them', () => {
   const h = makeHarness();
   h.core.journalTaskMutation({ completionDeleteId: 'old' });
