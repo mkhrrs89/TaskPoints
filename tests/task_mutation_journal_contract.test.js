@@ -707,6 +707,41 @@ test('Task journal rejects non-array, incomplete and unknown-field records witho
  }
 });
 
+test('blank but present Task journal is preserved as interrupted evidence, not replaced on an edit',()=>{
+  const h=makeHarness({[JOURNAL_KEY]:''});
+  assert.equal(h.core.readPendingTaskMutations().malformed,true);
+  const beforeGeneration=h.core.getTaskMutationJournalStatus().mutationGeneration;
+  const beforeTimers=h.timers.length;
+  assert.throws(()=>h.core.journalTaskMutation({
+    task:{id:'new-edit',title:'Must not overwrite blank journal'}
+  }),e=>e.code==='TASKPOINTS_TASK_MUTATION_JOURNAL_MALFORMED');
+  assert.equal(h.core.flushPendingTaskMutations(),false);
+  assert.equal(h.core.getTaskMutationJournalStatus().mutationGeneration,beforeGeneration);
+  assert.equal(h.timers.length,beforeTimers);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),'');
+  assert.equal(h.getSaveCalls(),0);
+});
+
+test('undefined storage readback cannot be mistaken for a missing Task journal',()=>{
+  const h=makeHarness();
+  const get=h.storage.getItem.bind(h.storage);
+  let attemptedWrites=0;
+  const set=h.storage.setItem.bind(h.storage);
+  h.storage.getItem=key=>key===JOURNAL_KEY ? undefined : get(key);
+  h.storage.setItem=(key,value)=>{
+    if(key===JOURNAL_KEY)attemptedWrites++;
+    return set(key,value);
+  };
+  assert.equal(h.core.readPendingTaskMutations().malformed,true);
+  assert.throws(()=>h.core.journalTaskMutation({
+    task:{id:'new-edit',title:'Never claim storage was empty'}
+  }),e=>e.code==='TASKPOINTS_TASK_MUTATION_JOURNAL_MALFORMED');
+  assert.equal(h.core.flushPendingTaskMutations(),false);
+  assert.equal(attemptedWrites,0);
+  assert.equal(get(JOURNAL_KEY),null);
+  assert.equal(h.getSaveCalls(),0);
+});
+
 test('valid older Task journal without optional timestamp remains compatible',()=>{
  const raw=JSON.stringify({
   schemaVersion:1,tasks:[{id:'old-task',title:'Preserve'}],
