@@ -29,6 +29,7 @@ function install({hostname='localhost',dark=true,sharedStorage=null,sharedIndexe
   const indexedDB=sharedIndexedDB || new FakeIndexedDB();
   const timers=[];
   const documentListeners=new Map();
+  const windowListeners=new Map();
   let idleAgo=10000,uuid=0,snapshotSaves=0;
   const core={
     STORAGE_KEY:KEY,
@@ -58,6 +59,11 @@ function install({hostname='localhost',dark=true,sharedStorage=null,sharedIndexe
     JSON,Date,Math,String,Number,Boolean,Array,Object,Map,Set,Promise,
     setTimeout(fn,ms){timers.push({fn,ms});return timers.length},
     clearTimeout(){},
+    addEventListener(type,fn){
+      const handlers=windowListeners.get(type) || [];
+      handlers.push(fn);
+      windowListeners.set(type,handlers);
+    },
     document:{readyState:'loading',hidden:false,
       addEventListener(type,fn){documentListeners.set(type,fn)}}
   };
@@ -66,7 +72,10 @@ function install({hostname='localhost',dark=true,sharedStorage=null,sharedIndexe
   vm.runInNewContext(V2,context,{filename:'state_runtime_v2.js'});
   vm.runInNewContext(JOURNAL,context,{filename:'task_mutation_journal.js'});
   return {
-    core,context,indexedDB,localStorage,timers,documentListeners,
+    core,context,indexedDB,localStorage,timers,documentListeners,windowListeners,
+    emitStorage(event){
+      for(const fn of windowListeners.get('storage') || [])fn(event);
+    },
     api:context.TaskPointsStateRuntimeV2,
     setIdleAgo(value){idleAgo=value},
     snapshotSaves(){return snapshotSaves}
@@ -168,6 +177,118 @@ test('production or dark-disabled startup never schedules preview Task catch-up'
     assert.equal(app.api.getObservedLegacyTaskStatus().pending,false);
     assert.equal(app.timers.some(t=>t.ms===9000),false);
   }
+});
+
+test('another tab changing the authoritative V1 snapshot queues an idle Task preview reconciliation',async()=>{
+  const previous=install();
+  await previous.api.seedFromLegacy();
+  const seed=await previous.api.rehearsePreviewTaskCollectionSeed();
+  assert.equal(seed.verified,true,seed.reason);
+  const peer=install({sharedStorage:previous.localStorage,
+    sharedIndexedDB:previous.indexedDB});
+  await peer.documentListeners.get('DOMContentLoaded')();
+  await Promise.resolve();
+  assert.equal((await peer.api.flushObservedLegacyTaskJournal()).verified,true);
+  const original=peer.localStorage.getItem(KEY);
+  const changed=JSON.parse(original);
+  changed.tasks[0].title='Peer edited this Task without a new journal';
+  changed.tasks.push({id:'peer-created',title:'Peer-created Task',status:'active'});
+  const changedRaw=JSON.stringify(changed);
+  peer.localStorage.setItem(KEY,changedRaw);
+  const beforeDb=peer.indexedDB.dump(DB);
+  const beforeStatus=peer.api.getObservedLegacyTaskStatus();
+  peer.emitStorage({key:KEY,oldValue:original,newValue:changedRaw,
+    storageArea:peer.localStorage});
+  const queued=peer.api.getObservedLegacyTaskStatus();
+  assert.equal(queued.peerStorageListenerInstalled,true);
+  assert.equal(queued.peerStorageNotifications,1);
+  assert.equal(queued.peerStorageCatchupRequests,1);
+  assert.equal(queued.pending,true);
+  assert.equal(queued.attempts,beforeStatus.attempts,
+    'cross-tab event must not start an immediate full Task read');
+  assert.deepEqual(peer.indexedDB.dump(DB),beforeDb,
+    'event handler may not write IndexedDB before the idle timer');
+  assert.equal(peer.timers.at(-1).ms,9000);
+  const result=await peer.api.flushObservedLegacyTaskJournal();
+  assert.equal(result.verified,true,result.reason);
+  assert.equal((await peer.api.inspectPreviewTaskCollectionParity()).match,true);
+  assert.equal(peer.localStorage.getItem(KEY),changedRaw);
+  assert.equal(peer.snapshotSaves(),0);
+  assert.equal(peer.api.getStatus().readAuthority,'legacy_only');
+});
+
+test('peer V1 pending Task journal edits mirror without compacting or changing its bytes',async()=>{
+  const tabA=install();
+  await tabA.api.seedFromLegacy();
+  assert.equal((await tabA.api.rehearsePreviewTaskCollectionSeed()).verified,true);
+  const tabB=install({sharedStorage:tabA.localStorage,
+    sharedIndexedDB:tabA.indexedDB});
+  await tabB.documentListeners.get('DOMContentLoaded')();
+  await Promise.resolve();
+  await tabB.api.flushObservedLegacyTaskJournal();
+  const prior=tabB.localStorage.getItem(PENDING);
+  tabA.core.journalTaskMutation({task:{id:'a',
+    title:'Durable V1 Task edit from another tab',status:'completed'}});
+  const raw=tabB.localStorage.getItem(PENDING);
+  assert.ok(raw);
+  const dbBefore=tabB.indexedDB.dump(DB);
+  tabB.emitStorage({key:PENDING,oldValue:prior,newValue:raw,
+    storageArea:tabB.localStorage});
+  assert.deepEqual(tabB.indexedDB.dump(DB),dbBefore);
+  const result=await tabB.api.flushObservedLegacyTaskJournal();
+  assert.equal(result.verified,true,result.reason);
+  assert.equal(tabB.indexedDB.dump(DB).tasks[0].value.title,
+    'Durable V1 Task edit from another tab');
+  assert.equal(tabB.localStorage.getItem(PENDING),raw,
+    'V2 shadow may never compact or remove the peer V1 pending journal');
+  assert.equal(tabB.snapshotSaves(),0);
+  assert.equal(tabB.api.getStatus().readAuthority,'legacy_only');
+});
+
+test('peer observer ignores unrelated keys, unchanged bytes, other storage and disabled preview',async()=>{
+  const app=install();
+  await app.documentListeners.get('DOMContentLoaded')();
+  await Promise.resolve();
+  await app.api.flushObservedLegacyTaskJournal();
+  const before=app.api.getObservedLegacyTaskStatus();
+  for(const event of [
+    {key:'tp_appearance_v1',oldValue:'a',newValue:'b'},
+    {key:KEY,oldValue:'same',newValue:'same'},
+    {key:null,oldValue:null,newValue:null},
+    {key:PENDING,oldValue:null,newValue:'new',storageArea:new FakeStorage()}
+  ])app.emitStorage(event);
+  const after=app.api.getObservedLegacyTaskStatus();
+  assert.equal(after.pending,false);
+  assert.equal(after.peerStorageNotifications,before.peerStorageNotifications);
+  assert.equal(after.peerStorageCatchupRequests,before.peerStorageCatchupRequests);
+  app.api.disableDarkMirror();
+  app.emitStorage({key:PENDING,oldValue:null,newValue:'new',
+    storageArea:app.localStorage});
+  assert.equal(app.api.getObservedLegacyTaskStatus().pending,false);
+  assert.equal(app.api.getObservedLegacyTaskStatus().peerStorageNotifications,0);
+  const prod=install({hostname:'taskpoints.pages.dev'});
+  await prod.documentListeners.get('DOMContentLoaded')();
+  prod.emitStorage({key:KEY,oldValue:'old',newValue:'new',
+    storageArea:prod.localStorage});
+  assert.equal(prod.api.getObservedLegacyTaskStatus().peerStorageListenerInstalled,false);
+  assert.equal(prod.api.getObservedLegacyTaskStatus().peerStorageCatchupRequests,0);
+});
+
+test('peer observer installs only one listener despite repeated coordinated startup',async()=>{
+  const app=install();
+  const start=app.documentListeners.get('DOMContentLoaded');
+  await start();
+  await Promise.resolve();
+  const listeners=app.windowListeners.get('storage').length;
+  await start();
+  await Promise.resolve();
+  assert.equal(app.windowListeners.get('storage').length,listeners);
+  assert.equal(app.api.getObservedLegacyTaskStatus().peerStorageListenerInstalled,true);
+  const initial=app.api.getObservedLegacyTaskStatus().peerStorageNotifications;
+  app.emitStorage({key:KEY,oldValue:'before',newValue:'after',
+    storageArea:app.localStorage});
+  assert.equal(app.api.getObservedLegacyTaskStatus().peerStorageNotifications,
+    initial+1,'repeating startup must never attach duplicate peer handlers');
 });
 
 test('real, already-verified V1 Task edits populate preview Tasks without switching authority',async()=>{
