@@ -711,11 +711,13 @@ test('shared WAL completeness requires unique shared IDs before using fast appen
 
 test('Task completion cleanup protects changed same-ID patches and preserves failed compaction',()=>{
   const journal=read('task_mutation_journal.js');
-  const begin=journal.indexOf('function clearVerifiedSnapshot(snapshot)');
+  const begin=journal.indexOf('function clearVerifiedSnapshot(snapshot, expectedSourceRaw = undefined)');
   const end=journal.indexOf('function persistedState()',begin);
   assert.ok(begin>0&&end>begin);
   const cleanup=journal.slice(begin,end);
   assert.match(cleanup,/if \(current\.malformed\) return false/);
+  assert.match(cleanup,/current\.raw !== expectedSourceRaw/,
+    'cleanup must refuse a Task journal changed by another tab since compaction began');
   assert.match(cleanup,/snapshot\.completionUpserts\.some/);
   assert.match(cleanup,/sameRow\(saved, row\)/);
   assert.match(cleanup,/snapshot\.completionDeletes\.includes\(id\)/);
@@ -725,7 +727,7 @@ test('Task completion cleanup protects changed same-ID patches and preserves fai
   const compact=journal.slice(compactStart,compactEnd);
   const saved=compact.indexOf('originalSaveStateSnapshot(candidate,');
   const verified=compact.indexOf('if (!snapshotVerified(saved, snapshot, result.state))');
-  const cleared=compact.indexOf('clearVerifiedSnapshot(snapshot)');
+  const cleared=compact.indexOf('clearVerifiedSnapshot(snapshot, current.raw)');
   assert.ok(saved>0&&verified>saved&&cleared>verified,
     'Task journal may clear only after the saved canonical snapshot is verified');
   assert.match(compact,/catch \(error\)/);
