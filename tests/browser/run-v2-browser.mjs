@@ -11328,6 +11328,74 @@ try {
     return {ordinaryHistoryWipeGuardPreserved:true,noV2Authority:true};
   });
 
+  await run('ordinary V1 full save refuses an interleaved peer Task journal change without fallback',async context=>{
+    const page=await open(context);
+    const proof=await page.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const storageKey='taskpoints_v1';
+      const journalKey='taskpoints_pending_task_mutations_v1';
+      core.journalTaskMutation({task:{
+        id:'synthetic-task',title:'Original pending Task edit',status:'active'
+      }});
+      const pending=localStorage.getItem(journalKey);
+      const peer=JSON.parse(pending);
+      peer.tasks[0].title='Newer pending Task edit from peer tab';
+      const peerRaw=JSON.stringify(peer);
+      const beforeState=localStorage.getItem(storageKey);
+      const candidate=core.parseTaskPointsStorageJson(beforeState,{});
+      const initialParser=core.parseTaskPointsStorageJson;
+      let injected=0,firstSave;
+      core.parseTaskPointsStorageJson=function(raw,...args){
+        if(!injected++){
+          // Simulate a second tab modifying the journal while this normal
+          // Home-style save prepares its full V1 candidate.
+          localStorage.setItem(journalKey,peerRaw);
+        }
+        return initialParser.call(this,raw,...args);
+      };
+      try {
+        firstSave=core.saveStateSnapshot(candidate,{
+          immediateWrite:true,savePath:'test-home-save-task-source-race'
+        });
+      } finally {
+        core.parseTaskPointsStorageJson=initialParser;
+      }
+      const afterFirstState=localStorage.getItem(storageKey);
+      const afterFirstJournal=localStorage.getItem(journalKey);
+      const status=core.getTaskMutationJournalStatus();
+      const retry=core.saveStateSnapshot(candidate,{
+        immediateWrite:true,savePath:'test-home-save-task-source-retry'
+      });
+      const finalState=core.parseTaskPointsStorageJson(
+        localStorage.getItem(storageKey),{});
+      return {
+        injected,firstSkipped:firstSave?.skipped,
+        sourceBlocked:firstSave?.blockedByTaskSourceChanged,
+        journalChanged:firstSave?.taskJournalSourceChanged,
+        snapshotPreserved:afterFirstState===beforeState,
+        journalPreserved:afterFirstJournal===peerRaw,
+        refusals:status.fullSaveSourceRefusals,
+        retrySkipped:retry?.skipped,
+        title:finalState.tasks.find(row=>row.id==='synthetic-task')?.title,
+        journalAfterRetry:localStorage.getItem(journalKey),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+      };
+    });
+    assert.equal(proof.injected,1);
+    assert.equal(proof.firstSkipped,true);
+    assert.equal(proof.sourceBlocked,true);
+    assert.equal(proof.journalChanged,true);
+    assert.equal(proof.snapshotPreserved,true);
+    assert.equal(proof.journalPreserved,true);
+    assert.equal(proof.refusals,1);
+    assert.notEqual(proof.retrySkipped,true);
+    assert.equal(proof.title,'Newer pending Task edit from peer tab');
+    assert.equal(proof.journalAfterRetry,null);
+    assert.equal(proof.authority,'legacy_only');
+    return {staleFullSaveRefused:true,peerPendingTaskRetained:true,
+      subsequentSaveRecovered:true,v1StillAuthoritative:true};
+  });
+
   await run('real Task compaction refuses peer full snapshot change and replays safely on retry',async context=>{
     const page=await open(context);
     const proof=await page.evaluate(()=>{
