@@ -16,8 +16,8 @@ const DARK='taskpoints_state_v2_dark_mode_v1';
 const PENDING='taskpoints_pending_task_mutations_v1';
 const DB='taskpoints_state_v2';
 
-function install({hostname='localhost',dark=true}={}){
-  const localStorage=new FakeStorage({
+function install({hostname='localhost',dark=true,sharedStorage=null,sharedIndexedDB=null}={}){
+  const localStorage=sharedStorage || new FakeStorage({
     ...(dark?{[DARK]:'1'}:{}),
     [KEY]:JSON.stringify({
       habits:[{id:'habit-1',name:'Walk',doneKeys:[],failedKeys:[],iceKeys:[]}],
@@ -26,7 +26,7 @@ function install({hostname='localhost',dark=true}={}){
       extraImportedField:{doNotLose:true}
     })
   });
-  const indexedDB=new FakeIndexedDB();
+  const indexedDB=sharedIndexedDB || new FakeIndexedDB();
   const timers=[];
   const documentListeners=new Map();
   let idleAgo=10000,uuid=0,snapshotSaves=0;
@@ -103,6 +103,44 @@ test('preview restart queues a bounded idle Task catch-up after V1 journal alrea
   assert.equal(app.localStorage.getItem(PENDING),null);
   assert.equal(app.snapshotSaves(),0);
   assert.equal(app.api.getObservedLegacyTaskStatus().verified,1);
+});
+
+test('cold preview reload reconciles stale Tasks even when older V1 edit already compacted',async()=>{
+  const before=install();
+  await before.api.seedFromLegacy();
+  const original=await before.api.rehearsePreviewTaskCollectionSeed();
+  assert.equal(original.verified,true,original.reason);
+  assert.equal(before.indexedDB.dump(DB).tasks[0].value.title,'Original');
+  const persisted=JSON.parse(before.localStorage.getItem(KEY));
+  persisted.tasks[0].title='Edited while old page was closing';
+  persisted.tasks.push({id:'new-during-restart',title:'Added before reopening',status:'active'});
+  before.localStorage.setItem(KEY,JSON.stringify(persisted));
+  // After compaction the authoritative Task journal is absent: a new page
+  // cannot rely on a journal notification to discover these newer tasks.
+  assert.equal(before.localStorage.getItem(PENDING),null);
+  const durableBefore=before.localStorage.getItem(KEY);
+  const after=install({
+    sharedStorage:before.localStorage,
+    sharedIndexedDB:before.indexedDB
+  });
+  await after.documentListeners.get('DOMContentLoaded')();
+  await Promise.resolve();
+  assert.equal(after.api.getObservedLegacyTaskStatus().pending,true);
+  assert.equal(after.api.getObservedLegacyTaskStatus().attempts,0);
+  assert.equal(after.indexedDB.dump(DB).tasks[0].value.title,'Original');
+  const reconciled=await after.api.flushObservedLegacyTaskJournal();
+  assert.equal(reconciled.verified,true,reconciled.reason);
+  const tasks=after.indexedDB.dump(DB).tasks.map(row=>row.value);
+  assert.equal(tasks.find(row=>row.id==='a').title,
+    'Edited while old page was closing');
+  assert.equal(tasks.find(row=>row.id==='new-during-restart').title,
+    'Added before reopening');
+  assert.equal((await after.api.inspectPreviewTaskCollectionParity()).match,true);
+  assert.equal(after.localStorage.getItem(KEY),durableBefore);
+  assert.equal(after.localStorage.getItem(PENDING),null);
+  assert.equal(after.snapshotSaves(),0);
+  assert.equal(after.api.getObservedLegacyTaskStatus().startupCatchupRequests,1);
+  assert.equal(reconciled.canPromote,false);
 });
 
 test('one preview Task catch-up is scheduled per startup generation without duplicate loops',async()=>{
