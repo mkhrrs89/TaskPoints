@@ -3093,6 +3093,19 @@
       "allLegacyWritersFenced": false,
       "productionOwnerCertified": false,
       "v1AuthorityUnchanged": true
+    },
+    "scwmDeferredSaveSafetyEvidence": {
+      "sourcePath": "scwm_interaction_fast_path.js",
+      "testPath": "tests/state_runtime_v2_m01_nine_image_export_wal_writer_behavior_contract.test.js",
+      "retainsQueuedIntentOnThrownError": true,
+      "retainsQueuedIntentOnExplicitSkip": true,
+      "retryInSamePagePossible": true,
+      "previewOnlySourceByteAndGenerationComparison": true,
+      "doesNotClaimDurableSuccessForUndefinedOriginalSave": true,
+      "atomicCrossTabWriterFenceVerified": false,
+      "productionOwnerCertified": false,
+      "oldTabsNotFenced": true,
+      "cutoverPermission": false
     }
   },
   "proposedWriterHandoffs": [
@@ -4838,7 +4851,12 @@
       "observedBehaviors": [
         "deferred_save_calls_original_once",
         "preserves_original_arguments",
-        "no_pending_save_is_noop"
+        "no_pending_save_is_noop",
+        "retains_pending_on_thrown_core_failure",
+        "refused_quota_result_does_not_drop_pending",
+        "later_explicit_retry_flushes_exact_pending_save",
+        "dark_preview_blocks_changed_full_source_or_generation",
+        "normal_v1_deferred_save_behavior_retained"
       ],
       "productionOwnerVerified": false,
       "productionFenceVerified": false,
