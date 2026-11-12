@@ -19127,6 +19127,8 @@
   let observedTaskStartupKey = null;
   let observedTaskStartupRequests = 0;
   let observedTaskPeerListenerInstalled = false;
+  let observedTaskVisibilityListenerInstalled = false;
+  let observedTaskVisibilityResumes = 0;
   let observedTaskPeerNotifications = 0;
   let observedTaskPeerCatchupRequests = 0;
   let observedTaskTimer = null;
@@ -19268,6 +19270,21 @@
       if (queueObservedLegacyTaskJournal()) observedTaskPeerCatchupRequests += 1;
     });
     observedTaskPeerListenerInstalled = true;
+    // A hidden preview page intentionally does not run its expensive idle
+    // mirror. A missed timer must not strand that pending request forever:
+    // resume only the delayed, bounded preflight after the page is visible.
+    // The event callback never parses V1 data or opens IndexedDB.
+    if (!observedTaskVisibilityListenerInstalled
+      && typeof global.document?.addEventListener === 'function') {
+      global.document.addEventListener('visibilitychange', () => {
+        if (global.document?.hidden
+          || global.document?.visibilityState === 'hidden'
+          || !observedTaskRequested || observedTaskRun
+          || observedTaskTimer != null || !observedTaskPreviewAllowed()) return;
+        if (scheduleObservedTaskMirror()) observedTaskVisibilityResumes += 1;
+      });
+      observedTaskVisibilityListenerInstalled = true;
+    }
     return true;
   }
 
@@ -19285,6 +19302,8 @@
       pending:observedTaskRequested,running:Boolean(observedTaskRun),
       startupCatchupRequests:observedTaskStartupRequests,
       peerStorageListenerInstalled:observedTaskPeerListenerInstalled,
+      visibilityResumeListenerInstalled:observedTaskVisibilityListenerInstalled,
+      visibilityResumeRequests:observedTaskVisibilityResumes,
       peerStorageNotifications:observedTaskPeerNotifications,
       peerStorageCatchupRequests:observedTaskPeerCatchupRequests,
       attempts:observedTaskAttempts,verified:observedTaskVerified,
