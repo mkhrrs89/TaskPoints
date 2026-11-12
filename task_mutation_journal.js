@@ -644,6 +644,19 @@
     const snapshot = clone(current.record);
     try {
       const candidate = applyRecord(persistedState(), snapshot);
+      // Another tab may finish a Task edit or compact/clear its journal
+      // while this tab decodes the full V1 snapshot. Refuse to overwrite
+      // that peer's newer snapshot using a candidate based on older journal
+      // evidence. This check narrows a known race; localStorage cannot
+      // provide an atomic cross-tab compare-and-swap or certify V2 ownership.
+      let latestJournalRaw;
+      try { latestJournalRaw = storage.getItem(JOURNAL_KEY); }
+      catch (_) { latestJournalRaw = undefined; }
+      if (latestJournalRaw === undefined
+        || (latestJournalRaw === null ? '' : latestJournalRaw) !== current.raw) {
+        journalSourceConflicts += 1;
+        throw new Error('Task journal changed during compaction preparation; older snapshot was not saved.');
+      }
       const result = originalSaveStateSnapshot(candidate, {
         storageKey: STORAGE_KEY,
         immediateWrite: true,
