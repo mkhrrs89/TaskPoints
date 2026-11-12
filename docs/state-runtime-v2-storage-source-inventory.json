@@ -3106,6 +3106,17 @@
       "productionOwnerCertified": false,
       "oldTabsNotFenced": true,
       "cutoverPermission": false
+    },
+    "verifiedSecondaryRetrySafetyEvidence": {
+      "sourcePath": "phase5b_deferred_mirror.js",
+      "testPath": "tests/phase5c_verified_secondary_contract.test.js",
+      "failedMirrorKeepsLatestSourceQueued": true,
+      "deniedIndexedDbOpenRetriedOnExplicitFlush": true,
+      "laterAuthoritativeSaveOverridesOldFailedSource": true,
+      "noUnboundedAutomaticRetryOnUnchangedSource": true,
+      "noV1AuthorityChange": true,
+      "doesNotCertifyProductionV2Owner": true,
+      "doesNotGrantCutover": true
     }
   },
   "proposedWriterHandoffs": [
