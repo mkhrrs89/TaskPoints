@@ -516,7 +516,7 @@ test('optimized LZ16 compressor keeps legacy bytes for representative TaskPoints
     ['aaaaaa', '780ebd01', 3],
     ['abcabcabc', '65e874a9', 5],
     ['Repeated history payload with individual tasks and scores.'.repeat(50), '2a76252f', 318],
-    ['\\u0000\\u00ff\\u0100\\u1234\\uD800\\uDC00😀👁️🐦中文 العربية ®'.repeat(80), 'b1797af2', 179],
+    [(String.fromCharCode(0, 255, 256, 0x1234, 0xD800, 0xDC00) + '😀👁️🐦中文 العربية ®').repeat(80), 'b1797af2', 179],
     [Array.from({ length: 65536 }, (_, i) => String.fromCharCode(i)).join(''), 'a0fe0055', 139678],
     [JSON.stringify(Array.from({ length: 4200 }, (_, i) => ({
       id: `m-${i}`, pA: i % 53, pB: i % 47, dateKey: `2026-10-${i % 28 + 1}`,
