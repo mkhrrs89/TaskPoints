@@ -250,6 +250,12 @@
     const getter = global.TaskPointsCore?.getImageBlob || getImageBlobFallback;
     const promise = Promise.resolve()
       .then(() => getter(imageId))
+      .then((blob) => {
+        // A missing image may be restored or uploaded later. Do not cache a
+        // permanent miss and silently omit it from every future backup.
+        if (!blob) imageBlobCache.delete(imageId);
+        return blob;
+      })
       .catch((error) => {
         imageBlobCache.delete(imageId);
         throw error;
@@ -398,10 +404,24 @@
       return { path: `images/${imageId}.${extensionForBlob(blob)}`, blob };
     });
 
+    // Keep the original ZIP/import structure and retain every state field.
+    // Record referenced images that could not be read so an incomplete photo
+    // backup is never presented as a verified complete image backup.
+    const missingImageIds = ids.filter((_, index) => !imageFiles[index]);
+    const includedImageIds = ids.filter((_, index) => Boolean(imageFiles[index]));
+    const manifestPayload = {
+      ...payload,
+      imageExportCoverage: {
+        referencedCount: ids.length,
+        includedCount: includedImageIds.length,
+        missingImageIds,
+        complete: missingImageIds.length === 0
+      }
+    };
     const files = [
       {
         path: 'manifest.json',
-        blob: new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+        blob: new Blob([JSON.stringify(manifestPayload, null, 2)], { type: 'application/json' })
       },
       ...imageFiles.filter(Boolean)
     ];
@@ -409,7 +429,11 @@
     const zipBlob = await buildZipBlob(files, (completed, total) => {
       onProgress?.({ phase: 'zip', completed, total });
     });
-    return { blob: zipBlob, filename: exportFilename(), payload, imageCount: imageFiles.filter(Boolean).length };
+    return {
+      blob: zipBlob, filename: exportFilename(), payload: manifestPayload,
+      imageCount: includedImageIds.length, missingImageCount: missingImageIds.length,
+      missingImageIds
+    };
   }
 
   function progressMessage(progress) {
@@ -439,8 +463,18 @@
         updateStatus('Opening the export screen…');
         await nextPaint();
         triggerDownload(artifact.blob, artifact.filename);
-        updateStatus(`Backup ready${artifact.imageCount ? ` with ${artifact.imageCount} images` : ''}.`);
-        global.setTimeout?.(() => updateStatus('', { hidden: true }), 2500);
+        if (artifact.missingImageCount > 0) {
+          const count = artifact.missingImageCount;
+          updateStatus(
+            `Backup downloaded, but ${count} referenced image${count === 1 ? ' was' : 's were'} missing. See imageExportCoverage in manifest.json and retry after recovering the photos.`,
+            { error: true }
+          );
+          // Keep the warning visible; a partial photo backup should not be
+          // mistaken for a complete recovery package after 2.5 seconds.
+        } else {
+          updateStatus(`Backup ready${artifact.imageCount ? ` with ${artifact.imageCount} images` : ''}.`);
+          global.setTimeout?.(() => updateStatus('', { hidden: true }), 2500);
+        }
         return artifact;
       } catch (error) {
         console.error('TaskPoints responsive export failed', error);
