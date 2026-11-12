@@ -11328,6 +11328,71 @@ try {
     return {ordinaryHistoryWipeGuardPreserved:true,noV2Authority:true};
   });
 
+  await run('real Task compaction refuses peer full snapshot change and replays safely on retry',async context=>{
+    const page=await open(context);
+    const proof=await page.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const key='taskpoints_v1';
+      const journalKey='taskpoints_pending_task_mutations_v1';
+      const id='synthetic-task';
+      core.journalTaskMutation({task:{
+        id,title:'Pending newer task edit',status:'completed'
+      }});
+      const journal=localStorage.getItem(journalKey);
+      const base=core.parseTaskPointsStorageJson(localStorage.getItem(key),{});
+      base.notes='Peer Notes preserved during Task compaction';
+      base.completions.push({
+        id:'peer-new-completion',source:'work',title:'Peer work entry',points:16
+      });
+      const peerRaw=JSON.stringify(base);
+      const priorParser=core.parseTaskPointsStorageJson;
+      let injected=0,firstFlush;
+      core.parseTaskPointsStorageJson=function(raw,...args){
+        if(!injected++){
+          // Simulate a peer snapshot commit immediately after the raw V1
+          // bytes were captured, while this tab decodes that old snapshot.
+          localStorage.setItem(key,peerRaw);
+        }
+        return priorParser.call(this,raw,...args);
+      };
+      try{firstFlush=core.flushPendingTaskMutations();}
+      finally{core.parseTaskPointsStorageJson=priorParser;}
+      const rawAfterFirst=localStorage.getItem(key);
+      const journalAfterFirst=localStorage.getItem(journalKey);
+      const beforeRetry=core.parseTaskPointsStorageJson(rawAfterFirst,{});
+      const statusAfterFirst=core.getTaskMutationJournalStatus();
+      const secondFlush=core.flushPendingTaskMutations();
+      const final=core.parseTaskPointsStorageJson(localStorage.getItem(key),{});
+      return {
+        injected,firstFlush,secondFlush,
+        peerSnapshotUnchanged:rawAfterFirst===peerRaw,
+        journalPreserved:journalAfterFirst===journal,
+        snapshotConflicts:statusAfterFirst.snapshotSourceConflicts,
+        peerBeforeRetry:beforeRetry.completions.some(row=>row.id==='peer-new-completion'),
+        peerAfterRetry:final.completions.some(row=>row.id==='peer-new-completion'),
+        notesAfterRetry:final.notes,
+        taskAfterRetry:final.tasks.find(row=>row.id===id)?.title,
+        journalAfterRetry:localStorage.getItem(journalKey),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+      };
+    });
+    assert.equal(proof.injected,1);
+    assert.equal(proof.firstFlush,false,
+      'stale full-state source must not be compacted');
+    assert.equal(proof.peerSnapshotUnchanged,true);
+    assert.equal(proof.journalPreserved,true);
+    assert.equal(proof.snapshotConflicts,1);
+    assert.equal(proof.peerBeforeRetry,true);
+    assert.equal(proof.secondFlush,true,'fresh Task compaction must retry safely');
+    assert.equal(proof.peerAfterRetry,true);
+    assert.equal(proof.notesAfterRetry,'Peer Notes preserved during Task compaction');
+    assert.equal(proof.taskAfterRetry,'Pending newer task edit');
+    assert.equal(proof.journalAfterRetry,null);
+    assert.equal(proof.authority,'legacy_only');
+    return {oldSnapshotRefused:true,newerPeerDataPreserved:true,
+      TaskJournalReplayedOnRetry:true,readAuthority:'legacy_only'};
+  });
+
   await run('newer Task completion edit during verified journal compaction survives cleanup and retry',async context=>{
     const page=await open(context);
     const proof=await page.evaluate(()=>{
