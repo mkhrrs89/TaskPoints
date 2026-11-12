@@ -19106,6 +19106,7 @@
   let observedTaskVerified = 0;
   let observedTaskRefused = 0;
   let observedTaskLastReason = 'not_started';
+  let observedTaskIdleDeferrals = 0;
 
   function observeTaskResult(reason, verified = false) {
     observedTaskLastReason = reason;
@@ -19196,8 +19197,8 @@
       if (serial !== observedTaskTimerGeneration) return;
       observedTaskTimer = null;
       if (!observedTaskPreviewAllowed() || !observedTaskRequested) return;
-      // Background-only. If the user is active, leave the request for their
-      // next quiet interval or an explicit preview diagnostic flush.
+      // Background-only. If the user is active, allow a few additional
+      // quiet-window checks, but never create unbounded background polling.
       const idle = core.getStorageMaintenanceIdleStatus?.() || null;
       if (global.document?.hidden || global.document?.visibilityState === 'hidden'
         || idle?.pageLeaving === true || idle?.activeEditor === true
@@ -19205,8 +19206,14 @@
         || (typeof core.isStorageMaintenanceQuiet === 'function'
           && core.isStorageMaintenanceQuiet() !== true)) {
         observedTaskLastReason = 'waiting_for_idle';
+        observedTaskIdleDeferrals += 1;
+        if (observedTaskIdleDeferrals < 4
+          && !global.document?.hidden
+          && global.document?.visibilityState !== 'hidden')
+          scheduleObservedTaskMirror();
         return;
       }
+      observedTaskIdleDeferrals = 0;
       void flushObservedLegacyTaskJournal();
     },OBSERVED_TASK_TIMER_MS);
     return true;
@@ -19215,6 +19222,7 @@
   function queueObservedLegacyTaskJournal() {
     if (!observedTaskPreviewAllowed()) return false;
     observedTaskRequested = true;
+    observedTaskIdleDeferrals = 0;
     scheduleObservedTaskMirror();
     return true;
   }
@@ -19225,6 +19233,7 @@
       pending:observedTaskRequested,running:Boolean(observedTaskRun),
       attempts:observedTaskAttempts,verified:observedTaskVerified,
       refused:observedTaskRefused,lastReason:observedTaskLastReason,
+      idleDeferrals:observedTaskIdleDeferrals,
       automaticIdleMs:OBSERVED_TASK_IDLE_MS
     };
   }
