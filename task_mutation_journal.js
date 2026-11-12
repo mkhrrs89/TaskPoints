@@ -617,7 +617,12 @@
       // canonical snapshot against the normalized state it actually committed,
       // rather than requiring byte-for-byte equality with the pre-save patch.
       if (!snapshotVerified(saved, snapshot, result.state)) throw new Error('Task mutation journal compaction verification failed.');
-      clearVerifiedSnapshot(snapshot);
+      // The underlying V1 snapshot can be correct while a peer/reset has
+      // replaced the pending journal with malformed or newer evidence.
+      // Decline completion unless cleanup explicitly succeeded; an older
+      // "false" return must never become an acknowledged compacted edit.
+      if (clearVerifiedSnapshot(snapshot) !== true)
+        throw new Error('Task mutation journal cleanup could not be confirmed; pending changes retained.');
       retryCount = 0;
       compactionsCompleted += 1;
       try { global.TaskPointsPerf?.mark?.('taskMutation.compactionComplete', { reason }); } catch (_) {}
