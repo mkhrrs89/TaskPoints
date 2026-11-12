@@ -949,6 +949,27 @@ test('full saves without pending Task journal still retain ordinary V1 save beha
   assert.equal(h.core.getTaskMutationJournalStatus().fullSaveSourceRefusals,0);
 });
 
+test('Home Weight and VO2 entry dialogs never acknowledge a skipped guarded full save',()=>{
+  for(const {start,end,resultName,modalClose} of [
+    {start:'function submitWeightEntry()',end:'function openVo2MaxModal()',
+      resultName:'weightSave',modalClose:'closeWeightModal()'},
+    {start:'function submitVo2MaxEntry()',end:'function drawDailyTrend(',
+      resultName:'vo2Save',modalClose:'closeVo2MaxModal()'}
+  ]){
+    const first=homeSource.indexOf(start);
+    const last=homeSource.indexOf(end,first);
+    assert.ok(first>=0&&last>first,'expected Home dialog: '+start);
+    const handler=homeSource.slice(first,last);
+    const guard=handler.indexOf('if ('+resultName+'?.skipped || '+resultName+'?.blockedByQuotaCircuit)');
+    const success=handler.indexOf('state = normalizeState('+resultName+'.state)');
+    const close=handler.indexOf(modalClose);
+    assert.ok(guard>=0&&success>guard&&close>guard,
+      resultName+' must refuse a skipped guarded save before updating UI or closing modal');
+    assert.match(handler.slice(guard,success),/return;/,
+      resultName+' must stop the success path after a skipped save');
+  }
+});
+
 test('full saves automatically include pending mutations before verification clears them', () => {
   const h = makeHarness();
   h.core.journalTaskMutation({ completionDeleteId: 'old' });
