@@ -92,17 +92,24 @@ test('export bestNotes falls back to dirty/authoritative cache when sync fails',
  assert.equal(h.c.bestNotes({notes:'longer but stale snapshot notes'}),'cache text');unchanged(h.s);
 });
 // 5 SCWM original deferred save handoff.
-function scwm(){
- const callbacks=[],calls=[],s=store();
+function scwm({preview=false, fail=false, skip=false}={}){
+ const callbacks=[],calls=[],s=store(preview?{
+  taskpoints_state_v2_dark_mode_v1:'1',
+  taskpoints_state_v2_generation_v1:'epoch-1'
+ }:{});
+ let shouldFail=fail,shouldSkip=skip;
  const c=ctx({localStorage:s,clearTimeout(){},cancelIdleCallback(){},setTimeout(fn){callbacks.push(fn);return callbacks.length},
-  requestIdleCallback(fn){callbacks.push(fn);return callbacks.length}});
+  requestIdleCallback(fn){callbacks.push(fn);return callbacks.length},
+  TaskPointsCore:{STORAGE_KEY:V1},
+  failOriginal(){return shouldFail},
+  skipOriginal(){return shouldSkip}});
  const sample= "const global=window;\nlet saveTimer=null,saveIdle=null,pendingSave=null;"
-  +"const originals={save:function(...args){calls.push(args)}};"
-  +"const status={savesFlushed:0};const SAVE_IDLE_TIMEOUT=900;\n"
+  +"const originals={save:function(...args){calls.push(args);if(failOriginal()) throw Error('SCWM quota denied'); if(skipOriginal()) return {skipped:true,blockedByQuotaCircuit:true}}};"
+  +"const status={savesFlushed:0,savesRetainedOnFailure:0,stalePreviewSavesBlocked:0};const SAVE_IDLE_TIMEOUT=900;\n"
   +slice('scwm_interaction_fast_path.js','function clearSaveSchedule() {','function fastSave()');
  c.calls=calls;
  evaluate(c,sample);
- return {c,s,callbacks,calls};
+ return {c,s,callbacks,calls,allow(){shouldFail=false;shouldSkip=false}};
 }
 test('SCWM deferred writer flushes original exactly once with preserved arguments',()=>{
  const h=scwm();vm.runInContext("pendingSave={thisArg:null,args:['a',{b:2}]}",h.c);
@@ -116,6 +123,69 @@ test('SCWM deferred writer declines to claim a flush if no pending save or owner
  assert.equal(h.c.flushSave(),false);
  assert.equal(vm.runInContext('status.savesFlushed',h.c),0);unchanged(h.s);
 });
+
+test('SCWM failed original save retains its pending intent and succeeds on later retry',()=>{
+ const h=scwm({fail:true});
+ vm.runInContext("pendingSave={thisArg:null,args:['edit'],previewBoundary:readPreviewSaveBoundary()}",h.c);
+ assert.throws(()=>h.c.flushSave(),/SCWM quota denied/);
+ assert.equal(vm.runInContext('Boolean(pendingSave)',h.c),true);
+ assert.equal(vm.runInContext('status.savesFlushed',h.c),0);
+ assert.equal(vm.runInContext('status.savesRetainedOnFailure',h.c),1);
+ h.allow();
+ assert.equal(h.c.flushSave(),true);
+ assert.equal(vm.runInContext('Boolean(pendingSave)',h.c),false);
+ assert.equal(vm.runInContext('status.savesFlushed',h.c),1);
+ unchanged(h.s);
+});
+test('SCWM nonthrowing quota refusal cannot silently discard queued save',()=>{
+ const h=scwm({skip:true});
+ vm.runInContext("pendingSave={thisArg:null,args:['edit'],previewBoundary:readPreviewSaveBoundary()}",h.c);
+ assert.throws(()=>h.c.flushSave(),e=>e.code==='TASKPOINTS_SCWM_DEFERRED_SAVE_REFUSED');
+ assert.equal(vm.runInContext('Boolean(pendingSave)',h.c),true);
+ h.allow();
+ assert.equal(h.c.flushSave(),true);
+ assert.equal(vm.runInContext('Boolean(pendingSave)',h.c),false);
+ unchanged(h.s);
+});
+test('SCWM dark preview blocks a known peer snapshot change before deferred save',()=>{
+ const h=scwm({preview:true});
+ vm.runInContext("pendingSave={thisArg:null,args:['outdated'],previewBoundary:readPreviewSaveBoundary()}",h.c);
+ h.s.setItem(V1,JSON.stringify({tasks:[{id:'newer-peer'}]}));
+ const latest=h.s.getItem(V1);
+ assert.throws(()=>h.c.flushSave(),e=>e.code==='TASKPOINTS_SCWM_PREVIEW_SOURCE_CHANGED');
+ assert.equal(h.s.getItem(V1),latest);
+ assert.equal(h.calls.length,0);
+ assert.equal(vm.runInContext('Boolean(pendingSave)',h.c),true);
+ assert.equal(vm.runInContext('status.stalePreviewSavesBlocked',h.c),1);
+});
+test('SCWM dark preview blocks a rotated or missing generation',()=>{
+ for(const generation of ['epoch-2',null]){
+  const h=scwm({preview:true});
+  vm.runInContext("pendingSave={thisArg:null,args:['obsolete'],previewBoundary:readPreviewSaveBoundary()}",h.c);
+  if(generation===null)h.s.removeItem('taskpoints_state_v2_generation_v1');
+  else h.s.setItem('taskpoints_state_v2_generation_v1',generation);
+  assert.throws(()=>h.c.flushSave(),e=>e.code==='TASKPOINTS_SCWM_PREVIEW_SOURCE_CHANGED');
+  assert.equal(h.calls.length,0);
+  unchanged(h.s);
+ }
+});
+test('SCWM dark preview rejects absent generation even when source does not change',()=>{
+ const h=scwm({preview:true});
+ h.s.removeItem('taskpoints_state_v2_generation_v1');
+ vm.runInContext("pendingSave={thisArg:null,args:['not-admitted'],previewBoundary:readPreviewSaveBoundary()}",h.c);
+ assert.throws(()=>h.c.flushSave(),e=>e.code==='TASKPOINTS_SCWM_PREVIEW_SOURCE_CHANGED');
+ assert.equal(h.calls.length,0);
+ unchanged(h.s);
+});
+test('SCWM ordinary V1 deferred save remains valid without a V2 preview token',()=>{
+ const h=scwm();
+ vm.runInContext("pendingSave={thisArg:null,args:['regular-v1'],previewBoundary:readPreviewSaveBoundary()}",h.c);
+ assert.equal(h.c.flushSave(),true);
+ assert.equal(h.calls.length,1);
+ assert.equal(h.calls[0][0],'regular-v1');
+ unchanged(h.s);
+});
+
 // 6+7 V2 dark WAL: run entire production module and its real append and delete API.
 function wal({failSet=null,ignoreSet=null,failRemove=null,ignoreRemove=null,failRead=null}={}){
  const WAL='taskpoints_v2_pending_mutations_v1';
