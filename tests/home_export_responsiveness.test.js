@@ -188,3 +188,136 @@ test('zip builder emits a valid local header and end-of-central-directory marker
   assert.equal(read32(0), 0x04034b50);
   assert.equal(read32(bytes.length - 22), 0x06054b50);
 });
+
+
+function manifestFromZip(blob) {
+  return blob.arrayBuffer().then(buffer => {
+    const bytes = new Uint8Array(buffer);
+    const read16 = offset => bytes[offset] | (bytes[offset+1] << 8);
+    const read32 = offset => (bytes[offset] | (bytes[offset+1] << 8)
+      | (bytes[offset+2] << 16) | (bytes[offset+3] << 24)) >>> 0;
+    assert.equal(read32(0), 0x04034b50);
+    const filenameLength = read16(26);
+    const filename = new TextDecoder().decode(bytes.slice(30, 30+filenameLength));
+    assert.equal(filename, 'manifest.json');
+    const start = 30 + filenameLength + read16(28);
+    return JSON.parse(new TextDecoder().decode(bytes.slice(start, start+read32(18))));
+  });
+}
+
+test('image ZIP discloses missing referenced photos, but preserves export and complete state', async () => {
+  const payload = {
+    exportType:'taskpoints_full_backup',version:2,
+    state:{
+      tasks:[{id:'important-task'}],completions:[],
+      players:[{id:'a',imageId:'image-ok'},{id:'b',imageId:'image-missing'}],
+      youImageId:'image-ok',goldLedger:[{id:'gold-keep',amount:5}],
+      unknownImportedState:{keep:true}
+    },aux:{taskpoints_notes_v1:'Keep notes'}
+  };
+  const imagesRequested = [];
+  const {api} = install({
+    getTaskPointsExportSnapshot(){return payload;},
+    TaskPointsCore:{
+      getImageBlob(id){imagesRequested.push(id);
+        return id==='image-ok' ? new Blob(['photo'],{type:'image/png'}) : null;
+      }
+    }
+  });
+
+  const artifact = await api.createExportArtifact();
+  assert.equal(artifact.imageCount,1);
+  assert.equal(artifact.missingImageCount,1);
+  assert.deepEqual(Array.from(artifact.missingImageIds),['image-missing']);
+  assert.deepEqual(imagesRequested,['image-ok','image-missing']);
+  assert.deepEqual(artifact.payload.imageExportCoverage.missingImageIds,['image-missing']);
+  assert.equal(artifact.payload.imageExportCoverage.complete,false);
+  const manifest = await manifestFromZip(artifact.blob);
+  assert.equal(manifest.exportType,'taskpoints_full_backup');
+  assert.equal(manifest.version,2);
+  assert.equal(manifest.imageExportCoverage.referencedCount,2);
+  assert.equal(manifest.imageExportCoverage.includedCount,1);
+  assert.equal(manifest.imageExportCoverage.complete,false);
+  assert.deepEqual(manifest.imageExportCoverage.missingImageIds,['image-missing']);
+  assert.equal(manifest.state.goldLedger[0].id,'gold-keep');
+  assert.equal(manifest.state.unknownImportedState.keep,true);
+  assert.equal(manifest.aux.taskpoints_notes_v1,'Keep notes');
+  assert.equal(payload.imageExportCoverage,undefined,
+    'snapshot owner must not be mutated by the export');
+});
+
+test('a referenced photo added after a missing-image export is fetched next time', async () => {
+  let recovered=false;
+  const calls=[];
+  const {api}=install({
+    getTaskPointsExportSnapshot(){return {
+      exportType:'taskpoints_full_backup',version:2,
+      state:{tasks:[],completions:[],youImageId:'recovered-photo',players:[]},aux:{}
+    }},
+    TaskPointsCore:{
+      getImageBlob(id){calls.push(id);
+        return recovered ? new Blob(['now present'],{type:'image/webp'}) : null;
+      }
+    }
+  });
+  const missing=await api.createExportArtifact();
+  assert.equal(missing.missingImageCount,1);
+  assert.equal(api.imageBlobCache.has('recovered-photo'),false,
+    'negative image lookup must not be cached forever');
+  recovered=true;
+  const complete=await api.createExportArtifact();
+  assert.equal(complete.imageCount,1);
+  assert.equal(complete.missingImageCount,0);
+  assert.equal(complete.payload.imageExportCoverage.complete,true);
+  assert.deepEqual(complete.payload.imageExportCoverage.missingImageIds,[]);
+  assert.equal(calls.length,2);
+  const manifest=await manifestFromZip(complete.blob);
+  assert.equal(manifest.imageExportCoverage.complete,true);
+});
+
+test('partial photo backup visibly warns and remains downloadable; complete backup stays ordinary', async () => {
+  const nodes=new Map();
+  let clicked=0, hiddenWarnings=0;
+  const document={
+    addEventListener(){},querySelectorAll(){return []},
+    getElementById(id){return nodes.get(id)||null},
+    createElement(tag){
+      const element={tag,style:{},hidden:false,textContent:'',
+        setAttribute(){},removeAttribute(){},click(){clicked++},remove(){}};
+      return element;
+    },
+    body:{appendChild(el){if(el.id)nodes.set(el.id,el)}},
+    documentElement:{appendChild(el){if(el.id)nodes.set(el.id)}}
+  };
+  let missing=true;
+  const payload={exportType:'taskpoints_full_backup',version:2,
+    state:{tasks:[],completions:[],youImageId:'profile-image',players:[]},aux:{}};
+  const {api}=install({
+    document,
+    getTaskPointsExportSnapshot(){return payload},
+    TaskPointsCore:{
+      getImageBlob(){return missing?null:new Blob(['image'],{type:'image/png'})}
+    },
+    setTimeout(callback,delay){
+      if(delay===2500)hiddenWarnings++;
+      else callback();
+      return 1;
+    },
+    requestAnimationFrame(callback){callback();return 1}
+  });
+
+  const first=await api.startExport();
+  assert.equal(first.missingImageCount,1);
+  const warning=nodes.get('tpResponsiveExportStatus');
+  assert.ok(warning);
+  assert.match(warning.textContent,/referenced image was missing/i);
+  assert.equal(warning.hidden,false);
+  assert.equal(hiddenWarnings,0,'partial backup warning must not auto-hide');
+  assert.equal(clicked,1,'user still receives the ZIP');
+
+  missing=false;
+  await api.startExport();
+  assert.equal(clicked,2);
+  assert.equal(hiddenWarnings,1);
+  assert.equal(nodes.get('tpResponsiveExportStatus').textContent,'Backup ready with 1 images.');
+});
