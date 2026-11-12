@@ -3846,6 +3846,47 @@ try {
       originalV1Authoritative:true};
   });
 
+  await run('preview Task journal refuses stale tab after reset epoch rotates',async context=>{
+    const page=await open(context);
+    const proof=await page.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const generation=window.TaskPointsStateRuntimeV2Generation;
+      const oldStatus=core.getTaskMutationJournalStatus();
+      const beforeState=localStorage.getItem('taskpoints_v1');
+      const beforeJournal=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const epochBefore=generation.read();
+      const rotated=generation.rotate('synthetic-task-reset-epoch');
+      let refusal=null;
+      try {
+        core.journalTaskMutation({task:{
+          id:'synthetic-task',title:'Must not commit from stale preview tab'
+        }});
+      } catch(error) {
+        refusal=error?.code || String(error?.message || error);
+      }
+      const compacted=core.flushPendingTaskMutations();
+      return {
+        enforced:oldStatus.previewGenerationEnforced,
+        epochChanged:rotated.generation!==epochBefore,
+        refusal,compacted,
+        snapshotPreserved:localStorage.getItem('taskpoints_v1')===beforeState,
+        journalPreserved:
+          localStorage.getItem('taskpoints_pending_task_mutations_v1')===beforeJournal,
+        blocks:core.getTaskMutationJournalStatus().previewGenerationBlocks,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority
+      };
+    });
+    assert.equal(proof.enforced,true);
+    assert.equal(proof.epochChanged,true);
+    assert.equal(proof.refusal,'TASKPOINTS_TASK_PREVIEW_GENERATION_CHANGED');
+    assert.equal(proof.compacted,false);
+    assert.equal(proof.snapshotPreserved,true);
+    assert.equal(proof.journalPreserved,true);
+    assert.ok(proof.blocks>=2);
+    assert.equal(proof.authority,'legacy_only');
+    return {staleTabDenied:true,sourceBytesIntact:true,previewOnly:true};
+  });
+
   await run('preview Task collection catches up compacted legacy snapshot after browser reload',async context=>{
     const page=await open(context);
     const initial=await page.evaluate(async()=>
