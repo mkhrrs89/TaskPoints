@@ -3157,7 +3157,9 @@
       "atomicCrossTabCompareAndSwap": false,
       "olderUncooperativeTabsFenced": false,
       "v2TransactionOwnerCertified": false,
-      "mainUnchanged": true
+      "mainUnchanged": true,
+      "compactionMalformedCleanupReportsFailure": true,
+      "completedCounterNotAdvancedOnFailedCleanup": true
     }
   },
   "proposedWriterHandoffs": [
