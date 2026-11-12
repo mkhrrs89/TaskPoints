@@ -40,6 +40,7 @@
   let mutationGeneration = 0;
   let journalWritesVerified = 0;
   let journalWritesUnverified = 0;
+  let journalSourceConflicts = 0;
 
   function emptyRecord() {
     return { schemaVersion: 1, tasks: [], completionUpserts: [], completionDeletes: [], updatedAtISO: null };
@@ -115,7 +116,7 @@
     return current;
   }
 
-  function writeRecord(record, alreadyNormalized = false) {
+  function writeRecord(record, alreadyNormalized = false, expectedPriorRaw = undefined) {
     if (!recoveryWriteAllowed()) {
       const error = new Error('TaskPoints paused task changes while recovery protection is active.');
       error.code = 'TASKPOINTS_TASK_MUTATION_JOURNAL_WRITE_LOCKED';
@@ -126,6 +127,27 @@
     // completion a second time on EACH foreground Work/Task interaction.
     // Keep the original validation path for any future untrusted caller.
     const normalized = alreadyNormalized ? record : (normalizeRecord(record) || emptyRecord());
+    // Source-byte admission is checked synchronously immediately before the
+    // write. This refuses a known peer edit between readRecord() and writeRecord()
+    // without waiting on an asynchronous lock (foreground Tasks remain pre-paint).
+    // localStorage is NOT compare-and-swap: a different tab can still race
+    // after this observation, so this cannot certify global V2 writer fencing.
+    if (expectedPriorRaw !== undefined) {
+      let sourceRaw;
+      try { sourceRaw = storage.getItem(JOURNAL_KEY); }
+      catch (error) {
+        journalSourceConflicts += 1;
+        const refused = new Error('Task mutation source cannot be rechecked before write.');
+        refused.code = 'TASKPOINTS_TASK_MUTATION_JOURNAL_SOURCE_UNREADABLE';
+        throw refused;
+      }
+      if ((sourceRaw === null ? '' : sourceRaw) !== expectedPriorRaw) {
+        journalSourceConflicts += 1;
+        const refused = new Error('Another tab changed pending Task data before this edit could be saved.');
+        refused.code = 'TASKPOINTS_TASK_MUTATION_JOURNAL_SOURCE_CHANGED';
+        throw refused;
+      }
+    }
     const expectedRaw = isEmpty(normalized) ? null : JSON.stringify(normalized);
     if (expectedRaw === null) storage.removeItem(JOURNAL_KEY);
     else storage.setItem(JOURNAL_KEY, expectedRaw);
@@ -207,7 +229,7 @@
       if (!record.completionDeletes.includes(id)) record.completionDeletes.push(id);
     }
     record.updatedAtISO = new Date().toISOString();
-    const saved = writeRecord(record, true);
+    const saved = writeRecord(record, true, current.raw);
     mutationGeneration += 1;
     try { core.noteStorageUserInteraction?.(); } catch (_) {}
     // saved is the exact successfully written normalized journal; avoid
@@ -369,7 +391,7 @@
     record.completionUpserts = record.completionUpserts.filter((row) => !snapshot.completionUpserts.some((saved) => String(saved.id) === String(row.id) && sameRow(saved, row)));
     record.completionDeletes = record.completionDeletes.filter((id) => !snapshot.completionDeletes.includes(id));
     record.updatedAtISO = new Date().toISOString();
-    writeRecord(record, true);
+    writeRecord(record, true, current.raw);
     return true;
   }
 
@@ -825,7 +847,8 @@
       compactionsCompleted,
       mutationGeneration,
       journalWritesVerified,
-      journalWritesUnverified
+      journalWritesUnverified,
+      journalSourceConflicts
     };
   };
 
