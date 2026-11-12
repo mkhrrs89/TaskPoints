@@ -837,7 +837,11 @@
           });
           alert("Game stats before today have been reset. Reload any open TaskPoints tabs to see the changes.");
         } else if (window.TaskPointsCore?.saveStateSnapshot) {
-          TaskPointsCore.saveStateSnapshot(nextState, { storageKey: SETTINGS_STORAGE_KEY, immediateWrite: true });
+          const resetSaved = TaskPointsCore.saveStateSnapshot(nextState, {
+            storageKey: SETTINGS_STORAGE_KEY, immediateWrite: true
+          });
+          if (resetSaved?.skipped || resetSaved?.blockedByQuotaCircuit)
+            throw new Error('Game reset was not saved; the storage safety gate refused the write.');
           alert("Game stats before today have been reset. Reload any open TaskPoints tabs to see the changes.");
         } else {
           console.warn("settings reset skipped localStorage write; TaskPointsCore missing.");
@@ -906,6 +910,8 @@
           immediateWrite: true,
           limits: { allowHistoryPrune: false, allowCompletionPrune: false }
         });
+        if (saved?.skipped || saved?.blockedByQuotaCircuit)
+          throw new Error('Skills clear was not saved; the storage safety gate refused the write.');
         return saved?.state || nextState;
       }
 
