@@ -274,6 +274,61 @@ test('peer observer ignores unrelated keys, unchanged bytes, other storage and d
   assert.equal(prod.api.getObservedLegacyTaskStatus().peerStorageCatchupRequests,0);
 });
 
+test('hidden preview Task mirror resumes its deferred idle window when tab becomes visible',async()=>{
+  const app=install();
+  await app.documentListeners.get('DOMContentLoaded')();
+  await Promise.resolve();
+  const first=app.timers.filter(timer=>timer.ms===9000).at(-1);
+  assert.ok(first,'startup Task preview should have a deferred timer');
+  const beforeDb=app.indexedDB.dump(DB);
+  app.context.document.hidden=true;
+  app.context.document.visibilityState='hidden';
+  first.fn();
+  assert.equal(app.api.getObservedLegacyTaskStatus().pending,true);
+  assert.equal(app.api.getObservedLegacyTaskStatus().attempts,0);
+  assert.deepEqual(app.indexedDB.dump(DB),beforeDb,
+    'hidden tab cannot write preview data');
+  const beforeCount=app.timers.filter(timer=>timer.ms===9000).length;
+  app.context.document.hidden=false;
+  app.context.document.visibilityState='visible';
+  const visible=app.documentListeners.get('visibilitychange');
+  assert.equal(typeof visible,'function');
+  visible();
+  const status=app.api.getObservedLegacyTaskStatus();
+  assert.equal(status.visibilityResumeListenerInstalled,true);
+  assert.equal(status.visibilityResumeRequests,1);
+  assert.equal(app.timers.filter(timer=>timer.ms===9000).length,beforeCount+1);
+  assert.equal(status.attempts,0,
+    'visibility listener must only schedule work, never run an IDB scan');
+  const result=await app.api.flushObservedLegacyTaskJournal();
+  assert.equal(result.verified,true,result.reason);
+  assert.equal(app.api.getStatus().readAuthority,'legacy_only');
+  assert.equal(app.snapshotSaves(),0);
+});
+
+test('visibility events cannot duplicate pending timers or reactivate disabled V2 preview',async()=>{
+  const app=install();
+  const start=app.documentListeners.get('DOMContentLoaded');
+  await start();
+  await Promise.resolve();
+  const visible=app.documentListeners.get('visibilitychange');
+  const firstCount=app.timers.filter(timer=>timer.ms===9000).length;
+  visible();
+  visible();
+  assert.equal(app.timers.filter(timer=>timer.ms===9000).length,firstCount);
+  await start();
+  assert.equal(app.api.getObservedLegacyTaskStatus().visibilityResumeRequests,0);
+  app.api.disableDarkMirror();
+  const previous=app.timers.filter(timer=>timer.ms===9000).length;
+  visible();
+  assert.equal(app.timers.filter(timer=>timer.ms===9000).length,previous);
+  assert.equal(app.api.getObservedLegacyTaskStatus().visibilityResumeRequests,0);
+  const prod=install({hostname:'taskpoints.pages.dev'});
+  await prod.documentListeners.get('DOMContentLoaded')();
+  assert.equal(prod.api.getObservedLegacyTaskStatus().visibilityResumeListenerInstalled,false);
+  assert.equal(prod.documentListeners.has('visibilitychange'),false);
+});
+
 test('peer observer installs only one listener despite repeated coordinated startup',async()=>{
   const app=install();
   const start=app.documentListeners.get('DOMContentLoaded');
