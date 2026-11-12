@@ -163,11 +163,15 @@ test('runtime page startup delegates to WAL bridge orchestration when the bridge
     runtimeSource.indexOf('function enableDarkMirror()', runtimeSource.indexOf('function startCoordinatedDarkMirror()'))
   );
   const installHookAt = coordinatedStart.indexOf('installHabitJournalHook()');
-  const bridgeStartAt = coordinatedStart.indexOf('return bridge.start()');
-  assert.ok(installHookAt >= 0 && bridgeStartAt > installHookAt, 'ordinary dark mirror hook must remain installed before WAL startup orchestration');
+  const bridgeStartAt = coordinatedStart.indexOf('? bridge.start() : startDarkMirror()');
+  assert.ok(installHookAt >= 0 && bridgeStartAt > installHookAt,
+    'ordinary dark mirror hook must remain installed before WAL startup orchestration');
   assert.match(runtimeSource, /TaskPointsStateRuntimeV2WalBridge/);
   assert.match(runtimeSource, /typeof bridge\.start === 'function'/);
-  assert.match(runtimeSource, /return bridge\.start\(\)/);
+  assert.match(coordinatedStart, /const startup = bridge\?\.__installedModule/);
+  assert.match(coordinatedStart, /return startup;/);
+  assert.match(coordinatedStart, /queueObservedLegacyTaskJournal\(\)/,
+    'post-startup Task catch-up must use the idle observer, not foreground IDB writes');
   assert.match(runtimeSource, /DOMContentLoaded', \(\) => startCoordinatedDarkMirror\(\)/);
 });
 
