@@ -25,11 +25,11 @@ const schedulerSource = extractFunction('scheduleHomeDailySimulationAfterReveal'
 function setup({ hidden = false, revealed = false, hasTodayMatchup = false, hour = 8 } = {}) {
   const jobs = [];
   const frames = [];
-  const calls = { simulations: 0, sync: 0, renders: 0, dirty: 0, baselines: 0, marks: [] };
+  const calls = { simulations: 0, sync: 0, renders: 0, matchupRefreshes: 0, dirty: 0, baselines: 0, marks: [] };
   const state = {
     players: [{ id: 'NPC-1', active: true }],
     gameHistory: [{ id: 'from-yesterday', playerId: 'NPC-1', date: '2026-11-10' }],
-    matchups: hasTodayMatchup ? [{ id: 'today', date: '2026-11-11' }] : []
+    matchups: hasTodayMatchup ? [{ id: 'today', date: '2026-11-11', playerAId: 'YOU', playerBId: 'NPC-1', scoreA: 42, scoreB: 50 }] : []
   };
   let shown = revealed;
   class FixedDate extends Date {
@@ -49,21 +49,24 @@ function setup({ hidden = false, revealed = false, hasTodayMatchup = false, hour
     getMatchupDateKeyLocal(row) { return row?.date || ''; },
     state,
     markHomeMorningStartupPhase(...args) { calls.marks.push(args); },
+    hasRecordedMatchupScore(row) { return Number.isFinite(row?.scoreA) && Number.isFinite(row?.scoreB); },
     setTimeout(fn, delay) { jobs.push({ fn, delay }); },
     requestAnimationFrame(fn) { frames.push(fn); },
     maybeAutoSimToday() {
       calls.simulations++;
-      state.matchups.push({ id: 'today', date: '2026-11-11' });
+      state.matchups.push({ id: 'today', date: '2026-11-11', playerAId: 'YOU', playerBId: 'NPC-1', scoreA: 42, scoreB: 50 });
       return true;
     },
     syncStateWithMatchups(next) { calls.sync++; return next; },
     markCompletionsDirty() { calls.dirty++; },
     renderAll() {},
     scheduleRender() { calls.renders++; },
+    refreshHomeMatchupAfterSimulation() { calls.matchupRefreshes++; },
     markHomeLifecycleBaseline() { calls.baselines++; }
   };
   vm.createContext(context);
-  vm.runInContext('let homeMorningSimulationScheduled = false;\n' + schedulerSource, context);
+  vm.runInContext('let homeMorningSimulationScheduled = false;\n'
+    + extractFunction('homeDailyMatchupsReady') + '\n' + schedulerSource, context);
   return {
     state, calls, jobs, frames, context,
     schedule: () => vm.runInContext('scheduleHomeDailySimulationAfterReveal()', context),
@@ -95,6 +98,7 @@ test('a fresh day queues without invoking NPC scoring or saving inside Home boot
   assert.equal(h.calls.sync, 1);
   assert.equal(h.calls.dirty, 1);
   assert.equal(h.calls.renders, 1);
+  assert.equal(h.calls.matchupRefreshes, 1, 'refresh the opponent immediately after generation');
   assert.equal(h.calls.baselines, 1);
   assert.equal(h.state.matchups.length, 1);
   assert.equal(h.schedule(), false, 'existing daily results are never regenerated');
@@ -120,6 +124,33 @@ test('nothing is queued when the daily slate exists or before the 5 AM game thre
     assert.equal(h.calls.simulations, 0);
     assert.equal(h.jobs.length, 0);
   }
+});
+
+test('a recorded NPC game cannot suppress a missing scheduled YOUR matchup', () => {
+  const h = setup({ hasTodayMatchup: true });
+  h.state.matchups[0].playerAId = 'NPC-1';
+  h.state.matchups[0].playerBId = 'NPC-2';
+  h.state.schedule = [{ date: '2026-11-11', matchups: [
+    { playerAId: 'YOU', playerBId: 'NPC-3' },
+    { playerAId: 'NPC-1', playerBId: 'NPC-2' }
+  ] }];
+  assert.equal(h.schedule(), true, 'partial NPC slate is not equivalent to a completed user game');
+  h.reveal();
+  h.tick();
+  h.frame();
+  h.tick();
+  assert.equal(h.calls.simulations, 1);
+  assert.equal(h.calls.matchupRefreshes, 1);
+});
+
+test('a legitimate user bye is not treated as a missing matchup', () => {
+  const h = setup({ hasTodayMatchup: true });
+  h.state.matchups[0].playerAId = 'NPC-1';
+  h.state.matchups[0].playerBId = 'NPC-2';
+  h.state.schedule = [{ date: '2026-11-11', byeIds: ['YOU'],
+    matchups: [{ playerAId: 'NPC-1', playerBId: 'NPC-2' }] }];
+  assert.equal(h.schedule(), false);
+  assert.equal(h.calls.simulations, 0);
 });
 
 test('fresh launches and waking an overnight app both use the same nonblocking scheduler', () => {
