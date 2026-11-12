@@ -18,6 +18,8 @@
     installs: 0,
     savesDeferred: 0,
     savesFlushed: 0,
+    savesRetainedOnFailure: 0,
+    stalePreviewSavesBlocked: 0,
     fullRendersSuppressed: 0,
     scwmRenders: 0,
     indexBuilds: 0,
@@ -256,14 +258,71 @@
     saveIdle = null;
   }
 
+  // Only the V2 dark preview carries a read-only source/generation witness.
+  // This is best effort, not atomic cross-tab fencing. A missing generation
+  // or unreadable preview source must never be treated as valid admission.
+  function readPreviewSaveBoundary() {
+    const storage = global.localStorage;
+    if (!storage) return null;
+    try {
+      if (storage.getItem('taskpoints_state_v2_dark_mode_v1') !== '1') return null;
+      const storageKey = global.TaskPointsCore?.STORAGE_KEY || 'taskpoints_v1';
+      return {
+        generation: storage.getItem('taskpoints_state_v2_generation_v1'),
+        sourceRaw: storage.getItem(storageKey),
+        storageKey
+      };
+    } catch (_) {
+      return { unreadable: true };
+    }
+  }
+
+  function deferredSaveRefusal(code, message) {
+    const error = new Error(message);
+    error.code = code;
+    return error;
+  }
+
   function flushSave() {
     clearSaveSchedule();
     const queued = pendingSave;
-    pendingSave = null;
     if (!queued || typeof originals.save !== 'function') return false;
-    originals.save.apply(queued.thisArg, queued.args);
-    status.savesFlushed += 1;
-    return true;
+    try {
+      if (queued.previewBoundary) {
+        const before = queued.previewBoundary;
+        const current = readPreviewSaveBoundary();
+        if (before.unreadable || !before.generation || !current
+          || current.unreadable || !current.generation
+          || current.generation !== before.generation
+          || current.sourceRaw !== before.sourceRaw
+          || current.storageKey !== before.storageKey) {
+          status.stalePreviewSavesBlocked += 1;
+          throw deferredSaveRefusal(
+            'TASKPOINTS_SCWM_PREVIEW_SOURCE_CHANGED',
+            'SCWM delayed save source or preview generation changed before flush.'
+          );
+        }
+      }
+      // Home's original save() commonly returns undefined on success; only
+      // explicit failure responses or thrown errors are a refusal.
+      const result = originals.save.apply(queued.thisArg, queued.args);
+      if (result === false || (result && typeof result === 'object'
+        && (result.skipped === true || result.blocked === true
+          || result.ok === false || result.blockedByQuotaCircuit === true))) {
+        throw deferredSaveRefusal(
+          'TASKPOINTS_SCWM_DEFERRED_SAVE_REFUSED',
+          'The original SCWM saver did not confirm the queued save.'
+        );
+      }
+      if (pendingSave === queued) pendingSave = null;
+      status.savesFlushed += 1;
+      return true;
+    } catch (error) {
+      status.savesRetainedOnFailure += 1;
+      // Never silently discard the queued intent on quota or stale preview.
+      // It remains available for explicit retry; there is no retry spin.
+      throw error;
+    }
   }
 
   function queueSave() {
@@ -271,7 +330,8 @@
     const afterPaint = () => {
       const run = () => {
         saveIdle = null;
-        flushSave();
+        try { flushSave(); }
+        catch (error) { console.warn('[TP SCWM] Deferred save retained for retry.', error); }
       };
       if (typeof global.requestIdleCallback === 'function') {
         saveIdle = global.requestIdleCallback(run, { timeout: SAVE_IDLE_TIMEOUT });
@@ -296,7 +356,11 @@
       return originals.save.apply(this, arguments);
     }
     if (!scwmBusy()) return originals.save.apply(this, arguments);
-    pendingSave = { thisArg: this, args: Array.from(arguments) };
+    // Keep the first captured source when newer edits replace a queued save:
+    // a later call must not rebase an older in-memory view onto fresh bytes.
+    const previewBoundary = pendingSave
+      ? pendingSave.previewBoundary : readPreviewSaveBoundary();
+    pendingSave = { thisArg: this, args: Array.from(arguments), previewBoundary };
     status.savesDeferred += 1;
     queueSave();
   }
@@ -572,13 +636,15 @@
 
     doc?.addEventListener?.('visibilitychange', () => {
       if (doc.hidden) {
-        flushSave();
+        try { flushSave(); }
+        catch (error) { console.warn('[TP SCWM] Hidden-page save retained for retry.', error); }
         stopHeartbeat();
       } else if (openScwmModal()) startHeartbeat();
     });
 
     global.addEventListener?.('pagehide', () => {
-      flushSave();
+      try { flushSave(); }
+      catch (error) { console.warn('[TP SCWM] Pagehide save retained for retry.', error); }
       stopHeartbeat();
     }, { capture: true });
   }
