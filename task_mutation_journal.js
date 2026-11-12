@@ -95,7 +95,7 @@
       && typeof value.updatedAtISO !== 'string') return false;
     const validRow = row => row && typeof row === 'object'
       && !Array.isArray(row) && row.id != null
-      && String(row.id).trim() !== '' && row.id !== false;
+      && Boolean(row.id) && String(row.id).trim() !== '';
     if (!value.tasks.every(validRow)
       || !value.completionUpserts.every(validRow)) return false;
     if (value.completionDeletes.some(id =>
