@@ -977,6 +977,18 @@
           };
         }
       }
+      // A preview tab can remain open across Reset All or an imported restore
+      // even when its Task journal was already compacted/cleared. The ordinary
+      // full-state writer must obey the same generation fence as foreground
+      // Task edits and background Task compaction. Recheck immediately before
+      // calling the real saver, after potentially expensive state preparation.
+      // This is preview-only, best-effort admission; localStorage is not an
+      // atomic cross-tab compare-and-swap and V1 remains authoritative.
+      try { assertPreviewTaskGeneration(); }
+      catch (_) {
+        fullSaveSourceRefusals += 1;
+        return { state, skipped: true, blockedByTaskPreviewGenerationChanged: true };
+      }
       const result = originalSaveStateSnapshot(candidate, protectedSaveOptions);
       if (!current.malformed && !isEmpty(current.record) && !result?.skipped && !result?.blockedByQuotaCircuit && result?.state) {
         try {
