@@ -116,11 +116,17 @@ test('automatic Task observer yields to user activity and never blocks the foreg
   queued.fn();
   assert.equal(app.api.getObservedLegacyTaskStatus().pending,true);
   assert.equal(app.api.getObservedLegacyTaskStatus().lastReason,'waiting_for_idle');
+  assert.equal(app.api.getObservedLegacyTaskStatus().idleDeferrals,1);
   assert.equal(app.indexedDB.dump(DB).tasks.length,0,
     'active use cannot trigger an automatic preview Task seed');
+  const nextQuietWindow=app.timers.filter(t=>t.ms===9000).at(-1);
+  assert.notStrictEqual(nextQuietWindow,queued,
+    'active-use deferral schedules a later bounded background opportunity');
   app.setIdleAgo(10000);
+  nextQuietWindow.fn();
   const outcome=await app.api.flushObservedLegacyTaskJournal();
   assert.equal(outcome.verified,true,outcome.reason);
+  assert.equal(app.api.getObservedLegacyTaskStatus().idleDeferrals,0);
   assert.equal(app.core.getTaskMutationJournalStatus().journalWritesVerified,1);
 });
 
