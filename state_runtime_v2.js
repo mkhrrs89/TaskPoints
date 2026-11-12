@@ -15783,6 +15783,9 @@
     installRevisionInvalidationListeners();
     installPreviewPeerResponder();
     installHabitJournalHook();
+    // Observe other V1 tabs' already-durable changes on preview hosts only.
+    // This never blocks startup or replaces the foreground V1 save path.
+    installObservedLegacyTaskPeerListener();
     const bridge = global.TaskPointsStateRuntimeV2WalBridge;
     const startup = bridge?.__installedModule && typeof bridge.start === 'function'
       ? bridge.start() : startDarkMirror();
@@ -19123,6 +19126,9 @@
   // No persistence, no V1 writes, no authority handoff.
   let observedTaskStartupKey = null;
   let observedTaskStartupRequests = 0;
+  let observedTaskPeerListenerInstalled = false;
+  let observedTaskPeerNotifications = 0;
+  let observedTaskPeerCatchupRequests = 0;
   let observedTaskTimer = null;
   let observedTaskTimerGeneration = 0;
   let observedTaskRun = null;
@@ -19243,6 +19249,28 @@
     return true;
   }
 
+  // When a second tab writes/compacts V1 Tasks, this page receives a
+  // storage event (never fired in the writing tab). The event handler must
+  // remain O(1): it does not parse a full V1 snapshot, touch IndexedDB, or
+  // acknowledge a Task save. The existing bounded idle mirror later reads
+  // the authoritative source and checks generation, receipts and parity.
+  function installObservedLegacyTaskPeerListener() {
+    if (observedTaskPeerListenerInstalled || !isWalTestPreviewHost()
+      || typeof global.addEventListener !== 'function') return false;
+    global.addEventListener('storage', event => {
+      if (!event || !observedTaskPreviewAllowed()) return;
+      if (event.key !== 'taskpoints_v1'
+        && event.key !== 'taskpoints_pending_task_mutations_v1') return;
+      if (event.oldValue === event.newValue) return;
+      if (event.storageArea != null && event.storageArea !== global.localStorage)
+        return;
+      observedTaskPeerNotifications += 1;
+      if (queueObservedLegacyTaskJournal()) observedTaskPeerCatchupRequests += 1;
+    });
+    observedTaskPeerListenerInstalled = true;
+    return true;
+  }
+
   function queueObservedLegacyTaskJournal() {
     if (!observedTaskPreviewAllowed()) return false;
     observedTaskRequested = true;
@@ -19256,6 +19284,9 @@
       previewOnly:true,productionWritersFenced:false,
       pending:observedTaskRequested,running:Boolean(observedTaskRun),
       startupCatchupRequests:observedTaskStartupRequests,
+      peerStorageListenerInstalled:observedTaskPeerListenerInstalled,
+      peerStorageNotifications:observedTaskPeerNotifications,
+      peerStorageCatchupRequests:observedTaskPeerCatchupRequests,
       attempts:observedTaskAttempts,verified:observedTaskVerified,
       refused:observedTaskRefused,lastReason:observedTaskLastReason,
       idleDeferrals:observedTaskIdleDeferrals,
