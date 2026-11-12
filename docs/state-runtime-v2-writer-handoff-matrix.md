@@ -1028,3 +1028,7 @@ M01 behavior-tested six additional existing source-anchored writer routes using 
 The tests verify durable-intent protected save routing, data preservation on thrown/absent storage writes, idempotent automatic Season rollover, backup-confirmed and stale-preview-safe historical repairs, and recovery-lock ownership controls preventing one tab from removing another tab's lock. The tests deliberately preserve all V1 runtime behavior.
 
 The behavior-rehearsal subtotal is **28/78** known writer paths, but production owner/fencing closure is still **0/78**. No V2 cutover permission, off-device backup verification, physical iPhone Safari proof or comprehensive nested source coverage was inferred. **Main was not edited or synced.**
+
+## November 12 — Task journal source anchor strengthened without changing handoff status
+
+The source audit now anchors the real synchronous Task journal writer to `storage.setItem(JOURNAL_KEY, expectedRaw)` rather than the old directly inlined serializer. `expectedRaw` is the exact serialized journal payload and `storage.getItem(JOURNAL_KEY)` must match it before the user action acknowledges persistence or schedules idle compaction. The unchanged explicit reset cleanup also verifies the key was actually removed. The pinned writer-family contract requires the new readback and refusal code and still reports this Task journal **unfenced from old tabs**. This strengthens V1 Task durability on the V2 branch, but it does not establish an atomic multi-context V2 writer, handoff, or cutover permission.

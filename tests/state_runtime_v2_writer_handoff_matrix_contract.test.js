@@ -294,7 +294,7 @@ const SOURCE_ANCHORS = [
   [
     "task_journal_and_idle_compaction",
     "task_mutation_journal.js",
-    "storage.setItem(JOURNAL_KEY, JSON.stringify(normalized))",
+    "storage.setItem(JOURNAL_KEY, expectedRaw)",
     "synchronous",
     "journal_and_sidecar"
   ],
@@ -967,8 +967,15 @@ test('Main Work action batches atomic V1 journal writes without removing fallbac
   const writeEnd=journal.indexOf('function mergeById(',writeStart);
   assert.ok(writeStart>0&&writeEnd>writeStart);
   assert.equal((core.match(/writeRecord\(record, true\)/g)||[]).length,1);
-  assert.match(journal.slice(writeStart,writeEnd),
-    /storage\.setItem\(JOURNAL_KEY, JSON\.stringify\(normalized\)\)/);
+  const writer = journal.slice(writeStart,writeEnd);
+  assert.match(writer, /const expectedRaw = isEmpty\(normalized\) \? null : JSON\.stringify\(normalized\)/);
+  assert.match(writer, /storage\.setItem\(JOURNAL_KEY, expectedRaw\)/);
+  assert.match(writer, /storage\.getItem\(JOURNAL_KEY\)/);
+  assert.match(writer, /actualRaw !== expectedRaw/);
+  assert.match(writer, /TASKPOINTS_TASK_MUTATION_JOURNAL_UNVERIFIED_WRITE/);
+  assert.ok(writer.indexOf('storage.getItem(JOURNAL_KEY)') <
+    writer.indexOf('invalidateReadCaches()'),
+    'a Task action must read back exact journal bytes before invalidating cache or acknowledging durability');
   assert.match(journal,/core\.journalTaskCompletionBatch = \(rows\) => journalMutation\(\{ completionUpserts: rows \}\)/);
   assert.match(batch,/typeof core\.journalTaskCompletionBatch === 'function'/);
   assert.match(batch,/core\.journalTaskCompletionBatch\(completeRows\)/);
