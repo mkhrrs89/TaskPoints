@@ -230,7 +230,7 @@ test('image ZIP discloses missing referenced photos, but preserves export and co
   assert.equal(artifact.missingImageCount,1);
   assert.deepEqual(Array.from(artifact.missingImageIds),['image-missing']);
   assert.deepEqual(imagesRequested,['image-ok','image-missing']);
-  assert.deepEqual(artifact.payload.imageExportCoverage.missingImageIds,['image-missing']);
+  assert.deepEqual(Array.from(artifact.payload.imageExportCoverage.missingImageIds),['image-missing']);
   assert.equal(artifact.payload.imageExportCoverage.complete,false);
   const manifest = await manifestFromZip(artifact.blob);
   assert.equal(manifest.exportType,'taskpoints_full_backup');
@@ -269,7 +269,7 @@ test('a referenced photo added after a missing-image export is fetched next time
   assert.equal(complete.imageCount,1);
   assert.equal(complete.missingImageCount,0);
   assert.equal(complete.payload.imageExportCoverage.complete,true);
-  assert.deepEqual(complete.payload.imageExportCoverage.missingImageIds,[]);
+  assert.deepEqual(Array.from(complete.payload.imageExportCoverage.missingImageIds),[]);
   assert.equal(calls.length,2);
   const manifest=await manifestFromZip(complete.blob);
   assert.equal(manifest.imageExportCoverage.complete,true);
