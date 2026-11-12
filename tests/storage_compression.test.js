@@ -500,3 +500,59 @@ test('opt-in oversized interactive save defers before synchronous compression an
   assert.ok(result.packedBytes >= result.safePackedLimitBytes);
   assert.equal(storage.get(core.STORAGE_KEY), before);
 });
+
+
+test('optimized LZ16 compressor keeps legacy bytes for representative TaskPoints data', () => {
+  const fnv32 = value => {
+    let hash = 2166136261;
+    for (let i = 0; i < value.length; i += 1) hash = Math.imul(hash ^ value.charCodeAt(i), 16777619) >>> 0;
+    return hash.toString(16).padStart(8, '0');
+  };
+  // Lengths and hashes captured from the previous shipped LZ16 encoder.
+  const fixtures = [
+    ['', '0112d28d', 2],
+    ['a', '78578bd5', 2],
+    ['aa', '55b6d514', 3],
+    ['aaaaaa', '780ebd01', 3],
+    ['abcabcabc', '65e874a9', 5],
+    ['Repeated history payload with individual tasks and scores.'.repeat(50), '2a76252f', 318],
+    ['\\u0000\\u00ff\\u0100\\u1234\\uD800\\uDC00😀👁️🐦中文 العربية ®'.repeat(80), 'b1797af2', 179],
+    [Array.from({ length: 65536 }, (_, i) => String.fromCharCode(i)).join(''), 'a0fe0055', 139678],
+    [JSON.stringify(Array.from({ length: 4200 }, (_, i) => ({
+      id: `m-${i}`, pA: i % 53, pB: i % 47, dateKey: `2026-10-${i % 28 + 1}`,
+      points: i % 95, details: `repeat normal game history ${i % 19} player record ⛹🏻‍♀️`,
+      comment: `note-${i}`
+    }))), '4a416dd2', 35251]
+  ];
+  let seed = 123456789;
+  const chars = [];
+  for (let i = 0; i < 180000; i += 1) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) | 0;
+    chars.push(String.fromCharCode((seed >>> 16) & 65535));
+  }
+  fixtures.push([chars.join(''), '8837fced', 270881]);
+  for (const [input, expectedHash, expectedChars] of fixtures) {
+    const compressed = core.compressStorageString(input);
+    assert.equal(compressed.length, expectedChars, 'legacy compressed length must match');
+    assert.equal(fnv32(compressed), expectedHash, 'legacy compressed bytes must match');
+    assert.equal(core.decompressStorageString(compressed), input, 'LZ16 round-trip must be lossless');
+  }
+  for (const input of ['__proto__'.repeat(20), 'constructor __proto__ toString valueOf'.repeat(50)]) {
+    assert.equal(core.decompressStorageString(core.compressStorageString(input)), input);
+  }
+});
+
+test('optimized LZ16 still supports verified full-state saves', () => {
+  storage.clear();
+  const snapshot = largeState();
+  snapshot.notes = 'UTF-16 preservation: 🏀 🌟 中文';
+  const result = core.saveStateSnapshot(snapshot, { immediateWrite: true, savePath: 'lz16-regression' });
+  assert.ok(result && !result.skipped && !result.blocked);
+  const raw = storage.get(core.STORAGE_KEY);
+  assert.ok(raw);
+  const decoded = core.parseTaskPointsStorageJson(raw, {});
+  assert.equal(decoded.notes, snapshot.notes);
+  for (const key of ['gameHistory', 'matchups', 'completions', 'reminders']) {
+    assert.deepEqual(decoded[key].map(row => row.id), snapshot[key].map(row => row.id));
+  }
+});
