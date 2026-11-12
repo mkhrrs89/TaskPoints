@@ -970,6 +970,52 @@ test('Home Weight and VO2 entry dialogs never acknowledge a skipped guarded full
   }
 });
 
+test('ordinary full save cannot bypass a denied Task journal read through Home fallback',()=>{
+  const h=makeHarness();
+  h.core.journalTaskMutation({task:{id:'t1',title:'Durable pending edit'}});
+  const pending=h.storage.getItem(JOURNAL_KEY);
+  const originalSnapshot=h.storage.getItem(STORAGE_KEY);
+  const get=h.storage.getItem.bind(h.storage);
+  let readAttempts=0;
+  h.storage.getItem=key=>{
+    if(key===JOURNAL_KEY){
+      readAttempts++;
+      throw new Error('Task journal access denied');
+    }
+    return get(key);
+  };
+  const candidate=JSON.parse(originalSnapshot);
+  candidate.notes='Should not save without pending Task overlay';
+  let outcome,thrown=false;
+  try{outcome=h.core.saveStateSnapshot(candidate,{savePath:'home-save'});}
+  catch(_){thrown=true;}
+  assert.equal(thrown,false,'blocked ordinary save must not enter Home exception fallback');
+  assert.equal(outcome.skipped,true);
+  assert.equal(outcome.blockedByTaskJournalUnreadable,true);
+  assert.equal(readAttempts,1);
+  assert.equal(h.getSaveCalls(),0);
+  assert.equal(get(STORAGE_KEY),originalSnapshot);
+  assert.equal(get(JOURNAL_KEY),pending);
+  h.storage.getItem=get;
+  assert.equal(h.core.getTaskMutationJournalStatus().fullSaveSourceRefusals,1);
+  assert.equal(h.core.saveStateSnapshot(candidate,{savePath:'home-save-retry'}).skipped,undefined);
+  const saved=JSON.parse(get(STORAGE_KEY));
+  assert.equal(saved.tasks.find(t=>t.id==='t1').title,'Durable pending edit');
+  assert.equal(saved.notes,'Should not save without pending Task overlay');
+  assert.equal(get(JOURNAL_KEY),null);
+});
+
+test('ordinary full save with missing Task journal still succeeds without source refusal',()=>{
+  const h=makeHarness();
+  const before=h.storage.getItem(STORAGE_KEY);
+  const candidate=JSON.parse(before);
+  candidate.notes='Normal operation unchanged';
+  const result=h.core.saveStateSnapshot(candidate,{savePath:'home-save'});
+  assert.notEqual(result.skipped,true);
+  assert.equal(JSON.parse(h.storage.getItem(STORAGE_KEY)).notes,'Normal operation unchanged');
+  assert.equal(h.core.getTaskMutationJournalStatus().fullSaveSourceRefusals,0);
+});
+
 test('full saves automatically include pending mutations before verification clears them', () => {
   const h = makeHarness();
   h.core.journalTaskMutation({ completionDeleteId: 'old' });
