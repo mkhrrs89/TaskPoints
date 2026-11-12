@@ -712,7 +712,7 @@ test('shared WAL completeness requires unique shared IDs before using fast appen
 test('Task completion cleanup protects changed same-ID patches and preserves failed compaction',()=>{
   const journal=read('task_mutation_journal.js');
   const begin=journal.indexOf('function clearVerifiedSnapshot(snapshot)');
-  const end=journal.indexOf('function persistedState()',begin);
+  const end=journal.indexOf('function persistedState(rawOverride)',begin);
   assert.ok(begin>0&&end>begin);
   const cleanup=journal.slice(begin,end);
   assert.match(cleanup,/if \(current\.malformed\) return false/);
@@ -727,6 +727,12 @@ test('Task completion cleanup protects changed same-ID patches and preserves fai
   const saved=compact.indexOf('originalSaveStateSnapshot(candidate,');
   assert.ok(preflight>0&&preflight<saved,
     'Task compaction must verify peer journal freshness before full-state write');
+  const snapshotSource=compact.indexOf('const snapshotSourceRaw = storage.getItem(STORAGE_KEY)');
+  const snapshotFreshness=compact.indexOf('latestSnapshotRaw !== snapshotSourceRaw');
+  assert.ok(snapshotSource>0&&snapshotSource<snapshotFreshness&&snapshotFreshness<saved,
+    'Task compaction must reject peer V1 snapshot changes before writing');
+  assert.match(compact,/snapshotSourceConflicts \+= 1/,
+    'peer V1 snapshot conflicts must be observable in diagnostics');
   const verified=compact.indexOf('if (!snapshotVerified(saved, snapshot, result.state))');
   const cleared=compact.indexOf('clearVerifiedSnapshot(snapshot)');
   assert.ok(saved>0&&verified>saved&&cleared>verified,
