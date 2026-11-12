@@ -1018,6 +1018,10 @@ test('ordinary full save with missing Task journal still succeeds without source
 });
 
 test('Settings game reset and skills clear reject skipped guarded Task-safe snapshots',()=>{
+  const validatedSaveAt=settingsSource.indexOf('const resetValidated = TaskPointsCore.saveValidatedSnapshot(');
+  const validatedGuardAt=settingsSource.indexOf('if (resetValidated?.blocked || resetValidated?.skipped');
+  assert.ok(validatedSaveAt>0&&validatedGuardAt>validatedSaveAt,
+    'Settings validated Game reset must also reject blocked or skipped snapshots');
   const resetAt=settingsSource.indexOf('function resetOldGameStats');
   const resetSaveAt=settingsSource.indexOf('const resetSaved = TaskPointsCore.saveStateSnapshot(');
   const resetGuardAt=settingsSource.indexOf('if (resetSaved?.skipped || resetSaved?.blockedByQuotaCircuit)');
