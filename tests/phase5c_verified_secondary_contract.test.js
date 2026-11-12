@@ -25,9 +25,10 @@ class FakeStorage {
   removeItem(key) { this.rows.delete(String(key)); }
 }
 
-function createFakeIndexedDb() {
+function createFakeIndexedDb(options = {}) {
   const databases = new Map();
   let openCalls = 0;
+  let failOpens = Number(options.failOpenCount || 0);
   const request = (work) => {
     const req = {};
     queueMicrotask(() => {
@@ -69,6 +70,12 @@ function createFakeIndexedDb() {
       openCalls += 1;
       const req = {};
       queueMicrotask(() => {
+        if (failOpens > 0) {
+          failOpens -= 1;
+          req.error = new Error('simulated IndexedDB open failure');
+          req.onerror?.();
+          return;
+        }
         let db = databases.get(name);
         const fresh = !db;
         if (!db) { db = new Database(); databases.set(name, db); }
@@ -113,7 +120,7 @@ function install(options = {}) {
     [JOURNAL_KEY]: '[]',
     taskpoints_phase4_storage_mode_v1: 'off'
   });
-  const indexedDB = createFakeIndexedDb();
+  const indexedDB = createFakeIndexedDb(options);
   let loadCalls = 0;
   let parseCalls = 0;
   const core = {
@@ -174,6 +181,54 @@ test('rapid successful saves drain to the newest authoritative snapshot', async 
   await harness.core.flushPhase5CVerifiedSecondaryWrites();
   assert.equal(harness.indexedDB.read(DB_NAME, 'latest').raw, newestRaw);
   assert.equal(harness.core.getPhase5CVerifiedSecondaryStatus().mirrorsCurrentSave, true);
+});
+
+test('failed secondary mirror remains pending after IDB denial and explicit retry verifies it', async () => {
+  const harness = install({ failOpenCount: 1 });
+  const raw = JSON.stringify(makeState('eventually-verified'));
+  harness.localStorage.setItem(STORAGE_KEY, raw);
+  assert.equal(await harness.core.flushPhase5CVerifiedSecondaryWrites(), false);
+  const failed = harness.core.getPhase5CVerifiedSecondaryStatus();
+  assert.equal(failed.pendingWrite, true);
+  assert.equal(failed.mirrorsCurrentSave, false);
+  assert.equal(failed.lastStatus, 'verification_failed');
+  assert.equal(failed.failedMirrorAttemptsRetained, 1);
+  assert.equal(harness.indexedDB.read(DB_NAME, 'latest'), undefined);
+  assert.equal(harness.localStorage.getItem(STORAGE_KEY), raw);
+
+  assert.equal(await harness.core.flushPhase5CVerifiedSecondaryWrites(), true);
+  const verified = harness.core.getPhase5CVerifiedSecondaryStatus();
+  assert.equal(verified.pendingWrite, false);
+  assert.equal(verified.mirrorsCurrentSave, true);
+  assert.equal(verified.lastStatus, 'passed_verification');
+  assert.equal(verified.mirrorRetrySuccesses, 1);
+  assert.equal(harness.indexedDB.read(DB_NAME, 'latest').raw, raw);
+});
+
+test('repeated secondary storage failures do not falsely claim completion or erase V1', async () => {
+  const harness = install({ failOpenCount: 2 });
+  const raw = JSON.stringify(makeState('authoritative-remains'));
+  harness.localStorage.setItem(STORAGE_KEY, raw);
+  assert.equal(await harness.core.flushPhase5CVerifiedSecondaryWrites(), false);
+  assert.equal(await harness.core.flushPhase5CVerifiedSecondaryWrites(), false);
+  assert.equal(harness.indexedDB.openCalls(), 2);
+  assert.equal(harness.core.getPhase5CVerifiedSecondaryStatus().pendingWrite, true);
+  assert.equal(harness.core.getPhase5CVerifiedSecondaryStatus().failedMirrorAttemptsRetained, 2);
+  assert.equal(harness.localStorage.getItem(STORAGE_KEY), raw);
+  assert.equal(harness.indexedDB.read(DB_NAME, 'latest'), undefined);
+});
+
+test('failed secondary retry always prefers newer V1 bytes, never the failed older snapshot', async () => {
+  const harness = install({ failOpenCount: 1 });
+  const oldRaw = JSON.stringify(makeState('older-failed'));
+  harness.localStorage.setItem(STORAGE_KEY, oldRaw);
+  assert.equal(await harness.core.flushPhase5CVerifiedSecondaryWrites(), false);
+  const newRaw = JSON.stringify(makeState('newer-authoritative'));
+  harness.localStorage.setItem(STORAGE_KEY, newRaw);
+  assert.equal(await harness.core.flushPhase5CVerifiedSecondaryWrites(), true);
+  assert.equal(harness.localStorage.getItem(STORAGE_KEY), newRaw);
+  assert.equal(harness.indexedDB.read(DB_NAME, 'latest').raw, newRaw);
+  assert.equal(harness.core.getPhase5CVerifiedSecondaryStatus().pendingWrite, false);
 });
 
 test('a rejected authoritative write cannot queue or replace the verified secondary copy', async () => {
