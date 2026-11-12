@@ -115,6 +115,92 @@ test('task completion mutation is durable immediately and replays without a full
   assert.equal(loaded.completions[0].id, 'c1');
 });
 
+
+test('a silently ignored Task journal setItem cannot acknowledge a real edit or schedule compaction', () => {
+  const h = makeHarness();
+  const beforeTimers = h.timers.length;
+  const original = h.storage.setItem.bind(h.storage);
+  h.storage.setItem = (key, value) => {
+    if (key === JOURNAL_KEY) return; // storage shim incorrectly claims success
+    return original(key, value);
+  };
+  assert.throws(() => h.core.journalTaskMutation({
+    task: { id: 't1', title: 'Not durable', status: 'completed' },
+    completionUpsert: { id: 'unsaved', taskId: 't1', points: 5 }
+  }), error => error.code === 'TASKPOINTS_TASK_MUTATION_JOURNAL_UNVERIFIED_WRITE');
+  assert.equal(h.storage.getItem(JOURNAL_KEY), null);
+  assert.equal(h.getSaveCalls(), 0);
+  assert.equal(h.timers.length, beforeTimers, 'failed edit cannot schedule successful compaction');
+  const status = h.core.getTaskMutationJournalStatus();
+  assert.equal(status.mutationGeneration, 0, 'failed edit cannot advance generation');
+  assert.equal(status.journalWritesUnverified, 1);
+  assert.equal(status.journalWritesVerified, 0);
+  const baseline = JSON.parse(h.storage.getItem(STORAGE_KEY));
+  assert.equal(baseline.tasks[0].status, 'active');
+});
+
+test('a silently ignored completion batch cannot claim pre-paint durability', () => {
+  const h = makeHarness();
+  const original = h.storage.setItem.bind(h.storage);
+  h.storage.setItem = (key, value) => key === JOURNAL_KEY ? undefined : original(key, value);
+  assert.throws(() => h.core.journalTaskCompletionBatch([
+    { id: 'metric-a', taskId: 't1', points: 1 },
+    { id: 'metric-b', taskId: 't1', points: 2 }
+  ]), error => error.code === 'TASKPOINTS_TASK_MUTATION_JOURNAL_UNVERIFIED_WRITE');
+  assert.equal(h.storage.getItem(JOURNAL_KEY), null);
+  assert.equal(h.core.getTaskMutationJournalStatus().mutationGeneration, 0);
+  assert.equal(h.getSaveCalls(), 0);
+});
+
+test('journal write detects silent overwrite refusal without losing the preexisting durable journal', () => {
+  const originalRecord = {
+    schemaVersion: 1, tasks: [{ id: 't1', title: 'Prior durable edit' }],
+    completionUpserts: [], completionDeletes: [],
+    updatedAtISO: '2026-11-11T09:00:00.000Z'
+  };
+  const originalRaw = JSON.stringify(originalRecord);
+  const h = makeHarness({ [JOURNAL_KEY]: originalRaw });
+  const original = h.storage.setItem.bind(h.storage);
+  h.storage.setItem = (key, value) => key === JOURNAL_KEY ? undefined : original(key, value);
+  assert.throws(() => h.core.journalTaskMutation({
+    task: { id: 't1', title: 'Unconfirmed replacement' }
+  }), error => error.code === 'TASKPOINTS_TASK_MUTATION_JOURNAL_UNVERIFIED_WRITE');
+  assert.equal(h.storage.getItem(JOURNAL_KEY), originalRaw);
+  assert.equal(h.core.readPendingTaskMutations().record.tasks[0].title, 'Prior durable edit');
+});
+
+test('reset journal clear refuses a silently ignored remove and succeeds when storage recovers', () => {
+  const pendingRecord = JSON.stringify({
+    schemaVersion: 1, tasks: [{ id: 't1', title: 'Pending before reset' }],
+    completionUpserts: [], completionDeletes: [],
+    updatedAtISO: '2026-11-11T09:00:00.000Z'
+  });
+  const h = makeHarness({ [JOURNAL_KEY]: pendingRecord });
+  const original = h.storage.removeItem.bind(h.storage);
+  h.storage.removeItem = key => key === JOURNAL_KEY ? undefined : original(key);
+  assert.throws(() => h.core.clearPendingTaskMutations(),
+    error => error.code === 'TASKPOINTS_TASK_MUTATION_JOURNAL_UNVERIFIED_CLEAR');
+  assert.equal(h.storage.getItem(JOURNAL_KEY), pendingRecord,
+    'the pending mutation must stay available for recovery');
+  assert.equal(h.core.getTaskMutationJournalStatus().journalWritesUnverified, 1);
+  h.storage.removeItem = original;
+  assert.equal(h.core.clearPendingTaskMutations(), true);
+  assert.equal(h.storage.getItem(JOURNAL_KEY), null);
+  assert.equal(h.core.getTaskMutationJournalStatus().journalWritesVerified, 1);
+});
+
+test('successful synchronous Task journal write is verified before action acknowledgement', () => {
+  const h = makeHarness();
+  const returned = h.core.journalTaskMutation({
+    task: { id: 't1', title: 'Committed real edit' }
+  });
+  assert.equal(returned.tasks[0].title, 'Committed real edit');
+  assert.equal(h.core.getTaskMutationJournalStatus().journalWritesVerified, 1);
+  assert.equal(h.core.getTaskMutationJournalStatus().journalWritesUnverified, 0);
+  assert.equal(h.core.getTaskMutationJournalStatus().mutationGeneration, 1);
+  assert.equal(JSON.parse(h.storage.getItem(JOURNAL_KEY)).tasks[0].title, 'Committed real edit');
+});
+
 test('fast Task journal skips invalid single-row arrays as the previous normalizer did',()=>{
   const h=makeHarness();
   const invalidTask=[]; invalidTask.id='array-task';
