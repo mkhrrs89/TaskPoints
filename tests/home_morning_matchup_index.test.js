@@ -94,6 +94,9 @@ test('daily matchup index reproduces the original earliest ID-or-pair matching w
     markHomeMorningStartupPhase() {},
     getGameDayKey() { return day; },
     getMatchupDateKeyLocal(row) { dateReads++; return String(row?.dateKey || row?.date || ''); },
+    hasRecordedMatchupScore(row) {
+      return Number.isFinite(row?.scoreA) && Number.isFinite(row?.scoreB);
+    },
     getHistoryDateKey(row) { return String(row?.date || row?.dateKey || ''); },
     getYouName() { return 'You'; },
     ensureUpcomingSchedule() { generatedSchedules++; },
@@ -131,4 +134,57 @@ test('the one-pass matchup index does not remove season reconciliation or protec
   assert.ok(simulateSource.includes('TaskPointsCore.dedupeSameDayGeneratedSlateState'));
   assert.ok(simulateSource.includes('TaskPointsCore.syncSeasonResultsFromDailyMatchups'));
   assert.ok(simulateSource.includes('const saved = save();'));
+});
+
+
+test('incomplete saved user matchup fills blank scores without replacing its opponent or Gold history', () => {
+  const state = seed();
+  const storedUser = {
+    id: 'new-5', dateKey: day, playerAId: 'NPC-6', playerBId: 'YOU',
+    matchupType: 'regular', scoreA: null, scoreB: null,
+    seriesId: 'keep-existing-series', recordedAtISO: null
+  };
+  state.matchups.push(storedUser);
+  let saves = 0;
+  const context = {
+    state, console: { warn() {}, error() {} },
+    Date, JSON, Math, Map, Set, String, Number, Array,
+    markHomeMorningStartupPhase() {},
+    getGameDayKey() { return day; },
+    getMatchupDateKeyLocal(row) { return String(row?.dateKey || row?.date || ''); },
+    hasRecordedMatchupScore(row) {
+      const a = row?.scoreA ?? row?.playerAScore;
+      const b = row?.scoreB ?? row?.playerBScore;
+      return (row?.winnerId != null && row.winnerId !== '') ||
+        (a != null && b != null && Number.isFinite(Number(a)) && Number.isFinite(Number(b)));
+    },
+    getHistoryDateKey(row) { return String(row?.date || row?.dateKey || ''); },
+    getYouName() { return 'You'; },
+    ensureUpcomingSchedule() {},
+    computeTodayPoints() { return 12; },
+    simulateAiScoreForPlayer(player, dateKey, options) {
+      options?.captureEffects?.(effectFor(player.id));
+      return scoreFor(player.id);
+    },
+    ensureOpponentDripSchedule() {},
+    makeId() { return 'generated-id'; },
+    TaskPointsCore: { withGoldNpcScoringBatch(state, fn) { return fn(); } },
+    save() { saves++; return true; }
+  };
+  context.window = context;
+  vm.createContext(context);
+  vm.runInContext(simulateSource + String.fromCharCode(10) + 'simulateToday();', context);
+  const userRows = state.matchups.filter(row =>
+    (row.playerAId === 'YOU' || row.playerBId === 'YOU') &&
+    String(row.dateKey || row.date || '') === day);
+  assert.equal(userRows.length, 1, 'existing user game is completed, not duplicated');
+  assert.equal(userRows[0].id, 'new-5');
+  assert.equal(userRows[0].seriesId, 'keep-existing-series');
+  assert.equal(userRows[0].scoreA, scoreFor('NPC-6'));
+  assert.equal(userRows[0].scoreB, scoreFor('YOU'));
+  assert.equal(saves, 1);
+  const npcExisting = state.matchups.find(row => row.id === 'prior-today');
+  assert.equal(npcExisting.scoreA, 42, 'previously completed NPC score is immutable');
+  assert.equal(npcExisting.scoreB, 50);
+  assert.deepEqual(npcExisting.playerAEffects, { existing: true });
 });
