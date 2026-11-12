@@ -269,8 +269,15 @@
     // Observe successful live V1 Task interactions on preview hosts only.
     // The V2 preview side runs after deep idle, never before the synchronous
     // journal write or before the UI can show the saved Task.
-    try { global.TaskPointsStateRuntimeV2?.queueObservedLegacyTaskJournal?.(); }
-    catch (_) {}
+    const taskRelevant = Boolean(mutation.task?.id
+      || mutation.completionUpsert?.taskId
+      || mutation.completionDeleteId
+      || (Array.isArray(mutation.completionUpserts)
+        && mutation.completionUpserts.some(row => row?.taskId)));
+    if (taskRelevant) {
+      try { global.TaskPointsStateRuntimeV2?.queueObservedLegacyTaskJournal?.(); }
+      catch (_) {}
+    }
     return saved;
   }
 
