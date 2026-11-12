@@ -7588,13 +7588,20 @@ function submitWeightEntry() {
 
   try {
     if (window.TaskPointsCore?.saveStateSnapshot) {
-      const { state: savedState } = TaskPointsCore.saveStateSnapshot(nextState, {
+      const weightSave = TaskPointsCore.saveStateSnapshot(nextState, {
         storageKey: STORAGE_KEY,
         immediateWrite: true,
         savePath: 'weight-entry'
       });
+      // V2 branch safety: source-change and quota guards can refuse a
+      // full save without throwing. Never close the modal or imply that
+      // this weight entry is durable when it was skipped.
+      if (weightSave?.skipped || weightSave?.blockedByQuotaCircuit) {
+        alert('Weight entry was not saved. Storage changed or is temporarily unavailable. Please try again.');
+        return;
+      }
 
-      state = normalizeState(savedState);
+      state = normalizeState(weightSave.state);
       storageCache.raw = null;
       storageCache.parsed = state;
     } else {
@@ -7702,13 +7709,18 @@ function submitVo2MaxEntry() {
 
   try {
     if (window.TaskPointsCore?.saveStateSnapshot) {
-      const { state: savedState } = TaskPointsCore.saveStateSnapshot(nextState, {
+      const vo2Save = TaskPointsCore.saveStateSnapshot(nextState, {
         storageKey: STORAGE_KEY,
         immediateWrite: true,
         savePath: 'vo2max-entry'
       });
+      // Do not acknowledge a skipped guarded save as a successful entry.
+      if (vo2Save?.skipped || vo2Save?.blockedByQuotaCircuit) {
+        alert('VO₂ Max entry was not saved. Storage changed or is temporarily unavailable. Please try again.');
+        return;
+      }
 
-      state = normalizeState(savedState);
+      state = normalizeState(vo2Save.state);
       storageCache.raw = null;
       storageCache.parsed = state;
     } else {
