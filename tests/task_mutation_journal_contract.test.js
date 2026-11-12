@@ -587,6 +587,51 @@ test('task completion deletion replays and verified compaction clears the journa
   assert.equal(loaded.completions.length, 0);
 });
 
+test('Task journal rejects non-array, incomplete and unknown-field records without loss',()=>{
+ const examples=[
+  {schemaVersion:1,tasks:[{id:'pending-edit',title:'Keep me'}],
+   completionUpserts:'not-an-array',completionDeletes:[]},
+  {schemaVersion:1,tasks:[{id:'pending-edit',title:'Keep me'}],
+   completionUpserts:[]},
+  {schemaVersion:1,tasks:[{id:'pending-edit',title:'Keep me'}],
+   completionUpserts:[],completionDeletes:[],
+   unknownNewMigrationPayload:{id:'must-remain'}},
+  {schemaVersion:1,tasks:[{id:'pending-edit',title:'Keep me'},null],
+   completionUpserts:[],completionDeletes:[]},
+  {schemaVersion:1,tasks:[],completionUpserts:[{id:'important'},{}],
+   completionDeletes:[]},
+  {schemaVersion:1,tasks:[],completionUpserts:[],completionDeletes:[null]},
+  {schemaVersion:1,tasks:[{id:0,title:'would-have-been-dropped'}],
+   completionUpserts:[],completionDeletes:[]}
+ ];
+ for(const record of examples){
+  const raw=JSON.stringify(record);
+  const h=makeHarness({[JOURNAL_KEY]:raw});
+  assert.equal(h.core.getTaskMutationJournalStatus().malformed,true,
+    'unsupported stored journal must remain visible as malformed');
+  assert.throws(()=>h.core.journalTaskMutation({
+    task:{id:'t2',title:'Do not overwrite pending journal'}
+  }),e=>e.code==='TASKPOINTS_TASK_MUTATION_JOURNAL_MALFORMED');
+  assert.equal(h.core.flushPendingTaskMutations(),false);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),raw,
+    'unknown or malformed pending bytes must remain exactly unchanged');
+  assert.equal(h.getSaveCalls(),0);
+ }
+});
+
+test('valid older Task journal without optional timestamp remains compatible',()=>{
+ const raw=JSON.stringify({
+  schemaVersion:1,tasks:[{id:'old-task',title:'Preserve'}],
+  completionUpserts:[],completionDeletes:[]
+ });
+ const h=makeHarness({[JOURNAL_KEY]:raw});
+ assert.equal(h.core.getTaskMutationJournalStatus().malformed,false);
+ const value=h.core.journalTaskMutation({task:{id:'new-task',title:'New'}});
+ assert.deepEqual(Array.from(value.tasks,t=>t.id),['old-task','new-task']);
+ assert.equal(h.core.getTaskMutationJournalStatus().journalWritesVerified,1);
+ assert.equal(JSON.parse(h.storage.getItem(JOURNAL_KEY)).tasks.length,2);
+});
+
 test('malformed journal is preserved and blocks a new journal mutation', () => {
   const h = makeHarness({ [JOURNAL_KEY]: '{bad-json' });
   assert.throws(() => h.core.assertTaskMutationJournalWritable(), /malformed and was preserved/);
