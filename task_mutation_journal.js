@@ -38,6 +38,8 @@
   // Advances on every new user journal mutation. A pending preflight captures
   // this generation so a newer mutation can invalidate an older countdown.
   let mutationGeneration = 0;
+  let journalWritesVerified = 0;
+  let journalWritesUnverified = 0;
 
   function emptyRecord() {
     return { schemaVersion: 1, tasks: [], completionUpserts: [], completionDeletes: [], updatedAtISO: null };
@@ -124,8 +126,25 @@
     // completion a second time on EACH foreground Work/Task interaction.
     // Keep the original validation path for any future untrusted caller.
     const normalized = alreadyNormalized ? record : (normalizeRecord(record) || emptyRecord());
-    if (isEmpty(normalized)) storage.removeItem(JOURNAL_KEY);
-    else storage.setItem(JOURNAL_KEY, JSON.stringify(normalized));
+    const expectedRaw = isEmpty(normalized) ? null : JSON.stringify(normalized);
+    if (expectedRaw === null) storage.removeItem(JOURNAL_KEY);
+    else storage.setItem(JOURNAL_KEY, expectedRaw);
+
+    // Browsers normally throw on denied storage writes, but some shims,
+    // injected storage implementations and interrupted recovery paths can
+    // acknowledge setItem/removeItem while silently retaining old bytes.
+    // Task completions must not appear durable until the exact synchronous
+    // V1 Task journal key has been read back successfully, before UI paint.
+    let actualRaw;
+    try { actualRaw = storage.getItem(JOURNAL_KEY); }
+    catch (_) { actualRaw = undefined; }
+    if (actualRaw !== expectedRaw) {
+      journalWritesUnverified += 1;
+      const error = new Error('Task mutation journal write could not be verified; the edit was not acknowledged.');
+      error.code = 'TASKPOINTS_TASK_MUTATION_JOURNAL_UNVERIFIED_WRITE';
+      throw error;
+    }
+    journalWritesVerified += 1;
     invalidateReadCaches();
     return normalized;
   }
@@ -774,6 +793,18 @@
   core.flushPendingTaskMutations = () => persistPending('explicit-flush');
   core.clearPendingTaskMutations = () => {
     storage.removeItem(JOURNAL_KEY);
+    // Reset/recovery callers must never report a cleared Task journal while
+    // stale pending edits can still replay after a later app restart.
+    let remaining;
+    try { remaining = storage.getItem(JOURNAL_KEY); }
+    catch (_) { remaining = undefined; }
+    if (remaining !== null) {
+      journalWritesUnverified += 1;
+      const error = new Error('Task mutation journal cleanup was not verified; pending changes were preserved.');
+      error.code = 'TASKPOINTS_TASK_MUTATION_JOURNAL_UNVERIFIED_CLEAR';
+      throw error;
+    }
+    journalWritesVerified += 1;
     invalidateReadCaches();
     return true;
   };
@@ -792,7 +823,9 @@
       preflightDeferrals,
       compactionsStarted,
       compactionsCompleted,
-      mutationGeneration
+      mutationGeneration,
+      journalWritesVerified,
+      journalWritesUnverified
     };
   };
 
