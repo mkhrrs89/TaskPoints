@@ -26,8 +26,15 @@ function install({hostname='localhost',dark=true,sharedStorage=null,sharedIndexe
       extraImportedField:{doNotLose:true}
     })
   });
+  // The shipped core bundle loads state_runtime_v2_generation.js before
+  // task_mutation_journal.js. Bootstrap the same durable V2 epoch here so
+  // a synthetic Task journal is never incorrectly installed unbound.
+  if (dark && hostname === 'localhost'
+    && localStorage.getItem('taskpoints_state_v2_generation_v1') === null)
+    localStorage.setItem('taskpoints_state_v2_generation_v1',
+      'v2-bootstrap:synthetic-task-live-journal-test');
   const indexedDB=sharedIndexedDB || new FakeIndexedDB();
-  const timers=[];
+  const timers=[]
   const documentListeners=new Map();
   const windowListeners=new Map();
   let idleAgo=10000,uuid=0,snapshotSaves=0;
