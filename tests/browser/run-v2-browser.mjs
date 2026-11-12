@@ -3882,7 +3882,11 @@ try {
           statePreserved:localStorage.getItem('taskpoints_v1')===initialState,
           authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
       },testcase);
-      assert.equal(result.verdict.reason,'task_journal_source_not_canonical',
+      // The live V1 journal now rejects malformed/unsupported shapes even
+      // before the V2 preview's independent canonicality check. Either
+      // fail-closed reason is safe; neither may touch pending V1 bytes.
+      assert.ok(['task_journal_not_writable','task_journal_source_not_canonical']
+        .includes(result.verdict.reason),
         testcase.label+': '+JSON.stringify(result));
       assert.equal(result.verdict.committed,false);
       assert.equal(result.verdict.confirmedDurable,false);
