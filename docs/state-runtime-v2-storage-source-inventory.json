@@ -3131,6 +3131,20 @@
       "allImportedImageBytesVerified": false,
       "productionOwnerCertified": false,
       "cutoverPermission": false
+    },
+    "taskJournalSynchronousReadbackEvidence": {
+      "sourcePath": "task_mutation_journal.js",
+      "testPath": "tests/task_mutation_journal_contract.test.js",
+      "exactReadbackRequiredBeforeAck": true,
+      "missingOrDifferentRawRefused": true,
+      "silencedStorageSetRefused": true,
+      "silencedStorageRemoveRefused": true,
+      "refusedWriteDoesNotAdvanceMutationGeneration": true,
+      "refusedWriteDoesNotQueueCompaction": true,
+      "authenticLegacyTaskOwnerSafetyStrengthened": true,
+      "atomicCrossTabCompareAndSwap": false,
+      "productionV2OwnerCertified": false,
+      "v1AuthorityUnchanged": true
     }
   },
   "proposedWriterHandoffs": [
