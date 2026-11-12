@@ -3117,6 +3117,20 @@
       "noV1AuthorityChange": true,
       "doesNotCertifyProductionV2Owner": true,
       "doesNotGrantCutover": true
+    },
+    "responsiveBackupMissingImageEvidence": {
+      "sourcePath": "home_export_responsiveness.js",
+      "testPath": "tests/home_export_responsiveness.test.js",
+      "imageReferenceScope": "current-profile-and-current-player-image-ids",
+      "zipManifestReportsMissingImageReferences": true,
+      "missingImageLookupIsNotCachedAcrossExports": true,
+      "downloadablePartialBackupRetained": true,
+      "partialBackupWarnsPersistently": true,
+      "importerStructurePreserved": true,
+      "imageDatabaseFullCensusCertified": false,
+      "allImportedImageBytesVerified": false,
+      "productionOwnerCertified": false,
+      "cutoverPermission": false
     }
   },
   "proposedWriterHandoffs": [

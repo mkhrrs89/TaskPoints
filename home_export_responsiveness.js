@@ -412,6 +412,9 @@
     const manifestPayload = {
       ...payload,
       imageExportCoverage: {
+        // This is a scoped reference census, not a proof that all IndexedDB
+        // image records or archived/unreferenced media were exported.
+        scope: 'current-profile-and-current-player-image-ids',
         referencedCount: ids.length,
         includedCount: includedImageIds.length,
         missingImageIds,

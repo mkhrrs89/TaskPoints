@@ -235,6 +235,7 @@ test('image ZIP discloses missing referenced photos, but preserves export and co
   const manifest = await manifestFromZip(artifact.blob);
   assert.equal(manifest.exportType,'taskpoints_full_backup');
   assert.equal(manifest.version,2);
+  assert.equal(manifest.imageExportCoverage.scope,'current-profile-and-current-player-image-ids');
   assert.equal(manifest.imageExportCoverage.referencedCount,2);
   assert.equal(manifest.imageExportCoverage.includedCount,1);
   assert.equal(manifest.imageExportCoverage.complete,false);
