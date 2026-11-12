@@ -26,7 +26,7 @@ function makeHarness(storageRows = {}, options = {}) {
     tasks: [{ id: 't1', title: 'Task', status: 'active', counts: 0 }],
     completions: [{ id: 'old', taskId: 't1', title: 'Old', points: 1, completedAtISO: '2026-08-09T12:00:00.000Z' }]
   };
-  const storage = new FakeStorage({ [STORAGE_KEY]: JSON.stringify(baseline), ...storageRows });
+  const storage = options.storage || new FakeStorage({ [STORAGE_KEY]: JSON.stringify(baseline), ...storageRows });
   const timers = [];
   const quietRuns = [];
   let saveCalls = 0;
@@ -199,6 +199,108 @@ test('successful synchronous Task journal write is verified before action acknow
   assert.equal(h.core.getTaskMutationJournalStatus().journalWritesUnverified, 0);
   assert.equal(h.core.getTaskMutationJournalStatus().mutationGeneration, 1);
   assert.equal(JSON.parse(h.storage.getItem(JOURNAL_KEY)).tasks[0].title, 'Committed real edit');
+});
+
+test('two real Task journal tabs reject a detectable peer edit instead of overwriting it', () => {
+  const shared = new FakeStorage({
+    [STORAGE_KEY]: JSON.stringify({
+      tasks: [{id:'t1',title:'Base',status:'active'}],completions:[]
+    })
+  });
+  const tabA = makeHarness({}, {storage:shared});
+  const tabB = makeHarness({}, {storage:shared});
+  const normalGet = shared.getItem.bind(shared);
+  let journalReads = 0, injected = false;
+  shared.getItem = key => {
+    if (key === JOURNAL_KEY) {
+      journalReads += 1;
+      if (journalReads === 2 && !injected) {
+        injected = true;
+        tabB.core.journalTaskMutation({task:{
+          id:'t1',title:'Saved by Tab B',status:'completed'
+        }});
+      }
+    }
+    return normalGet(key);
+  };
+  assert.throws(() => tabA.core.journalTaskMutation({task:{
+    id:'t1',title:'Stale Tab A',status:'active'
+  }}),e=>e.code==='TASKPOINTS_TASK_MUTATION_JOURNAL_SOURCE_CHANGED');
+  assert.equal(injected,true);
+  assert.equal(JSON.parse(shared.getItem(JOURNAL_KEY)).tasks[0].title,'Saved by Tab B');
+  assert.equal(tabA.core.getTaskMutationJournalStatus().mutationGeneration,0);
+  assert.equal(tabA.core.getTaskMutationJournalStatus().journalSourceConflicts,1);
+  assert.equal(tabA.core.getTaskMutationJournalStatus().journalWritesVerified,0);
+  assert.equal(tabA.getSaveCalls(),0);
+  assert.equal(tabB.core.getTaskMutationJournalStatus().journalWritesVerified,1);
+  assert.equal(tabB.getSaveCalls(),0);
+});
+
+test('Task journal prewrite source check fails closed when peer source cannot be reread', () => {
+  const h=makeHarness();
+  const original=h.storage.getItem.bind(h.storage);
+  let journalReads=0;
+  h.storage.getItem=key=>{
+    if(key===JOURNAL_KEY && ++journalReads===2) throw Error('read denied');
+    return original(key);
+  };
+  assert.throws(()=>h.core.journalTaskMutation({
+    task:{id:'t1',title:'Unconfirmed from unreadable source'}
+  }),e=>e.code==='TASKPOINTS_TASK_MUTATION_JOURNAL_SOURCE_UNREADABLE');
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+  assert.equal(h.core.getTaskMutationJournalStatus().journalSourceConflicts,1);
+  assert.equal(h.core.getTaskMutationJournalStatus().mutationGeneration,0);
+});
+
+test('compaction cleanup does not erase an edit another tab saved after the cleanup read', () => {
+  const initial={
+    schemaVersion:1,
+    tasks:[{id:'t1',title:'Task A from durable journal'}],
+    completionUpserts:[],completionDeletes:[],
+    updatedAtISO:'2026-11-11T12:00:00.000Z'
+  };
+  const h=makeHarness({[JOURNAL_KEY]:JSON.stringify(initial)});
+  const original=h.storage.getItem.bind(h.storage);
+  const set=h.storage.setItem.bind(h.storage);
+  let reads=0,peerWritten=false;
+  h.storage.getItem=key=>{
+    if(key===JOURNAL_KEY && ++reads===3 && !peerWritten){
+      peerWritten=true;
+      set(JOURNAL_KEY,JSON.stringify({
+        ...initial,
+        tasks:[
+          {id:'t1',title:'Task A from durable journal'},
+          {id:'t2',title:'Late Tab B edit'}
+        ],
+        updatedAtISO:'2026-11-11T12:00:01.000Z'
+      }));
+    }
+    return original(key);
+  };
+  assert.equal(h.core.flushPendingTaskMutations(),false,
+    'compaction cannot declare cleanup complete after a peer journal change');
+  assert.equal(peerWritten,true);
+  assert.equal(h.core.getTaskMutationJournalStatus().journalSourceConflicts,1);
+  const after=JSON.parse(h.storage.getItem(JOURNAL_KEY));
+  assert.equal(after.tasks.length,2);
+  assert.equal(after.tasks[1].title,'Late Tab B edit');
+  assert.equal(h.getSaveCalls(),1,
+    'snapshot may already contain original edit; newer journal stays durable for replay');
+  assert.equal(h.core.readTaskPointsStoredState().tasks.some(t=>t.id==='t2'),true);
+  assert.equal(h.core.getTaskMutationJournalStatus().compactionsCompleted,0);
+});
+
+test('sequential same-tab Task journal updates still merge and flush without a conflict', () => {
+  const h=makeHarness();
+  h.core.journalTaskMutation({task:{id:'t1',title:'First edit'}});
+  h.core.journalTaskMutation({task:{id:'t2',title:'Second edit'}});
+  const rows=JSON.parse(h.storage.getItem(JOURNAL_KEY)).tasks;
+  assert.equal(rows.length,2);
+  assert.equal(h.core.getTaskMutationJournalStatus().journalWritesVerified,2);
+  assert.equal(h.core.getTaskMutationJournalStatus().journalSourceConflicts,0);
+  assert.equal(h.core.flushPendingTaskMutations(),true);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+  assert.equal(h.core.getTaskMutationJournalStatus().compactionsCompleted,1);
 });
 
 test('fast Task journal skips invalid single-row arrays as the previous normalizer did',()=>{
