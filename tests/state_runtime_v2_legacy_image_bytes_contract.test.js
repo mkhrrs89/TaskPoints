@@ -60,6 +60,9 @@ test('all-image audit checks every row twice and hashes image content, not just 
   assert.match(source,/legacy_image_missing/);
   assert.match(source,/legacy_image_bytes_changed_during_audit/);
   assert.match(source,/imageReferencesCovered:false/);
-  assert.doesNotMatch(source,/\.get\(\s*(?:imageId|id)\s*\)/,
-    'full inventory may not silently narrow itself to currently referenced IDs');
+  // The per-row get(id) is safe because id comes from the full bounded
+  // getAllKeys() enumeration, not a current-player image reference.
+  assert.match(source,/for\(const id of keys\)\{/);
+  assert.doesNotMatch(source,/\b(?:referencedImageIds|playerImageIds|currentPlayerIds)\s*\(/,
+    'the census must never narrow its scope to only referenced photos');
 });
