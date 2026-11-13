@@ -368,9 +368,10 @@ test('preview local rotation must be durably readable before the current tab can
     { ...JSON.parse(before), notes: 'Unverified event' }, { savePath: 'habit-journal-compaction' }
   ).skipped, true);
   assert.equal(h.storage.getItem(STORAGE_KEY), before);
-  // A subsequent verified local rotation event can safely rebind.
+  // A subsequent verified and authorized import event can safely rebind
+  // only the narrowly permitted post-import full-snapshot checkpoint path.
   listeners[0]({ source: 'local', previousGeneration: 'epoch-A',
-    generation: 'epoch-B' });
+    generation: 'epoch-B', reason: 'settings-import' });
   const result = h.core.saveStateSnapshot(
     { ...JSON.parse(before), notes: 'Verified event' }, { savePath: 'habit-journal-compaction' });
   assert.notEqual(result.skipped, true);
