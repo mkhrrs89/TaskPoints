@@ -161,6 +161,9 @@ test('M01 live unknown-owner observer is read-only, preview-scoped and permanent
   assert.doesNotMatch(source,/\b(?:localStorage|storage)\.(?:setItem|removeItem|clear)\s*\(/);
   assert.doesNotMatch(source,/\b(?:saveStateSnapshot|journalTaskMutation|seedFromLegacy|safeReplaceTaskPointsStorage)\s*\(/);
   assert.doesNotMatch(source,/\b(?:put|deleteDatabase|clear)\s*\(/);
-  assert.doesNotMatch(source,/\bnormalizeState\s*\(/,
+  // Exclude comments when prohibiting execution: mentioning the legacy
+  // normalizer in a safety explanation is not the same as calling it.
+  const executable=source.replace(/\/\*[\s\S]*?\*\//g,'').replace(/^\s*\/\/.*$/gm,'');
+  assert.doesNotMatch(executable,/\bnormalizeState\s*\(/,
     'do not normalize unknown imported fields out of the live source witness');
 });
