@@ -226,3 +226,67 @@ test('M01 live IndexedDB ownership witness remains read-only, bounded and fail-c
   assert.doesNotMatch(source,/\b(?:getAll|openCursor|openKeyCursor|\.get\s*\(|objectStore\s*\()/,
     'IDB metadata inspection must not read records');
 });
+
+
+test('M01 rejected IDB opens close late successful connections without writing data',async()=>{
+  const vm=require('node:vm');
+  const runtime=fs.readFileSync(path.join(root,'state_runtime_v2.js'),'utf8');
+  const start=runtime.indexOf('async function inspectPreviewIndexedDbOwnerGaps(');
+  const end=runtime.indexOf('// Explicit developer-preview-only recovery *coverage* inventory.',start);
+  assert.ok(start>0&&end>start,'extract only the preview IDB audit');
+  const scannerSource=runtime.slice(start,end);
+  for(const event of ['onblocked','onupgradeneeded']){
+    let closes=0,abortions=0,opens=0;
+    const indexedDB={
+      databases:async()=>[{name:'taskpoints',version:1}],
+      open(name){
+        assert.equal(name,'taskpoints');
+        opens++;
+        const request={transaction:{abort(){abortions++;}}};
+        queueMicrotask(()=>{
+          request[event]();
+          // If an already-rejected IDB request later succeeds, the
+          // audit must close it, even though it never owns the promise.
+          request.result={close(){closes++;}};
+          request.onsuccess();
+        });
+        return request;
+      }
+    };
+    const context=vm.createContext({
+      global:{
+        indexedDB,
+        navigator:{locks:{request:async(_name,opts,callback)=>{
+          assert.equal(opts.mode,'exclusive');
+          assert.equal(opts.ifAvailable,true);
+          return callback({});
+        }}},
+        crypto:{subtle:{digest:async()=>new Uint8Array(32)}},
+        TextEncoder
+      },
+      isWalTestPreviewHost:()=>true,
+      isDarkEnabled:()=>true,
+      darkMirrorModeEpoch:1,
+      currentGeneration:()=> 'test-generation',
+      previewNotesWitnessObservedExternalChange:()=>false,
+      captureReadOnlyFullStorageInventory:()=> 'unchanged-origin',
+      PREVIEW_COOPERATIVE_TASK_FREEZE_LOCK:'preview-only-test-lock',
+      M01_REVIEWED_IDB_STORE_EVIDENCE:{},
+      stableJson:JSON.stringify,
+      previewRecoveryFingerprint:async()=> 'fingerprint'
+    });
+    const inspect=vm.runInContext(
+      scannerSource+'\\ninspectPreviewIndexedDbOwnerGaps',context);
+    const observed=await inspect('unchanged-origin');
+    await Promise.resolve();
+    assert.equal(observed.reason,event==='onblocked'
+      ?'m01_indexeddb_open_blocked'
+      :'m01_indexeddb_database_disappeared');
+    assert.equal(observed.sourceStable,false);
+    assert.equal(observed.canPromote,false);
+    assert.equal(observed.readAuthority,'legacy_only');
+    assert.equal(opens,1);
+    assert.equal(closes,1,'late successful open must release its IDB handle');
+    assert.equal(abortions,event==='onupgradeneeded'?1:0);
+  }
+});
