@@ -203,6 +203,83 @@ test('reset journal clear refuses a silently ignored remove and succeeds when st
   assert.equal(h.core.getTaskMutationJournalStatus().journalWritesVerified, 1);
 });
 
+test('reset Task-journal cleanup refuses a peer edit detected immediately before deletion', () => {
+  const originalRecord = JSON.stringify({
+    schemaVersion: 1, tasks: [{ id: 't1', title: 'Original pending edit' }],
+    completionUpserts: [], completionDeletes: [], updatedAtISO: '2026-11-11T09:00:00.000Z'
+  });
+  const peerRecord = JSON.stringify({
+    schemaVersion: 1, tasks: [
+      { id: 't1', title: 'Original pending edit' },
+      { id: 't2', title: 'New peer edit' }
+    ],
+    completionUpserts: [], completionDeletes: [], updatedAtISO: '2026-11-11T09:01:00.000Z'
+  });
+  const h = makeHarness({ [JOURNAL_KEY]: originalRecord });
+  const realGet = h.storage.getItem.bind(h.storage);
+  const realSet = h.storage.setItem.bind(h.storage);
+  let reads = 0, removed = false;
+  const realRemove = h.storage.removeItem.bind(h.storage);
+  h.storage.removeItem = key => { if (key === JOURNAL_KEY) removed = true; return realRemove(key); };
+  h.storage.getItem = key => {
+    if (key === JOURNAL_KEY && ++reads === 2) realSet(JOURNAL_KEY, peerRecord);
+    return realGet(key);
+  };
+  assert.throws(() => h.core.clearPendingTaskMutations(),
+    error => error.code === 'TASKPOINTS_TASK_MUTATION_JOURNAL_CLEAR_SOURCE_CHANGED');
+  assert.equal(removed, false, 'no destructive remove should run after detecting the peer');
+  assert.equal(realGet(JOURNAL_KEY), peerRecord, 'the newer peer journal remains durable');
+  assert.equal(h.core.getTaskMutationJournalStatus().journalSourceConflicts, 1);
+  assert.equal(h.core.getTaskMutationJournalStatus().journalWritesVerified, 0);
+});
+
+test('reset Task-journal cleanup refuses a denied source read rather than deleting blindly', () => {
+  const pending = JSON.stringify({
+    schemaVersion: 1, tasks: [{ id: 't1', title: 'Keep pending' }],
+    completionUpserts: [], completionDeletes: [], updatedAtISO: null
+  });
+  for (const deniedRead of [1, 2]) {
+    const h = makeHarness({ [JOURNAL_KEY]: pending });
+    const realGet = h.storage.getItem.bind(h.storage);
+    let reads = 0, removed = false;
+    const realRemove = h.storage.removeItem.bind(h.storage);
+    h.storage.removeItem = key => { removed = true; return realRemove(key); };
+    h.storage.getItem = key => {
+      if (key === JOURNAL_KEY && ++reads === deniedRead) throw Error('read denied');
+      return realGet(key);
+    };
+    assert.throws(() => h.core.clearPendingTaskMutations(),
+      error => error.code === 'TASKPOINTS_TASK_MUTATION_JOURNAL_CLEAR_SOURCE_UNREADABLE');
+    assert.equal(removed, false, 'no remove on read denial ' + deniedRead);
+    assert.equal(realGet(JOURNAL_KEY), pending);
+    assert.equal(h.core.getTaskMutationJournalStatus().journalSourceConflicts, 1);
+    assert.equal(h.core.getTaskMutationJournalStatus().journalWritesVerified, 0);
+  }
+});
+
+test('reset clear continues to support intentional malformed-journal cleanup and verified absence', () => {
+  const h = makeHarness({ [JOURNAL_KEY]: '{malformed-pending-evidence' });
+  assert.equal(h.core.clearPendingTaskMutations(), true,
+    'authorized destructive cleanup must retain its original malformed-journal capability');
+  assert.equal(h.storage.getItem(JOURNAL_KEY), null);
+  assert.equal(h.core.clearPendingTaskMutations(), true, 'already absent journal remains safe to clear');
+  assert.equal(h.core.getTaskMutationJournalStatus().journalWritesVerified, 2);
+  assert.equal(h.core.getTaskMutationJournalStatus().journalSourceConflicts, 0);
+});
+
+test('reset clear refuses nonstandard unreadable journal values without destroying evidence', () => {
+  const h = makeHarness();
+  const realGet = h.storage.getItem.bind(h.storage);
+  let removed = false;
+  const realRemove = h.storage.removeItem.bind(h.storage);
+  h.storage.removeItem = key => { removed = true; return realRemove(key); };
+  h.storage.getItem = key => key === JOURNAL_KEY ? undefined : realGet(key);
+  assert.throws(() => h.core.clearPendingTaskMutations(),
+    error => error.code === 'TASKPOINTS_TASK_MUTATION_JOURNAL_CLEAR_SOURCE_CHANGED');
+  assert.equal(removed, false);
+  assert.equal(h.core.getTaskMutationJournalStatus().journalWritesVerified, 0);
+});
+
 test('successful synchronous Task journal write is verified before action acknowledgement', () => {
   const h = makeHarness();
   const returned = h.core.journalTaskMutation({
