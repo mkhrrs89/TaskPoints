@@ -57,6 +57,10 @@
   })();
   let previewGenerationAtOpen = null;
   let previewFullSaveGeneration = null;
+  // A verified reset in this same page may finish its scheduled journal
+  // cleanup after the generation rotated. Keep a one-use, exact-byte witness;
+  // never use it to authorize ordinary Task edits, compaction or full saves.
+  let previewLocalResetClear = null;
   let previewGenerationEnforced = false;
   let previewGenerationBlocks = 0;
   if (previewHost) {
@@ -84,6 +88,27 @@
   if (previewGenerationEnforced) {
     try {
       global.TaskPointsStateRuntimeV2Generation?.subscribe?.((event) => {
+        // The Phase 2 shadow-reset hook runs in a microtask. The V2 bridge
+        // may already have rotated the reset epoch within that same page.
+        // Capture the exact pending bytes only for a locally verified reset
+        // whose V1 snapshot is already absent. A peer storage event, an
+        // import, or a stale tab cannot manufacture this authorization.
+        if (event?.source === 'local' && event.reason === 'reset-all'
+          && event.previousGeneration === previewGenerationAtOpen
+          && typeof event.generation === 'string' && event.generation
+          && event.generation !== previewGenerationAtOpen) {
+          try {
+            if (storage.getItem(PREVIEW_DARK_KEY) === '1'
+              && storage.getItem(PREVIEW_GENERATION_KEY) === event.generation
+              && storage.getItem(STORAGE_KEY) === null) {
+              const pendingRaw = storage.getItem(JOURNAL_KEY);
+              if (pendingRaw === null || typeof pendingRaw === 'string')
+                previewLocalResetClear = { generation: event.generation, pendingRaw };
+            }
+          } catch (_) {
+            // A denied witness read never grants destructive cleanup.
+          }
+        }
         if (event?.source !== 'local' || !previewFullSaveGeneration
           || event.previousGeneration !== previewFullSaveGeneration
           || typeof event.generation !== 'string' || !event.generation
@@ -1051,6 +1076,19 @@
   core.schedulePendingTaskMutationCompaction = scheduleCompaction;
   core.flushPendingTaskMutations = () => persistPending('explicit-flush');
   core.clearPendingTaskMutations = () => {
+    // Unlike a normal edit, a SAME-PAGE Reset All may finish a scheduled
+    // cleanup after its verified local epoch rotation. Only that exact,
+    // snapshot-absent reset may use the new token once. Other old tabs must
+    // reload, and an import/restore does not authorize Task-journal deletion.
+    const localReset = previewLocalResetClear;
+    let clearEpoch = previewGenerationAtOpen;
+    if (localReset && previewGenerationEnforced) {
+      let removedSnapshot = false;
+      try { removedSnapshot = storage.getItem(STORAGE_KEY) === null; }
+      catch (_) {}
+      if (removedSnapshot) clearEpoch = localReset.generation;
+    }
+    assertPreviewTaskGeneration(clearEpoch);
     // Reset/recovery cleanup is a separate V1 writer, not an ordinary
     // Task mutation. Recheck the exact pending bytes immediately before
     // deletion so a detectable peer edit cannot be erased by an older
@@ -1069,12 +1107,18 @@
     }
     if ((priorRaw !== null && typeof priorRaw !== 'string')
       || (latestRaw !== null && typeof latestRaw !== 'string')
-      || latestRaw !== priorRaw) {
+      || latestRaw !== priorRaw
+      || (localReset && clearEpoch === localReset.generation
+        && priorRaw !== localReset.pendingRaw)) {
       journalSourceConflicts += 1;
       const error = new Error('Task journal changed before reset cleanup; newer pending edits were preserved.');
       error.code = 'TASKPOINTS_TASK_MUTATION_JOURNAL_CLEAR_SOURCE_CHANGED';
       throw error;
     }
+    // A cooperating peer can rotate the reset epoch during the source
+    // preflight. Recheck before the destructive remove. This does not
+    // promise atomic cross-tab CAS, which localStorage cannot provide.
+    assertPreviewTaskGeneration(clearEpoch);
     storage.removeItem(JOURNAL_KEY);
     // Reset/recovery callers must never report a cleared Task journal while
     // stale pending edits can still replay after a later app restart.
@@ -1088,6 +1132,8 @@
       throw error;
     }
     journalWritesVerified += 1;
+    if (localReset && clearEpoch === localReset.generation)
+      previewLocalResetClear = null; // single-use authorization
     invalidateReadCaches();
     return true;
   };
