@@ -56,6 +56,7 @@
         && host !== 'www.taskpoints.pages.dev');
   })();
   let previewGenerationAtOpen = null;
+  let previewFullSaveGeneration = null;
   let previewGenerationEnforced = false;
   let previewGenerationBlocks = 0;
   if (previewHost) {
@@ -64,6 +65,7 @@
         previewGenerationEnforced = true;
         const token = storage.getItem(PREVIEW_GENERATION_KEY);
         previewGenerationAtOpen = typeof token === 'string' && token ? token : null;
+        previewFullSaveGeneration = previewGenerationAtOpen;
       }
     } catch (_) {
       // A denied read during preview bootstrap is not permission for an
@@ -73,35 +75,34 @@
   }
 
 
-  // An explicitly authorized import/restore rotates the V2 generation in
-  // this *same* preview page after its V1 save was verified. That page must
-  // remain usable for follow-up Habit/Task checkpoint saves without a reload.
-  // Trust only a local rotation whose previous token is exactly the token
-  // this Task journal bound at startup, and re-read the durable new token.
-  // Never follow external tab notifications or arbitrary storage changes:
-  // those still require reloading before any new Task/full-snapshot writes.
+  // The real Task journal remains bound to its startup epoch across every
+  // reset/import: queued pre-reset Task callbacks must not gain new authority.
+  // A completed SAME-PAGE import/restore can nevertheless require a *fresh*
+  // Habit V1 checkpoint before the user reloads. Permit that narrow
+  // continuation only after an exact locally verified replacement rotation.
+  // External tab changes and plain reset-all rotations never rebind.
   if (previewGenerationEnforced) {
     try {
       global.TaskPointsStateRuntimeV2Generation?.subscribe?.((event) => {
-        if (event?.source !== 'local' || !previewGenerationAtOpen
-          || event.previousGeneration !== previewGenerationAtOpen
+        if (event?.source !== 'local' || !previewFullSaveGeneration
+          || event.previousGeneration !== previewFullSaveGeneration
           || typeof event.generation !== 'string' || !event.generation
-          || event.generation === previewGenerationAtOpen) return;
+          || event.generation === previewFullSaveGeneration
+          || !/(^|[-_])(import|restore|recovery)([-_]|$)/i.test(String(event.reason || ''))) return;
         try {
           if (storage.getItem(PREVIEW_DARK_KEY) !== '1'
             || storage.getItem(PREVIEW_GENERATION_KEY) !== event.generation) return;
-          previewGenerationAtOpen = event.generation;
+          previewFullSaveGeneration = event.generation;
         } catch (_) {
           // Unreadable or unverified rotations remain blocked.
         }
       });
     } catch (_) {
-      // An unavailable generation subscription must never authorize
-      // a rotated token. The existing fail-closed checks stay in force.
+      // Subscription failure never authorizes a stale or ambiguous write.
     }
   }
 
-  function assertPreviewTaskGeneration() {
+  function assertPreviewTaskGeneration(expectedGeneration = previewGenerationAtOpen) {
     if (!previewGenerationEnforced) return;
     let live = null, enabled = null, readable = true;
     try {
@@ -111,13 +112,20 @@
     // Explicitly turning off the preview returns to unchanged V1 behavior.
     // Denied reads must not masquerade as a deliberate dark-mode disable.
     if (readable && (enabled === '0' || enabled === null)) return;
-    if (!previewGenerationAtOpen || typeof live !== 'string'
-      || !live || live !== previewGenerationAtOpen) {
+    if (!expectedGeneration || typeof live !== 'string'
+      || !live || live !== expectedGeneration) {
       previewGenerationBlocks += 1;
       const error = new Error('TaskPoints preview tab has an outdated reset/restore generation. Reload before editing Tasks.');
       error.code = 'TASKPOINTS_TASK_PREVIEW_GENERATION_CHANGED';
       throw error;
     }
+  }
+
+  function allowedSamePageReplacementCheckpoint(options = {}) {
+    if (options.savePath === 'habit-journal-compaction') return true;
+    const source = String(options.source || '');
+    return options.allowDestructiveOverwrite === true
+      && /(^|[-_])(import|restore|recovery)([-_]|$)/i.test(source);
   }
 
   function emptyRecord() {
@@ -1013,7 +1021,10 @@
       // calling the real saver, after potentially expensive state preparation.
       // This is preview-only, best-effort admission; localStorage is not an
       // atomic cross-tab compare-and-swap and V1 remains authoritative.
-      try { assertPreviewTaskGeneration(); }
+      const fullSaveGeneration = previewFullSaveGeneration !== previewGenerationAtOpen
+        && allowedSamePageReplacementCheckpoint(options)
+        ? previewFullSaveGeneration : previewGenerationAtOpen;
+      try { assertPreviewTaskGeneration(fullSaveGeneration); }
       catch (_) {
         fullSaveSourceRefusals += 1;
         return { state, skipped: true, blockedByTaskPreviewGenerationChanged: true };
