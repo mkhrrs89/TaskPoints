@@ -438,15 +438,19 @@ that existing behavior, the actual generation listener must witness a
 verified local `reset-all` event, a durable new token with the expected
 previous generation, an already-absent V1 snapshot and exact pending journal
 bytes. Only those same bytes can be cleared, and the permission is consumed
-on verified cleanup. This also supports an authorized import followed by
+on verified cleanup. Immediately before removing the Task journal, the
+cleanup also requires that the V1 snapshot **still be absent**; a peer
+that restored or recreated that snapshot during the preflight keeps its
+pending Task edits untouched. This also supports an authorized import followed by
 Reset All in the same page. Import events, storage events from another tab,
 unexpected source changes and old Task callbacks **never** gain this
 destructive-clear permission. After reset, ordinary old Task edits and
 full-snapshot saves remain bound to the original Task generation.
 
-Six production-module tests exercise changed-epoch refusal, one-use local
-reset, changed peer bytes, untrusted events, mid-clear rotation and
-import-then-reset continuation. The real-browser preview Task case now also
+Seven production-module tests exercise changed-epoch refusal, one-use local
+reset, changed peer bytes, untrusted events, mid-clear rotation,
+import-then-reset continuation and a peer restoring the V1 snapshot
+before cleanup. The real-browser preview Task case now also
 expects the stale destructive clear to fail without deleting the pending
 journal.
 
