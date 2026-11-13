@@ -6242,6 +6242,128 @@ try {
       everyV1SourcePreserved:true,noAuthoritySwitch:true};
   });
 
+  await run('M01 indexeddb catalog detects unknown databases and stores without reading record bytes',async context=>{
+    const page=await open(context);
+    const observed=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const create=async(name,stores)=>{
+        return new Promise((resolve,reject)=>{
+          const req=indexedDB.open(name,1);
+          req.onupgradeneeded=()=>{
+            for(const store of stores)
+              if(!req.result.objectStoreNames.contains(store))
+                req.result.createObjectStore(store);
+          };
+          req.onerror=()=>reject(req.error);
+          req.onsuccess=()=>{req.result.close();resolve();};
+        });
+      };
+      const read=async(name,store)=>{
+        const db=await new Promise((resolve,reject)=>{
+          const req=indexedDB.open(name);
+          req.onsuccess=()=>resolve(req.result);
+          req.onerror=()=>reject(req.error);
+        });
+        try{
+          const tx=db.transaction(store,'readonly');
+          const result=await new Promise((resolve,reject)=>{
+            const req=tx.objectStore(store).get('fixture');
+            req.onsuccess=()=>resolve(req.result);
+            req.onerror=()=>reject(req.error);
+          });
+          return result;
+        }finally{db.close();}
+      };
+      const catalog=typeof indexedDB.databases==='function'
+        ?await indexedDB.databases():null;
+      if(!catalog){
+        const declined=await api.inspectPreviewIndexedDbOwnerGaps(token());
+        return {noCatalog:true,declined};
+      }
+      const knownExists=catalog.some(row=>row.name==='taskpoints');
+      if(!knownExists){
+        await create('taskpoints',['images','m01_unreviewed_cache']);
+      }
+      await create('m01_foreign_database_fixture',['private_data']);
+      const imageDb=await new Promise((resolve,reject)=>{
+        const req=indexedDB.open('taskpoints');
+        req.onsuccess=()=>resolve(req.result);
+        req.onerror=()=>reject(req.error);
+      });
+      try{
+        if(imageDb.objectStoreNames.contains('m01_unreviewed_cache')){
+          const tx=imageDb.transaction('m01_unreviewed_cache','readwrite');
+          tx.objectStore('m01_unreviewed_cache')
+            .put('IDB_CONTENT_SHOULD_STAY_SECRET','fixture');
+          await new Promise((resolve,reject)=>{
+            tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);
+            tx.onabort=()=>reject(tx.error);
+          });
+        }
+      }finally{imageDb.close();}
+      const beforeToken=token();
+      const beforeCatalog=JSON.stringify((await indexedDB.databases())
+        .map(row=>[row.name,row.version]).sort());
+      const result=await api.inspectPreviewIndexedDbOwnerGaps(beforeToken);
+      const afterToken=token();
+      const afterCatalog=JSON.stringify((await indexedDB.databases())
+        .map(row=>[row.name,row.version]).sort());
+      const fixtureValue=knownExists?null:await read(
+        'taskpoints','m01_unreviewed_cache');
+      await create('m01_second_foreign_fixture',['additional_data']);
+      const second=await api.inspectPreviewIndexedDbOwnerGaps(beforeToken);
+      localStorage.setItem('tp_m01_idb_source_changed','1');
+      const stale=await api.inspectPreviewIndexedDbOwnerGaps(beforeToken);
+      return {noCatalog:false,knownExists,
+        result,second,stale,beforeToken,afterToken,
+        beforeCatalog,afterCatalog,fixtureValue,
+        reportContainsSecret:JSON.stringify(result).includes('IDB_CONTENT_SHOULD_STAY_SECRET')};
+    });
+    if(observed.noCatalog){
+      assert.equal(observed.declined.reason,'indexeddb_database_catalog_unavailable');
+      assert.equal(observed.declined.canPromote,false);
+      return {catalogUnavailableFailClosed:true};
+    }
+    assert.equal(observed.result.reason,'m01_indexeddb_owner_gaps_observed',
+      JSON.stringify(observed.result));
+    assert.equal(observed.result.idbCatalogObserved,true);
+    assert.equal(observed.result.idbStoresObserved,true);
+    assert.equal(observed.result.readOnly,true);
+    assert.equal(observed.result.idbRecordBytesVerified,false);
+    assert.equal(observed.result.ownerCoverageVerified,false);
+    assert.equal(observed.result.allStoresMapped,false);
+    assert.equal(observed.result.canPromote,false);
+    assert.equal(observed.beforeToken,observed.afterToken,
+      'the IDB observer cannot mutate V1 or auxiliary localStorage');
+    assert.equal(observed.beforeCatalog,observed.afterCatalog,
+      'inspection cannot create, upgrade or delete databases');
+    assert.equal(observed.reportContainsSecret,false,
+      'never return the saved IndexedDB record contents');
+    assert.ok(observed.result.unreviewedDatabases.includes('m01_foreign_database_fixture'));
+    assert.ok(observed.result.unreviewedStores.some(row=>
+      row.database==='m01_foreign_database_fixture'&&row.store==='private_data'));
+    assert.ok(observed.result.databaseStores.some(row=>
+      row.database==='taskpoints'&&row.sourceReviewed===true
+      &&row.reviewedStoreNames.includes('images')));
+    if(!observed.knownExists){
+      assert.equal(observed.fixtureValue,'IDB_CONTENT_SHOULD_STAY_SECRET');
+      assert.ok(observed.result.unreviewedStores.some(row=>
+        row.database==='taskpoints'&&row.store==='m01_unreviewed_cache'));
+    }
+    assert.equal(observed.second.sourceStable,true);
+    assert.ok(observed.second.unreviewedDatabases.includes('m01_second_foreign_fixture'));
+    assert.notEqual(observed.second.catalogFingerprint,observed.result.catalogFingerprint,
+      'same localStorage source token must not conceal new IndexedDB databases');
+    assert.equal(observed.stale.reason,'full_origin_changed_before_idb_audit');
+    assert.equal(observed.stale.sourceStable,false);
+    return {unreviewedDatabaseDetected:true,unreviewedStoreDetected:true,
+      metadataOnly:true,storedRecordsPreserved:true,
+      catalogFingerprintChanged:true,staleOriginRefused:true,
+      authorityUnchanged:true};
+  });
+
   await run('all-image byte audit detects orphan Blob changes without claiming a portable backup',async context=>{
     const page=await open(context);
     const initial=await page.evaluate(async()=>{
