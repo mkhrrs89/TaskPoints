@@ -398,3 +398,25 @@ older count-only whole-origin audit remains unchanged. No migrations,
 production writes or live image owner handoffs occurred; **C01 remains Open,
 M01 remains Working, 0/78 writer handoffs certified, 8/23 checkpoints verified,
 67/100 weighted readiness**. V1 is still authoritative; Main untouched.
+
+
+### November 13 follow-up — bounded photo verification without bulk memory use
+
+The first double-digest version issued a full-store `getAll()` of image
+Blobs **before** checking the 64-MiB size budget. On phones, that could
+materialize the entire library at once even if the audit later refused it.
+The V2 preview audit now first caps the key enumeration at **513 keys**
+(one beyond the supported 512-row limit), then performs exactly **one
+`get(id)` in one short readonly transaction per image**. Each Blob's size
+is checked against the remaining 64-MiB total budget **before** calling
+`arrayBuffer()` and SHA-256. A second complete bounded pass must match
+all IDs, sizes, types and content digests. A missing image during either
+pass fails closed. Awaiting each finished IndexedDB transaction before the
+Blob digest also avoids unsafe transaction lifetime assumptions in WebKit.
+
+This is **lower peak memory**, not a performance benchmark or a promise of
+atomic snapshot isolation. An already-open old tab can still change image
+data after the last audit. New mandatory static contracts prohibit a return
+to bulk `getAll()`; the actual Chromium/WebKit browser test must also pass
+before treating this as validated. No live image migration or new writer
+ownership is enabled. M01 remains Working; C01 Open.
