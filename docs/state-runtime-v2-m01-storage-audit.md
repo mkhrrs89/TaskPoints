@@ -543,3 +543,29 @@ audit remains separately available and unchanged. **M01 stays Working,
 0/78 actual writer handoffs certified, 8/23 preview checkpoints Verified,
 67/100 weighted readiness.** V1 remains authoritative; no Main sync,
 V2 activation or feature removal.
+
+
+## November 13 — read-only IDB audit connection lifecycle hardened
+
+The preview-only IndexedDB ownership census, backup-coverage census (including
+its verification recount), and legacy image-byte audit all open only databases
+that were already reported by `indexedDB.databases()`; a disappearing database
+is never a reason to intentionally create a replacement. Each open rejects
+`onupgradeneeded` after aborting the would-be new-database transaction.
+The audit also treats `onblocked` and `onerror` as refusals.
+
+A rejected IndexedDB request may deliver a delayed success. Every inspected
+open now closes the resulting handle on that late-success path, rather than
+leaving an unexpected connection able to hold a version-change lock. Normal
+successful opens still stay open until their existing surrounding `finally`
+cleanup. [Late-open regression contract](../tests/state_runtime_v2_readonly_idb_late_open_contract.test.js)
+exercises blocked, upgrade-aborted, error-then-success and normal-success
+behavior in each backup/image open, alongside the prior
+[M01 owner census regression](../tests/state_runtime_v2_m01_source_inventory_contract.test.js).
+The focused V2 contract CI requires the new contract and the independent
+Chromium/WebKit safety suite continues to exercise the real preview paths.
+
+**Still blocked:** these scanners cannot freeze an uncooperative older tab,
+prove same-count content stability across every IndexedDB store, export a
+restorable full-origin backup, map production writer owners, or grant a V2
+authority change. V1 remains live, and `main` was not synced or written.
