@@ -377,6 +377,39 @@ test('local Reset All witness refuses a peer Task edit added after the reset eve
   assert.equal(h.storage.getItem(JOURNAL_KEY),peer);
 });
 
+test('same-page reset cleanup refuses a new V1 snapshot created during journal preflight', () => {
+  const generationKey='taskpoints_state_v2_generation_v1';
+  const darkKey='taskpoints_state_v2_dark_mode_v1';
+  const listeners=[];
+  const h=makeHarness({[generationKey]:'epoch-A',[darkKey]:'1'},
+    {hostname:'localhost',generationApi:{subscribe(fn){listeners.push(fn);}}});
+  const pending=JSON.stringify({schemaVersion:1,tasks:[{id:'a',title:'Save me'}],
+    completionUpserts:[],completionDeletes:[],updatedAtISO:null});
+  h.storage.setItem(JOURNAL_KEY,pending);
+  h.storage.removeItem(STORAGE_KEY);
+  h.storage.setItem(generationKey,'epoch-B');
+  listeners[0]({source:'local',reason:'reset-all',
+    previousGeneration:'epoch-A',generation:'epoch-B'});
+  const get=h.storage.getItem.bind(h.storage);
+  let sourceReads=0;
+  const peerSnapshot=JSON.stringify({tasks:[{id:'peer',title:'Just restored'}],completions:[]});
+  h.storage.getItem=key=>{
+    if(key===STORAGE_KEY && ++sourceReads===2)
+      h.storage.setItem(STORAGE_KEY,peerSnapshot);
+    return get(key);
+  };
+  let removed=false;
+  const remove=h.storage.removeItem.bind(h.storage);
+  h.storage.removeItem=key=>{if(key===JOURNAL_KEY)removed=true;return remove(key);};
+  assert.throws(()=>h.core.clearPendingTaskMutations(),
+    e=>e.code==='TASKPOINTS_TASK_MUTATION_JOURNAL_CLEAR_RESET_SOURCE_CHANGED');
+  assert.equal(sourceReads,2);
+  assert.equal(removed,false);
+  assert.equal(get(JOURNAL_KEY),pending);
+  assert.equal(get(STORAGE_KEY),peerSnapshot);
+  assert.equal(h.core.getTaskMutationJournalStatus().snapshotSourceConflicts,1);
+});
+
 test('external/reset-impostor events never authorize stale preview Task cleanup', () => {
   const generationKey='taskpoints_state_v2_generation_v1';
   const darkKey='taskpoints_state_v2_dark_mode_v1';
