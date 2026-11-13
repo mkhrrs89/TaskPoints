@@ -167,3 +167,60 @@ test('M01 live unknown-owner observer is read-only, preview-scoped and permanent
   assert.doesNotMatch(executable,/\bnormalizeState\s*\(/,
     'do not normalize unknown imported fields out of the live source witness');
 });
+
+
+test('M01 IndexedDB database/store preview catalog exactly matches source-reviewed DB examples',()=>{
+  const runtime=fs.readFileSync(path.join(root,'state_runtime_v2.js'),'utf8');
+  const catalog=runtime.match(/const M01_REVIEWED_IDB_STORE_EVIDENCE = Object\.freeze\((\{[^\n]+\})\);/);
+  assert.ok(catalog,'M01 known IDB names must be source-linked, never guessed');
+  const actual=JSON.parse(catalog[1]);
+  const expected=Object.fromEntries(inventory.dbEvidence.map(row=>[
+    row.db,{knownStore:row.store==='multiple'?null:row.store,
+      state:row.state,owner:row.owner}
+  ]));
+  assert.deepEqual(actual,expected,
+    'do not remove or silently mark a new IDB store as already owner-verified');
+  assert.ok(Object.values(actual).some(row=>row.knownStore===null),
+    'source catalog must explicitly signal that V2 multi-store schema remains incomplete');
+});
+
+test('M01 live IndexedDB ownership witness remains read-only, bounded and fail-closed',()=>{
+  const runtime=fs.readFileSync(path.join(root,'state_runtime_v2.js'),'utf8');
+  const start=runtime.indexOf('async function inspectPreviewIndexedDbOwnerGaps(');
+  const end=runtime.indexOf('// Explicit developer-preview-only recovery *coverage* inventory.',start);
+  assert.ok(start>0&&end>start);
+  const source=runtime.slice(start,end);
+  for(const required of [
+    'isWalTestPreviewHost()', 'isDarkEnabled()',
+    'captureReadOnlyFullStorageInventory()',
+    'currentGeneration({create:false})',
+    'previewNotesWitnessObservedExternalChange',
+    "typeof global.indexedDB?.databases!=='function'",
+    "typeof global.navigator?.locks?.request!=='function'",
+    "mode:'exclusive',ifAvailable:true",
+    "const maxDatabases=64,maxStores=96",
+    'idb.open(item.name)',
+    'req.onupgradeneeded=()=>',
+    'req.transaction?.abort()',
+    'db.objectStoreNames',
+    'db?.close()',
+    'catalog(await idb.databases())',
+    'previewRecoveryFingerprint(rows)',
+    "sourceStable:true,idbCatalogObserved:true,idbStoresObserved:true",
+    "idbRecordBytesVerified:false",
+    "independentRecoveryVerified:false",
+    "allStoresMapped:false",
+    "allWritersKnown:false",
+    "ownerCoverageVerified:false",
+    "productionWritersFenced:false",
+    "canPromote:false",
+    "readAuthority:'legacy_only',mutationAuthority:'legacy_only'"
+  ])assert.ok(source.includes(required),
+    'M01 IDB witness lost safety rule: '+required);
+  assert.match(runtime,/inspectPreviewDynamicOwnerGaps,\s*inspectPreviewIndexedDbOwnerGaps,/);
+  assert.doesNotMatch(source,/\b(?:localStorage|storage)\.(?:setItem|removeItem|clear)\s*\(/);
+  assert.doesNotMatch(source,/\b(?:db|store|tx)\.(?:transaction|put|delete|clear|add|createObjectStore)\s*\(/);
+  assert.doesNotMatch(source,/\b(?:seedFromLegacy|safeReplaceTaskPointsStorage|saveImageBlob|deleteImageBlob)\s*\(/);
+  assert.doesNotMatch(source,/\b(?:getAll|openCursor|openKeyCursor|\.get\s*\(|objectStore\s*\()/,
+    'IDB metadata inspection must not read records');
+});
