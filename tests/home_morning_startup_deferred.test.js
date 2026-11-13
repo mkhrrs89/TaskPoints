@@ -233,7 +233,7 @@ test('deferred historical repair uses only fresh authoritative data and does not
     setTimeout(fn, delay) { timers.push({ fn, delay }); }
   };
   vm.createContext(sandbox);
-  vm.runInContext('let homeHistoricalRepairPersistenceScheduled = false;\\n' + source, sandbox);
+  vm.runInContext('let homeHistoricalRepairPersistenceScheduled = false;\n' + source, sandbox);
   vm.runInContext('scheduleHomeHistoricalRepairPersistenceAfterFirstPaint()', sandbox);
   assert.equal(timers.length, 1);
   assert.equal(timers[0].delay, 18000);
