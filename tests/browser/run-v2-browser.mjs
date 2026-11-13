@@ -6179,6 +6179,125 @@ try {
       originAndImageStillIntactAfterReload:true};
   });
 
+  await run('all-image byte audit detects orphan Blob changes without claiming a portable backup',async context=>{
+    const page=await open(context);
+    const initial=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const source=token();
+      const catalogBefore=typeof indexedDB.databases==='function'
+        ?(await indexedDB.databases()).map(x=>x.name).sort():null;
+      const missing=await api.inspectPreviewLegacyImageBytes(source);
+      const catalogAfter=typeof indexedDB.databases==='function'
+        ?(await indexedDB.databases()).map(x=>x.name).sort():null;
+      // A V1 imageId is merely one reference. The second stored image is
+      // intentionally unreferenced and must be covered by the audit.
+      const original=JSON.parse(localStorage.getItem('taskpoints_v1'));
+      original.youImageId='preview-image-referenced';
+      localStorage.setItem('taskpoints_v1',JSON.stringify(original));
+      let writeDenied=false;
+      try{
+        await TaskPointsCore.saveImageBlob('preview-image-referenced',
+          new Blob(['photo byte one'],{type:'image/png'}));
+        await TaskPointsCore.saveImageBlob('preview-image-unreferenced',
+          new Blob(['orphan byte two'],{type:'image/png'}));
+      }catch(error){
+        const detail=String(error?.message||'');
+        if(error?.name!=='UnknownError'
+          ||!detail.includes('Error preparing Blob/File data'))throw error;
+        writeDenied=true;
+      }
+      const afterWrites=token();
+      const proof=await api.inspectPreviewLegacyImageBytes(afterWrites);
+      return {missing,catalogBefore,catalogAfter,writeDenied,proof,
+        stillOriginal:token()===afterWrites,
+        originalTask:JSON.parse(localStorage.getItem('taskpoints_v1')).tasks[0].id};
+    });
+    assert.equal(initial.stillOriginal,true,JSON.stringify(initial));
+    assert.equal(initial.originalTask,'synthetic-task');
+    if(initial.catalogBefore){
+      assert.deepEqual(initial.catalogAfter,initial.catalogBefore,
+        'auditing missing image DB must never create it');
+      assert.equal(initial.missing.binaryImageBytesVerified,false);
+      assert.equal(initial.missing.canPromote,false);
+    }else{
+      assert.equal(initial.missing.reason,'indexeddb_database_catalog_unavailable');
+      assert.equal(initial.missing.binaryImageBytesVerified,false);
+    }
+    if(initial.writeDenied){
+      assert.equal(initial.proof.binaryImageBytesVerified,false,
+        'WebKit clone refusal cannot count as a verified Blob inventory');
+      assert.equal(initial.proof.canPromote,false);
+      return {blobPersistenceDeniedSafely:true,neverClaimsBackup:true};
+    }
+    if(!initial.catalogBefore){
+      assert.equal(initial.proof.binaryImageBytesVerified,false);
+      return {noCatalogFailsClosed:true,neverClaimsBackup:true};
+    }
+    assert.equal(initial.proof.reason,'legacy_image_bytes_double_read_verified',
+      JSON.stringify(initial.proof));
+    assert.equal(initial.proof.imageCount,2,
+      'both referenced and orphan image records must be hashed');
+    assert.equal(initial.proof.allLegacyImageRowsVerified,true);
+    assert.equal(initial.proof.binaryImageBytesVerified,true);
+    assert.equal(initial.proof.imageReferencesCovered,false,
+      'full byte coverage does not prove reference coverage');
+    assert.equal(initial.proof.backupComplete,false);
+    assert.equal(initial.proof.offDeviceBackupVerified,false);
+    assert.equal(initial.proof.canPromote,false);
+
+    const peer=await open(context);
+    await peer.evaluate(async()=>TaskPointsCore.saveImageBlob(
+      'preview-image-unreferenced',
+      new Blob(['orphan byte NEW'],{type:'image/png'})));
+    const changed=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      return api.inspectPreviewLegacyImageBytes(token);
+    });
+    assert.equal(changed.binaryImageBytesVerified,true,JSON.stringify(changed));
+    assert.equal(changed.imageCount,2,'same-count image edit must retain row count');
+    assert.notEqual(changed.imageFingerprint,initial.proof.imageFingerprint,
+      'same-count orphan edit must change the cryptographic fingerprint');
+    assert.equal(changed.backupComplete,false);
+
+    const denied=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const staleToken=JSON.stringify([['taskpoints_v1','stale']]);
+      const refused=await api.inspectPreviewLegacyImageBytes(staleToken);
+      const db=await new Promise((resolve,reject)=>{
+        const req=indexedDB.open(TaskPointsCore.IMAGE_DB_NAME||'taskpoints');
+        req.onsuccess=()=>resolve(req.result);
+        req.onerror=()=>reject(req.error);
+      });
+      try{
+        const tx=db.transaction('images','readwrite');
+        const done=new Promise((resolve,reject)=>{
+          tx.oncomplete=resolve;
+          tx.onerror=()=>reject(tx.error);
+          tx.onabort=()=>reject(tx.error);
+        });
+        tx.objectStore('images').put(new Uint8Array([1,2,3]),'bad-nonblob');
+        await done;
+      }finally{db.close();}
+      const token=JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const wrongType=await api.inspectPreviewLegacyImageBytes(token);
+      return {refused,wrongType};
+    });
+    assert.equal(denied.refused.binaryImageBytesVerified,false);
+    assert.equal(denied.refused.reason,'legacy_image_origin_changed');
+    assert.equal(denied.wrongType.binaryImageBytesVerified,false);
+    assert.equal(denied.wrongType.reason,'legacy_image_blob_invalid',
+      JSON.stringify(denied.wrongType));
+    assert.equal(denied.wrongType.canPromote,false);
+    return {orphanImageHashed:true,sameCountChangeDetected:true,
+      invalidBlobFailsClosed:true,readOnly:true,noPortableBackupClaim:true};
+  });
+
   await run('Notes sync refuses noncanonical V1 snapshot bytes rather than normalize imported data',async context=>{
     const page=await open(context);
     const result=await page.evaluate(async()=>{
