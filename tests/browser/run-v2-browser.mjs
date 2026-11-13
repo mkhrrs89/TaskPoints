@@ -6219,17 +6219,24 @@ try {
     assert.equal(initial.originalTask,'synthetic-task');
     if(initial.catalogBefore){
       assert.deepEqual(initial.catalogAfter,initial.catalogBefore,
-        'auditing missing image DB must never create it');
-      assert.equal(initial.missing.binaryImageBytesVerified,false);
+        'read-only auditing must not create a missing image DB');
+      if(!initial.catalogBefore.includes('taskpoints'))
+        assert.equal(initial.missing.binaryImageBytesVerified,false);
+      // A preexisting empty legacy image database may legitimately have
+      // zero auditable rows; that is still not a backup or migration.
       assert.equal(initial.missing.canPromote,false);
+      assert.equal(initial.missing.backupComplete,false);
     }else{
       assert.equal(initial.missing.reason,'indexeddb_database_catalog_unavailable');
       assert.equal(initial.missing.binaryImageBytesVerified,false);
     }
     if(initial.writeDenied){
-      assert.equal(initial.proof.binaryImageBytesVerified,false,
-        'WebKit clone refusal cannot count as a verified Blob inventory');
+      // WebKit may reject one Blob after an earlier put succeeded. A
+      // partial fixture is not proof of the intended two-image census.
       assert.equal(initial.proof.canPromote,false);
+      assert.equal(initial.proof.backupComplete,false);
+      assert.notEqual(initial.proof.imageCount,2,
+        'both images cannot have been committed after a denied Blob put');
       return {blobPersistenceDeniedSafely:true,neverClaimsBackup:true};
     }
     if(!initial.catalogBefore){
