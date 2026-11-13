@@ -190,7 +190,7 @@ test('incomplete saved user matchup fills blank scores without replacing its opp
 });
 
 test('morning score generation prepares and reuses one canonical standing table', () => {
-  assert.match(simulateSource, /new Map\(TaskPointsCore\.computeCanonicalRankings\(state\)\.map\(row => \[row\.playerId, row\]\)\)/);
+  assert.match(simulateSource, /new Map\(TaskPointsCore\.computeCanonicalRankings\(state, \{ preindexed: true \}\)\.map\(row => \[row\.playerId, row\]\)\)/);
   assert.match(simulateSource, /simulateAiScoreForPlayer\(player, todayKey, \{\s*opponent,\s*canonicalRanksByPlayerId,/);
   assert.match(simulateSource, /markHomeMorningStartupPhase\('gold-preflight-start'\)/);
   assert.match(simulateSource, /markHomeMorningStartupPhase\('gold-preflight-finished'\)/);
