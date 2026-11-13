@@ -4624,7 +4624,15 @@ for (const entry of state.gameHistory) {
   const id = String(entry.playerId || '');
   if (id && !todayHistoryByPlayer.has(id)) todayHistoryByPlayer.set(id, entry);
 }
-const scoreNpcParticipants = () => participantIds.forEach(id => {
+const scoreNpcParticipants = () => {
+  // withGoldNpcScoringBatch performs its required reconciliation first.
+  markHomeMorningStartupPhase('gold-preflight-finished');
+  // Today's new gameHistory entries do not change existing matchup standings.
+  const canonicalRanksByPlayerId = typeof TaskPointsCore?.computeCanonicalRankings === 'function'
+    ? new Map(TaskPointsCore.computeCanonicalRankings(state).map(row => [row.playerId, row]))
+    : null;
+  markHomeMorningStartupPhase('rankings-ready');
+  participantIds.forEach(id => {
   if (id === 'YOU') return;
   const player = playerMap.get(id);
   if (!player) return;
@@ -4641,6 +4649,7 @@ let capturedEffects = null;
 
 const score = simulateAiScoreForPlayer(player, todayKey, {
   opponent,
+  canonicalRanksByPlayerId,
 
   captureEffects(effects) {
     capturedEffects = effects || null;
@@ -4664,8 +4673,10 @@ effectsById[id] = capturedEffects;
     state.gameHistory.push(historyRow);
     todayHistoryByPlayer.set(String(id), historyRow);
   }
-});
+  });
+};
 
+  markHomeMorningStartupPhase('gold-preflight-start');
   // Home's first daily simulation has no new Gold outcomes until after all
   // NPC scores have been computed. Share the current pre-game wallets for this
   // one scoring pass, then discard them before matchups settle and save.

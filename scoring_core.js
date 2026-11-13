@@ -10345,10 +10345,13 @@ let poiseApplied = false;
       intimidationApplied = true;
     }
 
-    const ranked = typeof computeCanonicalRankings === "function" && state
-      ? computeCanonicalRankings(state)
-      : [];
-    const rankingMap = new Map(ranked.map(row => [row.playerId, row]));
+    // A daily slate's matchups are unchanged until scoring finishes.
+    // Reuse one pre-game standings snapshot instead of re-reading every
+    // historical matchup separately for each NPC. Other callers stay unchanged.
+    const rankingMap = context.canonicalRanksByPlayerId instanceof Map
+      ? context.canonicalRanksByPlayerId
+      : new Map((typeof computeCanonicalRankings === "function" && state
+        ? computeCanonicalRankings(state) : []).map(row => [row.playerId, row]));
     const playerRank = rankingMap.get(playerId)?.rank ?? null;
     const opponentRank = rankingMap.get(opponentId)?.rank ?? null;
 
