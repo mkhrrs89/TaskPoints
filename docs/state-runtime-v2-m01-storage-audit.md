@@ -462,3 +462,40 @@ fallback, emergency recovery, and all existing import/export formats remain
 unchanged. **M01 and M02 remain Working, C02/C03 remain Open, 0/78 certified
 writer handoffs, 8/23 verified preview foundations, 67/100 weighted
 readiness**. No Main sync or V2 promotion.
+
+
+## November 13 — dynamic M01 storage-owner gap witness (preview-only, no handoffs)
+
+The static M01 manifest contains **76 distinct literal storage-key names**
+across 146 key/source evidence entries, and **30 explicitly normalized V1
+top-level fields**. Those are source-discovered **lower bounds**, not the
+complete runtime schema or verified storage ownership. Added the read-only
+`inspectPreviewDynamicOwnerGaps(expectedInventoryToken)` API for a
+developer-preview tab to compare those known names with the actual browser
+origin's full `localStorage` inventory and the current parsed primary
+`taskpoints_v1` document.
+
+The observer requires the exact expected full-origin token, a stable V2
+preview generation and the real V1 compressed/packed-state parser. It checks
+the source before and after an asynchronous SHA-256 digest. Its results
+include names of unclassified origin keys and unknown imported top-level
+fields, counts, and provisional source-family witnesses for inventoried keys.
+It **never exposes stored values**, normalizes unknown fields, writes a
+journal, builds a backup or seeds V2. The 76 key/family classifications and
+30 fields are embedded as an explicit source snapshot; mandatory M01 Node
+tests require that snapshot to match the existing source manifest exactly.
+A real Chromium/WebKit browser scenario adds an extra auxiliary key and a
+future imported field, verifies that both appear as unresolved ownership
+gaps, checks that the original bytes are untouched, and rejects a stale
+source token.
+
+This makes **previously invisible runtime key/field gaps observable** when
+an actual user backup or test fixture contains values not covered by first
+pass. It does not imply every production key was exercised, prove a caller
+or old-tab writer fence, or permit automatic promotion even if the unknown
+counts are zero. A foreign key on the same origin may also need review
+rather than automatic V2 ownership. The result remains
+`ownerCoverageVerified:false`, `allWritersKnown:false`, and
+`canPromote:false`. **M01 stays Working; 0/78 production writer owners
+certified, 8/23 checkpoints verified, 67/100 weighted readiness.** Main is
+not synced or modified; V1 remains authoritative.
