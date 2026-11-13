@@ -276,7 +276,7 @@ test('M01 rejected IDB opens close late successful connections without writing d
       previewRecoveryFingerprint:async()=> 'fingerprint'
     });
     const inspect=vm.runInContext(
-      scannerSource+'\\ninspectPreviewIndexedDbOwnerGaps',context);
+      scannerSource+String.fromCharCode(10)+'inspectPreviewIndexedDbOwnerGaps',context);
     const observed=await inspect('unchanged-origin');
     await Promise.resolve();
     assert.equal(observed.reason,event==='onblocked'
