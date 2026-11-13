@@ -1565,7 +1565,8 @@ test('explicit destructive import can intentionally replace a newer persisted ta
 test('Home and Log use the tiny journal instead of immediate full-state saves for targeted interactions', () => {
   assert.match(homeSource, /journalTaskMutation\(\{ task: liveTask, completionUpsert: completion \}\)/);
   assert.match(logSource, /completionDeleteId: c\.id \|\| key/);
-  assert.match(resetSource, /clearPendingTaskMutations\?\.\(\)/);
+  assert.match(resetSource, /core\.clearPendingTaskMutations\(\) !== true/,
+    'shadow reset must require confirmed Task journal cleanup before mirroring an empty state');
 });
 
 
