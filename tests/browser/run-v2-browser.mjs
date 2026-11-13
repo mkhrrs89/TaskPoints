@@ -6186,6 +6186,62 @@ try {
       originAndImageStillIntactAfterReload:true};
   });
 
+  await run('M01 dynamic unknown storage and imported-field inventory never changes V1',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const core=window.TaskPointsCore;
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const state=core.parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1'),{});
+      state.m01UnknownFuture={nested:['CONTENTS_MUST_REMAIN_SECRET']};
+      localStorage.setItem('taskpoints_v1',JSON.stringify(state));
+      localStorage.setItem('tp_m01_unknown_aux_v1','CONTENT_VALUE_MUST_NOT_LEAK');
+      localStorage.setItem('tp_projects_v1',JSON.stringify([{id:'keep-project'}]));
+      const before=token();
+      const observed=await api.inspectPreviewDynamicOwnerGaps(before);
+      const unchanged=before===token();
+      const fullReportJson=JSON.stringify(observed);
+      localStorage.setItem('tp_m01_unknown_aux_v2','ANOTHER_UNKNOWN_VALUE');
+      const stale=await api.inspectPreviewDynamicOwnerGaps(before);
+      const fresh=await api.inspectPreviewDynamicOwnerGaps(token());
+      return {
+        observed,unchanged,stale,fresh,
+        noStoredValueLeaks:!fullReportJson.includes('CONTENT_VALUE_MUST_NOT_LEAK')
+          &&!fullReportJson.includes('CONTENTS_MUST_REMAIN_SECRET'),
+        importedFieldPreserved:core.parseTaskPointsStorageJson(
+          localStorage.getItem('taskpoints_v1'),{}).m01UnknownFuture.nested[0]
+          ==='CONTENTS_MUST_REMAIN_SECRET',
+        projectBytes:localStorage.getItem('tp_projects_v1')
+      };
+    });
+    assert.equal(result.observed.reason,'m01_dynamic_owner_gaps_observed',
+      JSON.stringify(result.observed));
+    assert.equal(result.observed.sourceStable,true);
+    assert.equal(result.observed.readOnly,true);
+    assert.equal(result.observed.canPromote,false);
+    assert.equal(result.observed.ownerCoverageVerified,false);
+    assert.equal(result.observed.allWritersKnown,false);
+    assert.ok(result.observed.unknownOriginKeys.includes('tp_m01_unknown_aux_v1'));
+    assert.ok(result.observed.unknownPrimaryFields.includes('m01UnknownFuture'));
+    assert.ok(result.observed.reviewedKeyWitnesses.some(row=>
+      row.key==='tp_projects_v1'&&row.provisionalFamilies.includes('projects')));
+    assert.ok(result.observed.explicitlyTrackedPrimaryFields.includes('tasks'));
+    assert.equal(result.unchanged,true);
+    assert.equal(result.noStoredValueLeaks,true);
+    assert.equal(result.importedFieldPreserved,true);
+    assert.equal(result.projectBytes,JSON.stringify([{id:'keep-project'}]));
+    assert.equal(result.stale.reason,'full_origin_changed_before_owner_audit');
+    assert.equal(result.stale.sourceStable,false);
+    assert.equal(result.fresh.sourceStable,true);
+    assert.equal(result.fresh.canPromote,false);
+    assert.ok(result.fresh.unknownOriginKeys.includes('tp_m01_unknown_aux_v2'));
+    assert.notEqual(result.fresh.originFingerprint,result.observed.originFingerprint);
+    return {unknownAuxiliaryKeyFound:true,unknownImportedFieldFound:true,
+      staleSourceRefused:true,valuesNeverExposed:true,
+      everyV1SourcePreserved:true,noAuthoritySwitch:true};
+  });
+
   await run('all-image byte audit detects orphan Blob changes without claiming a portable backup',async context=>{
     const page=await open(context);
     const initial=await page.evaluate(async()=>{
