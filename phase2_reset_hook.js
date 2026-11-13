@@ -13,7 +13,23 @@
         // not enqueue a false reset. The explicit Reset All flow leaves it
         // absent, so only that confirmed authoritative removal is mirrored.
         if (storage.getItem(key) === null) {
-          try { core.clearPendingTaskMutations?.(); } catch (_) {}
+          // This is an authorized destructive reset, but a failed Task-journal
+          // cleanup is NOT evidence that the pending edits disappeared. Keep
+          // the independent shadow recovery copy instead of mirroring an
+          // empty app while the pending journal may still replay on restart.
+          // The ordinary V1 reset remains the authority; this cannot promise
+          // atomic reset across tabs or substitute for full migration gates.
+          if (typeof core.clearPendingTaskMutations === 'function') {
+            try {
+              if (core.clearPendingTaskMutations() !== true) {
+                console.warn('TaskPoints: shadow reset postponed; Task journal cleanup was unverified.');
+                return;
+              }
+            } catch (error) {
+              console.warn('TaskPoints: shadow reset postponed; Task journal cleanup failed.', error);
+              return;
+            }
+          }
           const operation = core.queueShadowDualWrite({}, { reset: true });
           operation?.catch?.((error) => {
             console.warn('TaskPointsCore: shadow reset failed; localStorage remains authoritative.', error);
