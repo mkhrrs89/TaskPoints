@@ -3865,7 +3865,11 @@ try {
         refusal=error?.code || String(error?.message || error);
       }
       const compacted=core.flushPendingTaskMutations();
+      let clearRefusal=null;
+      try { core.clearPendingTaskMutations(); }
+      catch(error){ clearRefusal=error?.code || String(error?.message || error); }
       return {
+        clearRefusal,
         enforced:oldStatus.previewGenerationEnforced,
         epochChanged:rotated.generation!==epochBefore,
         refusal,compacted,
@@ -3880,11 +3884,14 @@ try {
     assert.equal(proof.epochChanged,true);
     assert.equal(proof.refusal,'TASKPOINTS_TASK_PREVIEW_GENERATION_CHANGED');
     assert.equal(proof.compacted,false);
+    assert.equal(proof.clearRefusal,'TASKPOINTS_TASK_PREVIEW_GENERATION_CHANGED',
+      'old preview code must not delete pending Task evidence after reset');
     assert.equal(proof.snapshotPreserved,true);
     assert.equal(proof.journalPreserved,true);
-    assert.ok(proof.blocks>=2);
+    assert.ok(proof.blocks>=3);
     assert.equal(proof.authority,'legacy_only');
-    return {staleTabDenied:true,sourceBytesIntact:true,previewOnly:true};
+    return {staleTabDenied:true,staleResetCleanupDenied:true,
+      sourceBytesIntact:true,previewOnly:true};
   });
 
   await run('preview Task collection catches up compacted legacy snapshot after browser reload',async context=>{
