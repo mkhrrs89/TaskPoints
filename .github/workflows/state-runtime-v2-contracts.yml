@@ -101,6 +101,7 @@ jobs:
           tests/state_runtime_v2_atomic_contract.test.js
           tests/state_runtime_v2_compatibility_snapshot_contract.test.js
           tests/state_runtime_v2_legacy_image_bytes_contract.test.js
+          tests/state_runtime_v2_readonly_idb_late_open_contract.test.js
           tests/state_runtime_v2_contract.test.js
           tests/state_runtime_v2_dark_contract.test.js
           tests/state_runtime_v2_export_contract.test.js
