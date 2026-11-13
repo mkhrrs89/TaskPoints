@@ -420,3 +420,41 @@ data after the last audit. New mandatory static contracts prohibit a return
 to bulk `getAll()`; the actual Chromium/WebKit browser test must also pass
 before treating this as validated. No live image migration or new writer
 ownership is enabled. M01 remains Working; C01 Open.
+
+
+## November 13 — reset-time Task journal deletion now checks the preview epoch (M02/C02 partial)
+
+The legacy `TaskPointsCore.clearPendingTaskMutations()` destructive cleanup
+path previously checked its pending journal bytes twice, but a preview tab
+that had been left open across another tab's Reset All could still delete a
+**new-generation journal** if those bytes did not change during the two reads.
+The V2 branch now checks the Task journal's startup reset generation **before
+reading and immediately before deleting** the source key, including in the
+separate Phase 2 shadow-reset hook's scheduled cleanup.
+
+An intentional **same-page** Reset All can still finish its microtask cleanup
+after the V2 reset bridge has already rotated its generation. To preserve
+that existing behavior, the actual generation listener must witness a
+verified local `reset-all` event, a durable new token with the expected
+previous generation, an already-absent V1 snapshot and exact pending journal
+bytes. Only those same bytes can be cleared, and the permission is consumed
+on verified cleanup. This also supports an authorized import followed by
+Reset All in the same page. Import events, storage events from another tab,
+unexpected source changes and old Task callbacks **never** gain this
+destructive-clear permission. After reset, ordinary old Task edits and
+full-snapshot saves remain bound to the original Task generation.
+
+Six production-module tests exercise changed-epoch refusal, one-use local
+reset, changed peer bytes, untrusted events, mid-clear rotation and
+import-then-reset continuation. The real-browser preview Task case now also
+expects the stale destructive clear to fail without deleting the pending
+journal.
+
+**Limits:** localStorage does not offer atomic compare-and-swap. A
+noncooperating older page can still write between checks; the same-page
+reset witness is not universal legacy writer fencing, V2 transaction
+admission, or whole-app restore certification. The production V1
+fallback, emergency recovery, and all existing import/export formats remain
+unchanged. **M01 and M02 remain Working, C02/C03 remain Open, 0/78 certified
+writer handoffs, 8/23 verified preview foundations, 67/100 weighted
+readiness**. No Main sync or V2 promotion.
