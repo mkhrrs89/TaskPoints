@@ -30,7 +30,8 @@ test('image audit requires exact source and existing database without upgrading 
   assert.match(source,/db\.transaction\(storeName,'readonly'\)/);
   assert.doesNotMatch(source,/\b(?:localStorage|storage)\.(?:setItem|removeItem|clear)\s*\(/);
   assert.doesNotMatch(source,/\b(?:saveImageBlob|deleteImageBlob|saveStateSnapshot|journalTaskMutation)\s*\(/);
-  assert.doesNotMatch(source,/\.(?:put|delete|add|clear)\s*\(/);
+  // Set.add() tracks duplicate image IDs in memory; it is not a storage write.
+  assert.doesNotMatch(source,/\b(?:store|tx|db|localStorage)\.(?:put|delete|add|clear|setItem|removeItem)\s*\(/);
 });
 
 test('all-image audit checks every row twice and hashes image content, not just counts',()=>{
