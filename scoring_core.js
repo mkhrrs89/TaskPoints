@@ -9927,11 +9927,24 @@ function computeCanonicalRankings(state, options = {}) {
   const rows = [];
   const players = Array.isArray(state.players) ? state.players.filter(p => p && p.active !== false) : [];
 
-  const youRow = computeCanonicalRankingRow(state, null, true, { includeToday });
-  rows.push(youRow);
+  // Only the first-of-day NPC slate opts into this linear pass. It computes
+  // the exact same per-player stats in matchup order but visits each stored
+  // matchup once, rather than repeating the scan for all ~120 players.
+  // All ordinary ranking callers keep their existing calculation unchanged.
+  const statsByPlayerId = options.preindexed === true
+    ? buildCanonicalMatchupStatsIndex(state, ['YOU', ...players.map(p => p.id)], { includeToday })
+    : null;
+  const forPlayer = (player, isYou) => {
+    const playerId = isYou ? 'YOU' : player?.id;
+    return computeCanonicalRankingRow(state, player, isYou, {
+      includeToday,
+      ...(statsByPlayerId ? { matchupStats: statsByPlayerId.get(playerId) } : {})
+    });
+  };
 
+  rows.push(forPlayer(null, true));
   players.forEach((player) => {
-    rows.push(computeCanonicalRankingRow(state, player, false, { includeToday }));
+    rows.push(forPlayer(player, false));
   });
 
   rows.sort((a, b) => {
@@ -9954,7 +9967,7 @@ function computeCanonicalRankingRow(state, player, isYou, options = {}) {
     ? ((typeof state.youName === "string" && state.youName.trim()) ? state.youName.trim() : "You")
     : (player?.name || "Unnamed");
 
-  const matchupStats = computeCanonicalMatchupStats(state, playerId, { includeToday });
+  const matchupStats = options.matchupStats || computeCanonicalMatchupStats(state, playerId, { includeToday });
 
   return {
     id: playerId,
@@ -9968,6 +9981,53 @@ function computeCanonicalRankingRow(state, player, isYou, options = {}) {
     ppd: matchupStats.ppd,
     rawPpd: matchupStats.rawPpd
   };
+}
+
+// Build optional morning-only ranking stats in one O(matchups + players)
+// historical pass. Keep the same score validity, tie rules, TODAY exclusion
+// and per-player accumulation order as computeCanonicalMatchupStats below.
+function buildCanonicalMatchupStatsIndex(state, playerIds, options = {}) {
+  const includeToday = options.includeToday === true;
+  const today = dateKey(new Date());
+  const matches = Array.isArray(state?.matchups) ? state.matchups : [];
+  const accumulator = new Map();
+  for (const id of playerIds) {
+    if (!accumulator.has(id)) accumulator.set(id, {
+      wins: 0, losses: 0, totalScore: 0, scoredGames: 0
+    });
+  }
+  const includeSide = (id, score, opponentScore) => {
+    const stats = accumulator.get(id);
+    if (!stats) return;
+    const hasOwnScore = Number.isFinite(score);
+    if (hasOwnScore) {
+      stats.totalScore += score;
+      stats.scoredGames += 1;
+    }
+    if (hasOwnScore && Number.isFinite(opponentScore)) {
+      if (score > opponentScore) stats.wins += 1;
+      else if (score < opponentScore) stats.losses += 1;
+    }
+  };
+  for (const matchup of matches) {
+    if (!matchup) continue;
+    if (!includeToday && matchupDateKey(matchup) === today) continue;
+    const aId = matchup.playerAId;
+    const bId = matchup.playerBId;
+    // Legacy stats choose side A when a self-match lists the same ID twice.
+    includeSide(aId, matchup.scoreA, matchup.scoreB);
+    if (aId !== bId) includeSide(bId, matchup.scoreB, matchup.scoreA);
+  }
+  const result = new Map();
+  for (const [id, stats] of accumulator) {
+    const { wins, losses, totalScore, scoredGames } = stats;
+    result.set(id, {
+      wins, losses, games: wins + losses,
+      rawPpd: scoredGames ? totalScore / scoredGames : 0,
+      ppd: scoredGames ? Number((totalScore / scoredGames).toFixed(1)) : 0
+    });
+  }
+  return result;
 }
 
 function computeCanonicalMatchupStats(state, playerId, options = {}) {

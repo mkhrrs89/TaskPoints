@@ -83,3 +83,69 @@ test('today history appended during scoring does not change historical standings
   assert.match(home, /TaskPointsCore\.withGoldNpcScoringBatch\(state, scoreNpcParticipants\)/);
   assert.match(home, /const saved = save\(\)/);
 });
+
+test('preindexed morning rankings exactly match established rankings for 120 players', () => {
+  const state = seedState();
+  const players = Array.from({ length: 120 }, (_, i) => makePlayer('NPC-' + i, 40 + i / 10, i % 100));
+  players.push({ id: 'inactive', name: 'Inactive', active: false, baseline: 50 });
+  state.players = players;
+  state.matchups = [];
+  const rng = seededRandom(8361);
+  for (let i = 0; i < 6300; i++) {
+    const ai = Math.floor(rng() * players.length);
+    const bi = Math.floor(rng() * players.length);
+    const a = players[ai].id;
+    const b = i % 41 === 0 ? a : players[bi].id;
+    const day = '2026-' + String(i % 12 + 1).padStart(2, '0') + '-' + String(i % 27 + 1).padStart(2, '0');
+    const scoreA = i % 19 === 0 ? null : i % 23 === 0 ? '51' : Math.round(rng() * 100) / 10;
+    const scoreB = i % 31 === 0 ? null : i % 37 === 0 ? '52' : Math.round(rng() * 100) / 10;
+    state.matchups.push({
+      id: 'rank-' + i,
+      dateKey: i % 101 === 0 ? new Date().toISOString().slice(0, 10) : day,
+      playerAId: i % 89 === 0 ? 'YOU' : a,
+      playerBId: i % 97 === 0 ? 'YOU' : b,
+      scoreA, scoreB
+    });
+  }
+  // Scored ties, incomplete matches, inactive players and same-side IDs
+  // must preserve every decimal, rank and tie-break identically.
+  for (const includeToday of [false, true]) {
+    const expected = core.computeCanonicalRankings(state, { includeToday });
+    const actual = core.computeCanonicalRankings(state, { includeToday, preindexed: true });
+    assert.deepEqual(actual, expected);
+    const every = actual.map(row => row.playerId);
+    assert.equal(every.includes('inactive'), false);
+    assert.equal(every.includes('YOU'), true);
+  }
+});
+
+test('preindexed daily ranks are reused without altering scores or effect telemetry', () => {
+  const state = seedState();
+  const oldMap = new Map(core.computeCanonicalRankings(state).map(row => [row.playerId, row]));
+  const newMap = new Map(core.computeCanonicalRankings(state, { preindexed: true })
+    .map(row => [row.playerId, row]));
+  assert.deepEqual([...newMap], [...oldMap]);
+  const original = Math.random;
+  try {
+    for (let seed = 1; seed < 20; seed++) {
+      const score = ranks => {
+        Math.random = seededRandom(seed);
+        let captured = null;
+        const result = core.simulateAiScoreForPlayerCore(state.players[0], '2026-11-13', {
+          state,
+          context: {
+            opponent: state.players[2],
+            canonicalRanksByPlayerId: ranks,
+            captureEffects(effects) { captured = effects; }
+          }
+        });
+        return { result, captured };
+      };
+      assert.deepEqual(score(newMap), score(oldMap));
+    }
+  } finally {
+    Math.random = original;
+  }
+  const home = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  assert.match(home, /computeCanonicalRankings\(state, \{ preindexed: true \}\)/);
+});

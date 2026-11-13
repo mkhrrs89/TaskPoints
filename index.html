@@ -4629,7 +4629,7 @@ const scoreNpcParticipants = () => {
   markHomeMorningStartupPhase('gold-preflight-finished');
   // Today's new gameHistory entries do not change existing matchup standings.
   const canonicalRanksByPlayerId = typeof TaskPointsCore?.computeCanonicalRankings === 'function'
-    ? new Map(TaskPointsCore.computeCanonicalRankings(state).map(row => [row.playerId, row]))
+    ? new Map(TaskPointsCore.computeCanonicalRankings(state, { preindexed: true }).map(row => [row.playerId, row]))
     : null;
   markHomeMorningStartupPhase('rankings-ready');
   participantIds.forEach(id => {
