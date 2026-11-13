@@ -289,7 +289,7 @@ test('preview Task compaction blocks a generation rotation during snapshot parsi
   assert.equal(h.core.getTaskMutationJournalStatus().previewGenerationBlocks,1);
 });
 
-test('verified same-page import rotation rebinds preview Task and full-save writers across two generations', () => {
+test('verified same-page import rotation permits Habit checkpoints but never rebinds old Task journals', () => {
   const generationKey = 'taskpoints_state_v2_generation_v1';
   const darkKey = 'taskpoints_state_v2_dark_mode_v1';
   const listeners = [];
@@ -313,16 +313,17 @@ test('verified same-page import rotation rebinds preview Task and full-save writ
     const after = { ...candidate, notes: 'Follow-up save in ' + next };
     const full = h.core.saveStateSnapshot(after, { savePath: 'habit-journal-compaction' });
     assert.notEqual(full.skipped, true,
-      'authorized same-page reset must not strand ordinary V1 saves');
-    h.core.journalTaskMutation({ task: { id: 't1', title: 'Task in ' + next } });
-    assert.equal(h.core.flushPendingTaskMutations(), true);
-    assert.equal(JSON.parse(h.storage.getItem(STORAGE_KEY)).tasks[0].title,
-      'Task in ' + next);
+      'authorized same-page import must not strand Habit V1 checkpoints');
+    assert.throws(() => h.core.journalTaskMutation({
+      task: { id: 't1', title: 'Pre-import Task tab must reload' }
+    }), e => e.code === 'TASKPOINTS_TASK_PREVIEW_GENERATION_CHANGED');
+    assert.equal(h.storage.getItem(JOURNAL_KEY), null,
+      'older Task callbacks cannot save under the new generation');
   };
 
   commitImport('epoch-B');
   commitImport('epoch-C');
-  assert.equal(h.core.getTaskMutationJournalStatus().previewGenerationBlocks, 0);
+  assert.equal(h.core.getTaskMutationJournalStatus().previewGenerationBlocks, 2);
   assert.equal(JSON.parse(h.storage.getItem(STORAGE_KEY)).notes,
     'Follow-up save in epoch-C');
 });
@@ -364,16 +365,59 @@ test('preview local rotation must be durably readable before the current tab can
     generation: 'epoch-B' });
   h.storage.setItem(generationKey, 'epoch-B');
   assert.equal(h.core.saveStateSnapshot(
-    { ...JSON.parse(before), notes: 'Unverified event' }, { savePath: 'home-save' }
+    { ...JSON.parse(before), notes: 'Unverified event' }, { savePath: 'habit-journal-compaction' }
   ).skipped, true);
   assert.equal(h.storage.getItem(STORAGE_KEY), before);
   // A subsequent verified local rotation event can safely rebind.
   listeners[0]({ source: 'local', previousGeneration: 'epoch-A',
     generation: 'epoch-B' });
   const result = h.core.saveStateSnapshot(
-    { ...JSON.parse(before), notes: 'Verified event' }, { savePath: 'home-save' });
+    { ...JSON.parse(before), notes: 'Verified event' }, { savePath: 'habit-journal-compaction' });
   assert.notEqual(result.skipped, true);
   assert.equal(JSON.parse(h.storage.getItem(STORAGE_KEY)).notes, 'Verified event');
+});
+
+test('same-page reset-all cannot rebind even Habit checkpoint or Task writers', () => {
+  const generationKey = 'taskpoints_state_v2_generation_v1';
+  const darkKey = 'taskpoints_state_v2_dark_mode_v1';
+  const listeners = [];
+  const h = makeHarness({ [generationKey]: 'epoch-A', [darkKey]: '1' },
+    { hostname: 'localhost', generationApi: { subscribe(fn) { listeners.push(fn); } } });
+  const before = h.storage.getItem(STORAGE_KEY);
+  h.storage.setItem(generationKey, 'epoch-B');
+  listeners[0]({ source: 'local', previousGeneration: 'epoch-A',
+    generation: 'epoch-B', reason: 'reset-all' });
+  const refused = h.core.saveStateSnapshot(
+    { ...JSON.parse(before), notes: 'Stale after reset' },
+    { savePath: 'habit-journal-compaction' });
+  assert.equal(refused.skipped, true);
+  assert.equal(refused.blockedByTaskPreviewGenerationChanged, true);
+  assert.throws(() => h.core.journalTaskMutation({
+    task: { id: 't1', title: 'Old Task' }
+  }), error => error.code === 'TASKPOINTS_TASK_PREVIEW_GENERATION_CHANGED');
+  assert.equal(h.storage.getItem(STORAGE_KEY), before);
+  assert.equal(h.storage.getItem(JOURNAL_KEY), null);
+});
+
+test('verified local import does not authorize arbitrary old full-state callbacks', () => {
+  const generationKey = 'taskpoints_state_v2_generation_v1';
+  const darkKey = 'taskpoints_state_v2_dark_mode_v1';
+  const listeners = [];
+  const h = makeHarness({ [generationKey]: 'epoch-A', [darkKey]: '1' },
+    { hostname: 'localhost', generationApi: { subscribe(fn) { listeners.push(fn); } } });
+  const before = h.storage.getItem(STORAGE_KEY);
+  h.storage.setItem(generationKey, 'epoch-B');
+  listeners[0]({ source: 'local', previousGeneration: 'epoch-A',
+    generation: 'epoch-B', reason: 'settings-import' });
+  const rejected = h.core.saveStateSnapshot(
+    { ...JSON.parse(before), notes: 'Old delayed Home snapshot' }, { savePath: 'home-save' });
+  assert.equal(rejected.skipped, true);
+  assert.equal(rejected.blockedByTaskPreviewGenerationChanged, true);
+  assert.equal(h.storage.getItem(STORAGE_KEY), before);
+  const allowed = h.core.saveStateSnapshot(
+    { ...JSON.parse(before), notes: 'Fresh Habit checkpoint' },
+    { savePath: 'habit-journal-compaction' });
+  assert.notEqual(allowed.skipped, true);
 });
 
 test('production and explicitly disabled V2 preview keep unchanged V1 Task journal behavior',()=>{
