@@ -692,12 +692,30 @@ try {
     await page.reload({ waitUntil: 'load' });
     await page.waitForFunction(() => window.V2BrowserFixture?.status()?.wal.pendingCount === 0,
       null, { timeout: 25000 });
-    const after = await page.evaluate(async () =>
-      window.TaskPointsStateRuntimeV2.inspectPilotReadiness());
-    assert.equal(after.eligible, true, JSON.stringify(after));
-    assert.equal(after.readAuthority, 'legacy_only');
+    // WebKit can finish WAL replay just before the IDB meta revision
+    // settles. A concurrent revision MUST fail closed; retry only that
+    // exact read-only refusal, never relax the production safety check.
+    const recovery = await page.evaluate(async () => {
+      const runtime = window.TaskPointsStateRuntimeV2;
+      const refusals = [];
+      for (let attempt = 0; attempt < 10; attempt++) {
+        const probe = await runtime.inspectPilotReadiness();
+        if (probe.eligible || probe.reason !== 'v2_revision_changed')
+          return {probe, refusals};
+        refusals.push({reason:probe.reason, readAuthority:probe.readAuthority});
+        await new Promise(resolve => setTimeout(resolve, 40));
+      }
+      return {probe:await runtime.inspectPilotReadiness(), refusals};
+    });
+    assert.ok(recovery.refusals.every(row =>
+      row.reason === 'v2_revision_changed'
+      && row.readAuthority === 'legacy_only'),
+      JSON.stringify(recovery));
+    assert.equal(recovery.probe.eligible, true, JSON.stringify(recovery));
+    assert.equal(recovery.probe.readAuthority, 'legacy_only');
     return {healthyPilotEligible:true, pendingWalRefused:true,
-      restartRecovered:true, authorityUnchanged:true};
+      restartRecovered:true, authorityUnchanged:true,
+      transientRevisionRefusals:recovery.refusals.length};
   });
 
   await run('pilot read gate refuses same-generation V1 differences and unreadable WAL without writes', async context => {
