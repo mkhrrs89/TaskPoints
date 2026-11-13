@@ -95,8 +95,17 @@ test('V2 declares a separate state database and only the four pilot stores', () 
   assert.match(imageAudit,/transaction\('images','readonly'\)/);
   assert.doesNotMatch(imageAudit,/objectStore\('images'\)\.(?:put|add|delete|clear)\(/);
 
-  assert.equal(runtimeSource.includes('taskpoints_shadow_state_v1'), false, 'must not reuse the shadow migration database');
-  assert.equal(runtimeSource.includes('taskpoints_verified_secondary_v1'), false, 'must not reuse verified-secondary storage');
+  // The M01 read-only catalog must be allowed to NAME legacy databases
+  // so it can report unknown keys; this grants no authority to OPEN them.
+  const catalogStart=runtimeSource.indexOf('const M01_REVIEWED_ORIGIN_KEY_FAMILIES = Object.freeze(');
+  const catalogEnd=runtimeSource.indexOf('async function inspectPreviewDynamicOwnerGaps(',catalogStart);
+  assert.ok(catalogStart>0&&catalogEnd>catalogStart,
+    'reviewed key names must remain isolated from runtime database operations');
+  const withoutReadOnlyCatalog=runtimeSource.slice(0,catalogStart)+runtimeSource.slice(catalogEnd);
+  assert.equal(withoutReadOnlyCatalog.includes('taskpoints_shadow_state_v1'),false,
+    'must not reuse the shadow migration database');
+  assert.equal(withoutReadOnlyCatalog.includes('taskpoints_verified_secondary_v1'),false,
+    'must not reuse verified-secondary storage');
 });
 
 test('dark mirror preserves production write ordering and isolates V2 failures', () => {
