@@ -1119,6 +1119,20 @@
     // preflight. Recheck before the destructive remove. This does not
     // promise atomic cross-tab CAS, which localStorage cannot provide.
     assertPreviewTaskGeneration(clearEpoch);
+    if (localReset && clearEpoch === localReset.generation) {
+      // The reset's absent V1 source is part of its one-use authorization:
+      // if a peer restored/recreated the snapshot during the journal reads,
+      // never delete that peer's pending Task work under an old reset.
+      let stillAbsent = false;
+      try { stillAbsent = storage.getItem(STORAGE_KEY) === null; }
+      catch (_) {}
+      if (!stillAbsent) {
+        snapshotSourceConflicts += 1;
+        const error = new Error('Task reset source changed before cleanup; pending edits were preserved.');
+        error.code = 'TASKPOINTS_TASK_MUTATION_JOURNAL_CLEAR_RESET_SOURCE_CHANGED';
+        throw error;
+      }
+    }
     storage.removeItem(JOURNAL_KEY);
     // Reset/recovery callers must never report a cleared Task journal while
     // stale pending edits can still replay after a later app restart.
