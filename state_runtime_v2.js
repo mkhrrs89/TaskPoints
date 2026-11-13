@@ -19115,6 +19115,171 @@
     return result;
   }
 
+  // C01/M01 preview stepping stone: inventory *every* legacy image Blob,
+  // including unreferenced images, rather than trusting only the current
+  // players' imageIds or an IndexedDB count. This is a local, read-only
+  // two-pass fingerprint audit, NOT an export or independently recoverable
+  // backup. V1's image store remains the source of truth.
+  async function inspectPreviewLegacyImageBytes(expectedInventoryToken) {
+    const refuse=(reason,detail={})=>({
+      checked:true,previewOnly:true,readOnly:true,
+      binaryImageBytesVerified:false,allLegacyImageRowsVerified:false,
+      imageReferencesCovered:false,offDeviceBackupVerified:false,
+      independentRecoveryVerified:false,backupPackageCreated:false,
+      backupComplete:false,canRestore:false,canPromote:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...detail
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    if(typeof expectedInventoryToken!=='string'||!expectedInventoryToken)
+      return refuse('full_origin_token_required');
+    if(typeof global.crypto?.subtle?.digest!=='function'
+      ||typeof global.TextEncoder!=='function)
+      return refuse('sha256_unavailable');
+    if(typeof global.indexedDB?.databases!=='function)
+      return refuse('indexeddb_database_catalog_unavailable');
+    if(typeof global.navigator?.locks?.request!=='function)
+      return refuse('lock_manager_unavailable');
+    const generation=currentGeneration({create:false});
+    if(!generation)return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    const current=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&currentGeneration({create:false})===generation
+      &&darkMirrorModeEpoch===epoch
+      &&!previewNotesWitnessObservedExternalChange(generation,epoch)
+      &&captureReadOnlyFullStorageInventory()===expectedInventoryToken;
+    const idb=global.indexedDB;
+    const imageName=core.IMAGE_DB_NAME||'taskpoints';
+    const storeName=core.IMAGE_STORE_NAME||'images';
+    const maxRows=512, maxBytes=64*1024*1024;
+    let report=refuse('legacy_image_audit_lock_unavailable');
+    try {
+      await global.navigator.locks.request(PREVIEW_COOPERATIVE_TASK_FREEZE_LOCK,
+        {mode:'exclusive',ifAvailable:true},async lock=>{
+          if(!lock){report=refuse('legacy_image_audit_lock_held');return;}
+          let db=null;
+          try {
+            if(!current()){
+              report=refuse('legacy_image_origin_changed');return;
+            }
+            const initialCatalog=await idb.databases();
+            if(!Array.isArray(initialCatalog)){
+              report=refuse('legacy_image_catalog_invalid');return;
+            }
+            const matches=initialCatalog.filter(item=>item?.name===imageName);
+            if(matches.length!==1
+              ||!Number.isSafeInteger(matches[0].version)
+              ||matches[0].version<1){
+              report=refuse('legacy_image_database_missing_or_ambiguous');return;
+            }
+            if(!current()){
+              report=refuse('legacy_image_origin_changed');return;
+            }
+            db=await new Promise((resolve,reject)=>{
+              const request=idb.open(imageName);
+              // Never create a missing database during an inspection.
+              request.onupgradeneeded=()=>{
+                try{request.transaction?.abort();}catch(_){}
+                reject(Error('legacy_image_database_recreated'));
+              };
+              request.onerror=()=>reject(request.error||Error('image_open_failed'));
+              request.onblocked=()=>reject(Error('image_open_blocked'));
+              request.onsuccess=()=>resolve(request.result);
+            });
+            if(db.version!==matches[0].version
+              ||!db.objectStoreNames?.contains(storeName)){
+              report=refuse('legacy_image_store_missing_or_changed');return;
+            }
+            const countTx=db.transaction(storeName,'readonly');
+            const countDone=transactionPromise(countTx);
+            const [count]=await Promise.all([
+              requestPromise(countTx.objectStore(storeName).count()),
+              countDone
+            ]);
+            if(!Number.isSafeInteger(count)||count<0||count>maxRows){
+              report=refuse('legacy_image_count_budget_exceeded',{imageCount:count});
+              return;
+            }
+            // Queue all reads synchronously before any await to preserve
+            // IndexedDB transaction activity on Safari/WebKit.
+            const capture=async()=>{
+              const tx=db.transaction(storeName,'readonly');
+              const done=transactionPromise(tx);
+              const store=tx.objectStore(storeName);
+              const [keys,values]=await Promise.all([
+                requestPromise(store.getAllKeys()),
+                requestPromise(store.getAll()),done
+              ]);
+              if(!Array.isArray(keys)||!Array.isArray(values)
+                ||keys.length!==count||values.length!==count)
+                throw Error('legacy_image_count_changed');
+              const rows=[],seen=new Set();
+              let bytes=0;
+              for(let i=0;i<keys.length;i++){
+                const id=keys[i],blob=values[i];
+                if(typeof id!=='string'||!id||id.length>256
+                  ||seen.has(id))throw Error('legacy_image_key_invalid');
+                seen.add(id);
+                if(!blob||typeof blob.arrayBuffer!=='function'
+                  ||!Number.isSafeInteger(blob.size)||blob.size<0)
+                  throw Error('legacy_image_blob_invalid');
+                bytes+=blob.size;
+                if(bytes>maxBytes)throw Error('legacy_image_byte_budget_exceeded');
+                const data=await blob.arrayBuffer();
+                if(data.byteLength!==blob.size)
+                  throw Error('legacy_image_blob_size_changed');
+                const hashed=await global.crypto.subtle.digest('SHA-256',data);
+                const hex=Array.from(new Uint8Array(hashed),
+                  value=>value.toString(16).padStart(2,'0')).join('');
+                rows.push([id,blob.size,blob.type||'',hex]);
+              }
+              return {rows,bytes};
+            };
+            const first=await capture();
+            if(!current()){
+              report=refuse('legacy_image_origin_changed_during_audit');return;
+            }
+            const second=await capture();
+            if(stableJson(first)!==stableJson(second)){
+              report=refuse('legacy_image_bytes_changed_during_audit');return;
+            }
+            const finalCatalog=await idb.databases();
+            const finalMatches=Array.isArray(finalCatalog)
+              ?finalCatalog.filter(item=>item?.name===imageName):[];
+            if(finalMatches.length!==1
+              ||finalMatches[0].version!==matches[0].version
+              ||!current()){
+              report=refuse('legacy_image_origin_or_database_changed');return;
+            }
+            const fingerprint=await previewRecoveryFingerprint(first.rows);
+            if(!current()){
+              report=refuse('legacy_image_origin_changed_after_digest');return;
+            }
+            report=refuse('legacy_image_bytes_double_read_verified',{
+              binaryImageBytesVerified:true,allLegacyImageRowsVerified:true,
+              imageCount:count,totalImageBytes:first.bytes,
+              imageFingerprint:fingerprint,
+              // This includes orphaned records; it does not prove that
+              // image references in every legacy format are intact.
+              imageReferencesCovered:false,
+              cooperativeLockUsed:true
+            });
+          }catch(error){
+            const known=new Set([
+              'legacy_image_count_changed','legacy_image_key_invalid',
+              'legacy_image_blob_invalid','legacy_image_byte_budget_exceeded',
+              'legacy_image_blob_size_changed']);
+            const message=String(error?.message||'');
+            report=refuse(known.has(message)?message:'legacy_image_audit_unavailable');
+          }finally{
+            try{db?.close();}catch(_){}
+          }
+        });
+    }catch(_){return refuse('legacy_image_audit_lock_failed');}
+    return report;
+  }
+
   // V2 PREVIEW ONLY: observe real, already-durable V1 Task journal edits.
   // Never put IndexedDB work on the foreground Task save path: the real
   // synchronous V1 journal is still authoritative and durable before paint.
@@ -19423,6 +19588,7 @@
     rehearsePreviewAdmittedNotesRepeatSnapshotSync,
     inspectPreviewNotesRepeatEditJournal,
     inspectPreviewIndependentBackupCoverage,
+    inspectPreviewLegacyImageBytes,
     inspectPreviewNotesSnapshotCompletionEvidence,
     inspectPreviewNotesFirstEditIntent,
     inspectPreviewCooperativeNotesFirstEditConflict,
