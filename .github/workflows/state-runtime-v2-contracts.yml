@@ -49,6 +49,7 @@ jobs:
         run: >-
           node --test
           tests/task_mutation_journal_contract.test.js
+          tests/phase2_reset_hook.test.js
           tests/storage_compression.test.js
 
       - name: Verify isolated V2 Habit order sidecar record migration
