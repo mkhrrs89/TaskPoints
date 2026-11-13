@@ -72,6 +72,35 @@
     }
   }
 
+
+  // An explicitly authorized import/restore rotates the V2 generation in
+  // this *same* preview page after its V1 save was verified. That page must
+  // remain usable for follow-up Habit/Task checkpoint saves without a reload.
+  // Trust only a local rotation whose previous token is exactly the token
+  // this Task journal bound at startup, and re-read the durable new token.
+  // Never follow external tab notifications or arbitrary storage changes:
+  // those still require reloading before any new Task/full-snapshot writes.
+  if (previewGenerationEnforced) {
+    try {
+      global.TaskPointsStateRuntimeV2Generation?.subscribe?.((event) => {
+        if (event?.source !== 'local' || !previewGenerationAtOpen
+          || event.previousGeneration !== previewGenerationAtOpen
+          || typeof event.generation !== 'string' || !event.generation
+          || event.generation === previewGenerationAtOpen) return;
+        try {
+          if (storage.getItem(PREVIEW_DARK_KEY) !== '1'
+            || storage.getItem(PREVIEW_GENERATION_KEY) !== event.generation) return;
+          previewGenerationAtOpen = event.generation;
+        } catch (_) {
+          // Unreadable or unverified rotations remain blocked.
+        }
+      });
+    } catch (_) {
+      // An unavailable generation subscription must never authorize
+      // a rotated token. The existing fail-closed checks stay in force.
+    }
+  }
+
   function assertPreviewTaskGeneration() {
     if (!previewGenerationEnforced) return;
     let live = null, enabled = null, readable = true;
