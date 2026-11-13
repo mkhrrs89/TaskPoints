@@ -19051,8 +19051,14 @@
                 });
                 if(db.version!==item.version)
                   throw Error('m01_indexeddb_version_changed');
-                const names=Array.from(db.objectStoreNames||[]);
-                if(names.length>maxStores||names.some(name=>
+                // Missing schema enumeration is not proof of zero stores.
+                if(!db.objectStoreNames
+                  || !Number.isSafeInteger(db.objectStoreNames.length)
+                  || typeof db.objectStoreNames.contains!=='function')
+                  throw Error('m01_indexeddb_stores_invalid');
+                const names=Array.from(db.objectStoreNames);
+                if(names.length!==db.objectStoreNames.length
+                  ||names.length>maxStores||names.some(name=>
                   typeof name!=='string'||!name||name.length>256)
                   ||new Set(names).size!==names.length)
                   throw Error('m01_indexeddb_stores_invalid');
