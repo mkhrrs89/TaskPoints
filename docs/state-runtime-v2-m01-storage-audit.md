@@ -499,3 +499,47 @@ rather than automatic V2 ownership. The result remains
 `canPromote:false`. **M01 stays Working; 0/78 production writer owners
 certified, 8/23 checkpoints verified, 67/100 weighted readiness.** Main is
 not synced or modified; V1 remains authoritative.
+
+
+## November 13 — live IndexedDB database/store owner-gap witness (M01 partial)
+
+The M01 first-pass manifest tracks **four database/store source examples**,
+including the production image store, safety-vault snapshots, verified-secondary
+snapshots and the V2 preview database (whose store list is explicitly marked
+incomplete). A new developer-preview-only inspector,
+`inspectPreviewIndexedDbOwnerGaps(expectedInventoryToken)`, compares this
+conservative list against the **existing IndexedDB databases and their
+object-store names** on the actual browser origin. It surfaces unreviewed
+database names and missing store-level source assignments, and preserves
+source paths as provisional evidence rather than declaring any owner verified.
+
+The inspector requires the exact current full-localStorage token, unchanged
+V2 preview generation, supported `indexedDB.databases()`, and a cooperating
+exclusive browser lock. It caps the database count at 64 and each store list
+at 96. For each already-listed database it uses a version-free
+`indexedDB.open(name)` **only to inspect schema metadata**, verifies the
+cataloged version, closes the connection and aborts any unexpected upgrade
+(which could otherwise create a just-deleted database). Unknown or malformed
+schema metadata fails closed. It checks the database name/version catalog
+before and after, rechecks after calculating a SHA-256 catalog fingerprint,
+and rejects a detected change of the original localStorage source.
+
+A real-browser fixture adds a previously unknown database and an extra store
+to the already inventoried legacy image database. It verifies those are
+reported, confirms stored record bytes remain unchanged and never appear in
+the returned report, then adds another database without changing
+localStorage and confirms that the catalog fingerprint changes. Both
+Chromium and WebKit safety jobs are required; a browser lacking the catalog
+API reports that coverage **cannot be verified** rather than pretending
+there are no databases. A source contract pins the four provisional DB
+examples to the reviewed manifest and prohibits any IDB record reads,
+transactions, mutation, restore or migration.
+
+**Still missing:** This is schema *discovery*, not byte-level validation of
+every IndexedDB store, source-complete ownership, a consistent cross-tab
+database snapshot, permission to migrate records, or an off-device backup.
+Other tabs can mutate after the last observation. The previous photo-byte
+audit remains separately available and unchanged. **M01 stays Working,
+0/78 actual writer handoffs certified, 8/23 preview checkpoints Verified,
+67/100 weighted readiness.** V1 remains authoritative; no Main sync,
+V2 activation or feature removal.
