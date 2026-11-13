@@ -115,3 +115,52 @@ test('M01 tracks every explicitly normalized V1 snapshot field without claiming 
   assert.ok(discovered.length>=30);
   assert.match(evidence.limitation,/additional unknown fields/);
 });
+
+
+// M01 second-pass dynamic source witness: test the *literal* preview catalog
+// against the reviewed inventory so new keys/fields force explicit updates.
+test('M01 preview unknown-key witness maps exactly the current reviewed source names',()=>{
+  const runtime=fs.readFileSync(path.join(root,'state_runtime_v2.js'),'utf8');
+  const keys=runtime.match(/const M01_REVIEWED_ORIGIN_KEY_FAMILIES = Object\.freeze\((\{[^\n]+\})\);/);
+  const fields=runtime.match(/const M01_EXPLICIT_LEGACY_FIELDS = Object\.freeze\((\[[^\n]+\])\);/);
+  assert.ok(keys&&fields,'source-linked preview inventory catalog missing');
+  const actual=JSON.parse(keys[1]);
+  const expected={};
+  for(const row of inventory.keyEvidence){
+    if(!expected[row.key])expected[row.key]=[];
+    if(!expected[row.key].includes(row.family))expected[row.key].push(row.family);
+  }
+  for(const family of Object.values(expected))family.sort();
+  assert.deepEqual(actual,expected,
+    'source manifest and preview inventory must not drift or invent owners');
+  assert.deepEqual(JSON.parse(fields[1]),
+    [...inventory.primarySnapshotNamedFields].sort(),
+    'explicitly normalized V1 fields must stay source-linked');
+  assert.equal(Object.keys(actual).length,new Set(inventory.keyEvidence.map(x=>x.key)).size);
+});
+
+test('M01 live unknown-owner observer is read-only, preview-scoped and permanently non-promotable',()=>{
+  const runtime=fs.readFileSync(path.join(root,'state_runtime_v2.js'),'utf8');
+  const start=runtime.indexOf('async function inspectPreviewDynamicOwnerGaps(');
+  const end=runtime.indexOf('// Explicit developer-preview-only recovery *coverage* inventory.',start);
+  assert.ok(start>0&&end>start);
+  const source=runtime.slice(start,end);
+  for(const required of [
+    'isWalTestPreviewHost()', 'isDarkEnabled()',
+    'captureReadOnlyFullStorageInventory()',
+    'currentGeneration({create:false})',
+    'parseTaskPointsStorageJson(main[1],null)',
+    'unknownOriginKeys:unknownKeys',
+    'unknownPrimaryFields:unknownFields',
+    "ownerCoverageVerified:false,allWritersKnown:false",
+    "productionWritersFenced:false,canPromote:false",
+    "readAuthority:'legacy_only',mutationAuthority:'legacy_only'"
+  ])assert.ok(source.includes(required),'M01 observer lost guard: '+required);
+  assert.match(source,/previewRecoveryFingerprint\(entries\)/);
+  assert.match(runtime,/inspectPreviewIndependentBackupCoverage,\s*inspectPreviewDynamicOwnerGaps,/);
+  assert.doesNotMatch(source,/\b(?:localStorage|storage)\.(?:setItem|removeItem|clear)\s*\(/);
+  assert.doesNotMatch(source,/\b(?:saveStateSnapshot|journalTaskMutation|seedFromLegacy|safeReplaceTaskPointsStorage)\s*\(/);
+  assert.doesNotMatch(source,/\b(?:put|deleteDatabase|clear)\s*\(/);
+  assert.doesNotMatch(source,/\bnormalizeState\s*\(/,
+    'do not normalize unknown imported fields out of the live source witness');
+});
