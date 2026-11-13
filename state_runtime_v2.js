@@ -19238,13 +19238,21 @@
               // rather than accidentally resurrecting a missing database.
               const db=await new Promise((resolve,reject)=>{
                 const request=idb.open(item.name);
+                let rejected=false;
+                const refuseOpen=error=>{rejected=true;reject(error);};
                 request.onupgradeneeded=()=>{
                   try{request.transaction?.abort?.();}catch(_){}
-                  reject(Error('backup_coverage_database_recreated'));
+                  refuseOpen(Error('backup_coverage_database_recreated'));
                 };
-                request.onerror=()=>reject(request.error||Error('db_open_failed'));
-                request.onblocked=()=>reject(Error('db_open_blocked'));
-                request.onsuccess=()=>resolve(request.result);
+                request.onerror=()=>refuseOpen(request.error||Error('db_open_failed'));
+                request.onblocked=()=>refuseOpen(Error('db_open_blocked'));
+                request.onsuccess=()=>{
+                  if(rejected){
+                    try{request.result?.close();}catch(_){}
+                    return;
+                  }
+                  resolve(request.result);
+                };
               });
               try{
                 if(db.version!==item.version)
@@ -19296,13 +19304,21 @@
             for(const prior of databases){
               const db=await new Promise((resolve,reject)=>{
                 const request=idb.open(prior.name);
+                let rejected=false;
+                const refuseOpen=error=>{rejected=true;reject(error);};
                 request.onupgradeneeded=()=>{
                   try{request.transaction?.abort?.();}catch(_){}
-                  reject(Error('backup_coverage_database_recreated'));
+                  refuseOpen(Error('backup_coverage_database_recreated'));
                 };
-                request.onerror=()=>reject(request.error||Error('db_reopen_failed'));
-                request.onblocked=()=>reject(Error('db_reopen_blocked'));
-                request.onsuccess=()=>resolve(request.result);
+                request.onerror=()=>refuseOpen(request.error||Error('db_reopen_failed'));
+                request.onblocked=()=>refuseOpen(Error('db_reopen_blocked'));
+                request.onsuccess=()=>{
+                  if(rejected){
+                    try{request.result?.close();}catch(_){}
+                    return;
+                  }
+                  resolve(request.result);
+                };
               });
               try{
                 if(db.version!==prior.version)
@@ -19445,14 +19461,22 @@
             }
             db=await new Promise((resolve,reject)=>{
               const request=idb.open(imageName);
+              let rejected=false;
+              const refuseOpen=error=>{rejected=true;reject(error);};
               // Never create a missing database during an inspection.
               request.onupgradeneeded=()=>{
                 try{request.transaction?.abort();}catch(_){}
-                reject(Error('legacy_image_database_recreated'));
+                refuseOpen(Error('legacy_image_database_recreated'));
               };
-              request.onerror=()=>reject(request.error||Error('image_open_failed'));
-              request.onblocked=()=>reject(Error('image_open_blocked'));
-              request.onsuccess=()=>resolve(request.result);
+              request.onerror=()=>refuseOpen(request.error||Error('image_open_failed'));
+              request.onblocked=()=>refuseOpen(Error('image_open_blocked'));
+              request.onsuccess=()=>{
+                if(rejected){
+                  try{request.result?.close();}catch(_){}
+                  return;
+                }
+                resolve(request.result);
+              };
             });
             if(db.version!==matches[0].version
               ||!db.objectStoreNames?.contains(storeName)){
