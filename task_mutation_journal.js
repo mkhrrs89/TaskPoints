@@ -94,7 +94,7 @@
         // whose V1 snapshot is already absent. A peer storage event, an
         // import, or a stale tab cannot manufacture this authorization.
         if (event?.source === 'local' && event.reason === 'reset-all'
-          && event.previousGeneration === previewGenerationAtOpen
+          && event.previousGeneration === previewFullSaveGeneration
           && typeof event.generation === 'string' && event.generation
           && event.generation !== previewGenerationAtOpen) {
           try {
