@@ -328,6 +328,30 @@ test('verified same-page Reset All can clear only the witnessed pending Task byt
   assert.equal(h.storage.getItem(JOURNAL_KEY),fresh);
 });
 
+test('same-page reset cleanup still succeeds after an earlier verified import rotation', () => {
+  const generationKey='taskpoints_state_v2_generation_v1';
+  const darkKey='taskpoints_state_v2_dark_mode_v1';
+  const listeners=[];
+  const h=makeHarness({[generationKey]:'epoch-A',[darkKey]:'1'},
+    {hostname:'localhost',generationApi:{subscribe(fn){listeners.push(fn);}}});
+  // The validated V1 import completed and rotated the full-save checkpoint,
+  // while old Task callbacks remained attached to their initial generation.
+  h.storage.setItem(generationKey,'epoch-B');
+  listeners[0]({source:'local',reason:'settings-import',
+    previousGeneration:'epoch-A',generation:'epoch-B'});
+  const pending=JSON.stringify({schemaVersion:1,tasks:[{id:'pending',title:'Old'}],
+    completionUpserts:[],completionDeletes:[],updatedAtISO:null});
+  h.storage.setItem(JOURNAL_KEY,pending);
+  h.storage.removeItem(STORAGE_KEY);
+  h.storage.setItem(generationKey,'epoch-C');
+  listeners[0]({source:'local',reason:'reset-all',
+    previousGeneration:'epoch-B',generation:'epoch-C'});
+  assert.equal(h.core.clearPendingTaskMutations(),true);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+  assert.throws(()=>h.core.journalTaskMutation({task:{id:'old',title:'Stale'}}),
+    e=>e.code==='TASKPOINTS_TASK_PREVIEW_GENERATION_CHANGED');
+});
+
 test('local Reset All witness refuses a peer Task edit added after the reset event', () => {
   const generationKey='taskpoints_state_v2_generation_v1';
   const darkKey='taskpoints_state_v2_dark_mode_v1';
