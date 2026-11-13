@@ -167,12 +167,18 @@ test('known Oct 8 lifetime totals become 178 for all original 16 after the confi
 });
 
 
-test('Home opts into repair-only persistence on both localStorage and native boot paths', () => {
+test('Home applies confirmed repairs during boot without forcing a full compressed startup save', () => {
   const fs = require('node:fs');
   const path = require('node:path');
   const home = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-  const occurrences = home.match(/persistConfirmedHistoricalRepairs:\s*true/g) || [];
-  assert.equal(occurrences.length, 2);
+  const deferred = home.match(/persistConfirmedHistoricalRepairs:\s*false/g) || [];
+  const eager = home.match(/persistConfirmedHistoricalRepairs:\s*true/g) || [];
+  assert.equal(deferred.length, 2, 'localStorage and native bootstrap remain repair-aware without writing');
+  assert.equal(eager.length, 0, 'no full compression before Home paints');
+  assert.match(home, /scheduleHomeHistoricalRepairPersistenceAfterFirstPaint\(\);/);
+  assert.match(home, /repairConfirmedJune2026LifetimeHistory\(latest\)/);
+  assert.match(home, /mergeAndSaveState\(repaired\.state/);
+  assert.match(home, /savePath: 'june-2026-lifetime-history-repair'/);
 });
 
 

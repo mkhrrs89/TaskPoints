@@ -2062,7 +2062,7 @@ let state = (() => {
       preloadedState: nativeCandidate,
       syncDerived: false,
       persistSync: false,
-      persistConfirmedHistoricalRepairs: true
+      persistConfirmedHistoricalRepairs: false
     });
     if (__TP_PERF_BOOT) console.timeEnd('LOAD: IndexedDB native prepare');
 
@@ -3511,7 +3511,7 @@ function getCachedStorageState() {
   const parsed = TaskPointsCore.loadAppState({
     syncDerived: false,
     persistSync: false,
-    persistConfirmedHistoricalRepairs: true
+    persistConfirmedHistoricalRepairs: false
   }).state;
   if (__TP_PERF_BOOT) console.timeEnd('LOAD: JSON.parse');
 
@@ -4578,7 +4578,7 @@ function simulateToday() {
   state.matchups    = state.matchups    || [];
   state.schedule    = state.schedule    || [];
 
-  ensureUpcomingSchedule();
+  const scheduleChanged = ensureUpcomingSchedule();
   markHomeMorningStartupPhase('schedule-ready');
 
   const todaysSchedule = state.schedule.find(d => d && d.date === todayKey);
@@ -4587,7 +4587,11 @@ function simulateToday() {
     : [];
 
   if (!todaysPairs.length) {
-    save();
+    // A legitimate bye/off-day needs no daily score write. Persist only if
+    // schedule generation itself changed something; otherwise repeated Home
+    // opens used to compress the whole history without changing a single game.
+    const saved = scheduleChanged ? save() : false;
+    markHomeMorningStartupPhase('simulation-finished', { saved });
     return;
   }
 
@@ -6656,6 +6660,59 @@ function scheduleHomeSeasonMaterializationAfterFirstPaint(todayKeyStr = getGameD
     window.TaskPointsHomeIdleQueue.enqueue('home-season-materialization', run, { delayMs: 10000 });
   } else {
     window.setTimeout(run, 10000);
+  }
+  return true;
+}
+
+// The confirmed June-2026 repair is still applied in memory during every
+// authoritative load. Only its full compressed *persistence* is postponed:
+// triggering a multi-second full save while decoding Home made the first
+// morning launch look frozen. Check fresh authoritative bytes after paint,
+// so an ordinary daily save or later user edit cannot be overwritten.
+let homeHistoricalRepairPersistenceScheduled = false;
+function scheduleHomeHistoricalRepairPersistenceAfterFirstPaint() {
+  if (homeHistoricalRepairPersistenceScheduled) return false;
+  if (typeof TaskPointsCore?.repairConfirmedJune2026LifetimeHistory !== 'function'
+    || typeof TaskPointsCore?.readTaskPointsStoredState !== 'function'
+    || typeof TaskPointsCore?.mergeAndSaveState !== 'function') return false;
+
+  homeHistoricalRepairPersistenceScheduled = true;
+  const retryMs = 2500;
+  const requiredQuietMs = 12000;
+  const run = () => {
+    const idle = TaskPointsCore.getStorageMaintenanceIdleStatus?.();
+    if (document.hidden || homeMorningSimulationScheduled || (
+      idle && (idle.pageLeaving || idle.activeEditor
+        || Number(idle.navigationQuietForMs || 0) > 0
+        || Number(idle.lastInteractionAgoMs || 0) < requiredQuietMs)
+    )) {
+      setTimeout(run, retryMs);
+      return;
+    }
+
+    try {
+      // Re-read *current* durable state, never persist a stale startup copy.
+      const latest = TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY);
+      if (!latest) return;
+      const repaired = TaskPointsCore.repairConfirmedJune2026LifetimeHistory(latest);
+      if (!repaired?.changed) return; // already saved by normal daily simulation
+      const saved = TaskPointsCore.mergeAndSaveState(repaired.state, {
+        storageKey: STORAGE_KEY,
+        savePath: 'june-2026-lifetime-history-repair'
+      });
+      if (saved?.skipped || saved?.blocked || saved?.blockedByQuotaCircuit) {
+        console.warn('June history repair persistence deferred by storage protection; in-memory correction retained.');
+      }
+    } catch (error) {
+      // No clearing, reset or fallback overwrite: protected data stays intact.
+      console.warn('Deferred June history repair could not be persisted; retry on next launch.', error);
+    }
+  };
+
+  if (window.TaskPointsHomeIdleQueue?.enqueue) {
+    window.TaskPointsHomeIdleQueue.enqueue('home-june-history-repair', run, { delayMs: 18000 });
+  } else {
+    setTimeout(run, 18000);
   }
   return true;
 }
@@ -15515,6 +15572,7 @@ renderFlexActions();
 scheduleRender(renderAll);
 startHomeWorkHoursWeekRollover();
 scheduleHomeSeasonMaterializationAfterFirstPaint();
+scheduleHomeHistoricalRepairPersistenceAfterFirstPaint();
 scheduleInitialHomeLiveDiffCapture();
 
 (async () => {

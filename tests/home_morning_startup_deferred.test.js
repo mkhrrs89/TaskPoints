@@ -197,3 +197,57 @@ test('Settings provides a read-only, copyable morning report without touching ga
   assert.ok(!snippet.includes('saveSettingsState'));
   assert.doesNotThrow(() => new Function(snippet));
 });
+
+test('a day with no games never needlessly saves unchanged historical data', () => {
+  const source = extractFunction('simulateToday');
+  assert.match(source, /const scheduleChanged = ensureUpcomingSchedule\(\);/);
+  assert.match(source, /const saved = scheduleChanged \? save\(\) : false;/);
+  assert.match(source, /markHomeMorningStartupPhase\('simulation-finished', \{ saved \}\);/);
+});
+
+test('deferred historical repair uses only fresh authoritative data and does not save if repaired already', () => {
+  const source = extractFunction('scheduleHomeHistoricalRepairPersistenceAfterFirstPaint');
+  const timers = [];
+  const calls = { reads: 0, repairs: 0, saves: 0 };
+  let changed = true;
+  let userActive = true;
+  const core = {
+    getStorageMaintenanceIdleStatus() {
+      return { pageLeaving: false, activeEditor: false, navigationQuietForMs: 0, lastInteractionAgoMs: userActive ? 1000 : 20000 };
+    },
+    readTaskPointsStoredState() { calls.reads++; return { revision: calls.reads, tasks: [{ id: 'keep' }] }; },
+    repairConfirmedJune2026LifetimeHistory(state) {
+      calls.repairs++;
+      return { changed, state: { ...state, historicalRepairMarkers: { june2026LifetimeMatchupsV1: true } } };
+    },
+    mergeAndSaveState(state, options) {
+      calls.saves++;
+      assert.equal(state.revision, calls.reads, 'latest durable revision, never startup state');
+      assert.equal(options.savePath, 'june-2026-lifetime-history-repair');
+      return { state };
+    }
+  };
+  const sandbox = {
+    TaskPointsCore: core, STORAGE_KEY: 'taskpoints_v1', document: { hidden: false },
+    window: {}, console: { warn() {} }, homeMorningSimulationScheduled: false,
+    setTimeout(fn, delay) { timers.push({ fn, delay }); }
+  };
+  vm.createContext(sandbox);
+  vm.runInContext('let homeHistoricalRepairPersistenceScheduled = false;\\n' + source, sandbox);
+  vm.runInContext('scheduleHomeHistoricalRepairPersistenceAfterFirstPaint()', sandbox);
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].delay, 18000);
+  assert.equal(calls.reads, 0);
+  timers.shift().fn(); // app still active: do not block input
+  assert.equal(calls.saves, 0);
+  assert.equal(timers[0].delay, 2500);
+  userActive = false;
+  timers.shift().fn();
+  assert.equal(calls.reads, 1);
+  assert.equal(calls.saves, 1);
+  changed = false;
+  vm.runInContext('homeHistoricalRepairPersistenceScheduled = false; scheduleHomeHistoricalRepairPersistenceAfterFirstPaint()', sandbox);
+  timers.shift().fn();
+  assert.equal(calls.reads, 2);
+  assert.equal(calls.saves, 1, 'daily save already persisted the repair');
+});
