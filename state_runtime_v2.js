@@ -19040,14 +19040,30 @@
               try{
                 db=await new Promise((resolve,reject)=>{
                   const req=idb.open(item.name);
+                  let denied=false;
+                  const refuseOpen=error=>{
+                    denied=true;
+                    reject(error);
+                  };
                   // A disappeared database would otherwise be recreated.
                   req.onupgradeneeded=()=>{
                     try{req.transaction?.abort();}catch(_){}
-                    reject(Error('m01_indexeddb_database_disappeared'));
+                    refuseOpen(Error('m01_indexeddb_database_disappeared'));
                   };
-                  req.onerror=()=>reject(req.error||Error('m01_indexeddb_open_failed'));
-                  req.onblocked=()=>reject(Error('m01_indexeddb_open_blocked'));
-                  req.onsuccess=()=>resolve(req.result);
+                  req.onerror=()=>refuseOpen(
+                    req.error||Error('m01_indexeddb_open_failed'));
+                  // A blocked request can succeed *after* its promise was
+                  // rejected. Close that late connection; otherwise a
+                  // read-only audit could strand a live IDB schema lock.
+                  req.onblocked=()=>refuseOpen(
+                    Error('m01_indexeddb_open_blocked'));
+                  req.onsuccess=()=>{
+                    if(denied){
+                      try{req.result?.close();}catch(_){}
+                      return;
+                    }
+                    resolve(req.result);
+                  };
                 });
                 if(db.version!==item.version)
                   throw Error('m01_indexeddb_version_changed');
