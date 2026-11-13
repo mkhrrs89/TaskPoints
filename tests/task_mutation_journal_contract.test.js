@@ -280,6 +280,127 @@ test('reset clear refuses nonstandard unreadable journal values without destroyi
   assert.equal(h.core.getTaskMutationJournalStatus().journalWritesVerified, 0);
 });
 
+test('preview stale tab cannot erase a newer-generation Task journal during reset cleanup', () => {
+  const generationKey='taskpoints_state_v2_generation_v1';
+  const darkKey='taskpoints_state_v2_dark_mode_v1';
+  const h=makeHarness({[generationKey]:'epoch-A',[darkKey]:'1'}, {hostname:'localhost'});
+  const first=JSON.stringify({schemaVersion:1,tasks:[{id:'a',title:'old'}],
+    completionUpserts:[],completionDeletes:[],updatedAtISO:null});
+  const later=JSON.stringify({schemaVersion:1,tasks:[{id:'b',title:'new peer edit'}],
+    completionUpserts:[],completionDeletes:[],updatedAtISO:null});
+  h.storage.setItem(JOURNAL_KEY,first);
+  // A separate tab has completed an authorized reset and written a new Task.
+  h.storage.setItem(generationKey,'epoch-B');
+  h.storage.setItem(JOURNAL_KEY,later);
+  let removed=false;
+  const realRemove=h.storage.removeItem.bind(h.storage);
+  h.storage.removeItem=key=>{if(key===JOURNAL_KEY)removed=true;return realRemove(key);};
+  assert.throws(()=>h.core.clearPendingTaskMutations(),
+    e=>e.code==='TASKPOINTS_TASK_PREVIEW_GENERATION_CHANGED');
+  assert.equal(removed,false);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),later);
+  assert.equal(h.core.getTaskMutationJournalStatus().previewGenerationBlocks,1);
+});
+
+test('verified same-page Reset All can clear only the witnessed pending Task bytes once', () => {
+  const generationKey='taskpoints_state_v2_generation_v1';
+  const darkKey='taskpoints_state_v2_dark_mode_v1';
+  const listeners=[];
+  const h=makeHarness({[generationKey]:'epoch-A',[darkKey]:'1'},
+    {hostname:'localhost',generationApi:{subscribe(fn){listeners.push(fn);}}});
+  const old=JSON.stringify({schemaVersion:1,tasks:[{id:'a',title:'Old before reset'}],
+    completionUpserts:[],completionDeletes:[],updatedAtISO:null});
+  h.storage.setItem(JOURNAL_KEY,old);
+  h.storage.removeItem(STORAGE_KEY);
+  h.storage.setItem(generationKey,'epoch-B');
+  listeners[0]({source:'local',reason:'reset-all',
+    previousGeneration:'epoch-A',generation:'epoch-B'});
+  assert.equal(h.core.clearPendingTaskMutations(),true);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+  assert.throws(()=>h.core.journalTaskMutation({task:{id:'z',title:'Stale callback'}}),
+    e=>e.code==='TASKPOINTS_TASK_PREVIEW_GENERATION_CHANGED');
+  // The authorization must not be reusable to erase a new-generation journal.
+  const fresh=JSON.stringify({schemaVersion:1,tasks:[{id:'b',title:'New generation'}],
+    completionUpserts:[],completionDeletes:[],updatedAtISO:null});
+  h.storage.setItem(JOURNAL_KEY,fresh);
+  assert.throws(()=>h.core.clearPendingTaskMutations(),
+    e=>e.code==='TASKPOINTS_TASK_PREVIEW_GENERATION_CHANGED');
+  assert.equal(h.storage.getItem(JOURNAL_KEY),fresh);
+});
+
+test('local Reset All witness refuses a peer Task edit added after the reset event', () => {
+  const generationKey='taskpoints_state_v2_generation_v1';
+  const darkKey='taskpoints_state_v2_dark_mode_v1';
+  const listeners=[];
+  const h=makeHarness({[generationKey]:'epoch-A',[darkKey]:'1'},
+    {hostname:'localhost',generationApi:{subscribe(fn){listeners.push(fn);}}});
+  const original=JSON.stringify({schemaVersion:1,tasks:[{id:'a',title:'Old'}],
+    completionUpserts:[],completionDeletes:[],updatedAtISO:null});
+  const peer=JSON.stringify({schemaVersion:1,tasks:[{id:'b',title:'Newer peer'}],
+    completionUpserts:[],completionDeletes:[],updatedAtISO:null});
+  h.storage.setItem(JOURNAL_KEY,original);
+  h.storage.removeItem(STORAGE_KEY);
+  h.storage.setItem(generationKey,'epoch-B');
+  listeners[0]({source:'local',reason:'reset-all',
+    previousGeneration:'epoch-A',generation:'epoch-B'});
+  h.storage.setItem(JOURNAL_KEY,peer);
+  let removed=false;
+  const realRemove=h.storage.removeItem.bind(h.storage);
+  h.storage.removeItem=key=>{if(key===JOURNAL_KEY)removed=true;return realRemove(key);};
+  assert.throws(()=>h.core.clearPendingTaskMutations(),
+    e=>e.code==='TASKPOINTS_TASK_MUTATION_JOURNAL_CLEAR_SOURCE_CHANGED');
+  assert.equal(removed,false);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),peer);
+});
+
+test('external/reset-impostor events never authorize stale preview Task cleanup', () => {
+  const generationKey='taskpoints_state_v2_generation_v1';
+  const darkKey='taskpoints_state_v2_dark_mode_v1';
+  for(const [source,reason,snapshotPresent] of [
+    ['storage','reset-all',false],
+    ['local','settings-import',false],
+    ['local','reset-all',true]
+  ]){
+    const listeners=[];
+    const h=makeHarness({[generationKey]:'epoch-A',[darkKey]:'1'},
+      {hostname:'localhost',generationApi:{subscribe(fn){listeners.push(fn);}}});
+    const pending=JSON.stringify({schemaVersion:1,tasks:[{id:'a',title:'Do not erase'}],
+      completionUpserts:[],completionDeletes:[],updatedAtISO:null});
+    h.storage.setItem(JOURNAL_KEY,pending);
+    if(!snapshotPresent)h.storage.removeItem(STORAGE_KEY);
+    h.storage.setItem(generationKey,'epoch-B');
+    listeners[0]({source,reason,previousGeneration:'epoch-A',generation:'epoch-B'});
+    assert.throws(()=>h.core.clearPendingTaskMutations(),
+      e=>e.code==='TASKPOINTS_TASK_PREVIEW_GENERATION_CHANGED');
+    assert.equal(h.storage.getItem(JOURNAL_KEY),pending,source+' '+reason);
+  }
+});
+
+test('preview Task cleanup rechecks reset generation after source reads before removing', () => {
+  const generationKey='taskpoints_state_v2_generation_v1';
+  const darkKey='taskpoints_state_v2_dark_mode_v1';
+  const h=makeHarness({[generationKey]:'epoch-A',[darkKey]:'1'},
+    {hostname:'localhost'});
+  const pending=JSON.stringify({schemaVersion:1,tasks:[{id:'a',title:'Keep on race'}],
+    completionUpserts:[],completionDeletes:[],updatedAtISO:null});
+  h.storage.setItem(JOURNAL_KEY,pending);
+  const get=h.storage.getItem.bind(h.storage);
+  let generationReads=0;
+  h.storage.getItem=key=>{
+    if(key===generationKey && ++generationReads===2)
+      h.storage.setItem(generationKey,'epoch-B');
+    return get(key);
+  };
+  let removed=false;
+  const remove=h.storage.removeItem.bind(h.storage);
+  h.storage.removeItem=key=>{if(key===JOURNAL_KEY)removed=true;return remove(key);};
+  assert.throws(()=>h.core.clearPendingTaskMutations(),
+    e=>e.code==='TASKPOINTS_TASK_PREVIEW_GENERATION_CHANGED');
+  assert.equal(generationReads,2);
+  assert.equal(removed,false);
+  assert.equal(get(JOURNAL_KEY),pending);
+});
+
 test('successful synchronous Task journal write is verified before action acknowledgement', () => {
   const h = makeHarness();
   const returned = h.core.journalTaskMutation({
