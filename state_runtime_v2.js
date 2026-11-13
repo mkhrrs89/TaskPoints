@@ -18885,6 +18885,10 @@
   const M01_REVIEWED_ORIGIN_KEY_FAMILIES = Object.freeze({"taskpoints_active_page_v1":["session"],"taskpoints_backup_latest":["backup","recovery"],"taskpoints_backup_prev1":["recovery"],"taskpoints_backup_prev2":["recovery"],"taskpoints_backup_prev3":["recovery"],"taskpoints_emergency_pre_restore_mirror_v1":["recovery"],"taskpoints_emergency_quarantined_phase5b_journal_v1":["recovery"],"taskpoints_emergency_recovery_hold_v1":["recovery"],"taskpoints_full_backup":["backup"],"taskpoints_gallery_columns":["game"],"taskpoints_group_active_players":["game"],"taskpoints_habit_fast_path_disabled_v1":["habits"],"taskpoints_habit_order_overlay_v1":["habits"],"taskpoints_home_targeted_render_disabled_v1":["settings"],"taskpoints_inbox_scan_checkpoint_v1":["tasks"],"taskpoints_indexeddb_browser_session_v1":["session"],"taskpoints_indexeddb_requalification_diagnostics_v1":["recovery"],"taskpoints_indexeddb_requalification_v1":["recovery"],"taskpoints_notes_authoritative_v1":["notes"],"taskpoints_notes_dirty_v1":["notes"],"taskpoints_notes_v1":["notes","settings"],"taskpoints_pending_flex_completions_v1":["habits"],"taskpoints_pending_flex_order_v1":["habits"],"taskpoints_pending_habit_deltas_v1":["habits"],"taskpoints_pending_inbox_state_v1":["tasks"],"taskpoints_pending_player_edits_v1":["game"],"taskpoints_pending_task_mutations_v1":["tasks"],"taskpoints_phase3_read_diagnostics_v1":["storage"],"taskpoints_phase3_read_mode_v1":["storage"],"taskpoints_phase3_verified_session_cache_v1":["storage"],"taskpoints_phase4_diagnostics_v1":["storage"],"taskpoints_phase4_storage_mode_v1":["storage"],"taskpoints_phase4_verified_primary_cache_v1":["storage"],"taskpoints_phase5b_pending_changes_v1":["recovery"],"taskpoints_player_sort_mode":["game"],"taskpoints_quarantined_snapshot":["recovery"],"taskpoints_rankings_scope_season3_rollover_v1":["settings"],"taskpoints_rankings_scope_season4_rollover_v1":["settings"],"taskpoints_rankings_scope_v1":["settings"],"taskpoints_ratings_show_inactive":["settings"],"taskpoints_recovery_attempt_lock_v1":["recovery"],"taskpoints_recovery_write_lock_v1":["recovery"],"taskpoints_safety_vault_v1":["recovery"],"taskpoints_season_archive_data":["season"],"taskpoints_season_round_collapsed_v1":["season"],"taskpoints_shadow_state_v1":["recovery"],"taskpoints_skills_bar_color":["settings"],"taskpoints_skills_bar_max":["settings"],"taskpoints_skills_level_config":["settings"],"taskpoints_standings_scope_season3_rollover_v1":["settings"],"taskpoints_standings_scope_season4_rollover_v1":["settings"],"taskpoints_standings_scope_v1":["settings"],"taskpoints_state_revision_v1":["storage"],"taskpoints_state_v2":["v2-preview"],"taskpoints_state_v2_dark_mode_v1":["v2-preview"],"taskpoints_state_v2_generation_v1":["v2-preview"],"taskpoints_state_v2_wal_test_armed_v1":["v2-preview"],"taskpoints_storage_data_loss_guard_v1":["recovery"],"taskpoints_today_view_v1":["today"],"taskpoints_v1":["core"],"taskpoints_v2_game_preview":["v2-preview"],"taskpoints_v2_habit_order_preview":["v2-preview"],"taskpoints_v2_notes_preview":["v2-preview"],"taskpoints_v2_pending_mutations_v1":["v2-preview"],"taskpoints_v2_recovery_checkpoints_preview":["v2-preview"],"taskpoints_v2_stale_habit_tap_v1":["session"],"taskpoints_verified_secondary_restore_package":["recovery"],"taskpoints_verified_secondary_v1":["recovery"],"tp_audit_dupe_habits_last_run":["habits"],"tp_perf_trace_enabled_v1":["session"],"tp_perf_trace_pages_v1":["session"],"tp_perf_trace_pending_nav_v1":["session"],"tp_projects_v1":["projects"],"tp-nav-emoji":["settings"],"tp-nav-icon":["settings"],"tpBootSeenThisSession":["session"]});
   const M01_EXPLICIT_LEGACY_FIELDS = Object.freeze(["completions","currentSeason","flexActions","gameHistory","habitTagColors","habits","latestSeasonId","liveDiffHistory","liveDiffSnapshots","matchups","notes","opponentDripSchedules","playerBadges","players","projects","reminders","reservedPlayerPids","schedule","scoringSettings","seasonHistory","tasks","vo2MaxHistory","weightHistory","workHistory","youImageId","youName","youNotes","youPrimaryColor","youRivalId","youSecondaryColor"]);
 
+  // These are unverified source-discovered DB/store names, NOT permission
+  // to access their values or evidence of complete writer ownership.
+  const M01_REVIEWED_IDB_STORE_EVIDENCE = Object.freeze({"taskpoints":{"knownStore":"images","state":"live","owner":"V1 player/season image blobs"},"taskpoints_safety_vault_v1":{"knownStore":"snapshots","state":"live","owner":"legacy recovery vault"},"taskpoints_state_v2":{"knownStore":null,"state":"preview","owner":"V2 preview records and receipts"},"taskpoints_verified_secondary_v1":{"knownStore":"snapshots","state":"live","owner":"V1 verified-secondary IndexedDB mirror, not V2 authority"}});
+
   async function inspectPreviewDynamicOwnerGaps(expectedInventoryToken) {
     const refuse=(reason,detail={})=>({
       checked:true,previewOnly:true,readOnly:true,
@@ -18967,6 +18971,156 @@
         productionWritersFenced:false,canPromote:false
       });
     }catch(_){return refuse('m01_dynamic_owner_audit_unavailable');}
+  }
+
+  // M01 preview-only IDB catalog inspection: no transactions, record reads,
+  // upgrade, deletion, database creation, or migration authority. The
+  // version-free open is used ONLY for a database found in databases().
+  // onupgradeneeded aborts so a concurrent deletion cannot silently create
+  // a replacement database. Retain unknown names as unresolved evidence.
+  async function inspectPreviewIndexedDbOwnerGaps(expectedInventoryToken) {
+    const refuse=(reason,detail={})=>({
+      checked:true,previewOnly:true,readOnly:true,
+      sourceStable:false,idbCatalogObserved:false,idbStoresObserved:false,
+      idbRecordBytesVerified:false,independentRecoveryVerified:false,
+      allStoresMapped:false,allWritersKnown:false,
+      ownerCoverageVerified:false,productionWritersFenced:false,
+      canPromote:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...detail
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    if(typeof expectedInventoryToken!=='string'||!expectedInventoryToken)
+      return refuse('full_origin_token_required');
+    if(typeof global.indexedDB?.databases!=='function')
+      return refuse('indexeddb_database_catalog_unavailable');
+    if(typeof global.navigator?.locks?.request!=='function')
+      return refuse('lock_manager_unavailable');
+    if(typeof global.crypto?.subtle?.digest!=='function'
+      ||typeof global.TextEncoder!=='function')
+      return refuse('sha256_unavailable');
+    const generation=currentGeneration({create:false});
+    if(!generation)return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    const current=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&darkMirrorModeEpoch===epoch
+      &&currentGeneration({create:false})===generation
+      &&!previewNotesWitnessObservedExternalChange(generation,epoch)
+      &&captureReadOnlyFullStorageInventory()===expectedInventoryToken;
+    const idb=global.indexedDB;
+    const maxDatabases=64,maxStores=96;
+    const catalog=raw=>{
+      if(!Array.isArray(raw)||raw.length>maxDatabases)
+        throw Error('m01_indexeddb_catalog_invalid');
+      const seen=new Set(),entries=[];
+      for(const item of raw){
+        if(typeof item?.name!=='string'||!item.name
+          ||item.name.length>256||seen.has(item.name)
+          ||!Number.isSafeInteger(item.version)||item.version<1)
+          throw Error('m01_indexeddb_catalog_invalid');
+        seen.add(item.name);
+        entries.push({name:item.name,version:item.version});
+      }
+      return entries.sort((a,b)=>a.name.localeCompare(b.name));
+    };
+    let report=refuse('idb_owner_lock_unavailable');
+    try {
+      await global.navigator.locks.request(PREVIEW_COOPERATIVE_TASK_FREEZE_LOCK,
+        {mode:'exclusive',ifAvailable:true},async lock=>{
+          if(!lock){report=refuse('idb_owner_lock_held');return;}
+          try{
+            if(!current()){report=refuse('full_origin_changed_before_idb_audit');return;}
+            const before=catalog(await idb.databases());
+            if(!current()){report=refuse('full_origin_changed_during_idb_audit');return;}
+            const rows=[];
+            for(const item of before){
+              if(!current()){report=refuse('full_origin_changed_during_idb_audit');return;}
+              let db=null;
+              try{
+                db=await new Promise((resolve,reject)=>{
+                  const req=idb.open(item.name);
+                  // A disappeared database would otherwise be recreated.
+                  req.onupgradeneeded=()=>{
+                    try{req.transaction?.abort();}catch(_){}
+                    reject(Error('m01_indexeddb_database_disappeared'));
+                  };
+                  req.onerror=()=>reject(req.error||Error('m01_indexeddb_open_failed'));
+                  req.onblocked=()=>reject(Error('m01_indexeddb_open_blocked'));
+                  req.onsuccess=()=>resolve(req.result);
+                });
+                if(db.version!==item.version)
+                  throw Error('m01_indexeddb_version_changed');
+                const names=Array.from(db.objectStoreNames||[]);
+                if(names.length>maxStores||names.some(name=>
+                  typeof name!=='string'||!name||name.length>256)
+                  ||new Set(names).size!==names.length)
+                  throw Error('m01_indexeddb_stores_invalid');
+                names.sort();
+                const known=Object.prototype.hasOwnProperty.call(
+                  M01_REVIEWED_IDB_STORE_EVIDENCE,item.name)
+                  ?M01_REVIEWED_IDB_STORE_EVIDENCE[item.name]:null;
+                const tracked=known?.knownStore?[known.knownStore]:[];
+                rows.push({
+                  database:item.name,version:item.version,
+                  sourceReviewed:!!known,
+                  provisionalOwner:known?.owner||null,
+                  sourceState:known?.state||'unreviewed',
+                  storeSchemaComplete:false,
+                  allStoreNames:names,
+                  reviewedStoreNames:names.filter(name=>tracked.includes(name)),
+                  unreviewedStoreNames:names.filter(name=>!tracked.includes(name))
+                });
+              }finally{
+                try{db?.close();}catch(_){}
+              }
+            }
+            const after=catalog(await idb.databases());
+            if(stableJson(before)!==stableJson(after)){
+              report=refuse('m01_indexeddb_catalog_changed_during_audit');return;
+            }
+            if(!current()){
+              report=refuse('full_origin_changed_after_idb_audit');return;
+            }
+            const fingerprint=await previewRecoveryFingerprint(rows);
+            if(!current()||stableJson(catalog(await idb.databases()))
+              !==stableJson(before)){
+              report=refuse('m01_indexeddb_catalog_changed_after_fingerprint');
+              return;
+            }
+            const unreviewedDatabases=rows.filter(row=>!row.sourceReviewed)
+              .map(row=>row.database);
+            const unreviewedStores=rows.flatMap(row=>
+              row.unreviewedStoreNames.map(store=>({
+                database:row.database,store
+              })));
+            report=refuse('m01_indexeddb_owner_gaps_observed',{
+              sourceStable:true,idbCatalogObserved:true,idbStoresObserved:true,
+              databaseCount:rows.length,
+              reviewedDatabaseCount:rows.length-unreviewedDatabases.length,
+              unreviewedDatabases,
+              unreviewedStores,
+              databaseStores:rows,
+              catalogFingerprint:fingerprint,
+              // Even zero unresolved names is not complete DB ownership,
+              // bytes verification, atomic snapshot or restore authority.
+              allStoresMapped:false,idbRecordBytesVerified:false,
+              independentRecoveryVerified:false,canPromote:false
+            });
+          }catch(error){
+            const reason=String(error?.message||'');
+            const allowed=new Set([
+              'm01_indexeddb_catalog_invalid',
+              'm01_indexeddb_database_disappeared',
+              'm01_indexeddb_version_changed',
+              'm01_indexeddb_stores_invalid',
+              'm01_indexeddb_open_blocked'
+            ]);
+            report=refuse(allowed.has(reason)?reason:'m01_indexeddb_audit_unavailable');
+          }
+        });
+    }catch(_){return refuse('m01_indexeddb_lock_failed');}
+    return report;
   }
 
   // Explicit developer-preview-only recovery *coverage* inventory.
@@ -19691,6 +19845,7 @@
     inspectPreviewNotesRepeatEditJournal,
     inspectPreviewIndependentBackupCoverage,
     inspectPreviewDynamicOwnerGaps,
+    inspectPreviewIndexedDbOwnerGaps,
     inspectPreviewLegacyImageBytes,
     inspectPreviewNotesSnapshotCompletionEvidence,
     inspectPreviewNotesFirstEditIntent,
