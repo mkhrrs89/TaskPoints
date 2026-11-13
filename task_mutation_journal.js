@@ -1051,6 +1051,30 @@
   core.schedulePendingTaskMutationCompaction = scheduleCompaction;
   core.flushPendingTaskMutations = () => persistPending('explicit-flush');
   core.clearPendingTaskMutations = () => {
+    // Reset/recovery cleanup is a separate V1 writer, not an ordinary
+    // Task mutation. Recheck the exact pending bytes immediately before
+    // deletion so a detectable peer edit cannot be erased by an older
+    // reset callback. This is best effort; localStorage has no atomic CAS.
+    // Deliberately allow malformed bytes to be cleared by an authorized
+    // destructive reset, as before; do not parse/normalize them here.
+    let priorRaw, latestRaw;
+    try {
+      priorRaw = storage.getItem(JOURNAL_KEY);
+      latestRaw = storage.getItem(JOURNAL_KEY);
+    } catch (_) {
+      journalSourceConflicts += 1;
+      const error = new Error('Task journal reset cleanup source is unreadable; pending edits were not cleared.');
+      error.code = 'TASKPOINTS_TASK_MUTATION_JOURNAL_CLEAR_SOURCE_UNREADABLE';
+      throw error;
+    }
+    if ((priorRaw !== null && typeof priorRaw !== 'string')
+      || (latestRaw !== null && typeof latestRaw !== 'string')
+      || latestRaw !== priorRaw) {
+      journalSourceConflicts += 1;
+      const error = new Error('Task journal changed before reset cleanup; newer pending edits were preserved.');
+      error.code = 'TASKPOINTS_TASK_MUTATION_JOURNAL_CLEAR_SOURCE_CHANGED';
+      throw error;
+    }
     storage.removeItem(JOURNAL_KEY);
     // Reset/recovery callers must never report a cleared Task journal while
     // stale pending edits can still replay after a later app restart.
