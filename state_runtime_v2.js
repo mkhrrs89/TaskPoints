@@ -19201,31 +19201,41 @@
               report=refuse('legacy_image_count_budget_exceeded',{imageCount:count});
               return;
             }
-            // Queue all reads synchronously before any await to preserve
-            // IndexedDB transaction activity on Safari/WebKit.
+            // Enumerate at most maxRows+1 keys (to catch a peer growing
+            // the store after count()). Never getAll() photo Blobs: doing so
+            // could allocate every photo before the 64-MiB budget is checked.
+            // Get just ONE Blob in a short readonly transaction, await that
+            // transaction's completion, then hash it outside the transaction.
+            // This also avoids Safari's inactive-transaction-on-await issue.
             const capture=async()=>{
-              const tx=db.transaction(storeName,'readonly');
-              const done=transactionPromise(tx);
-              const store=tx.objectStore(storeName);
-              const [keys,values]=await Promise.all([
-                requestPromise(store.getAllKeys()),
-                requestPromise(store.getAll()),done
+              const keysTx=db.transaction(storeName,'readonly');
+              const keysDone=transactionPromise(keysTx);
+              const [keys]=await Promise.all([
+                requestPromise(keysTx.objectStore(storeName)
+                  .getAllKeys(undefined,maxRows+1)),
+                keysDone
               ]);
-              if(!Array.isArray(keys)||!Array.isArray(values)
-                ||keys.length!==count||values.length!==count)
+              if(!Array.isArray(keys)||keys.length!==count)
                 throw Error('legacy_image_count_changed');
               const rows=[],seen=new Set();
               let bytes=0;
-              for(let i=0;i<keys.length;i++){
-                const id=keys[i],blob=values[i];
+              for(const id of keys){
                 if(typeof id!=='string'||!id||id.length>256
                   ||seen.has(id))throw Error('legacy_image_key_invalid');
                 seen.add(id);
+                const rowTx=db.transaction(storeName,'readonly');
+                const rowDone=transactionPromise(rowTx);
+                const [blob]=await Promise.all([
+                  requestPromise(rowTx.objectStore(storeName).get(id)),rowDone
+                ]);
+                if(blob===undefined)throw Error('legacy_image_missing');
                 if(!blob||typeof blob.arrayBuffer!=='function'
                   ||!Number.isSafeInteger(blob.size)||blob.size<0)
                   throw Error('legacy_image_blob_invalid');
                 bytes+=blob.size;
                 if(bytes>maxBytes)throw Error('legacy_image_byte_budget_exceeded');
+                // A single image buffer is the peak content allocation;
+                // release each image before reading the next record.
                 const data=await blob.arrayBuffer();
                 if(data.byteLength!==blob.size)
                   throw Error('legacy_image_blob_size_changed');
@@ -19268,7 +19278,8 @@
           }catch(error){
             const known=new Set([
               'legacy_image_count_changed','legacy_image_key_invalid',
-              'legacy_image_blob_invalid','legacy_image_byte_budget_exceeded',
+              'legacy_image_blob_invalid','legacy_image_missing',
+              'legacy_image_byte_budget_exceeded',
               'legacy_image_blob_size_changed']);
             const message=String(error?.message||'');
             report=refuse(known.has(message)?message:'legacy_image_audit_unavailable');
