@@ -18,7 +18,8 @@ test('whole legacy image byte audit is preview-only and cannot claim migration o
   assert.match(source,/offDeviceBackupVerified:false/);
   assert.match(source,/backupComplete:false,canRestore:false,canPromote:false/);
   assert.match(source,/readAuthority:'legacy_only',mutationAuthority:'legacy_only'/);
-  assert.match(runtime,/inspectPreviewIndependentBackupCoverage,\s*inspectPreviewLegacyImageBytes,/);
+  assert.match(runtime,/inspectPreviewIndependentBackupCoverage,/);
+  assert.match(runtime,/inspectPreviewLegacyImageBytes,/);
 });
 
 test('image audit requires exact source and existing database without upgrading or altering V1 bytes',()=>{
