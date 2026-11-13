@@ -35,8 +35,18 @@ test('image audit requires exact source and existing database without upgrading 
 });
 
 test('all-image audit checks every row twice and hashes image content, not just counts',()=>{
-  assert.match(source,/getAllKeys\(\)/);
-  assert.match(source,/getAll\(\)/);
+  assert.match(source,/getAllKeys\(undefined,maxRows\+1\)/,
+    'key enumeration must be bounded even if a peer adds rows after count');
+  assert.doesNotMatch(source,/\.getAll\s*\(/,
+    'loading every image Blob at once can exceed an iPhone memory budget');
+  assert.match(source,/requestPromise\(rowTx\.objectStore\(storeName\)\.get\(id\)\)/,
+    'stream image reads one key at a time');
+  assert.match(source,/const rowTx=db\.transaction\(storeName,'readonly'\)/);
+  assert.match(source,/const \[blob\]=await Promise\.all\(\[/);
+  assert.match(source,/rowDone/);
+  assert.match(source,/if\(bytes>maxBytes\)throw Error\('legacy_image_byte_budget_exceeded'\);/);
+  assert.ok(source.indexOf('if(bytes>maxBytes)')<source.indexOf('await blob.arrayBuffer()'),
+    'byte budget must be enforced before allocating an image buffer');
   assert.match(source,/\.count\(\)/);
   assert.match(source,/const first=await capture\(\)/);
   assert.match(source,/const second=await capture\(\)/);
@@ -47,6 +57,7 @@ test('all-image audit checks every row twice and hashes image content, not just 
   assert.match(source,/legacy_image_blob_invalid/);
   assert.match(source,/legacy_image_byte_budget_exceeded/);
   assert.match(source,/legacy_image_count_changed/);
+  assert.match(source,/legacy_image_missing/);
   assert.match(source,/legacy_image_bytes_changed_during_audit/);
   assert.match(source,/imageReferencesCovered:false/);
   assert.doesNotMatch(source,/\.get\(\s*(?:imageId|id)\s*\)/,
