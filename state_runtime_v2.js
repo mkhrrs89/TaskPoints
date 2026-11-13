@@ -19135,11 +19135,11 @@
     if(typeof expectedInventoryToken!=='string'||!expectedInventoryToken)
       return refuse('full_origin_token_required');
     if(typeof global.crypto?.subtle?.digest!=='function'
-      ||typeof global.TextEncoder!=='function)
+      ||typeof global.TextEncoder!=='function')
       return refuse('sha256_unavailable');
-    if(typeof global.indexedDB?.databases!=='function)
+    if(typeof global.indexedDB?.databases!=='function')
       return refuse('indexeddb_database_catalog_unavailable');
-    if(typeof global.navigator?.locks?.request!=='function)
+    if(typeof global.navigator?.locks?.request!=='function')
       return refuse('lock_manager_unavailable');
     const generation=currentGeneration({create:false});
     if(!generation)return refuse('generation_unavailable');
