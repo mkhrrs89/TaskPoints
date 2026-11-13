@@ -203,6 +203,8 @@ test('M01 live IndexedDB ownership witness remains read-only, bounded and fail-c
     'req.onupgradeneeded=()=>',
     'req.transaction?.abort()',
     'db.objectStoreNames',
+    "typeof db.objectStoreNames.contains!=='function'",
+    'names.length!==db.objectStoreNames.length',
     'db?.close()',
     'catalog(await idb.databases())',
     'previewRecoveryFingerprint(rows)',
