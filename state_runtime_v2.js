@@ -18878,6 +18878,97 @@
   }
 
 
+  // M01 read-only owner GAP WITNESS: this is the frozen first-pass source
+  // inventory, not a list of verified storage owners. Preserve the literal
+  // map so CI can compare it with the reviewed manifest as sources evolve.
+  // Unknown imported fields/keys are surfaced, never removed or normalized.
+  const M01_REVIEWED_ORIGIN_KEY_FAMILIES = Object.freeze({"taskpoints_active_page_v1":["session"],"taskpoints_backup_latest":["backup","recovery"],"taskpoints_backup_prev1":["recovery"],"taskpoints_backup_prev2":["recovery"],"taskpoints_backup_prev3":["recovery"],"taskpoints_emergency_pre_restore_mirror_v1":["recovery"],"taskpoints_emergency_quarantined_phase5b_journal_v1":["recovery"],"taskpoints_emergency_recovery_hold_v1":["recovery"],"taskpoints_full_backup":["backup"],"taskpoints_gallery_columns":["game"],"taskpoints_group_active_players":["game"],"taskpoints_habit_fast_path_disabled_v1":["habits"],"taskpoints_habit_order_overlay_v1":["habits"],"taskpoints_home_targeted_render_disabled_v1":["settings"],"taskpoints_inbox_scan_checkpoint_v1":["tasks"],"taskpoints_indexeddb_browser_session_v1":["session"],"taskpoints_indexeddb_requalification_diagnostics_v1":["recovery"],"taskpoints_indexeddb_requalification_v1":["recovery"],"taskpoints_notes_authoritative_v1":["notes"],"taskpoints_notes_dirty_v1":["notes"],"taskpoints_notes_v1":["notes","settings"],"taskpoints_pending_flex_completions_v1":["habits"],"taskpoints_pending_flex_order_v1":["habits"],"taskpoints_pending_habit_deltas_v1":["habits"],"taskpoints_pending_inbox_state_v1":["tasks"],"taskpoints_pending_player_edits_v1":["game"],"taskpoints_pending_task_mutations_v1":["tasks"],"taskpoints_phase3_read_diagnostics_v1":["storage"],"taskpoints_phase3_read_mode_v1":["storage"],"taskpoints_phase3_verified_session_cache_v1":["storage"],"taskpoints_phase4_diagnostics_v1":["storage"],"taskpoints_phase4_storage_mode_v1":["storage"],"taskpoints_phase4_verified_primary_cache_v1":["storage"],"taskpoints_phase5b_pending_changes_v1":["recovery"],"taskpoints_player_sort_mode":["game"],"taskpoints_quarantined_snapshot":["recovery"],"taskpoints_rankings_scope_season3_rollover_v1":["settings"],"taskpoints_rankings_scope_season4_rollover_v1":["settings"],"taskpoints_rankings_scope_v1":["settings"],"taskpoints_ratings_show_inactive":["settings"],"taskpoints_recovery_attempt_lock_v1":["recovery"],"taskpoints_recovery_write_lock_v1":["recovery"],"taskpoints_safety_vault_v1":["recovery"],"taskpoints_season_archive_data":["season"],"taskpoints_season_round_collapsed_v1":["season"],"taskpoints_shadow_state_v1":["recovery"],"taskpoints_skills_bar_color":["settings"],"taskpoints_skills_bar_max":["settings"],"taskpoints_skills_level_config":["settings"],"taskpoints_standings_scope_season3_rollover_v1":["settings"],"taskpoints_standings_scope_season4_rollover_v1":["settings"],"taskpoints_standings_scope_v1":["settings"],"taskpoints_state_revision_v1":["storage"],"taskpoints_state_v2":["v2-preview"],"taskpoints_state_v2_dark_mode_v1":["v2-preview"],"taskpoints_state_v2_generation_v1":["v2-preview"],"taskpoints_state_v2_wal_test_armed_v1":["v2-preview"],"taskpoints_storage_data_loss_guard_v1":["recovery"],"taskpoints_today_view_v1":["today"],"taskpoints_v1":["core"],"taskpoints_v2_game_preview":["v2-preview"],"taskpoints_v2_habit_order_preview":["v2-preview"],"taskpoints_v2_notes_preview":["v2-preview"],"taskpoints_v2_pending_mutations_v1":["v2-preview"],"taskpoints_v2_recovery_checkpoints_preview":["v2-preview"],"taskpoints_v2_stale_habit_tap_v1":["session"],"taskpoints_verified_secondary_restore_package":["recovery"],"taskpoints_verified_secondary_v1":["recovery"],"tp_audit_dupe_habits_last_run":["habits"],"tp_perf_trace_enabled_v1":["session"],"tp_perf_trace_pages_v1":["session"],"tp_perf_trace_pending_nav_v1":["session"],"tp_projects_v1":["projects"],"tp-nav-emoji":["settings"],"tp-nav-icon":["settings"],"tpBootSeenThisSession":["session"]});
+  const M01_EXPLICIT_LEGACY_FIELDS = Object.freeze(["completions","currentSeason","flexActions","gameHistory","habitTagColors","habits","latestSeasonId","liveDiffHistory","liveDiffSnapshots","matchups","notes","opponentDripSchedules","playerBadges","players","projects","reminders","reservedPlayerPids","schedule","scoringSettings","seasonHistory","tasks","vo2MaxHistory","weightHistory","workHistory","youImageId","youName","youNotes","youPrimaryColor","youRivalId","youSecondaryColor"]);
+
+  async function inspectPreviewDynamicOwnerGaps(expectedInventoryToken) {
+    const refuse=(reason,detail={})=>({
+      checked:true,previewOnly:true,readOnly:true,
+      sourceStable:false,fieldNamesObserved:false,keyNamesObserved:false,
+      ownerCoverageVerified:false,allWritersKnown:false,
+      productionWritersFenced:false,canPromote:false,
+      readAuthority:'legacy_only',mutationAuthority:'legacy_only',
+      reason,...detail
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    if(typeof expectedInventoryToken!=='string'||!expectedInventoryToken)
+      return refuse('full_origin_token_required');
+    if(typeof core.parseTaskPointsStorageJson!=='function')
+      return refuse('legacy_parser_unavailable');
+    if(typeof global.crypto?.subtle?.digest!=='function'
+      ||typeof global.TextEncoder!=='function')
+      return refuse('sha256_unavailable');
+    const generation=currentGeneration({create:false});
+    if(!generation)return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    const current=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&currentGeneration({create:false})===generation
+      &&darkMirrorModeEpoch===epoch
+      &&!previewNotesWitnessObservedExternalChange(generation,epoch)
+      &&captureReadOnlyFullStorageInventory()===expectedInventoryToken;
+    try {
+      const before=captureReadOnlyFullStorageInventory();
+      if(before!==expectedInventoryToken||!current())
+        return refuse('full_origin_changed_before_owner_audit');
+      const entries=JSON.parse(before);
+      if(!Array.isArray(entries)||entries.length>10000)
+        return refuse('full_origin_inventory_invalid');
+      const seen=new Set();
+      for(const row of entries){
+        if(!Array.isArray(row)||row.length!==2
+          ||typeof row[0]!=='string'||typeof row[1]!=='string'
+          ||seen.has(row[0]))
+          return refuse('full_origin_inventory_invalid');
+        seen.add(row[0]);
+      }
+      const main=entries.find(row=>row[0]===(core.STORAGE_KEY||'taskpoints_v1'));
+      if(!main)return refuse('legacy_snapshot_missing');
+      // Use the exact V1 parser (including compressed/packed snapshots).
+      // Do not call normalizeState(): it may synthesize defaults or hide
+      // unknown imported fields that require future ownership review.
+      const parsed=core.parseTaskPointsStorageJson(main[1],null);
+      if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))
+        return refuse('legacy_snapshot_invalid');
+      const observedKeys=[...seen].sort();
+      const observedFields=Object.keys(parsed).sort();
+      const unknownKeys=observedKeys.filter(key=>
+        !Object.prototype.hasOwnProperty.call(M01_REVIEWED_ORIGIN_KEY_FAMILIES,key));
+      const unknownFields=observedFields.filter(key=>
+        !M01_EXPLICIT_LEGACY_FIELDS.includes(key));
+      const reviewedKeyWitnesses=observedKeys.filter(key=>
+        Object.prototype.hasOwnProperty.call(M01_REVIEWED_ORIGIN_KEY_FAMILIES,key))
+        .map(key=>({key,provisionalFamilies:[...M01_REVIEWED_ORIGIN_KEY_FAMILIES[key]]}));
+      if(!current())return refuse('full_origin_changed_during_owner_audit');
+      // Fingerprint of the entire origin inventory is verification evidence,
+      // not an export. Never return any persisted values to the caller.
+      const originFingerprint=await previewRecoveryFingerprint(entries);
+      if(!current())return refuse('full_origin_changed_after_owner_audit');
+      return refuse('m01_dynamic_owner_gaps_observed',{
+        sourceStable:true,keyNamesObserved:true,fieldNamesObserved:true,
+        originFingerprint,
+        observedOriginKeyCount:observedKeys.length,
+        reviewedOriginKeyCount:reviewedKeyWitnesses.length,
+        reviewedKeyWitnesses,
+        unknownOriginKeyCount:unknownKeys.length,
+        unknownOriginKeys:unknownKeys,
+        observedPrimaryFieldCount:observedFields.length,
+        explicitlyTrackedPrimaryFields:observedFields.filter(key=>
+          M01_EXPLICIT_LEGACY_FIELDS.includes(key)),
+        unknownPrimaryFieldCount:unknownFields.length,
+        unknownPrimaryFields:unknownFields,
+        // Even zero unknown names does NOT prove source completeness or
+        // verified writer ownership. The 78 handoffs remain unproven.
+        ownerCoverageVerified:false,allWritersKnown:false,
+        productionWritersFenced:false,canPromote:false
+      });
+    }catch(_){return refuse('m01_dynamic_owner_audit_unavailable');}
+  }
+
   // Explicit developer-preview-only recovery *coverage* inventory.
   // Browser origin data lives in multiple independent stores: the full
   // localStorage namespace, V2 runtime/WAL, shadow migration, and images.
@@ -19599,6 +19690,7 @@
     rehearsePreviewAdmittedNotesRepeatSnapshotSync,
     inspectPreviewNotesRepeatEditJournal,
     inspectPreviewIndependentBackupCoverage,
+    inspectPreviewDynamicOwnerGaps,
     inspectPreviewLegacyImageBytes,
     inspectPreviewNotesSnapshotCompletionEvidence,
     inspectPreviewNotesFirstEditIntent,
