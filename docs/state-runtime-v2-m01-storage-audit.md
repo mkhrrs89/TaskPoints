@@ -364,3 +364,37 @@ The real V1 Task journal already has read-before-write source-byte checks and re
 The check is **disabled on production hosts** and when preview dark mode is explicitly turned off. An old preview tab must reload after a reset to adopt the new generation. The existing synchronous V1 journal remains the only acknowledged Task durability path; the V2 IndexedDB store stays an isolated observer. New [source-executed regression cases](../tests/task_mutation_journal_contract.test.js) cover stale Task edits, generation change between preflight and write, rotation during quiet compaction, denied reads, valid new-generation reload, preview-off and production-host exclusions, and the shipped bundle order. [V2 integration harness](../tests/state_runtime_v2_task_live_journal_bridge_contract.test.js) now reproduces the real bootstrap's generation-before-Task-journal order. The [Chromium/WebKit scenario](../tests/browser/run-v2-browser.mjs) uses the real generation rotation API and verifies old-tab refusal, no Task compaction, unchanged V1 bytes and legacy authority.
 
 **Known limitations:** this is still **not** cross-tab atomic compare-and-swap or complete writer fencing. Code running in a pre-V2 tab cannot be forced to participate; the direct recovery/reset Task-journal clear path, ordinary snapshot writers, old branches and nonpilot collections still need individually proven admission/rollback behavior. No Task data is moved to authoritative IndexedDB, and no live production V2 read/write switch occurs. M02 stays Working, C03 stays Open, **0/78** certified production writer owners, **8/23** Verified preview-scoped foundations, **67/100** weighted readiness. Main was not modified or synced.
+
+
+## November 13 — all legacy image Blob bytes, including orphan rows (C01/M01 partial)
+
+The read-only V2 preview method `inspectPreviewLegacyImageBytes(expectedInventoryToken)`
+checks the **entire existing legacy IndexedDB `taskpoints/images` store**, not
+just the image IDs referenced by current player fields. It never opens an
+absent database in upgrade/create mode, never mutates or exports a record, and
+requires the exact live full-origin token, a stable preview reset generation,
+and an available cooperating-browser lock. Two separate readonly captures
+check the complete key list and digest each stored Blob's actual bytes using
+SHA-256, then require identical row identities, byte lengths, MIME types and
+content hashes. A concurrent same-count replacement cannot silently pass as
+the same source if observed between those captures; comparing fingerprints
+across independent audits also detects changes in otherwise identical
+record counts. Unreadable, non-Blob, over-budget or changing records fail
+closed. The byte cap is 64 MiB and the row cap is 512; exceeding either does
+**not** qualify as verified image coverage.
+
+The new [browser rehearsal](../tests/browser/run-v2-browser.mjs) uses disposable
+real IndexedDB with one referenced and one orphan image; checks exact
+fingerprint changes after a peer replaces the orphan without changing counts;
+and rejects a non-Blob row or stale localStorage token. The
+[source contract](../tests/state_runtime_v2_legacy_image_bytes_contract.test.js)
+is required by V2 core CI. Browser implementations that refuse Blob cloning
+are explicitly reported as **not verified** rather than counted as success.
+
+**Scope limits:** A local image-byte digest is not an independent off-device
+backup, does not prove all image references or other IndexedDB stores, cannot
+atomically fence noncooperating old tabs, and does not offer a restore. The
+older count-only whole-origin audit remains unchanged. No migrations,
+production writes or live image owner handoffs occurred; **C01 remains Open,
+M01 remains Working, 0/78 writer handoffs certified, 8/23 checkpoints verified,
+67/100 weighted readiness**. V1 is still authoritative; Main untouched.
