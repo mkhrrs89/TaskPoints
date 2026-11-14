@@ -11763,6 +11763,62 @@ try {
     return {ordinaryHistoryWipeGuardPreserved:true,noV2Authority:true};
   });
 
+  await run('dark preview refuses a stale full save despite an already-empty Task journal',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const storageKey='taskpoints_v1';
+      const journalKey='taskpoints_pending_task_mutations_v1';
+      const beforeRaw=localStorage.getItem(storageKey);
+      const candidate=core.parseTaskPointsStorageJson(beforeRaw,{});
+      const peer={...candidate,notes:'Newer peer Notes must survive',
+        tasks:candidate.tasks.map(task=>task.id==='synthetic-task'
+          ?{...task,title:'Peer edit after journal compacted'}:task)};
+      const peerRaw=JSON.stringify(peer);
+      const original=core.parseTaskPointsStorageJson;
+      let injected=0,first;
+      core.parseTaskPointsStorageJson=function(raw,...args){
+        if(injected++===0)localStorage.setItem(storageKey,peerRaw);
+        return original.call(this,raw,...args);
+      };
+      try{
+        first=core.saveStateSnapshot({...candidate,notes:'Stale tab Notes'},{
+          immediateWrite:true,savePath:'test-empty-task-journal-source-race'
+        });
+      }finally{core.parseTaskPointsStorageJson=original;}
+      const persistedAfterRefusal=localStorage.getItem(storageKey);
+      const retry=core.saveStateSnapshot(peer,{
+        immediateWrite:true,savePath:'test-empty-task-journal-source-retry'
+      });
+      const current=core.parseTaskPointsStorageJson(
+        localStorage.getItem(storageKey),{});
+      return {injected,firstSkipped:first?.skipped,
+        sourceBlocked:first?.blockedByTaskSourceChanged,
+        journalChanged:first?.taskJournalSourceChanged,
+        snapshotChanged:first?.taskSnapshotSourceChanged,
+        sourceRetained:persistedAfterRefusal===peerRaw,
+        journalAfterRefusal:localStorage.getItem(journalKey),
+        retrySkipped:retry?.skipped,
+        finalTask:current.tasks.find(task=>task.id==='synthetic-task'),
+        finalNotes:current.notes,
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.equal(result.injected>=1,true);
+    assert.equal(result.firstSkipped,true);
+    assert.equal(result.sourceBlocked,true);
+    assert.equal(result.journalChanged,false);
+    assert.equal(result.snapshotChanged,true);
+    assert.equal(result.sourceRetained,true);
+    assert.equal(result.journalAfterRefusal,null);
+    assert.notEqual(result.retrySkipped,true);
+    assert.equal(result.finalTask.title,'Peer edit after journal compacted');
+    assert.equal(result.finalNotes,'Newer peer Notes must survive');
+    assert.equal(result.authority,'legacy_only');
+    return {drainedJournalStaleSaveRefused:true,
+      recentPeerSnapshotPreserved:true,safeRetrySupported:true,
+      darkPreviewOnly:true,noV2Authority:true};
+  });
+
   await run('ordinary V1 full save refuses an interleaved peer Task journal change without fallback',async context=>{
     const page=await open(context);
     const proof=await page.evaluate(()=>{
