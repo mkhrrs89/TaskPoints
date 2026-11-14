@@ -290,3 +290,38 @@ test('M01 rejected IDB opens close late successful connections without writing d
     assert.equal(abortions,event==='onupgradeneeded'?1:0);
   }
 });
+
+
+test('M01 preview sessionStorage census matches all source-known session keys and stays dark/read-only',()=>{
+  const runtime=fs.readFileSync(path.join(root,'state_runtime_v2.js'),'utf8');
+  const start=runtime.indexOf('const M01_REVIEWED_SESSION_STORAGE_KEYS = Object.freeze([');
+  const end=runtime.indexOf('async function inspectPreviewSessionStorageOwnerGaps(',start);
+  const next=runtime.indexOf('// M01 preview-only IDB catalog inspection:',end);
+  assert.ok(start>0&&end>start&&next>end);
+  const knownBlock=runtime.slice(start,end);
+  const reviewed=[...knownBlock.matchAll(/'([^']+)'/g)].map(match=>match[1]);
+  const manifest=[...new Set(inventory.keyEvidence
+    .filter(entry=>entry.family==='session').map(entry=>entry.key))];
+  assert.deepEqual(reviewed.slice().sort(),manifest.sort(),
+    'new sessionStorage keys must be explicitly source-reviewed before M01 can close');
+  const source=runtime.slice(end,next);
+  for(const required of [
+    'isWalTestPreviewHost()',
+    'isDarkEnabled()',
+    'currentGeneration({create:false})',
+    'captureReadOnlyFullStorageInventory()===expectedInventoryToken',
+    'previewNotesWitnessObservedExternalChange(generation,epoch)',
+    'sessionFingerprint:fingerprint',
+    'sessionInventoryStable:true',
+    'allSessionKeysMapped:false',
+    "canPromote:false",
+    "readAuthority:'legacy_only'"
+  ])assert.ok(source.includes(required),'session M01 audit lost safety rule: '+required);
+  assert.doesNotMatch(source,
+    /(?:localStorage|sessionStorage|store)\\s*\\.\\s*(?:setItem|removeItem|clear)\\s*\\(/,
+    'the census must not change any browser storage');
+  assert.doesNotMatch(source, /\\b(?:indexedDB|seedFromLegacy|saveStateSnapshot)\\b/,
+    'session scan must not seed or touch storage authority');
+  assert.match(runtime,
+    /inspectPreviewDynamicOwnerGaps,\\s*inspectPreviewSessionStorageOwnerGaps,/);
+});
