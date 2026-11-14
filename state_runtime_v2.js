@@ -19724,6 +19724,16 @@
     'legacy_changed_after_preview_commit',
     'legacy_unreadable_before_reconcile',
     'legacy_unreadable_during_reconcile',
+    'legacy_changed_after_noop_parity',
+    'legacy_unreadable_after_noop_parity',
+    // These are independently reported by the final read-only parity scan.
+    // A peer can land another durable V1 edit after our shadow seed/reconcile.
+    // Retry a bounded idle reconciliation instead of stranding that edit.
+    'legacy_changed_before_inspection',
+    'legacy_changed_during_inspection',
+    'legacy_unreadable_before_inspection',
+    'task_preview_source_stale',
+    'task_preview_parity_unreadable',
     'full_origin_unreadable'
   ]);
   let observedTaskTransientRetries = 0;
