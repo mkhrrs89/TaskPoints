@@ -605,23 +605,29 @@ test('peer edit arriving during final parity is retried and verified without los
   const updated={...initial,
     tasks:[{...initial.tasks[0],title:'Peer edit arriving during final parity'}]};
   const updatedRaw=JSON.stringify(updated);
-  const read=app.core.readTaskPointsStoredState;
-  let reads=0;
-  app.core.readTaskPointsStoredState=()=>{
-    reads++;
-    if(reads===2)app.localStorage.setItem(KEY,updatedRaw);
-    return read();
+  const originalSubtle=app.context.crypto.subtle;
+  const originalDigest=originalSubtle.digest.bind(originalSubtle);
+  let digests=0;
+  app.context.crypto.subtle={
+    digest:async(...args)=>{
+      const hashed=await originalDigest(...args);
+      // First digest authenticates the already-seeded Task mirror. The
+      // second is parity's digest; mutate V1 after hashing but before
+      // the parity inspector's final V1 source recheck.
+      if(++digests===2)app.localStorage.setItem(KEY,updatedRaw);
+      return hashed;
+    }
   };
   app.api.queueObservedLegacyTaskJournal();
   const first=await app.api.flushObservedLegacyTaskJournal();
-  assert.equal(reads>=2,true,'final parity must perform a separate V1 read');
+  assert.equal(digests>=2,true,'parity must separately hash Tasks');
   assert.equal(first.verified,false);
-  assert.equal(first.reason,'task_preview_source_stale');
+  assert.equal(first.reason,'legacy_changed_before_inspection');
   assert.equal(app.api.getObservedLegacyTaskStatus().pending,true,
     'durable peer edit discovered during parity must get a bounded retry');
   assert.equal(app.api.getObservedLegacyTaskStatus().transientRetryCount,1);
   assert.equal(app.localStorage.getItem(KEY),updatedRaw);
-  app.core.readTaskPointsStoredState=read;
+  app.context.crypto.subtle=originalSubtle;
   const second=await app.api.flushObservedLegacyTaskJournal();
   assert.equal(second.verified,true,second.reason);
   assert.equal(app.api.getObservedLegacyTaskStatus().pending,false);
@@ -634,7 +640,7 @@ test('peer edit arriving during final parity is retried and verified without los
   assert.equal(app.api.getStatus().readAuthority,'legacy_only');
 });
 
-test('repeated parity peer churn is bounded and does not certify a stale Task shadow',async()=>{
+test('repeated peer source churn is bounded and does not certify a stale Task shadow',async()=>{
   const app=install();
   await app.api.seedFromLegacy();
   assert.equal((await app.api.rehearsePreviewTaskCollectionSeed()).verified,true);
