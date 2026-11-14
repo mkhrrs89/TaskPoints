@@ -4555,7 +4555,7 @@ function markHomeMorningStartupPhase(phase, details = {}) {
       report.phases = [];
     }
     const safe = {};
-    for (const key of ['players', 'historyRows', 'matchups', 'ledgerRows', 'saved']) {
+    for (const key of ['players', 'historyRows', 'matchups', 'ledgerRows', 'saved', 'processedPlayers', 'scoringMs', 'dripMs']) {
       if (typeof details[key] === 'boolean') safe[key] = details[key];
       else if (Number.isFinite(details[key])) safe[key] = Math.max(0, Math.floor(details[key]));
     }
@@ -4632,6 +4632,15 @@ const scoreNpcParticipants = () => {
     ? new Map(TaskPointsCore.computeCanonicalRankings(state, { preindexed: true }).map(row => [row.playerId, row]))
     : null;
   markHomeMorningStartupPhase('rankings-ready');
+  const morningScoringInputs = typeof TaskPointsCore?.buildNpcMorningScoringInputs === 'function'
+    ? TaskPointsCore.buildNpcMorningScoringInputs(state, participantIds, todayKey)
+    : null;
+  markHomeMorningStartupPhase('npc-inputs-ready');
+  let processedPlayers = 0;
+  let scoringMs = 0;
+  let dripMs = 0;
+  const timerNow = () => typeof performance !== 'undefined' && performance.now
+    ? performance.now() : Date.now();
   participantIds.forEach(id => {
   if (id === 'YOU') return;
   const player = playerMap.get(id);
@@ -4647,18 +4656,29 @@ const scoreNpcParticipants = () => {
 
 let capturedEffects = null;
 
+const scoreStarted = timerNow();
 const score = simulateAiScoreForPlayer(player, todayKey, {
   opponent,
   canonicalRanksByPlayerId,
+  ...(morningScoringInputs || {}),
 
   captureEffects(effects) {
     capturedEffects = effects || null;
   }
 });
+scoringMs += timerNow() - scoreStarted;
 
 scoresById[id] = score;
 effectsById[id] = capturedEffects;
+  const dripStarted = timerNow();
   ensureOpponentDripSchedule(todayKey, id, score);
+  dripMs += timerNow() - dripStarted;
+  processedPlayers += 1;
+  if (processedPlayers % 30 === 0) {
+    markHomeMorningStartupPhase('npc-progress', {
+      processedPlayers, scoringMs, dripMs
+    });
+  }
   const existingHistory = todayHistoryByPlayer.get(String(id));
   if (existingHistory) {
     if (capturedEffects && typeof capturedEffects === 'object') existingHistory.effects = capturedEffects;
@@ -4673,6 +4693,9 @@ effectsById[id] = capturedEffects;
     state.gameHistory.push(historyRow);
     todayHistoryByPlayer.set(String(id), historyRow);
   }
+  });
+  markHomeMorningStartupPhase('npc-loop-finished', {
+    processedPlayers, scoringMs, dripMs
   });
 };
 

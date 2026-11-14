@@ -10322,6 +10322,76 @@ function softCurbNpcScore(rawScore) {
     return { rating, streak, bonus };
   }
 
+  // Optional morning-only inputs. A daily slate scores each NPC once against
+  // fixed *historical* matchups. Build both scoring history indexes with one
+  // pass each; no game outcome, probability, random draw, or schema changes.
+  function buildNpcMorningScoringInputs(state, playerIds, beforeDateKey) {
+    const ids = new Set((Array.isArray(playerIds) ? playerIds : [])
+      .filter(id => id && id !== 'YOU'));
+    const npcLatestHistoryByPlayerId = new Map([...ids].map(id => [id, null]));
+    const badHistoryIds = new Set();
+    for (const row of (Array.isArray(state?.gameHistory) ? state.gameHistory : [])) {
+      if (!row || !ids.has(row.playerId) || badHistoryIds.has(row.playerId)) continue;
+      if (typeof row.date !== 'string') {
+        // Legacy score sorting expects .date.localeCompare. Leave unusual
+        // records on the established per-player path rather than reinterpret.
+        npcLatestHistoryByPlayerId.delete(row.playerId);
+        badHistoryIds.add(row.playerId);
+        continue;
+      }
+      const previous = npcLatestHistoryByPlayerId.get(row.playerId);
+      // A stable descending sort uses the earliest row for equal dates.
+      if (!previous || row.date.localeCompare(previous.date) > 0) {
+        npcLatestHistoryByPlayerId.set(row.playerId, row);
+      }
+    }
+
+    const npcStreakByPlayerId = new Map();
+    const date = String(beforeDateKey || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      for (const id of ids) npcStreakByPlayerId.set(id, 0);
+      return { npcLatestHistoryByPlayerId, npcStreakByPlayerId };
+    }
+    const seasonStart = getStreakySeasonStart(date);
+    const grouped = new Map([...ids].map(id => [id, []]));
+    for (const [index, matchup] of (Array.isArray(state?.matchups) ? state.matchups : []).entries()) {
+      if (!matchup || matchup.completed === false || matchup.result === 'pending') continue;
+      const key = String(matchup.dateKey || matchup.date || matchup.dateISO || '').slice(0, 10);
+      if (key < seasonStart || key >= date) continue;
+      const aId = String(matchup.playerAId || '');
+      const bId = String(matchup.playerBId || '');
+      if (!grouped.has(aId) && !grouped.has(bId)) continue;
+      if (matchup.scoreA == null || matchup.scoreB == null ||
+          matchup.scoreA === '' || matchup.scoreB === '') continue;
+      const a = Number(matchup.scoreA);
+      const b = Number(matchup.scoreB);
+      if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+      const game = Number(matchup.gameNumber || matchup.seriesGameNumber) || 0;
+      const draw = a === b;
+      if (grouped.has(aId)) {
+        grouped.get(aId).push({ key, order: index, game, result: draw ? 0 : (a > b ? 1 : -1) });
+      }
+      if (bId !== aId && grouped.has(bId)) {
+        grouped.get(bId).push({ key, order: index, game, result: draw ? 0 : (b > a ? 1 : -1) });
+      }
+    }
+    for (const [id, rows] of grouped) {
+      rows.sort((a, b) => b.key.localeCompare(a.key) || b.game - a.game || b.order - a.order);
+      if (!rows.length || rows[0].result === 0) {
+        npcStreakByPlayerId.set(id, 0);
+        continue;
+      }
+      const direction = rows[0].result;
+      let streak = 0;
+      for (const row of rows) {
+        if (row.result !== direction) break;
+        streak++;
+      }
+      npcStreakByPlayerId.set(id, streak * direction);
+    }
+    return { npcLatestHistoryByPlayerId, npcStreakByPlayerId };
+  }
+
 function simulateAiScoreForPlayerCore(player, dateKey, options = {}) {
   if (!player) {
     return NPC_SCORE_LOW_SOFT_CAP_MIN;
@@ -10340,7 +10410,11 @@ function simulateAiScoreForPlayerCore(player, dateKey, options = {}) {
     typeof player.varianceTilt === "number" ? player.varianceTilt : (player.varianceTilt || 50)
   );
   const momentum = Number(player.momentum);
-  const streakyEffect = computeStreakyEffect(player, computeNpcWinLossStreak(state, player.id, dateKey));
+  const streakMap = context.npcStreakByPlayerId;
+  const signedStreak = streakMap instanceof Map && streakMap.has(player.id)
+    ? streakMap.get(player.id)
+    : computeNpcWinLossStreak(state, player.id, dateKey);
+  const streakyEffect = computeStreakyEffect(player, signedStreak);
 
   let riskyRating = Number(player.risky);
   if (isNaN(riskyRating)) riskyRating = 0;
@@ -10348,9 +10422,12 @@ function simulateAiScoreForPlayerCore(player, dateKey, options = {}) {
 
   let previousScore = null;
   if (momentum && Array.isArray(state?.gameHistory) && state.gameHistory.length) {
-    const prev = state.gameHistory
-      .filter(g => g.playerId === player.id)
-      .sort((a,b) => b.date.localeCompare(a.date))[0];
+    const previousMap = context.npcLatestHistoryByPlayerId;
+    const prev = previousMap instanceof Map && previousMap.has(player.id)
+      ? previousMap.get(player.id)
+      : state.gameHistory
+        .filter(g => g.playerId === player.id)
+        .sort((a,b) => b.date.localeCompare(a.date))[0];
 
     if (prev && prev.date !== dateKey) {
       const parsedPrevScore = Number(prev.score);
@@ -10870,6 +10947,7 @@ return Number(cappedScore.toFixed(1));
     roundPoints,
     computeMomentumEffects,
     computeNpcWinLossStreak,
+    buildNpcMorningScoringInputs,
     computeStreakyEffect,
     getStreakySeasonStart,
 generateOpponentDripScheduleCore,

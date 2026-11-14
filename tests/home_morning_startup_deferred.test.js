@@ -251,3 +251,26 @@ test('deferred historical repair uses only fresh authoritative data and does not
   assert.equal(calls.reads, 2);
   assert.equal(calls.saves, 1, 'daily save already persisted the repair');
 });
+
+test('morning scoring milestones distinguish NPC scoring, drip and history preparation', () => {
+  const source = extractFunction('simulateToday');
+  for (const phase of ['npc-inputs-ready', 'npc-progress', 'npc-loop-finished']) {
+    assert.ok(source.includes("'" + phase + "'"));
+  }
+  assert.match(source, /buildNpcMorningScoringInputs\(state, participantIds, todayKey\)/);
+  assert.match(source, /scoringMs \+= timerNow\(\) - scoreStarted/);
+  assert.match(source, /dripMs \+= timerNow\(\) - dripStarted/);
+  assert.match(source, /processedPlayers % 30 === 0/);
+  assert.match(home, /'processedPlayers', 'scoringMs', 'dripMs'/);
+});
+
+test('boot script timing retains stalled filenames but never skips scripts or changes save data', () => {
+  assert.ok(gate.includes("tp_home_boot_script_timing_v1"));
+  assert.ok(gate.includes("recordScriptReplay('start', label, index + 1)"));
+  assert.ok(gate.includes("await replayScript(node)"));
+  assert.ok(gate.includes("recordScriptReplay('end', label, index + 1)"));
+  assert.ok(settings.includes('scriptReplaySummary()'));
+  assert.ok(settings.includes("summaryOf('tp_home_morning_startup_trace_v1'"));
+  const snippet = settings.slice(settings.indexOf('(function enableMorningStartupDiagnostics()'));
+  assert.ok(!snippet.includes('localStorage.setItem'), 'reading diagnostics never modifies storage');
+});

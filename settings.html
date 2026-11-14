@@ -5191,7 +5191,7 @@ return;
           const gap = Number.isFinite(time) && last !== null
             ? ' | +' + Math.max(0, Math.round(time - last)) + ' ms since previous step'
             : '';
-          const detail = ['players', 'historyRows', 'matchups', 'ledgerRows', 'saved']
+          const detail = ['players', 'historyRows', 'matchups', 'ledgerRows', 'saved', 'processedPlayers', 'scoringMs', 'dripMs']
             .filter(key => phase[key] !== undefined)
             .map(key => key + '=' + String(phase[key]))
             .join(', ');
@@ -5203,10 +5203,39 @@ return;
       });
       return lines.join(String.fromCharCode(10));
     }
+    function scriptReplaySummary() {
+      let report = null;
+      try {
+        const raw = localStorage.getItem('tp_home_boot_script_timing_v1');
+        report = raw ? JSON.parse(raw) : null;
+      } catch (_) {}
+      if (!report?.current) return 'Startup script details: No saved information yet.';
+      const attempts = [
+        ...(Array.isArray(report.priorAttempts) ? report.priorAttempts : []),
+        report.current
+      ];
+      const lines = ['Startup script details (' + String(report.dateKey || 'date unknown') + ')'];
+      attempts.forEach((attempt, index) => {
+        if (!attempt) return;
+        if (attempts.length > 1) lines.push('Attempt ' + (index + 1) + ' of ' + attempts.length + ':');
+        lines.push('  Completed ' + Number(attempt.completed || 0) + ' / ' +
+          Number(attempt.total || 0) + ' scripts');
+        if (attempt.active?.name) {
+          lines.push('  Last running: ' + attempt.active.name +
+            ' (script ' + attempt.active.index + ', began ' +
+            attempt.active.startedAtMs + ' ms)');
+        }
+        for (const item of (Array.isArray(attempt.slowest) ? attempt.slowest : []).slice(0, 8)) {
+          lines.push('  ' + item.name + ': ' + Number(item.durationMs || 0) + ' ms');
+        }
+      });
+      return lines.join(String.fromCharCode(10));
+    }
     function buildReport() {
       return summaryOf('tp_home_boot_timing_v1', 'Home boot/loading') +
         String.fromCharCode(10, 10) +
-        summaryOf('tp_home_morning_startup_trace_v1', 'First-of-day games');
+        summaryOf('tp_home_morning_startup_trace_v1', 'First-of-day games') +
+        String.fromCharCode(10, 10) + scriptReplaySummary();
     }
     function bind() {
       const show = document.getElementById('showMorningStartupReportBtn');

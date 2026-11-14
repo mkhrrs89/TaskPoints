@@ -149,3 +149,71 @@ test('preindexed daily ranks are reused without altering scores or effect teleme
   const home = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   assert.match(home, /computeCanonicalRankings\(state, \{ preindexed: true \}\)/);
 });
+
+test('NPC morning history inputs exactly reproduce legacy momentum and streak outcomes', () => {
+  const players = Array.from({ length: 120 }, (_, i) => makePlayer('NPC-' + i, 40 + (i % 20), 50 + i % 50));
+  const state = { players, gameHistory: [], matchups: [] };
+  const rng = seededRandom(16316);
+  for (let i = 0; i < 12500; i++) {
+    const p = players[Math.floor(rng() * players.length)];
+    const day = '2026-' + String(i % 12 + 1).padStart(2, '0') + '-' + String(i % 27 + 1).padStart(2, '0');
+    state.gameHistory.push({ playerId: p.id, date: day, score: (rng() * 90).toFixed(1) });
+  }
+  for (let i = 0; i < 6100; i++) {
+    const a = players[Math.floor(rng() * players.length)].id;
+    const b = i % 29 === 0 ? a : players[Math.floor(rng() * players.length)].id;
+    const day = '2026-' + String(i % 12 + 1).padStart(2, '0') + '-' + String(i % 27 + 1).padStart(2, '0');
+    state.matchups.push({ playerAId: a, playerBId: b, dateKey: day,
+      gameNumber: i % 7, scoreA: i % 31 === 0 ? null : Number((rng() * 90).toFixed(1)),
+      scoreB: i % 37 === 0 ? null : Number((rng() * 90).toFixed(1)),
+      ...(i % 41 === 0 ? { result: 'pending' } : {})
+    });
+  }
+  const ids = players.map(p => p.id);
+  for (const dateKey of ['2026-11-14', '2026-10-12', '2026-07-10']) {
+    const inputs = core.buildNpcMorningScoringInputs(state, ids, dateKey);
+    assert.equal(inputs.npcStreakByPlayerId.size, ids.length);
+    for (let i = 0; i < players.length; i++) {
+      const player = players[i];
+      assert.equal(inputs.npcStreakByPlayerId.get(player.id),
+        core.computeNpcWinLossStreak(state, player.id, dateKey), 'streak for ' + player.id);
+      const prior = state.gameHistory.filter(row => row.playerId === player.id)
+        .sort((a, b) => b.date.localeCompare(a.date))[0];
+      assert.deepEqual(inputs.npcLatestHistoryByPlayerId.get(player.id), prior);
+    }
+    const originalRandom = Math.random;
+    try {
+      for (const p of players) {
+        const opponent = players[(ids.indexOf(p.id) + 3) % players.length];
+        const calculate = useCache => {
+          let effects = null, calls = 0;
+          const next = seededRandom(9163);
+          Math.random = () => { calls++; return next(); };
+          const result = core.simulateAiScoreForPlayerCore(p, dateKey, {
+            state,
+            context: {
+              opponent,
+              ...(useCache ? inputs : {}),
+              captureEffects(value) { effects = value; }
+            }
+          });
+          return { result, effects, calls };
+        };
+        assert.deepEqual(calculate(true), calculate(false),
+          'scores, all modifiers and random draws must match for ' + p.id);
+      }
+    } finally { Math.random = originalRandom; }
+  }
+});
+
+test('morning scoring inputs ignore same-day incomplete rows without mutating saved history', () => {
+  const state = seedState();
+  const before = JSON.stringify(state);
+  const inputs = core.buildNpcMorningScoringInputs(state, ['A', 'B', 'C'], '2026-11-13');
+  assert.equal(JSON.stringify(state), before, 'cache building is read-only');
+  assert.equal(inputs.npcStreakByPlayerId.get('A'),
+    core.computeNpcWinLossStreak(state, 'A', '2026-11-13'));
+  state.gameHistory.push({ playerId: 'B', date: '2026-11-13', score: 44 });
+  assert.deepEqual(inputs.npcLatestHistoryByPlayerId.get('A'),
+    state.gameHistory.filter(x => x.playerId === 'A').sort((a,b) => b.date.localeCompare(a.date))[0]);
+});

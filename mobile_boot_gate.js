@@ -521,12 +521,79 @@ const RUNTIME_LOADER_SCRIPT = `<script id="tp-mobile-boot-runtime-loader">
     });
   }
 
+  // Keep read-only, content-free measurements of the deferred scripts.
+  // If Safari stalls on a network script or a slow inline initializer, the
+  // currently running filename survives a force-close. Never skip a required
+  // script, reorder dependency execution, or touch TaskPoints saved data.
+  const scriptReplayKey = 'tp_home_boot_script_timing_v1';
+  let scriptReplayReport = null;
+  function replayScriptLabel(node, index) {
+    const source = String(node?.getAttribute?.('src') || '').split('?')[0];
+    const basename = source ? source.split('/').pop() : '';
+    const id = String(node?.getAttribute?.('id') || '');
+    return (basename || id || 'inline-' + index)
+      .replace(/[^a-zA-Z0-9._-]/g, '').slice(0, 72);
+  }
+  function recordScriptReplay(event, label = '', index = 0, total = 0) {
+    if (isSettingsPage) return;
+    try {
+      const store = window.localStorage;
+      const now = new Date();
+      const day = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0')].join('-');
+      if (!scriptReplayReport) {
+        const raw = store.getItem(scriptReplayKey);
+        const parsed = raw ? JSON.parse(raw) : null;
+        scriptReplayReport = parsed?.dateKey === day && Array.isArray(parsed?.priorAttempts)
+          ? parsed : { version: 1, dateKey: day, priorAttempts: [], current: null };
+      }
+      const atMs = Math.round(performance.now());
+      if (event === 'begin') {
+        if (scriptReplayReport.current) {
+          scriptReplayReport.priorAttempts.push(scriptReplayReport.current);
+          scriptReplayReport.priorAttempts = scriptReplayReport.priorAttempts.slice(-3);
+        }
+        scriptReplayReport.current = {
+          completed: 0, total, active: null, slowest: [], finished: false
+        };
+      } else {
+        const current = scriptReplayReport.current;
+        if (!current) return;
+        if (event === 'start') {
+          current.active = { name: label, index, startedAtMs: atMs };
+        } else if (event === 'end') {
+          const started = current.active?.startedAtMs ?? atMs;
+          current.completed++;
+          current.active = null;
+          current.slowest.push({ name: label, index, durationMs: Math.max(0, atMs - started) });
+          current.slowest.sort((a, b) => b.durationMs - a.durationMs);
+          current.slowest = current.slowest.slice(0, 10);
+        } else if (event === 'finished') {
+          current.active = null;
+          current.finished = true;
+        }
+      }
+      store.setItem(scriptReplayKey, JSON.stringify(scriptReplayReport));
+    } catch (_) { /* diagnostics must never affect boot or recovery */ }
+  }
+
   async function replayDeferredRuntime() {
     window.__tpBootTraceStage?.('scripts-replay-start');
     const runtime = Array.from(document.querySelectorAll('script[data-tp-boot-deferred="runtime"]'));
     const afterRuntime = Array.from(document.querySelectorAll('script[data-tp-boot-deferred="after-runtime"]'));
-    for (const node of runtime) await replayScript(node);
-    for (const node of afterRuntime) await replayScript(node);
+    const ordered = runtime.concat(afterRuntime);
+    recordScriptReplay('begin', '', 0, ordered.length);
+    for (let index = 0; index < ordered.length; index++) {
+      const node = ordered[index];
+      const label = replayScriptLabel(node, index + 1);
+      recordScriptReplay('start', label, index + 1);
+      try {
+        await replayScript(node); // preserve original sequential script ordering
+      } finally {
+        recordScriptReplay('end', label, index + 1);
+      }
+    }
+    recordScriptReplay('finished');
     window.__tpBootTraceStage?.('scripts-replay-finished');
   }
 
