@@ -1349,6 +1349,104 @@ test('malformed journal is preserved and blocks a new journal mutation', () => {
   assert.equal(h.getSaveCalls(), 0);
 });
 
+test('dark preview refuses a stale full save after the Task journal was already drained',()=>{
+  const generationKey='taskpoints_state_v2_generation_v1';
+  const darkKey='taskpoints_state_v2_dark_mode_v1';
+  const h=makeHarness({[generationKey]:'epoch-A',[darkKey]:'1'},
+    {hostname:'localhost'});
+  const originalRaw=h.storage.getItem(STORAGE_KEY);
+  const peer={...JSON.parse(originalRaw),notes:'Peer Note must survive',
+    tasks:[{id:'t1',title:'Newer peer Task',status:'active',counts:2}]};
+  const peerRaw=JSON.stringify(peer);
+  let injected=false;
+  h.core.parseTaskPointsStorageJson=raw=>{
+    if(!injected){
+      injected=true;
+      h.storage.setItem(STORAGE_KEY,peerRaw);
+    }
+    return JSON.parse(raw);
+  };
+  const result=h.core.saveStateSnapshot({
+    ...JSON.parse(originalRaw),notes:'Old preview tab'
+  },{savePath:'home-normal-save'});
+  assert.equal(injected,true);
+  assert.equal(result.skipped,true);
+  assert.equal(result.blockedByTaskSourceChanged,true);
+  assert.equal(result.taskSnapshotSourceChanged,true);
+  assert.equal(result.taskJournalSourceChanged,false);
+  assert.equal(h.getSaveCalls(),0);
+  assert.equal(h.storage.getItem(STORAGE_KEY),peerRaw);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+  h.core.parseTaskPointsStorageJson=raw=>JSON.parse(raw);
+  const retried=h.core.saveStateSnapshot(peer,{savePath:'home-normal-retry'});
+  assert.notEqual(retried.skipped,true);
+  assert.equal(h.getSaveCalls(),1);
+  assert.equal(JSON.parse(h.storage.getItem(STORAGE_KEY)).tasks[0].title,
+    'Newer peer Task');
+});
+
+test('dark preview refuses a peer Task journal that appeared after an empty preflight',()=>{
+  const generationKey='taskpoints_state_v2_generation_v1';
+  const darkKey='taskpoints_state_v2_dark_mode_v1';
+  const h=makeHarness({[generationKey]:'epoch-A',[darkKey]:'1'},
+    {hostname:'localhost'});
+  const originalRaw=h.storage.getItem(STORAGE_KEY);
+  const journal={
+    schemaVersion:1,
+    tasks:[{id:'t1',title:'Peer pending Task',status:'completed',counts:1}],
+    completionUpserts:[],completionDeletes:[],updatedAtISO:'2026-11-14T12:00:00.000Z'
+  };
+  const pendingRaw=JSON.stringify(journal);
+  let injected=false;
+  h.core.parseTaskPointsStorageJson=raw=>{
+    if(!injected){
+      injected=true;
+      h.storage.setItem(JOURNAL_KEY,pendingRaw);
+    }
+    return JSON.parse(raw);
+  };
+  const outcome=h.core.saveStateSnapshot(JSON.parse(originalRaw),
+    {savePath:'home-normal-save'});
+  assert.equal(outcome.skipped,true);
+  assert.equal(outcome.blockedByTaskSourceChanged,true);
+  assert.equal(outcome.taskJournalSourceChanged,true);
+  assert.equal(outcome.taskSnapshotSourceChanged,false);
+  assert.equal(h.getSaveCalls(),0);
+  assert.equal(h.storage.getItem(STORAGE_KEY),originalRaw);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),pendingRaw);
+  h.core.parseTaskPointsStorageJson=raw=>JSON.parse(raw);
+  const replayed=h.core.saveStateSnapshot(JSON.parse(originalRaw),
+    {savePath:'home-normal-retry'});
+  assert.notEqual(replayed.skipped,true);
+  assert.equal(JSON.parse(h.storage.getItem(STORAGE_KEY)).tasks[0].title,
+    'Peer pending Task');
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+});
+
+test('dark preview refuses an unreadable snapshot recheck with no pending journal',()=>{
+  const h=makeHarness({
+    taskpoints_state_v2_generation_v1:'epoch-A',
+    taskpoints_state_v2_dark_mode_v1:'1'
+  },{hostname:'localhost'});
+  const previous=h.storage.getItem(STORAGE_KEY);
+  const get=h.storage.getItem.bind(h.storage);
+  let sourceReads=0;
+  h.storage.getItem=key=>{
+    if(key===STORAGE_KEY&&++sourceReads===2)
+      throw Error('source read denied during preview save');
+    return get(key);
+  };
+  const outcome=h.core.saveStateSnapshot({
+    ...JSON.parse(previous),notes:'Not safely admitted'
+  },{savePath:'home-save'});
+  assert.equal(outcome.skipped,true);
+  assert.equal(outcome.blockedByTaskSourceChanged,true);
+  assert.equal(outcome.taskSnapshotSourceChanged,true);
+  assert.equal(h.getSaveCalls(),0);
+  assert.equal(get(STORAGE_KEY),previous);
+  assert.equal(get(JOURNAL_KEY),null);
+});
+
 test('ordinary full save refuses a peer Task journal edit during snapshot parsing',()=>{
   const h=makeHarness();
   h.core.journalTaskMutation({task:{id:'t1',title:'First pending edit'}});
