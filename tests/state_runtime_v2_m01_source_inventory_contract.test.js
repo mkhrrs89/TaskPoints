@@ -219,7 +219,7 @@ test('M01 live IndexedDB ownership witness remains read-only, bounded and fail-c
     "readAuthority:'legacy_only',mutationAuthority:'legacy_only'"
   ])assert.ok(source.includes(required),
     'M01 IDB witness lost safety rule: '+required);
-  assert.match(runtime,/inspectPreviewDynamicOwnerGaps,\s*inspectPreviewIndexedDbOwnerGaps,/);
+  assert.match(runtime,/inspectPreviewDynamicOwnerGaps,\s*inspectPreviewSessionStorageOwnerGaps,\s*inspectPreviewIndexedDbOwnerGaps,/);
   assert.doesNotMatch(source,/\b(?:localStorage|storage)\.(?:setItem|removeItem|clear)\s*\(/);
   assert.doesNotMatch(source,/\b(?:db|store|tx)\.(?:transaction|put|delete|clear|add|createObjectStore)\s*\(/);
   assert.doesNotMatch(source,/\b(?:seedFromLegacy|safeReplaceTaskPointsStorage|saveImageBlob|deleteImageBlob)\s*\(/);
