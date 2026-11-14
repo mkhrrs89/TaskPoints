@@ -489,3 +489,109 @@ test('rotated reset generation prevents queued legacy Task observation from beco
   assert.equal(JSON.parse(app.localStorage.getItem(PENDING)).tasks[0].title,
     'Pending at reset');
 });
+
+
+test('transient V1 journal read denial requeues only a delayed, bounded V2 Task catch-up',async()=>{
+  const app=install();
+  await app.api.seedFromLegacy();
+  app.core.journalTaskMutation({task:{id:'a',title:'Saved while storage flaky'}});
+  const durableJournal=app.localStorage.getItem(PENDING);
+  const durableSnapshot=app.localStorage.getItem(KEY);
+  const before=app.indexedDB.dump(DB);
+  const get=app.localStorage.getItem.bind(app.localStorage);
+  let deny=true;
+  app.localStorage.getItem=key=>{
+    if(deny&&key===PENDING)throw Error('temporary storage denial');
+    return get(key);
+  };
+  const refused=await app.api.flushObservedLegacyTaskJournal();
+  assert.equal(refused.verified,false);
+  assert.equal(refused.reason,'task_preview_observation_failed');
+  assert.equal(app.api.getObservedLegacyTaskStatus().transientRetryCount,1);
+  assert.equal(app.api.getObservedLegacyTaskStatus().pending,true);
+  assert.ok(app.timers.filter(t=>t.ms===9000).length>=2);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+  deny=false;
+  const recovered=await app.api.flushObservedLegacyTaskJournal();
+  assert.equal(recovered.verified,true,recovered.reason);
+  assert.equal(app.api.getObservedLegacyTaskStatus().transientRetryCount,0);
+  assert.equal(app.api.getObservedLegacyTaskStatus().pending,false);
+  assert.equal(app.indexedDB.dump(DB).tasks[0].value.title,'Saved while storage flaky');
+  assert.equal(app.localStorage.getItem(PENDING),durableJournal);
+  assert.equal(app.localStorage.getItem(KEY),durableSnapshot);
+  assert.equal(app.snapshotSaves(),0);
+  assert.equal(app.api.getStatus().readAuthority,'legacy_only');
+});
+
+test('repeated Task mirror read denials stop after two retries until a new durable edit',async()=>{
+  const app=install();
+  await app.api.seedFromLegacy();
+  app.core.journalTaskMutation({task:{id:'a',title:'Keep pending V1'}}); 
+  const durable=app.localStorage.getItem(PENDING);
+  const get=app.localStorage.getItem.bind(app.localStorage);
+  app.localStorage.getItem=key=>{
+    if(key===PENDING)throw Error('denied repeatedly');
+    return get(key);
+  };
+  for(let attempt=1;attempt<=3;attempt++){
+    const declined=await app.api.flushObservedLegacyTaskJournal();
+    assert.equal(declined.verified,false);
+    assert.equal(declined.reason,'task_preview_observation_failed');
+    const state=app.api.getObservedLegacyTaskStatus();
+    assert.equal(state.transientRetryCount,Math.min(attempt,2));
+    assert.equal(state.maxTransientRetries,2);
+    assert.equal(state.pending,attempt<3);
+  }
+  assert.equal((await app.api.flushObservedLegacyTaskJournal()).reason,
+    'no_pending_task_observation');
+  assert.equal(app.api.getObservedLegacyTaskStatus().attempts,3);
+  app.localStorage.getItem=get;
+  assert.equal(app.localStorage.getItem(PENDING),durable);
+  assert.equal(app.indexedDB.dump(DB).tasks.length,0);
+  app.core.journalTaskMutation({task:{id:'a',title:'New durable V1 retry event'}});
+  assert.equal(app.api.getObservedLegacyTaskStatus().transientRetryCount,0);
+  assert.equal((await app.api.flushObservedLegacyTaskJournal()).verified,true);
+  assert.equal(app.indexedDB.dump(DB).tasks[0].value.title,
+    'New durable V1 retry event');
+  assert.equal(app.snapshotSaves(),0);
+});
+
+test('malformed pending Task journal is never auto-retried or normalized by V2',async()=>{
+  const app=install();
+  await app.api.seedFromLegacy();
+  app.localStorage.setItem(PENDING,'{"schemaVersion":1,"tasks":[');
+  const saved=app.localStorage.getItem(PENDING);
+  app.api.queueObservedLegacyTaskJournal();
+  const result=await app.api.flushObservedLegacyTaskJournal();
+  assert.equal(result.reason,'legacy_task_journal_unreadable');
+  assert.equal(result.verified,false);
+  assert.equal(app.api.getObservedLegacyTaskStatus().pending,false);
+  assert.equal(app.api.getObservedLegacyTaskStatus().transientRetryCount,0);
+  assert.equal(app.localStorage.getItem(PENDING),saved);
+  assert.equal(app.indexedDB.dump(DB).tasks.length,0);
+  assert.equal(app.snapshotSaves(),0);
+});
+
+test('reset generation rotation suppresses a retry after an observed source failure',async()=>{
+  const app=install();
+  await app.api.seedFromLegacy();
+  app.core.journalTaskMutation({task:{id:'a',title:'Old generation Task'}});
+  const pending=app.localStorage.getItem(PENDING);
+  const get=app.localStorage.getItem.bind(app.localStorage);
+  let rotated=false;
+  app.localStorage.getItem=key=>{
+    if(key===PENDING&&!rotated){
+      rotated=true;
+      app.localStorage.setItem(app.api.GENERATION_KEY,'newer-reset-generation');
+      throw Error('source read raced reset');
+    }
+    return get(key);
+  };
+  const declined=await app.api.flushObservedLegacyTaskJournal();
+  assert.equal(declined.reason,'task_preview_observation_failed');
+  assert.equal(app.api.getObservedLegacyTaskStatus().pending,false);
+  assert.equal(app.api.getObservedLegacyTaskStatus().transientRetryCount,0);
+  assert.equal(app.localStorage.getItem(PENDING),pending);
+  assert.equal(app.indexedDB.dump(DB).tasks.length,0);
+  assert.equal(app.snapshotSaves(),0);
+});
