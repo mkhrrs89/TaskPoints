@@ -317,11 +317,13 @@ test('M01 preview sessionStorage census matches all source-known session keys an
     "canPromote:false",
     "readAuthority:'legacy_only'"
   ])assert.ok(source.includes(required),'session M01 audit lost safety rule: '+required);
-  assert.doesNotMatch(source,
-    /(?:localStorage|sessionStorage|store)\\s*\\.\\s*(?:setItem|removeItem|clear)\\s*\\(/,
-    'the census must not change any browser storage');
-  assert.doesNotMatch(source, /\\b(?:indexedDB|seedFromLegacy|saveStateSnapshot)\\b/,
-    'session scan must not seed or touch storage authority');
-  assert.match(runtime,
-    /inspectPreviewDynamicOwnerGaps,\\s*inspectPreviewSessionStorageOwnerGaps,/);
+  for(const token of [
+    '.setItem(','.removeItem(','.clear(',
+    'indexedDB','seedFromLegacy','saveStateSnapshot'
+  ])assert.ok(!source.includes(token),
+    'read-only session audit unexpectedly references a writer: '+token);
+  assert.ok(runtime.includes(
+    'inspectPreviewDynamicOwnerGaps,\\n    inspectPreviewSessionStorageOwnerGaps,'
+      .replace('\\n',String.fromCharCode(10))),
+    'session owner audit is not exported by the V2 runtime');
 });
