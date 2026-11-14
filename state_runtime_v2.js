@@ -18973,6 +18973,106 @@
     }catch(_){return refuse('m01_dynamic_owner_audit_unavailable');}
   }
 
+  // M01 preview-only SESSION namespace audit. localStorage and IndexedDB
+  // inventories do not cover tab-scoped sessionStorage. A missing/unknown
+  // session key can affect retry, page navigation and restore behavior.
+  // Source-reviewed names below are provisional, not verified ownership.
+  const M01_REVIEWED_SESSION_STORAGE_KEYS = Object.freeze([
+    'taskpoints_active_page_v1',
+    'taskpoints_indexeddb_browser_session_v1',
+    'taskpoints_v2_stale_habit_tap_v1',
+    'tpBootSeenThisSession',
+    'tp_perf_trace_enabled_v1',
+    'tp_perf_trace_pages_v1',
+    'tp_perf_trace_pending_nav_v1'
+  ]);
+
+  async function inspectPreviewSessionStorageOwnerGaps(expectedInventoryToken) {
+    const refuse=(reason,detail={})=>({
+      checked:true,previewOnly:true,readOnly:true,
+      sourceStable:false,sessionInventoryStable:false,
+      allSessionKeysMapped:false,ownerCoverageVerified:false,
+      productionWritersFenced:false,allWritersKnown:false,
+      canPromote:false,readAuthority:'legacy_only',
+      mutationAuthority:'legacy_only',reason,...detail
+    });
+    if(!isWalTestPreviewHost())return refuse('preview_host_required');
+    if(!isDarkEnabled())return refuse('dark_disabled');
+    if(typeof expectedInventoryToken!=='string'||!expectedInventoryToken)
+      return refuse('full_origin_token_required');
+    const store=global.sessionStorage;
+    if(!store || typeof store.key!=='function'
+      ||typeof store.getItem!=='function')
+      return refuse('session_storage_unavailable');
+    if(typeof global.crypto?.subtle?.digest!=='function'
+      ||typeof global.TextEncoder!=='function')
+      return refuse('sha256_unavailable');
+    const generation=currentGeneration({create:false});
+    if(!generation)return refuse('generation_unavailable');
+    const epoch=darkMirrorModeEpoch;
+    const current=()=>isWalTestPreviewHost()&&isDarkEnabled()
+      &&darkMirrorModeEpoch===epoch
+      &&currentGeneration({create:false})===generation
+      &&!previewNotesWitnessObservedExternalChange(generation,epoch)
+      &&captureReadOnlyFullStorageInventory()===expectedInventoryToken;
+    // Bound memory before hashing; never return stored values or clear data.
+    // Tab-specific sessionStorage cannot be snapshotted across older tabs.
+    const capture=()=>{
+      const length=store.length;
+      if(!Number.isSafeInteger(length)||length<0||length>512)
+        throw Error('m01_session_storage_size_invalid');
+      const entries=[],seen=new Set();
+      let codeUnits=0;
+      for(let i=0;i<length;i++){
+        const key=store.key(i);
+        if(typeof key!=='string'||!key||key.length>512||seen.has(key))
+          throw Error('m01_session_storage_key_invalid');
+        seen.add(key);
+        const value=store.getItem(key);
+        if(typeof value!=='string')
+          throw Error('m01_session_storage_value_unreadable');
+        codeUnits+=key.length+value.length;
+        if(codeUnits>4*1024*1024)
+          throw Error('m01_session_storage_byte_budget');
+        entries.push([key,value]);
+      }
+      if(store.length!==length)throw Error('m01_session_storage_changed');
+      return entries.sort((a,b)=>a[0].localeCompare(b[0]));
+    };
+    try{
+      if(!current())return refuse('full_origin_changed_before_session_audit');
+      const before=capture();
+      if(!current())return refuse('full_origin_changed_during_session_audit');
+      const fingerprint=await previewRecoveryFingerprint(before);
+      const after=capture();
+      if(!current()||stableJson(before)!==stableJson(after))
+        return refuse('session_storage_changed_during_audit');
+      const reviewed=new Set(M01_REVIEWED_SESSION_STORAGE_KEYS);
+      const names=before.map(row=>row[0]);
+      return refuse('m01_session_storage_owner_gaps_observed',{
+        sourceStable:true,sessionInventoryStable:true,
+        sessionKeyCount:names.length,
+        reviewedSessionKeys:names.filter(key=>reviewed.has(key)),
+        unreviewedSessionKeys:names.filter(key=>!reviewed.has(key)),
+        sessionFingerprint:fingerprint,
+        // Even zero unknown keys does not prove every tab participated,
+        // nor that all dynamic aliases or future writer paths were found.
+        allSessionKeysMapped:false,ownerCoverageVerified:false,
+        productionWritersFenced:false,canPromote:false
+      });
+    }catch(error){
+      const reason=String(error?.message||'');
+      const known=new Set([
+        'm01_session_storage_size_invalid',
+        'm01_session_storage_key_invalid',
+        'm01_session_storage_value_unreadable',
+        'm01_session_storage_byte_budget',
+        'm01_session_storage_changed'
+      ]);
+      return refuse(known.has(reason)?reason:'session_storage_audit_unavailable');
+    }
+  }
+
   // M01 preview-only IDB catalog inspection: no transactions, record reads,
   // upgrade, deletion, database creation, or migration authority. The
   // version-free open is used ONLY for a database found in databases().
@@ -19929,6 +20029,7 @@
     inspectPreviewNotesRepeatEditJournal,
     inspectPreviewIndependentBackupCoverage,
     inspectPreviewDynamicOwnerGaps,
+    inspectPreviewSessionStorageOwnerGaps,
     inspectPreviewIndexedDbOwnerGaps,
     inspectPreviewLegacyImageBytes,
     inspectPreviewNotesSnapshotCompletionEvidence,
