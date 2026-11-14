@@ -598,3 +598,36 @@ production write authority. This does **not** certify an old-tab atomic
 compare-and-swap, production writer fencing, M01 ownership completion or
 M02 live Task transaction admission. V1 remains authoritative, no cutover,
 and Main remains unmodified and unsynced.
+
+
+## November 14 — M01 active-tab sessionStorage ownership gap audit
+
+The M01 static key inventory already contains **7 distinct source-reviewed
+session marker names**, but previous dynamic ownership inspection covered
+only `localStorage` and IndexedDB. A tab can hold additional transient
+session values affecting boot, navigation, read-mode decisions and pending
+actions without those keys appearing in the durable origin census.
+
+Added `inspectPreviewSessionStorageOwnerGaps(expectedInventoryToken)` in
+the **dark-mode developer preview only**. It enumerates the current tab's
+`sessionStorage` namespace, reports reviewed versus unknown key **names**
+and a SHA-256 fingerprint without returning their values, and compares two
+bounded snapshots to detect changes while the fingerprint is computed.
+Every call also checks the exact full-localStorage source token, V2 reset
+generation, preview epoch and external-change witness. Denied or malformed
+reads, source drift and oversized inventories fail closed. The inspector
+**does not** mutate either storage namespace, seed V2, open IndexedDB, create
+a backup or grant an owner handoff.
+
+The M01 source contract verifies the seven reviewed names against the
+machine-readable source manifest and prohibits new storage writers.
+Chromium/WebKit scenarios exercise unknown key discovery, value redaction,
+session-value change fingerprints, rejected session reads and a changed
+localStorage token. Source evidence is not permission to promote.
+
+**Not yet proven:** every tab has its own sessionStorage namespace, so one
+inspected tab cannot certify another tab, a stale tab's callbacks, dynamic
+callgraph completeness, or V2 production writer admission. M01 remains
+**Working** with **0/78** V2 production writer owners certified; C01 and
+other cutover gates remain blocked. All existing V1 features and safety
+protections remain in place; Main was neither modified nor synchronized.
