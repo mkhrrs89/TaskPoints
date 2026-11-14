@@ -631,3 +631,34 @@ callgraph completeness, or V2 production writer admission. M01 remains
 **Working** with **0/78** V2 production writer owners certified; C01 and
 other cutover gates remain blocked. All existing V1 features and safety
 protections remain in place; Main was neither modified nor synchronized.
+
+
+## November 14 — M02 final-parity Task observation race, bounded recovery
+
+The Task shadow observer already compared its preview to the independently
+re-read V1 source before calling a catch-up verified. However, a peer edit
+could arrive *during that last async parity scan* and return a refusal with
+a reason not eligible for the observer's bounded idle retry. This meant
+the real V1 edit remained safe but the optional V2 Task preview could remain
+stale until another event or startup.
+
+The developer-preview observer now recognizes five additional **transient
+final-parity refusal reasons** and two no-op parity source-change reasons.
+They use the existing **two extra 9-second idle retries**, never an immediate
+foreground write, and remain subject to the dark-mode, generation, user-idle
+and page-visibility protections. Unknown/corrupt/unowned V2 row evidence
+and epoch rotation remain hard refusals. The independent full collection
+parity check and its source-stability checks are unchanged.
+
+Two real-module bridge tests inject a peer V1 update while hashing the
+final parity check and exercise repeated source churn; a separate
+Chromium/WebKit browser case uses **two actual tabs** to verify that a V1
+Task journal edit is mirrored only after its V1 durability, with the
+original pending journal and full V1 snapshot bytes intact.
+
+**Limits:** The observer is still an optional V2 preview, not transactional
+admission for real Home/Tasks actions. Rechecking and retrying a non-atomic
+localStorage snapshot cannot fence an uncooperative old tab. M01/M02 remain
+Working, C03 Open; 0/78 production writer ownerships verified, 8/23
+preview foundations verified, 67/100 weighted rubric unchanged.
+Main is neither modified nor synchronized; V1 is the only authority.
