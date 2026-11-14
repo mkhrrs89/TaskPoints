@@ -595,3 +595,78 @@ test('reset generation rotation suppresses a retry after an observed source fail
   assert.equal(app.indexedDB.dump(DB).tasks.length,0);
   assert.equal(app.snapshotSaves(),0);
 });
+
+
+test('peer edit arriving during final parity is retried and verified without losing the V1 source',async()=>{
+  const app=install();
+  await app.api.seedFromLegacy();
+  assert.equal((await app.api.rehearsePreviewTaskCollectionSeed()).verified,true);
+  const initial=JSON.parse(app.localStorage.getItem(KEY));
+  const updated={...initial,
+    tasks:[{...initial.tasks[0],title:'Peer edit arriving during final parity'}]};
+  const updatedRaw=JSON.stringify(updated);
+  const read=app.core.readTaskPointsStoredState;
+  let reads=0;
+  app.core.readTaskPointsStoredState=()=>{
+    reads++;
+    if(reads===2)app.localStorage.setItem(KEY,updatedRaw);
+    return read();
+  };
+  app.api.queueObservedLegacyTaskJournal();
+  const first=await app.api.flushObservedLegacyTaskJournal();
+  assert.equal(reads>=2,true,'final parity must perform a separate V1 read');
+  assert.equal(first.verified,false);
+  assert.equal(first.reason,'task_preview_source_stale');
+  assert.equal(app.api.getObservedLegacyTaskStatus().pending,true,
+    'durable peer edit discovered during parity must get a bounded retry');
+  assert.equal(app.api.getObservedLegacyTaskStatus().transientRetryCount,1);
+  assert.equal(app.localStorage.getItem(KEY),updatedRaw);
+  app.core.readTaskPointsStoredState=read;
+  const second=await app.api.flushObservedLegacyTaskJournal();
+  assert.equal(second.verified,true,second.reason);
+  assert.equal(app.api.getObservedLegacyTaskStatus().pending,false);
+  assert.equal(app.api.getObservedLegacyTaskStatus().transientRetryCount,0);
+  assert.equal(app.indexedDB.dump(DB).tasks[0].value.title,
+    'Peer edit arriving during final parity');
+  assert.equal(app.localStorage.getItem(KEY),updatedRaw);
+  assert.equal(app.localStorage.getItem(PENDING),null);
+  assert.equal(app.snapshotSaves(),0);
+  assert.equal(app.api.getStatus().readAuthority,'legacy_only');
+});
+
+test('repeated parity peer churn is bounded and does not certify a stale Task shadow',async()=>{
+  const app=install();
+  await app.api.seedFromLegacy();
+  assert.equal((await app.api.rehearsePreviewTaskCollectionSeed()).verified,true);
+  const read=app.core.readTaskPointsStoredState;
+  let reads=0,updates=0;
+  app.core.readTaskPointsStoredState=()=>{
+    if(++reads%2===0){
+      const previous=JSON.parse(app.localStorage.getItem(KEY));
+      previous.tasks[0].title='Peer churn revision '+(++updates);
+      app.localStorage.setItem(KEY,JSON.stringify(previous));
+    }
+    return read();
+  };
+  app.api.queueObservedLegacyTaskJournal();
+  for(let attempt=1;attempt<=3;attempt++){
+    const observed=await app.api.flushObservedLegacyTaskJournal();
+    assert.equal(observed.verified,false);
+    const status=app.api.getObservedLegacyTaskStatus();
+    assert.equal(status.transientRetryCount,Math.min(attempt,2));
+    assert.equal(status.pending,attempt<3,
+      'only the first two parity refusals may schedule another attempt');
+  }
+  assert.equal((await app.api.flushObservedLegacyTaskJournal()).reason,
+    'no_pending_task_observation');
+  assert.equal(app.api.getObservedLegacyTaskStatus().attempts,3);
+  assert.equal(app.api.getObservedLegacyTaskStatus().verified,0);
+  assert.equal(app.snapshotSaves(),0);
+  app.core.readTaskPointsStoredState=read;
+  app.api.queueObservedLegacyTaskJournal();
+  assert.equal(app.api.getObservedLegacyTaskStatus().transientRetryCount,0);
+  const recovered=await app.api.flushObservedLegacyTaskJournal();
+  assert.equal(recovered.verified,true,recovered.reason);
+  assert.equal((await app.api.inspectPreviewTaskCollectionParity()).match,true);
+  assert.equal(app.api.getStatus().readAuthority,'legacy_only');
+});
