@@ -6260,6 +6260,71 @@ try {
       everyV1SourcePreserved:true,noAuthoritySwitch:true};
   });
 
+  await run('M01 sessionStorage inventory finds unowned tab keys and refuses stale or denied reads',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const originToken=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const sessionToken=()=>JSON.stringify(Array.from({length:sessionStorage.length},
+        (_,i)=>sessionStorage.key(i)).sort().map(k=>[k,sessionStorage.getItem(k)]));
+      sessionStorage.setItem('tpBootSeenThisSession','KNOWN_SESSION_VALUE_SECRET');
+      sessionStorage.setItem('tp_m01_unclassified_session_v1','SECRET_SESSION_DATA_A');
+      const beforeOrigin=originToken();
+      const beforeSession=sessionToken();
+      const observed=await api.inspectPreviewSessionStorageOwnerGaps(beforeOrigin);
+      const afterOrigin=originToken();
+      const afterSession=sessionToken();
+      sessionStorage.setItem('tp_m01_unclassified_session_v1','SECRET_SESSION_DATA_B');
+      const mutated=await api.inspectPreviewSessionStorageOwnerGaps(beforeOrigin);
+      const originalGet=Storage.prototype.getItem;
+      let unreadable;
+      Storage.prototype.getItem=function(key){
+        if(this===sessionStorage&&key==='tp_m01_unclassified_session_v1')
+          throw new DOMException('Session read denied for M01 test','SecurityError');
+        return originalGet.call(this,key);
+      };
+      try{
+        unreadable=await api.inspectPreviewSessionStorageOwnerGaps(beforeOrigin);
+      }finally{Storage.prototype.getItem=originalGet;}
+      localStorage.setItem('tp_m01_session_origin_changed_v1','1');
+      const stale=await api.inspectPreviewSessionStorageOwnerGaps(beforeOrigin);
+      const report=JSON.stringify([observed,mutated,unreadable,stale]);
+      return {observed,mutated,unreadable,stale,
+        sessionUnchanged:beforeSession===afterSession,
+        originUnchanged:beforeOrigin===afterOrigin,
+        noSecretValues:!report.includes('KNOWN_SESSION_VALUE_SECRET')
+          &&!report.includes('SECRET_SESSION_DATA_A')
+          &&!report.includes('SECRET_SESSION_DATA_B'),
+        finalSessionValue:sessionStorage.getItem('tp_m01_unclassified_session_v1')};
+    });
+    assert.equal(result.observed.reason,'m01_session_storage_owner_gaps_observed',
+      JSON.stringify(result.observed));
+    assert.equal(result.observed.readOnly,true);
+    assert.equal(result.observed.sourceStable,true);
+    assert.equal(result.observed.sessionInventoryStable,true);
+    assert.equal(result.observed.allSessionKeysMapped,false);
+    assert.equal(result.observed.ownerCoverageVerified,false);
+    assert.equal(result.observed.canPromote,false);
+    assert.ok(result.observed.reviewedSessionKeys.includes('tpBootSeenThisSession'));
+    assert.ok(result.observed.unreviewedSessionKeys
+      .includes('tp_m01_unclassified_session_v1'));
+    assert.equal(result.originUnchanged,true);
+    assert.equal(result.sessionUnchanged,true);
+    assert.equal(result.noSecretValues,true);
+    assert.equal(result.mutated.sourceStable,true);
+    assert.notEqual(result.mutated.sessionFingerprint,result.observed.sessionFingerprint);
+    assert.equal(result.unreadable.sourceStable,false);
+    assert.equal(result.unreadable.sessionInventoryStable,false);
+    assert.equal(result.unreadable.canPromote,false);
+    assert.equal(result.stale.reason,'full_origin_changed_before_session_audit');
+    assert.equal(result.stale.sourceStable,false);
+    assert.equal(result.finalSessionValue,'SECRET_SESSION_DATA_B');
+    return {tabScopedKeyGapsDiscovered:true,sessionContentNotExposed:true,
+      sessionReadFailureRefused:true,staleOriginRefused:true,
+      storageUnchangedDuringInspection:true,v1StillPrimary:true};
+  });
+
   await run('M01 indexeddb catalog detects unknown databases and stores without reading record bytes',async context=>{
     const page=await open(context);
     const observed=await page.evaluate(async()=>{
