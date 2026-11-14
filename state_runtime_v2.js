@@ -19606,6 +19606,27 @@
   let observedTaskRefused = 0;
   let observedTaskLastReason = 'not_started';
   let observedTaskIdleDeferrals = 0;
+  // A transient source/IDB refusal must not permanently strand an already
+  // durable V1 Task edit. Limit automatic shadow retries to two quiet windows.
+  // Malformed/unowned data, old generations and disabled previews NEVER retry.
+  const OBSERVED_TASK_MAX_TRANSIENT_RETRIES = 2;
+  const OBSERVED_TASK_TRANSIENT_REASONS = new Set([
+    'task_preview_observation_failed',
+    'legacy_task_capture_unreadable',
+    'legacy_changed_before_seed',
+    'legacy_changed_after_seed',
+    'legacy_unreadable_before_seed',
+    'task_preview_db_unavailable',
+    'task_preview_read_unavailable',
+    'legacy_changed_before_reconcile',
+    'legacy_changed_during_capture',
+    'legacy_changed_during_reconcile',
+    'legacy_changed_after_preview_commit',
+    'legacy_unreadable_before_reconcile',
+    'legacy_unreadable_during_reconcile',
+    'full_origin_unreadable'
+  ]);
+  let observedTaskTransientRetries = 0;
 
   function observeTaskResult(reason, verified = false) {
     observedTaskLastReason = reason;
@@ -19680,7 +19701,20 @@
       } catch (_) {
         return observeTaskResult('task_preview_observation_failed');
       }
-    })().finally(() => {
+    })().then(result => {
+      if (result.verified) {
+        observedTaskTransientRetries = 0;
+      } else if (!observedTaskRequested
+        && OBSERVED_TASK_TRANSIENT_REASONS.has(result.reason)
+        && observedTaskTransientRetries < OBSERVED_TASK_MAX_TRANSIENT_RETRIES
+        && observedTaskPreviewAllowed()
+        && currentGeneration({create:false}) === generation
+        && darkMirrorModeEpoch === epoch) {
+        observedTaskTransientRetries += 1;
+        observedTaskRequested = true;
+      }
+      return result;
+    }).finally(() => {
       observedTaskRun = null;
       if (observedTaskRequested) scheduleObservedTaskMirror();
     });
@@ -19758,6 +19792,8 @@
   function queueObservedLegacyTaskJournal() {
     if (!observedTaskPreviewAllowed()) return false;
     observedTaskRequested = true;
+    // A new durable V1 event starts a new bounded retry budget.
+    observedTaskTransientRetries = 0;
     observedTaskIdleDeferrals = 0;
     scheduleObservedTaskMirror();
     return true;
@@ -19775,6 +19811,8 @@
       peerStorageCatchupRequests:observedTaskPeerCatchupRequests,
       attempts:observedTaskAttempts,verified:observedTaskVerified,
       refused:observedTaskRefused,lastReason:observedTaskLastReason,
+      transientRetryCount:observedTaskTransientRetries,
+      maxTransientRetries:OBSERVED_TASK_MAX_TRANSIENT_RETRIES,
       idleDeferrals:observedTaskIdleDeferrals,
       automaticIdleMs:OBSERVED_TASK_IDLE_MS
     };
