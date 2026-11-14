@@ -11597,6 +11597,77 @@ try {
       snapshotNotOverwritten:true,cutoverBlocked:true};
   });
 
+  await run('preview Task observer reconciles actual peer V1 Task journal without taking authority',async context=>{
+    const observer=await open(context);
+    const writer=await open(context);
+    const seed=await observer.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      await api.seedFromLegacy();
+      const result=await api.rehearsePreviewTaskCollectionSeed();
+      return {verified:result.verified,reason:result.reason,
+        status:api.getObservedLegacyTaskStatus(),
+        raw:localStorage.getItem('taskpoints_v1')};
+    });
+    assert.equal(seed.verified,true,seed.reason);
+    await observer.waitForFunction(()=>window.TaskPointsStateRuntimeV2
+      .getObservedLegacyTaskStatus().peerStorageListenerInstalled,
+      null,{timeout:12000});
+    const change=await writer.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const snapshot=localStorage.getItem('taskpoints_v1');
+      core.journalTaskMutation({task:{
+        id:'synthetic-task',title:'Peer Task edit for idle V2 observer',
+        status:'completed',updatedAtISO:'2026-11-14T12:30:00.000Z'
+      }});
+      return {snapshot,raw:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        authority:window.TaskPointsStateRuntimeV2.getStatus().readAuthority};
+    });
+    assert.ok(change.raw,'real V1 foreground journal must commit before mirroring');
+    assert.equal(change.snapshot,seed.raw,'journal cannot require a V1 full snapshot');
+    assert.equal(change.authority,'legacy_only');
+    await requireCrossTabStorageValue(observer,
+      'taskpoints_pending_task_mutations_v1',change.raw);
+    await observer.waitForFunction(()=>window.TaskPointsStateRuntimeV2
+      .getObservedLegacyTaskStatus().peerStorageNotifications>0,
+      null,{timeout:12000});
+    const before=await observer.evaluate(()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      return api.getObservedLegacyTaskStatus();
+    });
+    assert.equal(before.pending,true);
+    assert.equal(before.attempts,0,
+      'peer event must only request an idle mirror, never run expensive foreground IDB');
+    const result=await observer.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const result=await api.flushObservedLegacyTaskJournal();
+      const parity=await api.inspectPreviewTaskCollectionParity();
+      const db=await api.open();
+      const row=await new Promise((resolve,reject)=>{
+        const req=db.transaction('tasks','readonly')
+          .objectStore('tasks').get('synthetic-task');
+        req.onsuccess=()=>resolve(req.result);
+        req.onerror=()=>reject(req.error);
+      });
+      return {result,parity,row:row?.value,
+        afterStatus:api.getObservedLegacyTaskStatus(),
+        rawJournal:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
+        rawSnapshot:localStorage.getItem('taskpoints_v1'),
+        readAuthority:api.getStatus().readAuthority};
+    });
+    assert.equal(result.result.verified,true,result.result.reason);
+    assert.equal(result.result.canPromote,false);
+    assert.equal(result.parity.match,true,result.parity.reason);
+    assert.equal(result.row.title,'Peer Task edit for idle V2 observer');
+    assert.equal(result.afterStatus.pending,false);
+    assert.equal(result.readAuthority,'legacy_only');
+    assert.equal(result.rawSnapshot,change.snapshot);
+    assert.equal(result.rawJournal,change.raw,
+      'preview Task mirror must never compact the V1 Task journal');
+    return {realPeerJournalObserved:true,backgroundOnly:true,
+      collectionParityVerified:true,originalV1BytesRetained:true,
+      authorityStillV1:true};
+  });
+
   await run('stale Home-like Task save after other tab compacted a newer Task edit preserves that row',async context=>{
     const stale=await open(context),writer=await open(context);
     const seed=await stale.evaluate(()=>{
