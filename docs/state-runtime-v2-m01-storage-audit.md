@@ -569,3 +569,32 @@ Chromium/WebKit safety suite continues to exercise the real preview paths.
 prove same-count content stability across every IndexedDB store, export a
 restorable full-origin backup, map production writer owners, or grant a V2
 authority change. V1 remains live, and `main` was not synced or written.
+
+
+## November 13 — M02 idle Task mirror can recover from transient read refusal
+
+The V2 preview-only observer that follows real, synchronous V1 Task journal
+edits previously consumed its one pending observation before attempting a
+Task source read. If that read was temporarily denied, the preview would
+not catch up until a new Task edit, peer storage event or next startup.
+The foreground V1 Task save was unaffected, but the preview could be stale.
+
+The observer now schedules **at most two extra 9-second idle-window attempts**
+for a narrow allowlist of transient source, database or contention refusals.
+It retains its existing quiet/hidden-tab checks, generation + mode-epoch
+checks and post-write Task parity validation. A verified catch-up resets
+the retry counter. A *new durable* Task event starts a fresh bounded budget.
+Malformed journals, unexplained unowned V2 records, and a rotated reset
+generation do not receive an automatic retry. No V1 journal bytes are removed
+or rewritten, and IndexedDB is never part of the foreground Task tap.
+
+The source-executed bridge regression suite now covers a single denied
+read followed by successful recovery; a hard two-retry ceiling; malformed
+journal byte preservation; and generation rotation during a denied read.
+See [Task observed-journal bridge tests](../tests/state_runtime_v2_task_live_journal_bridge_contract.test.js).
+
+**Unchanged safety:** the V2 Task mirror remains a developer preview, not
+production write authority. This does **not** certify an old-tab atomic
+compare-and-swap, production writer fencing, M01 ownership completion or
+M02 live Task transaction admission. V1 remains authoritative, no cutover,
+and Main remains unmodified and unsynced.
