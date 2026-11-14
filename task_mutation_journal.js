@@ -1014,7 +1014,17 @@
       // V1 snapshot during that work, the candidate is no longer safe to save.
       // Refuse rather than throwing into Home's unguarded fallback writer.
       // This is a best-effort synchronous check, not an atomic old-tab fence.
-      if (!current.malformed && !isEmpty(current.record)) {
+      // A dark-preview Home tab can also hold a stale full snapshot when
+      // the Task journal is EMPTY: a peer may have completed compaction or
+      // written a newer snapshot while this tab prepared its save. Cover
+      // that gap in preview only, without changing deployed V1 behavior.
+      // The two source reads are observational, never atomic cross-tab CAS.
+      const previewSourceFence = previewGenerationEnforced
+        && (() => {
+          try { return storage.getItem(PREVIEW_DARK_KEY) === '1'; }
+          catch (_) { return true; } // unreadable mode cannot grant admission
+        })();
+      if (previewSourceFence || (!current.malformed && !isEmpty(current.record))) {
         let nowJournalRaw, nowSnapshotRaw;
         try {
           nowJournalRaw = storage.getItem(JOURNAL_KEY);
