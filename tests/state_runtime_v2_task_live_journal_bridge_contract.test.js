@@ -710,7 +710,11 @@ function makeNestedNoopObserver(prerequisiteReason){
   };
   const exposed=vm.runInNewContext(V2.slice(first,last)+`
     ({
-      queue(){observedTaskRequested=true;},
+      queue(){
+        observedTaskRequested=true;
+        observedTaskRequestGeneration=currentGeneration({create:false});
+        observedTaskRequestEpoch=darkMirrorModeEpoch;
+      },
       status(){return {pending:observedTaskRequested,
         retry:observedTaskTransientRetries,attempts:observedTaskAttempts,
         verified:observedTaskVerified};},
@@ -759,4 +763,98 @@ test('Task no-op parity with unknown V2 row evidence remains blocked without ret
     assert.equal(app.reconciled(),1);
     assert.equal((await app.flush()).reason,'no_pending_task_observation');
   }
+});
+
+
+test('queued preview Task scan is cancelled before any V1 read after reset generation rotates',async()=>{
+  const app=install();
+  await app.api.seedFromLegacy();
+  app.core.journalTaskMutation({task:{id:'a',title:'Old generation pending edit'}});
+  const originalV1=app.localStorage.getItem(KEY);
+  const originalJournal=app.localStorage.getItem(PENDING);
+  const beforeDb=app.indexedDB.dump(DB);
+  const scheduled=app.timers.filter(row=>row.ms===9000).at(-1);
+  assert.ok(scheduled,'real V1 edit must have queued preview-only idle work');
+  assert.equal(app.api.getObservedLegacyTaskStatus().pending,true);
+  const beforeAttempts=app.api.getObservedLegacyTaskStatus().attempts;
+  app.localStorage.setItem(app.api.GENERATION_KEY,'reset-generation-B');
+  const get=app.localStorage.getItem.bind(app.localStorage);
+  let legacySourceReads=0;
+  app.localStorage.getItem=key=>{
+    if(key===KEY||key===PENDING){
+      legacySourceReads++;
+      throw Error('no old V1 content reads allowed after reset');
+    }
+    return get(key);
+  };
+  scheduled.fn();
+  assert.equal(legacySourceReads,0);
+  const status=app.api.getObservedLegacyTaskStatus();
+  assert.equal(status.pending,false);
+  assert.equal(status.attempts,beforeAttempts,
+    'stale timer must never start a new Task preview scan');
+  assert.equal(status.staleRequestCancellations,1);
+  assert.equal(status.lastReason,'preview_request_generation_changed');
+  assert.deepEqual(app.indexedDB.dump(DB),beforeDb);
+  assert.equal(await app.api.flushObservedLegacyTaskJournal().then(x=>x.reason),
+    'no_pending_task_observation');
+  app.localStorage.getItem=get;
+  assert.equal(app.localStorage.getItem(KEY),originalV1);
+  assert.equal(app.localStorage.getItem(PENDING),originalJournal);
+  assert.equal(app.snapshotSaves(),0);
+});
+
+test('manual observer flush refuses an old queued generation without reading legacy Tasks',async()=>{
+  const app=install();
+  await app.api.seedFromLegacy();
+  app.core.journalTaskMutation({task:{id:'a',title:'Must stay V1 owned'}});
+  const beforeDb=app.indexedDB.dump(DB);
+  const oldSnapshot=app.localStorage.getItem(KEY);
+  const oldJournal=app.localStorage.getItem(PENDING);
+  app.localStorage.setItem(app.api.GENERATION_KEY,'restore-epoch-C');
+  const get=app.localStorage.getItem.bind(app.localStorage);
+  let legacyReads=0;
+  app.localStorage.getItem=key=>{
+    if(key===KEY || key===PENDING) {
+      legacyReads++;
+      throw Error('legacy source read must not happen');
+    }
+    return get(key);
+  };
+  const refused=await app.api.flushObservedLegacyTaskJournal();
+  assert.equal(refused.verified,false);
+  assert.equal(refused.reason,'preview_request_generation_changed');
+  assert.equal(refused.canPromote,false);
+  assert.equal(legacyReads,0);
+  assert.equal(app.api.getObservedLegacyTaskStatus().attempts,0);
+  assert.equal(app.api.getObservedLegacyTaskStatus().staleRequestCancellations,1);
+  assert.equal(app.api.getObservedLegacyTaskStatus().pending,false);
+  assert.deepEqual(app.indexedDB.dump(DB),beforeDb);
+  app.localStorage.getItem=get;
+  assert.equal(app.localStorage.getItem(KEY),oldSnapshot);
+  assert.equal(app.localStorage.getItem(PENDING),oldJournal);
+  assert.equal(app.snapshotSaves(),0);
+  assert.equal(app.api.getStatus().readAuthority,'legacy_only');
+});
+
+test('new preview Task notification is independent from a discarded old reset epoch',async()=>{
+  const app=install();
+  await app.api.seedFromLegacy();
+  app.api.queueObservedLegacyTaskJournal();
+  app.localStorage.setItem(app.api.GENERATION_KEY,'newly-restored-generation');
+  const cancelled=await app.api.flushObservedLegacyTaskJournal();
+  assert.equal(cancelled.reason,'preview_request_generation_changed');
+  assert.equal(app.api.getObservedLegacyTaskStatus().staleRequestCancellations,1);
+  assert.equal(app.api.queueObservedLegacyTaskJournal(),true,
+    'new post-reset request can be queued independently');
+  const queued=app.api.getObservedLegacyTaskStatus();
+  assert.equal(queued.pending,true);
+  assert.equal(queued.transientRetryCount,0);
+  const refused=await app.api.flushObservedLegacyTaskJournal();
+  assert.equal(refused.verified,false,
+    'old V2 pilot metadata must block using pre-reset preview records');
+  assert.equal(refused.canPromote,false);
+  assert.equal(app.api.getObservedLegacyTaskStatus().pending,false);
+  assert.equal(app.indexedDB.dump(DB).tasks.length,0);
+  assert.equal(app.snapshotSaves(),0);
 });
