@@ -676,3 +676,79 @@ test('repeated peer source churn is bounded and does not certify a stale Task sh
   assert.equal((await app.api.inspectPreviewTaskCollectionParity()).match,true);
   assert.equal(app.api.getStatus().readAuthority,'legacy_only');
 });
+
+
+test('Task no-op nested parity source race gets bounded retry without claiming stale V2 data',async()=>{
+  const app=install();
+  await app.api.seedFromLegacy();
+  assert.equal((await app.api.rehearsePreviewTaskCollectionSeed()).verified,true);
+  const oldRaw=app.localStorage.getItem(KEY);
+  const fresh=JSON.parse(oldRaw);
+  fresh.tasks[0].title='Peer changed V1 during no-op parity';
+  const freshRaw=JSON.stringify(fresh);
+  const originalRead=app.core.readTaskPointsStoredState;
+  let reads=0;
+  app.core.readTaskPointsStoredState=()=>{
+    // Seed first sees old V1, reconcile sees old V1, and nested no-op
+    // parity reads new V1. No V2 rows were unowned or lost.
+    if(++reads===3)app.localStorage.setItem(KEY,freshRaw);
+    return originalRead();
+  };
+  app.api.queueObservedLegacyTaskJournal();
+  const first=await app.api.flushObservedLegacyTaskJournal();
+  assert.equal(reads>=3,true,'nested no-op parity must re-read V1 separately');
+  assert.equal(first.verified,false);
+  assert.equal(first.reason,'task_preview_source_stale',
+    'V1-only source race must be unwrapped from the no-op parity refusal');
+  assert.equal(app.api.getObservedLegacyTaskStatus().pending,true);
+  assert.equal(app.api.getObservedLegacyTaskStatus().transientRetryCount,1);
+  assert.equal(app.indexedDB.dump(DB).tasks[0].value.title,'Original',
+    'rejected V1 source race must not overwrite V2 until retried');
+  assert.equal(app.localStorage.getItem(KEY),freshRaw);
+  assert.equal(app.snapshotSaves(),0);
+  app.core.readTaskPointsStoredState=originalRead;
+  const recovered=await app.api.flushObservedLegacyTaskJournal();
+  assert.equal(recovered.verified,true,recovered.reason);
+  assert.equal((await app.api.inspectPreviewTaskCollectionParity()).match,true);
+  assert.equal(app.indexedDB.dump(DB).tasks[0].value.title,
+    'Peer changed V1 during no-op parity');
+  assert.equal(app.localStorage.getItem(KEY),freshRaw);
+  assert.equal(app.localStorage.getItem(PENDING),null);
+  assert.equal(app.api.getObservedLegacyTaskStatus().pending,false);
+  assert.equal(app.api.getObservedLegacyTaskStatus().transientRetryCount,0);
+  assert.equal(app.api.getStatus().readAuthority,'legacy_only');
+});
+
+test('Task no-op parity rejects unexpected V2 row changes without retry or recovery write',async()=>{
+  const app=install();
+  await app.api.seedFromLegacy();
+  assert.equal((await app.api.rehearsePreviewTaskCollectionSeed()).verified,true);
+  const initialRaw=app.localStorage.getItem(KEY);
+  const originalRead=app.core.readTaskPointsStoredState;
+  let reads=0;
+  app.core.readTaskPointsStoredState=()=>{
+    if(++reads===3){
+      // A separate preview writer changes the V2 row after reconcile's
+      // prior-row fingerprint check but before the nested parity reads it.
+      const store=app.indexedDB._databases.get(DB)._stores.get('tasks');
+      const prior=store.get('a');
+      store.set('a',{...prior,value:{...prior.value,title:'Unknown V2-only row'}});
+    }
+    return originalRead();
+  };
+  app.api.queueObservedLegacyTaskJournal();
+  const outcome=await app.api.flushObservedLegacyTaskJournal();
+  assert.equal(reads>=3,true);
+  assert.equal(outcome.verified,false);
+  assert.equal(outcome.reason,'task_preview_noop_parity_mismatch',
+    'unowned V2 record change must stay blocked, not be renamed as V1 race');
+  assert.equal(app.api.getObservedLegacyTaskStatus().pending,false);
+  assert.equal(app.api.getObservedLegacyTaskStatus().transientRetryCount,0);
+  assert.equal(app.api.getObservedLegacyTaskStatus().verified,0);
+  assert.equal(app.indexedDB.dump(DB).tasks[0].value.title,'Unknown V2-only row',
+    'unexplained V2 records must remain untouched for review');
+  assert.equal(app.localStorage.getItem(KEY),initialRaw);
+  assert.equal(app.localStorage.getItem(PENDING),null);
+  assert.equal(app.snapshotSaves(),0);
+  assert.equal(app.api.getStatus().readAuthority,'legacy_only');
+});
