@@ -972,7 +972,7 @@ test('Main Work action batches atomic V1 journal writes without removing fallbac
   assert.match(core,/TASKPOINTS_TASK_COMPLETION_BATCH_INVALID/);
   // One single synchronous journal commit after every validated row is
   // merged. The writeRecord helper itself performs the only setItem.
-  const writeStart=journal.indexOf('function writeRecord(record, alreadyNormalized = false, expectedPriorRaw = undefined)');
+  const writeStart=journal.indexOf('function writeRecord(');
   const writeEnd=journal.indexOf('function mergeById(',writeStart);
   assert.ok(writeStart>0&&writeEnd>writeStart);
   assert.equal((core.match(/writeRecord\(record, true, current\.raw\)/g)||[]).length,1);

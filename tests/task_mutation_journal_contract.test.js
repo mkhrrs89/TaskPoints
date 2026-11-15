@@ -2238,3 +2238,74 @@ test('an empty peer journal and a rotated preview epoch both block prepared edit
     assert.equal(h.storage.getItem(JOURNAL_KEY),change==='reset' ? null : '');
   }
 });
+
+test('a bulk Task update overlays pending edits, preserves unrelated rows and commits once',()=>{
+  const tasks=Array.from({length:90},(_,n)=>({id:'p'+n,title:'Title '+n,meta:{n}}));
+  const h=makeHarness({[STORAGE_KEY]:JSON.stringify({tasks,completions:[{id:'history'}]})});
+  h.core.journalTaskMutation({task:{...tasks[0],title:'Latest'},
+    completionUpsert:{id:'pending-history',points:3}});
+  const before=h.storage.getItem(STORAGE_KEY);
+  const set=h.storage.setItem.bind(h.storage);
+  const writes=[];
+  h.storage.setItem=(k,v)=>{writes.push(k);set(k,v);};
+  const result=h.core.journalTaskUpdates(tasks.map(t=>t.id),t=>{
+    if(t.id==='p1')return false;
+    t.dueDateISO='2026-11-15';return true;
+  });
+  assert.deepEqual(writes,[JOURNAL_KEY]);
+  assert.equal(result.get('p0').title,'Latest');
+  assert.equal(result.get('p1').dueDateISO,undefined);
+  const saved=h.core.readPendingTaskMutations().record;
+  assert.equal(saved.tasks.length,89);
+  assert.equal(saved.completionUpserts[0].id,'pending-history');
+  assert.equal(h.storage.getItem(STORAGE_KEY),before);
+  assert.equal(h.core.readTaskPointsStoredState().tasks[89].meta.n,89);
+  assert.equal(h.core.flushPendingTaskMutations(),true);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+  assert.equal(JSON.parse(h.storage.getItem(STORAGE_KEY)).tasks[89].dueDateISO,'2026-11-15');
+});
+
+test('Task updates refuse a missing task, a peer snapshot change or a peer journal change atomically',()=>{
+  for(const mode of ['missing','snapshot','journal','quota','unacknowledged']){
+    const h=makeHarness();
+    const before=h.storage.getItem(STORAGE_KEY);
+    const pending=JSON.stringify({schemaVersion:1,tasks:[{id:'peer'}],
+      completionUpserts:[],completionDeletes:[],updatedAtISO:null});
+    if (mode==='quota' || mode==='unacknowledged'){
+      const set=h.storage.setItem.bind(h.storage);
+      h.storage.setItem=(k,v)=>{
+        if(k!==JOURNAL_KEY)return set(k,v);
+        if(mode==='quota')throw Error('quota');
+      };
+    }
+    assert.throws(()=>h.core.journalTaskUpdates(mode==='missing'?['t1','gone']:['t1'],task=>{
+      task.title='Must not be written';
+      if(mode==='snapshot')h.storage.setItem(STORAGE_KEY,before+' ');
+      if(mode==='journal')h.storage.setItem(JOURNAL_KEY,pending);
+      return true;
+    }));
+    assert.equal(h.storage.getItem(JOURNAL_KEY),mode==='journal'?pending:null);
+    assert.equal(h.storage.getItem(STORAGE_KEY),mode==='snapshot'?before+' ':before);
+    assert.equal(h.core.getTaskMutationJournalStatus().journalWritesVerified,0);
+  }
+});
+
+test('Home postponement keeps the snapshot fallback and restores the list on a failed save',()=>{
+  const start=homeSource.indexOf('function canPostponeTask(');
+  const end=homeSource.indexOf('function wontDoMain(',start);
+  for(const succeeds of [false,true]){
+    const before=[{id:'legacy',dueDateISO:'2026-11-12',title:'Existing',metadata:{keep:true}}];
+    let saves=0,renders=0,errors=0;
+    const scope={state:{tasks:before},TaskPointsCore:{},todayKey:()=> '2026-11-15',
+      getTaskStatus:()=> 'active',trackDueDatePush:task=>{task.postponedDays=3;},
+      save:()=>{saves++;return succeeds;},renderTasks:()=>{renders++;},
+      console:{warn(){}},alert:()=>{errors++;}};
+    vm.runInNewContext(homeSource.slice(start,end)+"\npostponeAllOverdueTasks()",scope);
+    assert.equal(saves,1);
+    assert.equal(renders,Number(succeeds));
+    assert.equal(errors,Number(!succeeds));
+    assert.equal(scope.state.tasks[0].dueDateISO,succeeds?'2026-11-15':'2026-11-12');
+    assert.equal(before[0].dueDateISO,'2026-11-12');
+    assert.equal(scope.state.tasks[0].metadata.keep,true);
+  }
+});

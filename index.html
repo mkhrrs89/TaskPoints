@@ -13669,34 +13669,61 @@ function bumpTaskOneDay(id){
   renderTasks(state);
 }
 
-function applyPostponeToTask(task){
-  if (!task || !task.dueDateISO) return false;
+function canPostponeTask(task, today){
+  return task?.dueDateISO && task.dueDateISO < today && !task.completedAtISO
+    && !task.hidden && getTaskStatus(task) === 'active';
+}
+
+function applyPostponeToTask(task, today){
+  if (!canPostponeTask(task, today)) return false;
   const oldDue = task.dueDateISO;
-  task.dueDateISO = todayKey();
-  trackDueDatePush(task, oldDue, task.dueDateISO);
+  task.originalDueDateISO ||= oldDue;
+  task.dueDateISO = today;
+  trackDueDatePush(task, oldDue, today);
   task.updatedAtISO = new Date().toISOString();
   return true;
 }
 
-  function postponeTask(id){
-    const t=state.tasks.find(x=>x.id===id);
-    if (!applyPostponeToTask(t)) return;
-    save(); renderTasks();
-    window.updateCriticalTasksIsland?.();
+function postponeTasks(tasks, today){
+  if (!tasks.length) return;
+  try {
+    if (TaskPointsCore?.journalTaskUpdates) {
+      const latest = TaskPointsCore.journalTaskUpdates(tasks.map(task => task.id),
+        draft => applyPostponeToTask(draft, today));
+      for (const [index, task] of state.tasks.entries()) {
+        const saved = latest.get(String(task.id));
+        if (saved) state.tasks[index] = saved;
+      }
+    } else {
+      const selected = new Set(tasks);
+      const before = state.tasks;
+      state.tasks = before.map(task => {
+        if (!selected.has(task)) return task;
+        const draft = { ...task };
+        return applyPostponeToTask(draft, today) ? draft : task;
+      });
+      if (!save()) {
+        state.tasks = before;
+        throw new Error('The postponed tasks could not be saved.');
+      }
+    }
+  } catch (error) {
+    console.warn('Task postponement was not confirmed.', error);
+    alert(error?.message || 'Could not save the new due date. Please try again.');
+    return;
   }
+  renderTasks(state);
+}
+
+function postponeTask(id){
+  const task = state.tasks.find(row => row.id === id);
+  if (task) postponeTasks([task], todayKey());
+}
 
 function postponeAllOverdueTasks(){
-  const todayIso = todayKey();
-  let changed = false;
-  state.tasks.forEach(task => {
-    if (task && !task.completedAtISO && !task.hidden && !isTaskTrashed(task) && getTaskStatus(task)!=='wontdo' && task.dueDateISO && task.dueDateISO < todayIso) {
-      changed = applyPostponeToTask(task) || changed;
-    }
-  });
-  if (!changed) return;
-  save();
-  renderTasks();
-  window.updateCriticalTasksIsland?.();
+  const today = todayKey();
+  const overdue = state.tasks.filter(task => canPostponeTask(task, today));
+  postponeTasks(overdue, today);
 }
 function wontDoMain(id){
   const t=state.tasks.find(x=>x.id===id); if(!t || !assertTaskActionMutationWritable()) return;

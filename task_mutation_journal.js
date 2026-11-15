@@ -267,7 +267,7 @@
     return current;
   }
 
-  function writeRecord(record, alreadyNormalized = false, expectedPriorRaw = undefined) {
+  function writeRecord(record, alreadyNormalized = false, expectedPriorRaw = undefined, expectedSnapshotRaw = undefined) {
     // Both internal callers receive a fresh, fully normalized copy from
     // readRecord(). Re-normalizing here cloned every pending Task and
     // completion a second time on EACH foreground Work/Task interaction.
@@ -285,6 +285,10 @@
     // without waiting on an asynchronous lock (foreground Tasks remain pre-paint).
     // localStorage is NOT compare-and-swap: a different tab can still race
     // after this observation, so this cannot certify global V2 writer fencing.
+    if (expectedSnapshotRaw !== undefined && storage.getItem(STORAGE_KEY) !== expectedSnapshotRaw) {
+      snapshotSourceConflicts++;
+      throw new Error('Another tab changed the saved tasks. Refresh and try again.');
+    }
     if (expectedPriorRaw !== undefined) {
       let sourceRaw;
       try { sourceRaw = storage.getItem(JOURNAL_KEY); }
@@ -382,6 +386,16 @@
     }
     record.updatedAtISO = new Date().toISOString();
     const saved = writeRecord(record, true, current.raw);
+    const taskRelevant = Boolean(mutation.task?.id
+      || mutation.completionUpsert?.taskId
+      || mutation.completionDeleteId
+      || (Array.isArray(mutation.completionUpserts)
+        && mutation.completionUpserts.some(row => row?.taskId)));
+    afterJournalWrite(saved, taskRelevant);
+    return saved;
+  }
+
+  function afterJournalWrite(saved, taskRelevant) {
     mutationGeneration += 1;
     try { core.noteStorageUserInteraction?.(); } catch (_) {}
     // saved is the exact successfully written normalized journal; avoid
@@ -391,16 +405,58 @@
     // Observe successful live V1 Task interactions on preview hosts only.
     // The V2 preview side runs after deep idle, never before the synchronous
     // journal write or before the UI can show the saved Task.
-    const taskRelevant = Boolean(mutation.task?.id
-      || mutation.completionUpsert?.taskId
-      || mutation.completionDeleteId
-      || (Array.isArray(mutation.completionUpserts)
-        && mutation.completionUpserts.some(row => row?.taskId)));
     if (taskRelevant) {
       try { global.TaskPointsStateRuntimeV2?.queueObservedLegacyTaskJournal?.(); }
       catch (_) {}
     }
-    return saved;
+  }
+
+  // Prepare a single logical edit from the latest durable versions of the
+  // selected tasks. No caller-owned Task or unrelated completion is mutated.
+  function journalTaskUpdates(ids, prepare) {
+    const current = assertJournalWritable();
+    const snapshotRaw = storage.getItem(STORAGE_KEY);
+    if (snapshotRaw !== null && (typeof snapshotRaw !== 'string' || !snapshotRaw))
+      throw new Error('The TaskPoints snapshot could not be read.');
+    const selected = new Set(ids.map(String));
+    const latest = new Map();
+    for (const row of current.record.tasks) {
+      const id = String(row.id);
+      if (selected.has(id)) latest.set(id, row);
+    }
+    if (latest.size < selected.size && snapshotRaw !== null) {
+      const snapshot = core.parseTaskPointsStorageJson(snapshotRaw, null);
+      if (!Array.isArray(snapshot?.tasks)) throw new Error('Saved tasks could not be read.');
+      let rows = snapshot.tasks.filter(row => row && selected.has(String(row.id))
+        && !latest.has(String(row.id)));
+      if (snapshot.__storageCompactVersion === 1)
+        rows = core.normalizeState({tasks:rows, __storageCompactVersion:1}).tasks;
+      for (const row of rows) {
+        const id = String(row.id);
+        if (!latest.has(id)) latest.set(id, row);
+      }
+    }
+
+    const updates = new Map();
+    for (const id of selected) {
+      const row = latest.get(id);
+      if (!row) throw new Error('A selected task is no longer available. Refresh the task list.');
+      const draft = clone(row);
+      const changed = prepare(draft);
+      if (typeof changed !== 'boolean') throw new Error('Task updates must finish synchronously.');
+      if (changed) {
+        if (String(draft.id) !== id) throw new Error('A Task update changed its ID.');
+        updates.set(id, draft);
+      }
+    }
+    if (!updates.size) return latest;
+    const record = current.record;
+    record.tasks = record.tasks.filter(row => !updates.has(String(row.id))).concat([...updates.values()]);
+    record.updatedAtISO = new Date().toISOString();
+    const saved = writeRecord(record, true, current.raw, snapshotRaw);
+    afterJournalWrite(saved, true);
+    for (const [id, row] of updates) latest.set(id, row);
+    return latest;
   }
 
   function applyRecord(sourceState, suppliedRecord = null) {
@@ -1101,6 +1157,7 @@
   core.applyPendingTaskMutations = applyRecord;
   core.assertTaskMutationJournalWritable = assertJournalWritable;
   core.journalTaskMutation = journalMutation;
+  core.journalTaskUpdates = journalTaskUpdates;
   // V2-branch migration stepping stone. This remains an ordinary V1
   // synchronous journal until real multi-context writer admission is proven.
   // Older journalTaskMutation callers and all recovery formats stay intact.

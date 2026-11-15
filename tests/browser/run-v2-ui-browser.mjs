@@ -1057,6 +1057,99 @@ try{
   });
 
 
+  await test('Home postpones one or all overdue tasks through a single journal write per tap',async ctx=>{
+    // Home wraps Storage methods during bootstrap. Install instrumentation
+    // underneath those wrappers so both browsers exercise the real save path.
+    await ctx.addInitScript(()=>{
+      const probe=window.__postponeWrites={active:false,deny:false,keys:[]};
+      const set=Storage.prototype.setItem;
+      Storage.prototype.setItem=function(key,value){
+        if (probe.active && this===localStorage
+          && ['taskpoints_v1','taskpoints_pending_task_mutations_v1'].includes(key)) {
+          if (probe.deny && key==='taskpoints_pending_task_mutations_v1')
+            throw new DOMException('Synthetic quota failure','QuotaExceededError');
+          probe.keys.push(key);
+        }
+        return set.call(this,key,value);
+      };
+    });
+    const {page}=await home(ctx);
+    const result=await page.evaluate(()=>{
+      const core=window.TaskPointsCore;
+      const today=todayKey(),old=dateKey(addDays(fromKey(today),-3));
+      const make=id=>({id,title:id,dueDateISO:old,originalDueDateISO:old,
+        status:'active',postponedDays:2,points:1,tags:['keep']});
+      const tasks=['one','two','three','future','trashed'].map(make);
+      tasks[3].dueDateISO=dateKey(addDays(fromKey(today),1));
+      tasks[4].status='trashed';
+      const saved=core.saveStateSnapshot({...state,tasks},{immediateWrite:true,userInitiated:true});
+      if (!saved?.state || saved.skipped) throw Error('fixture tasks not saved');
+      state=saved.state;
+      // A prior edit exists durably before the open page sees its new title.
+      core.journalTaskMutation({task:{...state.tasks.find(t=>t.id==='one'),
+        title:'Edited title',detail:{retained:true}}});
+      renderTasks(state);
+      const snapshotBefore=localStorage.getItem('taskpoints_v1');
+      const probe=window.__postponeWrites;
+      probe.active=true;
+      const click=selector=>{
+        const button=document.querySelector(selector);
+        if (!button) throw Error('Missing postpone button '+selector);
+        button.click();
+      };
+      // A denied batch must leave every visible date and the prior journal intact.
+      const beforeFailure=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const liveBefore=JSON.stringify(state.tasks);
+      const alertBefore=window.alert;
+      let alerts=0;
+      try {
+        window.alert=()=>{alerts++;};
+        probe.deny=true;
+        click('[data-task-action="postpone-all-overdue"]');
+      } finally {window.alert=alertBefore;probe.deny=false;}
+      if (alerts!==1 || JSON.stringify(state.tasks)!==liveBefore
+        || localStorage.getItem('taskpoints_pending_task_mutations_v1')!==beforeFailure)
+        throw Error('Unverified postponement: '+JSON.stringify({alerts,liveChanged:JSON.stringify(state.tasks)!==liveBefore,
+          journalChanged:localStorage.getItem('taskpoints_pending_task_mutations_v1')!==beforeFailure,writes:probe.keys}));
+      let singleDate;
+      try {
+        click('[data-task-action="postpone"][data-task-id="one"]');
+        singleDate=core.readTaskPointsStoredState().tasks.find(t=>t.id==='one').dueDateISO;
+        click('[data-task-action="postpone-all-overdue"]');
+      } finally {probe.active=false;}
+      return {today,old,writes:probe.keys,singleDate,unchanged:localStorage.getItem('taskpoints_v1')===snapshotBefore,
+        tasks:core.readTaskPointsStoredState().tasks,live:state.tasks};
+    });
+    assert.equal(result.singleDate,result.today,'the first tap must survive its pending journal overlay');
+    for(const rows of [result.tasks,result.live]){
+      for (const id of ['one','two','three']){
+        const task=rows.find(t=>t.id===id);
+        assert.equal(task.dueDateISO,result.today,id);
+        assert.equal(task.postponedDays,5);
+        assert.equal(task.originalDueDateISO,result.old);
+      }
+      assert.equal(rows.find(t=>t.id==='one').title,'Edited title');
+      assert.deepEqual(rows.find(t=>t.id==='one').detail,{retained:true});
+      assert.equal(rows.find(t=>t.id==='trashed').dueDateISO,result.old);
+      assert.ok(rows.find(t=>t.id==='future').dueDateISO>result.today);
+    }
+    assert.equal(result.unchanged,true);
+    assert.deepEqual(result.writes,Array(2).fill('taskpoints_pending_task_mutations_v1'));
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(()=>document.querySelectorAll('#habitsList .habitDay').length>=21);
+    const mirrored=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      api.queueObservedLegacyTaskJournal();
+      const outcome=await api.flushObservedLegacyTaskJournal();
+      return {verified:outcome.verified,reason:outcome.reason,
+        tasks:window.TaskPointsCore.readTaskPointsStoredState().tasks};
+    });
+    assert.equal(mirrored.verified,true,mirrored.reason);
+    for(const id of ['one','two','three'])
+      assert.equal(mirrored.tasks.find(t=>t.id===id).dueDateISO,result.today);
+    return {tasksPostponed:3,journalWrites:2,fullSnapshotWrites:0,verifiedAfterReload:true};
+  });
+
   await test('Task UI edit then Trash survives repeated reloads without resurrecting an older task',async ctx=>{
     const {page}=await home(ctx);
     await page.locator('[data-home-tab="tasks"]').click({force:true});
