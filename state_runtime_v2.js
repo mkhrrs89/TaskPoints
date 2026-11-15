@@ -19689,6 +19689,11 @@
   const OBSERVED_TASK_IDLE_MS = 7000;
   const OBSERVED_TASK_TIMER_MS = 9000;
   let observedTaskRequested = false;
+  // Bind each delayed preview Task scan to the generation and local dark
+  // epoch that requested it. Reset/restore must not inherit a stale timer.
+  let observedTaskRequestGeneration = null;
+  let observedTaskRequestEpoch = null;
+  let observedTaskStaleRequestsCancelled = 0;
   // Tracks one low-priority catch-up opportunity per preview startup epoch.
   // No persistence, no V1 writes, no authority handoff.
   let observedTaskStartupKey = null;
@@ -19751,6 +19756,34 @@
   ]);
   let observedTaskTransientRetries = 0;
 
+  function cancelStaleObservedTaskRequest() {
+    if (!observedTaskRequested) return false;
+    observedTaskRequested = false;
+    observedTaskRequestGeneration = null;
+    observedTaskRequestEpoch = null;
+    observedTaskTransientRetries = 0;
+    observedTaskIdleDeferrals = 0;
+    observedTaskStaleRequestsCancelled += 1;
+    observedTaskLastReason = 'preview_request_generation_changed';
+    // clearTimeout alone cannot stop a callback already dispatched.
+    // Incrementing the serial also makes old scheduled closures inert.
+    observedTaskTimerGeneration += 1;
+    if (observedTaskTimer != null) {
+      try { global.clearTimeout?.(observedTaskTimer); } catch (_) {}
+      observedTaskTimer = null;
+    }
+    return true;
+  }
+
+  function observedTaskRequestCurrent() {
+    if (!observedTaskRequested) return false;
+    try {
+      return observedTaskRequestEpoch === darkMirrorModeEpoch
+        && observedTaskRequestGeneration != null
+        && currentGeneration({create:false}) === observedTaskRequestGeneration;
+    } catch (_) { return false; }
+  }
+
   function observeTaskResult(reason, verified = false) {
     observedTaskLastReason = reason;
     if (verified) observedTaskVerified += 1;
@@ -19777,7 +19810,13 @@
         reason:'no_pending_task_observation',canPromote:false,
         productionWritersFenced:false
       };
+    if (!observedTaskRequestCurrent()) {
+      cancelStaleObservedTaskRequest();
+      return observeTaskResult('preview_request_generation_changed');
+    }
     observedTaskRequested = false;
+    observedTaskRequestGeneration = null;
+    observedTaskRequestEpoch = null;
     observedTaskAttempts += 1;
     const generation = currentGeneration({create:false});
     const epoch = darkMirrorModeEpoch;
@@ -19856,12 +19895,20 @@
   function scheduleObservedTaskMirror() {
     if (!observedTaskPreviewAllowed() || !observedTaskRequested
       || typeof global.setTimeout !== 'function') return false;
+    if (!observedTaskRequestCurrent()) {
+      cancelStaleObservedTaskRequest();
+      return false;
+    }
     const serial = ++observedTaskTimerGeneration;
     if (observedTaskTimer != null) global.clearTimeout?.(observedTaskTimer);
     observedTaskTimer = global.setTimeout(() => {
       if (serial !== observedTaskTimerGeneration) return;
       observedTaskTimer = null;
       if (!observedTaskPreviewAllowed() || !observedTaskRequested) return;
+      if (!observedTaskRequestCurrent()) {
+        cancelStaleObservedTaskRequest();
+        return;
+      }
       // Background-only. If the user is active, allow a few additional
       // quiet-window checks, but never create unbounded background polling.
       const idle = core.getStorageMaintenanceIdleStatus?.() || null;
@@ -19923,7 +19970,11 @@
 
   function queueObservedLegacyTaskJournal() {
     if (!observedTaskPreviewAllowed()) return false;
+    const generation = currentGeneration({create:false});
+    if (!generation) return false;
     observedTaskRequested = true;
+    observedTaskRequestGeneration = generation;
+    observedTaskRequestEpoch = darkMirrorModeEpoch;
     // A new durable V1 event starts a new bounded retry budget.
     observedTaskTransientRetries = 0;
     observedTaskIdleDeferrals = 0;
@@ -19935,6 +19986,7 @@
     return {
       previewOnly:true,productionWritersFenced:false,
       pending:observedTaskRequested,running:Boolean(observedTaskRun),
+      staleRequestCancellations:observedTaskStaleRequestsCancelled,
       startupCatchupRequests:observedTaskStartupRequests,
       peerStorageListenerInstalled:observedTaskPeerListenerInstalled,
       visibilityResumeListenerInstalled:observedTaskVisibilityListenerInstalled,
