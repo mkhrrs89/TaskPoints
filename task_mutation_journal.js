@@ -220,14 +220,19 @@
     // string (or a nonstandard storage shim returning undefined) is
     // unreadable evidence: treating it as absent would let the next Task tap
     // overwrite potentially interrupted/corrupt pending work.
-    if (raw === null) return { raw: '', malformed: false, record: emptyRecord() };
+    if (raw === null) return { raw, malformed: false, record: emptyRecord() };
     let parsed;
     try { parsed = JSON.parse(raw); }
     catch (_) { return { raw, malformed: true, record: emptyRecord() }; }
     if (!validStoredTaskJournal(parsed))
       return { raw, malformed: true, record: emptyRecord() };
-    const record = normalizeRecord(parsed);
-    return record ? { raw, malformed: false, record } : { raw, malformed: true, record: emptyRecord() };
+    // JSON.parse already gave this read private arrays and nested objects.
+    // Retain the two normalizations needed for older valid journal records.
+    const record = {
+      schemaVersion: 1, tasks: parsed.tasks, completionUpserts: parsed.completionUpserts,
+      completionDeletes: [...new Set(parsed.completionDeletes)], updatedAtISO: parsed.updatedAtISO ?? null
+    };
+    return { raw, malformed: false, record };
   }
 
   function isEmpty(record) {
@@ -263,17 +268,18 @@
   }
 
   function writeRecord(record, alreadyNormalized = false, expectedPriorRaw = undefined) {
+    // Both internal callers receive a fresh, fully normalized copy from
+    // readRecord(). Re-normalizing here cloned every pending Task and
+    // completion a second time on EACH foreground Work/Task interaction.
+    // Keep the original validation path for any future untrusted caller.
+    const normalized = alreadyNormalized ? record : (normalizeRecord(record) || emptyRecord());
+    const expectedRaw = isEmpty(normalized) ? null : JSON.stringify(normalized);
     assertPreviewTaskGeneration();
     if (!recoveryWriteAllowed()) {
       const error = new Error('TaskPoints paused task changes while recovery protection is active.');
       error.code = 'TASKPOINTS_TASK_MUTATION_JOURNAL_WRITE_LOCKED';
       throw error;
     }
-    // Both internal callers receive a fresh, fully normalized copy from
-    // readRecord(). Re-normalizing here cloned every pending Task and
-    // completion a second time on EACH foreground Work/Task interaction.
-    // Keep the original validation path for any future untrusted caller.
-    const normalized = alreadyNormalized ? record : (normalizeRecord(record) || emptyRecord());
     // Source-byte admission is checked synchronously immediately before the
     // write. This refuses a known peer edit between readRecord() and writeRecord()
     // without waiting on an asynchronous lock (foreground Tasks remain pre-paint).
@@ -288,14 +294,13 @@
         refused.code = 'TASKPOINTS_TASK_MUTATION_JOURNAL_SOURCE_UNREADABLE';
         throw refused;
       }
-      if ((sourceRaw === null ? '' : sourceRaw) !== expectedPriorRaw) {
+      if (sourceRaw !== expectedPriorRaw) {
         journalSourceConflicts += 1;
         const refused = new Error('Another tab changed pending Task data before this edit could be saved.');
         refused.code = 'TASKPOINTS_TASK_MUTATION_JOURNAL_SOURCE_CHANGED';
         throw refused;
       }
     }
-    const expectedRaw = isEmpty(normalized) ? null : JSON.stringify(normalized);
     if (expectedRaw === null) storage.removeItem(JOURNAL_KEY);
     else storage.setItem(JOURNAL_KEY, expectedRaw);
 
@@ -405,17 +410,28 @@
     const record = suppliedRecord || readRecord().record;
 
     const tasks = Array.isArray(state.tasks) ? [...state.tasks] : [];
+    const taskIndex = record.tasks.length >= 8 ? new Map() : null;
+    if (taskIndex) {
+      for (let i = 0; i < tasks.length; i++) {
+        const id = String(tasks[i]?.id || '');
+        if (!taskIndex.has(id)) taskIndex.set(id, i);
+      }
+    }
     for (const patch of record.tasks) {
       const id = String(patch.id);
-      const at = tasks.findIndex((task) => String(task?.id || '') === id);
-      if (at >= 0) tasks[at] = clone(patch); else tasks.push(clone(patch));
+      const at = taskIndex ? (taskIndex.get(id) ?? -1)
+        : tasks.findIndex((task) => String(task?.id || '') === id);
+      if (at >= 0) tasks[at] = clone(patch);
+      else {
+        taskIndex?.set(id, tasks.length);
+        tasks.push(clone(patch));
+      }
     }
     state.tasks = tasks;
 
     const deleteIds = new Set(record.completionDeletes.map(String));
     const completions = (Array.isArray(state.completions) ? state.completions : [])
-      .filter((entry) => !deleteIds.has(String(entry?.id || '')))
-      .map((entry) => entry);
+      .filter((entry) => !deleteIds.has(String(entry?.id || '')));
     if (record.completionUpserts.length < 8) {
       // Single-row interaction replays stay cheap; indexing the entire
       // completion history would cost more than a handful of lookups.
@@ -782,7 +798,7 @@
       try { latestJournalRaw = storage.getItem(JOURNAL_KEY); }
       catch (_) { latestJournalRaw = undefined; }
       if (latestJournalRaw === undefined
-        || (latestJournalRaw === null ? '' : latestJournalRaw) !== current.raw) {
+        || latestJournalRaw !== current.raw) {
         journalSourceConflicts += 1;
         throw new Error('Task journal changed during compaction preparation; older snapshot was not saved.');
       }
@@ -1034,7 +1050,7 @@
           nowSnapshotRaw = undefined;
         }
         const journalChanged = nowJournalRaw === undefined
-          || (nowJournalRaw === null ? '' : nowJournalRaw) !== current.raw;
+          || nowJournalRaw !== current.raw;
         const snapshotChanged = fullSaveSourceRaw === undefined
           || nowSnapshotRaw === undefined || nowSnapshotRaw !== fullSaveSourceRaw
           || savedForProtection === null;
@@ -1075,7 +1091,13 @@
     };
   }
 
-  core.readPendingTaskMutations = () => readRecord();
+  core.readPendingTaskMutations = () => {
+    const current = readRecord();
+    // Keep the public absent-key convention. Internal write guards compare
+    // the actual storage value so a newly appeared empty string is a conflict.
+    if (current.raw === null) current.raw = '';
+    return current;
+  };
   core.applyPendingTaskMutations = applyRecord;
   core.assertTaskMutationJournalWritable = assertJournalWritable;
   core.journalTaskMutation = journalMutation;

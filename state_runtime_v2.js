@@ -11268,6 +11268,10 @@
   }
 
   async function rehearsePreviewTaskCollectionSeed() {
+    return seedPreviewTaskCollection(false);
+  }
+
+  async function seedPreviewTaskCollection(reconcileExisting) {
     const refuse = (reason, detail = {}) => ({
       checked: true, previewOnly: true, verified: false, stored: false,
       canPromote: false, productionWritersFenced: false,
@@ -11336,14 +11340,22 @@
     // during the optional live-Task mirror's first seed.
     if (!priorEvidence && (taskCount !== 0 || lifecycleCursor))
       return refuse('task_preview_unowned_rows_preserved');
-    if (priorEvidence && (priorEvidence.resetGeneration !== generation
-      || priorEvidence.taskFingerprint !== taskFingerprint))
-      return refuse('task_preview_existing_evidence_preserved');
-    // Compute the metadata signature before opening the write transaction.
-    // Every admission and readback still compares the actual source strings.
     const sourceSignature = `${fnv1a(source.token)}:${source.token.length}`;
-    if (priorEvidence && priorEvidence.sourceInventory !== sourceSignature)
-      return refuse('task_preview_existing_evidence_preserved');
+    if (priorEvidence && (priorEvidence.resetGeneration !== generation
+      || priorEvidence.taskFingerprint !== taskFingerprint
+      || priorEvidence.sourceInventory !== sourceSignature)) {
+      if (!reconcileExisting) return refuse('task_preview_existing_evidence_preserved');
+      if (!isDarkEnabled() || darkMirrorModeEpoch !== expectedEpoch
+        || currentGeneration({create:false}) !== generation)
+        return refuse('preview_generation_changed');
+      const id = 'observed-task-'+String(global.crypto?.randomUUID?.()
+        || (Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)));
+      // Only this background job can forward the private copy it just hashed.
+      // Reconciliation still re-reads the source before and inside the write.
+      return reconcilePreviewTaskCollection(source.token, id, {
+        source, sourceSignature, tasks, taskFingerprint, generation, modeEpoch:expectedEpoch
+      });
+    }
     if (!priorEvidence) {
       let commitError = null;
       try {
@@ -11427,6 +11439,10 @@
   // Never repair an unexplained V2 mismatch or overwrite preview-only edits.
   // V1 retains all read, mutation, import/export and recovery authority.
   async function rehearsePreviewTaskCollectionReconcile(sourceToken, actionId) {
+    return reconcilePreviewTaskCollection(sourceToken, actionId);
+  }
+
+  async function reconcilePreviewTaskCollection(sourceToken, actionId, captured) {
     const refuse = (reason, detail = {}) => ({
       checked: true, previewOnly: true, committed: false,
       confirmedDurable: false, collectionParityVerified: false,
@@ -11444,8 +11460,8 @@
       || typeof core.readPendingTaskMutations !== 'function')
       return refuse('legacy_task_reader_unavailable');
 
-    const modeEpoch = darkMirrorModeEpoch;
-    const generation = currentGeneration({ create: false });
+    const modeEpoch = captured?.modeEpoch ?? darkMirrorModeEpoch;
+    const generation = captured?.generation ?? currentGeneration({ create: false });
     if (!generation) return refuse('generation_unavailable');
     let source;
     const modeCurrent = () => isDarkEnabled() && darkMirrorModeEpoch === modeEpoch
@@ -11453,25 +11469,31 @@
     const sourceCurrent = () => modeCurrent() && source.isCurrent();
 
     let desired, desiredFingerprint;
-    try {
-      source = captureTaskStorageSource();
-      if (source.token !== sourceToken || !modeCurrent()) return refuse('full_origin_changed');
-      const pending = core.readPendingTaskMutations();
-      if (pending?.malformed) return refuse('legacy_task_journal_malformed');
-      const state = core.readTaskPointsStoredState();
-      if (!state || !Array.isArray(state.tasks))
-        return refuse('legacy_tasks_missing');
-      desired = clone(state.tasks);
-      const ids = new Set();
-      for (const item of desired) {
-        if (!item || typeof item !== 'object' || Array.isArray(item)
-          || item.id == null || !String(item.id)
-          || ids.has(String(item.id))) return refuse('legacy_task_ids_invalid');
-        ids.add(String(item.id));
-      }
-      if (!sourceCurrent()) return refuse('legacy_changed_during_capture');
-      desiredFingerprint = await previewRecoveryFingerprint(desired);
-    } catch (_) { return refuse('legacy_task_capture_unreadable'); }
+    if (captured) {
+      source = captured.source;
+      desired = captured.tasks;
+      desiredFingerprint = captured.taskFingerprint;
+    } else {
+      try {
+        source = captureTaskStorageSource();
+        if (source.token !== sourceToken || !modeCurrent()) return refuse('full_origin_changed');
+        const pending = core.readPendingTaskMutations();
+        if (pending?.malformed) return refuse('legacy_task_journal_malformed');
+        const state = core.readTaskPointsStoredState();
+        if (!state || !Array.isArray(state.tasks))
+          return refuse('legacy_tasks_missing');
+        desired = clone(state.tasks);
+        const ids = new Set();
+        for (const item of desired) {
+          if (!item || typeof item !== 'object' || Array.isArray(item)
+            || item.id == null || !String(item.id)
+            || ids.has(String(item.id))) return refuse('legacy_task_ids_invalid');
+          ids.add(String(item.id));
+        }
+        if (!sourceCurrent()) return refuse('legacy_changed_during_capture');
+        desiredFingerprint = await previewRecoveryFingerprint(desired);
+      } catch (_) { return refuse('legacy_task_capture_unreadable'); }
+    }
     try { if (!sourceCurrent()) return refuse('legacy_changed_before_reconcile'); }
     catch (_) { return refuse('legacy_unreadable_before_reconcile'); }
 
@@ -11517,7 +11539,7 @@
     try { if (!sourceCurrent()) return refuse('legacy_changed_during_reconcile'); }
     catch (_) { return refuse('legacy_unreadable_during_reconcile'); }
 
-    const sourceSignature = `${fnv1a(sourceToken)}:${sourceToken.length}`;
+    const sourceSignature = captured?.sourceSignature ?? `${fnv1a(sourceToken)}:${sourceToken.length}`;
     if (priorEvidence.taskFingerprint === desiredFingerprint
       && priorEvidence.sourceInventory === sourceSignature) {
       // The initial read and its SHA calculation are asynchronous. A second
@@ -19890,20 +19912,7 @@
           || !Array.isArray(pending.record?.completionUpserts)
           || !Array.isArray(pending.record?.completionDeletes))
           return observeTaskResult('legacy_task_journal_unreadable');
-        const seeded = await rehearsePreviewTaskCollectionSeed();
-        let result = seeded;
-        if (!seeded.verified && seeded.reason === 'task_preview_existing_evidence_preserved') {
-          if (!observedTaskPreviewAllowed()
-            || currentGeneration({create:false}) !== generation
-            || darkMirrorModeEpoch !== epoch)
-            return observeTaskResult('preview_generation_changed');
-          let token;
-          try { token = captureReadOnlyFullStorageInventory(); }
-          catch (_) { return observeTaskResult('full_origin_unreadable'); }
-          const id = 'observed-task-'+String(global.crypto?.randomUUID?.()
-            || (Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)));
-          result = await rehearsePreviewTaskCollectionReconcile(token,id);
-        }
+        const result = await seedPreviewTaskCollection(true);
         if (!(result?.verified === true
           || (result?.confirmedDurable === true && result?.collectionParityVerified === true))) {
           // A previously-current V2 Task preview may fail its nested no-op

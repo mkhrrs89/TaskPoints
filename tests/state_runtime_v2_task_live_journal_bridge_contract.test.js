@@ -679,14 +679,13 @@ test('repeated peer source churn is bounded and does not certify a stale Task sh
 
 
 // Exercise the actual installed observer function with only the underlying
-// seed/reconcile outcomes substituted. A normally-current seed short-circuits
-// reconciliation, so a nested no-op branch needs a simulated mid-seed race;
-// it cannot reliably be reached by counting readTaskPointsStoredState calls.
+// collection sync outcomes substituted. This exercises the observer's retry
+// policy independently of the timing of the nested V1 source checks.
 function makeNestedNoopObserver(prerequisiteReason){
   const first=V2.indexOf('  const OBSERVED_TASK_IDLE_MS = 7000;');
   const last=V2.indexOf('  function scheduleObservedTaskMirror() {',first);
   assert.ok(first>0&&last>first,'source observer and retry gates must exist');
-  let reconciled=0,scheduled=0,sourceValue='unchanged';
+  let reconciled=0,scheduled=0;
   const scope={
     global:{crypto:{randomUUID:()=> 'noop-task-observer-reconcile'}},
     core:{readPendingTaskMutations:()=>({malformed:false,record:{
@@ -694,11 +693,8 @@ function makeNestedNoopObserver(prerequisiteReason){
     }})},
     isWalTestPreviewHost:()=>true,isDarkEnabled:()=>true,
     currentGeneration:()=> 'rehearsal-generation',darkMirrorModeEpoch:1,
-    rehearsePreviewTaskCollectionSeed:async()=>({
-      verified:false,reason:'task_preview_existing_evidence_preserved'
-    }),
-    captureReadOnlyFullStorageInventory:()=>sourceValue,
-    rehearsePreviewTaskCollectionReconcile:async()=>{
+    seedPreviewTaskCollection:async(reconcileExisting)=>{
+      assert.equal(reconcileExisting,true);
       reconciled++;
       return reconciled===1
         ?{verified:false,reason:'task_preview_noop_parity_mismatch',
@@ -721,8 +717,7 @@ function makeNestedNoopObserver(prerequisiteReason){
       flush:flushObservedLegacyTaskJournal
     })
   `,scope,{filename:'v2_observed_task_noop_retry_source.js'});
-  return {...exposed,reconciled:()=>reconciled,scheduled:()=>scheduled,
-    setSource:next=>{sourceValue=next}};
+  return {...exposed,reconciled:()=>reconciled,scheduled:()=>scheduled};
 }
 
 test('Task no-op parity unwraps only a documented V1 peer-source race for delayed retry',async()=>{
@@ -955,4 +950,57 @@ test('record-level Task edits recheck the entire source without serializing back
   assert.equal(result.confirmedDurable, true, result.reason);
   assert.ok(reads >= 6, 'the backup is still checked through transaction and readback');
   assert.equal(encodes, 1);
+});
+
+test('updating an existing Task mirror reads effective Tasks once to prepare and once to verify', async () => {
+  const app=install();
+  await app.api.seedFromLegacy();
+  assert.equal((await app.api.rehearsePreviewTaskCollectionSeed()).verified,true);
+  app.core.journalTaskMutation({task:{id:'a',title:'New title',status:'active'}});
+  const read=app.core.readTaskPointsStoredState;
+  let reads=0;
+  app.core.readTaskPointsStoredState=(...args)=>{reads++;return read(...args);};
+  const result=await app.api.flushObservedLegacyTaskJournal();
+  assert.equal(result.verified,true,result.reason);
+  assert.equal(reads,2);
+  assert.equal(app.indexedDB.dump(DB).tasks[0].value.title,'New title');
+});
+
+test('a peer change at the handoff from Task seed to reconciliation refuses stale prepared data',async()=>{
+  const app=install();
+  await app.api.seedFromLegacy();
+  assert.equal((await app.api.rehearsePreviewTaskCollectionSeed()).verified,true);
+  app.core.journalTaskMutation({task:{id:'a',title:'First edit',status:'active'}});
+  const peer=JSON.parse(app.localStorage.getItem(PENDING));
+  peer.tasks[0].title='Peer edit';
+  const before=app.indexedDB.dump(DB);
+  // The action ID is allocated after seed has read its evidence and before
+  // reconciliation has opened its transaction.
+  const uuid=app.context.crypto.randomUUID;
+  app.context.crypto.randomUUID=()=>{
+    app.localStorage.setItem(PENDING,JSON.stringify(peer));
+    return 'peer-change-at-handoff';
+  };
+  const blocked=await app.api.flushObservedLegacyTaskJournal();
+  assert.equal(blocked.reason,'legacy_changed_before_reconcile');
+  assert.equal(blocked.verified,false);
+  assert.deepEqual(app.indexedDB.dump(DB),before);
+  assert.equal(app.api.getObservedLegacyTaskStatus().pending,true);
+  app.context.crypto.randomUUID=uuid;
+  assert.equal((await app.api.flushObservedLegacyTaskJournal()).verified,true);
+  assert.equal(app.indexedDB.dump(DB).tasks[0].value.title,'Peer edit');
+});
+
+test('public Task calls cannot inject a prepared source or opt into background reconciliation',async()=>{
+  const app=install();
+  await app.api.seedFromLegacy();
+  assert.equal((await app.api.rehearsePreviewTaskCollectionSeed()).verified,true);
+  app.core.journalTaskMutation({task:{id:'a',title:'Fresh source'}});
+  const before=app.indexedDB.dump(DB);
+  const seeded=await app.api.rehearsePreviewTaskCollectionSeed(true);
+  assert.equal(seeded.reason,'task_preview_existing_evidence_preserved');
+  const forged={source:{token:'old',isCurrent:()=>true},tasks:[],taskFingerprint:'invented'};
+  const checked=await app.api.rehearsePreviewTaskCollectionReconcile('old','injected',forged);
+  assert.equal(checked.reason,'full_origin_changed');
+  assert.deepEqual(app.indexedDB.dump(DB),before);
 });

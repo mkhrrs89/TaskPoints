@@ -1012,7 +1012,7 @@ test('fast Task journal skips invalid single-row arrays as the previous normaliz
   assert.equal(h.getSaveCalls(),0);
 });
 
-test('pending completion journal rows are cloned once rather than twice per foreground save',()=>{
+test('validated pending completion rows need no deep copy after JSON parsing',()=>{
   const rows=Array.from({length:320},(_,i)=>({
     id:'existing-scwm-'+i,source:'work',points:7.2,workHours:8,
     completedAtISO:'2026-10-25T12:00:00.000Z'
@@ -1031,8 +1031,7 @@ test('pending completion journal rows are cloned once rather than twice per fore
     id:'new-fast-work',source:'work',points:8.4,workHours:8.25,
     completedAtISO:'2026-11-02T12:00:00.000Z'
   }]);
-  assert.equal(cloneCalls,rows.length,
-    'readRecord normalizes each pending row once; the writer must not clone all rows again');
+  assert.equal(cloneCalls,0, 'a fresh JSON parse already owns the pending rows');
   const after=JSON.parse(h.storage.getItem(JOURNAL_KEY));
   assert.equal(after.completionUpserts.length,rows.length+1);
   assert.ok(after.completionUpserts.some(row=>row.id==='new-fast-work'));
@@ -2161,4 +2160,81 @@ test('V2 Home maintenance refuses to rebuild without an authoritative persisted 
   const result = h.core.saveStateSnapshot(candidate, { savePath: 'home-season-slate-idle-materialization' });
   assert.equal(result.skipped, true);
   assert.equal(h.storage.getItem(STORAGE_KEY), original);
+});
+
+test('fresh journal reads isolate nested rows and preserve older record normalization', () => {
+  const source = { schemaVersion:1, tasks:[{id:'a',extra:{items:[1]}}],
+    completionUpserts:[{id:'b',extra:{items:[2]}}], completionDeletes:['x','x','y'] };
+  const h = makeHarness({ [JOURNAL_KEY]:JSON.stringify(source) });
+  const first = h.core.readPendingTaskMutations().record;
+  first.tasks[0].extra.items.push(3);
+  first.completionUpserts[0].extra.items.length = 0;
+  first.completionDeletes.reverse();
+  assert.deepEqual(clone(h.core.readPendingTaskMutations().record), {
+    ...source, completionDeletes:['x','y'], updatedAtISO:null
+  });
+  assert.equal(h.storage.getItem(JOURNAL_KEY),JSON.stringify(source));
+});
+
+test('large pending Task replay preserves first matching ID, append order and row isolation', () => {
+  const h = makeHarness();
+  const state = {tasks:[{id:1,title:'first'},{id:'1',title:'duplicate'},null],
+    completions:[{id:'keep'}]};
+  const patches = [1,'new',2,3,4,5,6,7,'new',1].map((id,index) => ({id, extra:{index}}));
+  const record = {tasks:patches,completionUpserts:[],completionDeletes:[]};
+  const replayed = h.core.applyPendingTaskMutations(state,record);
+  const expected = clone(state.tasks);
+  for (const row of patches) {
+    const i = expected.findIndex(t => String(t?.id || '') === String(row.id));
+    if (i >= 0) expected[i] = row; else expected.push(row);
+  }
+  assert.deepEqual(clone(replayed.tasks),expected);
+  assert.equal(replayed.tasks[1].title,'duplicate');
+  replayed.tasks[0].extra.index = -1;
+  assert.equal(patches.at(-1).extra.index,9);
+  assert.notEqual(replayed.completions,state.completions);
+  assert.equal(state.tasks[0].title,'first');
+});
+
+test('a peer edit during foreground serialization survives the final source check', () => {
+  const h = makeHarness();
+  const peer = JSON.stringify({schemaVersion:1,tasks:[{id:'peer'}],
+    completionUpserts:[],completionDeletes:[],updatedAtISO:null});
+  const journal = h.storage.getItem(JOURNAL_KEY);
+  let injected = false;
+  h.context.JSON = { parse:JSON.parse, stringify(value,...args) {
+    const raw = JSON.stringify(value,...args);
+    if (!injected && value?.tasks?.some(row => row.id === 'local')) {
+      injected = true;
+      h.storage.setItem(JOURNAL_KEY,peer);
+    }
+    return raw;
+  }};
+  assert.throws(() => h.core.journalTaskMutation({task:{id:'local'}}),
+    {code:'TASKPOINTS_TASK_MUTATION_JOURNAL_SOURCE_CHANGED'});
+  assert.ok(injected);
+  assert.notEqual(peer,journal);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),peer);
+  assert.equal(h.core.getTaskMutationJournalStatus().journalWritesVerified,0);
+});
+
+test('an empty peer journal and a rotated preview epoch both block prepared edits', () => {
+  const generation = 'taskpoints_state_v2_generation_v1';
+  for (const change of ['empty journal','reset']) {
+    const h = makeHarness({ [generation]:'A',taskpoints_state_v2_dark_mode_v1:'1' },
+      {hostname:'localhost'});
+    assert.equal(h.core.readPendingTaskMutations().raw,'');
+    h.context.JSON = { parse:JSON.parse, stringify(value,...args) {
+      const raw = JSON.stringify(value,...args);
+      if (value?.tasks?.some(row=>row.id==='edit')) {
+        if (change==='reset') h.storage.setItem(generation,'B');
+        else h.storage.setItem(JOURNAL_KEY,'');
+      }
+      return raw;
+    }};
+    assert.throws(()=>h.core.journalTaskMutation({task:{id:'edit'}}),
+      {code:change==='reset' ? 'TASKPOINTS_TASK_PREVIEW_GENERATION_CHANGED'
+        : 'TASKPOINTS_TASK_MUTATION_JOURNAL_SOURCE_CHANGED'});
+    assert.equal(h.storage.getItem(JOURNAL_KEY),change==='reset' ? null : '');
+  }
 });
