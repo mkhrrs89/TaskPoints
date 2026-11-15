@@ -19736,6 +19736,19 @@
     'task_preview_parity_unreadable',
     'full_origin_unreadable'
   ]);
+  // The no-op reconcile path wraps an independent parity refusal in
+  // task_preview_noop_parity_mismatch. Only explicitly known V1 source
+  // races/read failures may be unwrapped for a bounded idle retry. Actual
+  // V2 row mismatch, missing evidence or unowned writes must stay blocked.
+  const OBSERVED_TASK_NOOP_SOURCE_RETRY_REASONS = new Set([
+    'legacy_changed_during_capture',
+    'legacy_task_capture_unreadable',
+    'legacy_changed_before_inspection',
+    'legacy_changed_during_inspection',
+    'legacy_unreadable_before_inspection',
+    'task_preview_source_stale',
+    'task_preview_read_unavailable'
+  ]);
   let observedTaskTransientRetries = 0;
 
   function observeTaskResult(reason, verified = false) {
@@ -19796,8 +19809,17 @@
           result = await rehearsePreviewTaskCollectionReconcile(token,id);
         }
         if (!(result?.verified === true
-          || (result?.confirmedDurable === true && result?.collectionParityVerified === true)))
-          return observeTaskResult(result?.reason || 'task_preview_reconcile_refused');
+          || (result?.confirmedDurable === true && result?.collectionParityVerified === true))) {
+          // A previously-current V2 Task preview may fail its nested no-op
+          // parity because a peer changed V1 during the asynchronous check.
+          // Recover only specific source races; never reinterpret a genuine
+          // V2 row/evidence discrepancy as transient ownership.
+          const nestedSourceRace = result?.reason === 'task_preview_noop_parity_mismatch'
+            && OBSERVED_TASK_NOOP_SOURCE_RETRY_REASONS.has(result.prerequisiteReason);
+          return observeTaskResult(nestedSourceRace
+            ? result.prerequisiteReason
+            : result?.reason || 'task_preview_reconcile_refused');
+        }
         // Independent post-action parity; V1 journal may have changed again
         // during the async mirror. Never count a stale preview as verified.
         const parity = await inspectPreviewTaskCollectionParity();
