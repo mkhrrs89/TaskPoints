@@ -11717,7 +11717,7 @@ try {
       });
       return {reads,before,declinedReason:declined.reason,
         prerequisiteReason:declined.prerequisiteReason,
-        declinedVerified:declined.verified,
+        declinedVerified:declined.verified===true,
         observedVerified:observed.verified,observedReason:observed.reason,
         title:row?.value?.title,parityMatch:parity.match,
         oldRaw:originalRaw,newerRaw,retained,
