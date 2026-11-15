@@ -19883,6 +19883,10 @@
         && darkMirrorModeEpoch === epoch) {
         observedTaskTransientRetries += 1;
         observedTaskRequested = true;
+        // Re-arm this bounded retry only for the same generation and epoch;
+        // it must never inherit a request from a later reset or restore.
+        observedTaskRequestGeneration = generation;
+        observedTaskRequestEpoch = epoch;
       }
       return result;
     }).finally(() => {
