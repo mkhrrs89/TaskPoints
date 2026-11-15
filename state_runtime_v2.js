@@ -4040,6 +4040,11 @@
   // An equal before/after image is NOT proof of writer fencing (an unfenced
   // tab can write between checks, or change a value and then restore it).
   function captureReadOnlyFullStorageInventory() {
+    const entries = readFullStorageEntries();
+    return stableJson(entries);
+  }
+
+  function readFullStorageEntries() {
     const storage = global.localStorage;
     if (!storage || typeof storage.key !== 'function'
       || typeof storage.getItem !== 'function'
@@ -4063,7 +4068,22 @@
     });
     if (storage.length !== count)
       throw Error('cutover_full_storage_inventory_changed');
-    return stableJson(entries);
+    return entries;
+  }
+
+  // Task mirroring checks the whole origin several times across async work.
+  // Keep the original strings for this operation so every check still reads
+  // every key and compares exact values, without re-encoding large backups.
+  function captureTaskStorageSource() {
+    const entries = readFullStorageEntries();
+    return {
+      token: stableJson(entries),
+      isCurrent() {
+        const current = readFullStorageEntries();
+        return current.length === entries.length && current.every(([key, value], index) =>
+          key === entries[index][0] && value === entries[index][1]);
+      }
+    };
   }
 
   // Read-only observation of the *actual* V1 Task mutation journal.
@@ -11231,6 +11251,22 @@
     }); }
   }
 
+  function storedTaskRowsMatch(rows, tasks) {
+    if (rows.length !== tasks.length) return false;
+    // IndexedDB returns primary-key order. Match each record directly to
+    // its V1 slot, including its key, without sorting or cloning the store.
+    const seen = new Set();
+    for (const row of rows) {
+      const index = row?.legacyIndex;
+      if (!Number.isInteger(index) || index < 0 || index >= tasks.length
+        || seen.has(index) || typeof row.id !== 'string' || !row.value
+        || String(row.value.id) !== row.id || String(tasks[index].id) !== row.id
+        || stableJson(row.value) !== stableJson(tasks[index])) return false;
+      seen.add(index);
+    }
+    return true;
+  }
+
   async function rehearsePreviewTaskCollectionSeed() {
     const refuse = (reason, detail = {}) => ({
       checked: true, previewOnly: true, verified: false, stored: false,
@@ -11246,9 +11282,9 @@
     const expectedEpoch = darkMirrorModeEpoch;
     const generation = currentGeneration({ create: false });
     if (!generation) return refuse('generation_unavailable');
-    let inventoryBefore, inventoryAfter, tasks, taskSignature;
+    let source, tasks;
     try {
-      inventoryBefore = captureReadOnlyFullStorageInventory();
+      source = captureTaskStorageSource();
       const pending = core.readPendingTaskMutations();
       if (pending?.malformed) return refuse('legacy_task_journal_malformed');
       const state = core.readTaskPointsStoredState();
@@ -11262,18 +11298,15 @@
           || ids.has(String(task.id))) return refuse('legacy_task_ids_invalid');
         ids.add(String(task.id));
       }
-      taskSignature = stableJson(tasks);
-      inventoryAfter = captureReadOnlyFullStorageInventory();
+      if (!source.isCurrent()) return refuse('legacy_changed_during_capture');
     } catch (_) { return refuse('legacy_task_capture_unreadable'); }
-    if (inventoryBefore !== inventoryAfter)
-      return refuse('legacy_changed_during_capture');
     let taskFingerprint;
     try { taskFingerprint = await previewRecoveryFingerprint(tasks); }
     catch (_) { return refuse('task_fingerprint_unavailable'); }
     const stillSameSource = () => {
       if (!isDarkEnabled() || darkMirrorModeEpoch !== expectedEpoch
         || currentGeneration({ create: false }) !== generation) return false;
-      return captureReadOnlyFullStorageInventory() === inventoryBefore;
+      return source.isCurrent();
     };
     try { if (!stillSameSource()) return refuse('legacy_changed_before_seed'); }
     catch (_) { return refuse('legacy_unreadable_before_seed'); }
@@ -11289,24 +11322,27 @@
       return refuse('pilot_meta_not_ready');
     try { if (!stillSameSource()) return refuse('legacy_changed_before_seed'); }
     catch (_) { return refuse('legacy_unreadable_before_seed'); }
-    let priorEvidence = null, unownedTaskRows = [], lifecycleCursor = null;
+    let priorEvidence = null, taskCount, lifecycleCursor = null;
     try {
       const tx = db.transaction(['tasks','meta'], 'readonly');
-      [priorEvidence,unownedTaskRows,lifecycleCursor] = await Promise.all([
+      [priorEvidence,taskCount,lifecycleCursor] = await Promise.all([
         requestPromise(tx.objectStore('meta').get('task-preview')),
-        requestPromise(tx.objectStore('tasks').getAll()),
+        requestPromise(tx.objectStore('tasks').count()),
         requestPromise(tx.objectStore('meta').get('task-preview-lifecycle-state'))
       ]);
     } catch (_) { return refuse('task_preview_evidence_unreadable'); }
     // An older preview experiment may have written a Task record without
     // the Task collection seed receipt. Never clear unowned preview bytes
     // during the optional live-Task mirror's first seed.
-    if (!priorEvidence && (unownedTaskRows.length || lifecycleCursor))
+    if (!priorEvidence && (taskCount !== 0 || lifecycleCursor))
       return refuse('task_preview_unowned_rows_preserved');
-    const sameEvidence = priorEvidence?.resetGeneration === generation
-      && priorEvidence?.taskFingerprint === taskFingerprint
-      && priorEvidence?.sourceInventory === `${fnv1a(inventoryBefore)}:${inventoryBefore.length}`;
-    if (priorEvidence && !sameEvidence)
+    if (priorEvidence && (priorEvidence.resetGeneration !== generation
+      || priorEvidence.taskFingerprint !== taskFingerprint))
+      return refuse('task_preview_existing_evidence_preserved');
+    // Compute the metadata signature before opening the write transaction.
+    // Every admission and readback still compares the actual source strings.
+    const sourceSignature = `${fnv1a(source.token)}:${source.token.length}`;
+    if (priorEvidence && priorEvidence.sourceInventory !== sourceSignature)
       return refuse('task_preview_existing_evidence_preserved');
     if (!priorEvidence) {
       let commitError = null;
@@ -11316,13 +11352,13 @@
         const metaStore = tx.objectStore('meta');
         const req = metaStore.get(RUNTIME_META_ID);
         const evidenceReq = metaStore.get('task-preview');
-        const rowsReq = tx.objectStore('tasks').getAll();
+        const countReq = tx.objectStore('tasks').count();
         const lifecycleReq = metaStore.get('task-preview-lifecycle-state');
-        let have = 0, currentMeta, currentEvidence, currentRows, currentLifecycle;
+        let have = 0, currentMeta, currentEvidence, currentCount, currentLifecycle;
         const check = () => {
           if (++have !== 4) return;
           if (stableJson(currentMeta || null) !== stableJson(initialMeta)
-            || currentEvidence || currentRows?.length || currentLifecycle
+            || currentEvidence || currentCount !== 0 || currentLifecycle
             || !isDarkEnabled()
             || darkMirrorModeEpoch !== expectedEpoch
             || currentGeneration({ create: false }) !== generation) {
@@ -11341,9 +11377,7 @@
               store.put({id:String(task.id),legacyIndex:index,value:task}));
             metaStore.put({
               id:'task-preview', schemaVersion:1, resetGeneration:generation,
-              taskFingerprint, sourceInventory:
-                // This digest is metadata only, never authority proof.
-                `${fnv1a(inventoryBefore)}:${inventoryBefore.length}`,
+              taskFingerprint, sourceInventory:sourceSignature,
               taskCount:tasks.length, capturedAtISO:nowIso()
             });
           } catch (_) {
@@ -11353,7 +11387,7 @@
         };
         req.onsuccess = () => { currentMeta=req.result; check(); };
         evidenceReq.onsuccess = () => { currentEvidence=evidenceReq.result; check(); };
-        rowsReq.onsuccess = () => { currentRows=rowsReq.result; check(); };
+        countReq.onsuccess = () => { currentCount=countReq.result; check(); };
         lifecycleReq.onsuccess = () => { currentLifecycle=lifecycleReq.result; check(); };
         await transactionPromise(tx);
       } catch (_) { return refuse(commitError || 'task_preview_write_failed'); }
@@ -11368,10 +11402,8 @@
       const [rows, evidence] = await Promise.all([
         requestPromise(storedReq), requestPromise(evidenceReq)
       ]);
-      const ordered = rows.slice()
-        .sort((a,b)=>a.legacyIndex-b.legacyIndex)
-        .map(row=>row.value);
-      if (stableJson(ordered) !== taskSignature
+      if (!storedTaskRowsMatch(rows, tasks)
+        || evidence?.schemaVersion !== 1 || evidence.sourceInventory !== sourceSignature
         || evidence?.taskFingerprint !== taskFingerprint
         || evidence?.resetGeneration !== generation
         || evidence?.taskCount !== tasks.length)
@@ -11415,14 +11447,15 @@
     const modeEpoch = darkMirrorModeEpoch;
     const generation = currentGeneration({ create: false });
     if (!generation) return refuse('generation_unavailable');
-    const sourceCurrent = () => isDarkEnabled()
-      && darkMirrorModeEpoch === modeEpoch
-      && currentGeneration({ create: false }) === generation
-      && captureReadOnlyFullStorageInventory() === sourceToken;
+    let source;
+    const modeCurrent = () => isDarkEnabled() && darkMirrorModeEpoch === modeEpoch
+      && currentGeneration({ create: false }) === generation;
+    const sourceCurrent = () => modeCurrent() && source.isCurrent();
 
     let desired, desiredFingerprint;
     try {
-      if (!sourceCurrent()) return refuse('full_origin_changed');
+      source = captureTaskStorageSource();
+      if (source.token !== sourceToken || !modeCurrent()) return refuse('full_origin_changed');
       const pending = core.readPendingTaskMutations();
       if (pending?.malformed) return refuse('legacy_task_journal_malformed');
       const state = core.readTaskPointsStoredState();
@@ -11638,9 +11671,9 @@
     const expectedEpoch = darkMirrorModeEpoch;
     const generation = currentGeneration({ create: false });
     if (!generation) return refuse('generation_unavailable');
-    let sourceInventory, tasks, taskFingerprint;
+    let source, tasks, taskFingerprint;
     try {
-      sourceInventory = captureReadOnlyFullStorageInventory();
+      source = captureTaskStorageSource();
       const pending = core.readPendingTaskMutations();
       if (pending?.malformed) return refuse('legacy_task_journal_malformed');
       const state = core.readTaskPointsStoredState();
@@ -11654,14 +11687,14 @@
           return refuse('legacy_task_ids_invalid');
         ids.add(String(task.id));
       }
-      if (captureReadOnlyFullStorageInventory() !== sourceInventory)
+      if (!source.isCurrent())
         return refuse('legacy_changed_during_capture');
       taskFingerprint = await previewRecoveryFingerprint(tasks);
     } catch (_) { return refuse('legacy_task_capture_unreadable'); }
     const sourceCurrent = () => isDarkEnabled()
       && darkMirrorModeEpoch === expectedEpoch
       && currentGeneration({ create: false }) === generation
-      && captureReadOnlyFullStorageInventory() === sourceInventory;
+      && source.isCurrent();
     try {
       if (!sourceCurrent()) return refuse('legacy_changed_before_inspection');
     } catch (_) { return refuse('legacy_unreadable_before_inspection'); }
@@ -11685,28 +11718,16 @@
       if (evidence.schemaVersion !== 1
         || evidence.resetGeneration !== generation)
         return refuse('task_preview_generation_mismatch');
-      const inventorySignature = `${fnv1a(sourceInventory)}:${sourceInventory.length}`;
+      const inventorySignature = `${fnv1a(source.token)}:${source.token.length}`;
       if (evidence.taskFingerprint !== taskFingerprint
         || evidence.sourceInventory !== inventorySignature)
         return refuse('task_preview_source_stale');
       if (evidence.taskCount !== tasks.length)
         return refuse('task_preview_evidence_mismatch');
       // Never accept a matching metadata fingerprint as proof of actual rows.
-      const seen = new Set();
-      const ordered = rows.slice().sort((a, b) => a.legacyIndex - b.legacyIndex);
-      if (ordered.length !== tasks.length)
+      if (!storedTaskRowsMatch(rows, tasks))
         return refuse('task_preview_record_mismatch',
-          { expectedCount: tasks.length, actualCount: ordered.length });
-      for (let index = 0; index < ordered.length; index += 1) {
-        const row = ordered[index];
-        if (!row || typeof row.id !== 'string'
-          || seen.has(row.id) || row.legacyIndex !== index
-          || !row.value || String(row.value.id) !== row.id
-          || stableJson(row.value) !== stableJson(tasks[index]))
-          return refuse('task_preview_record_mismatch',
-            { expectedCount: tasks.length, actualCount: ordered.length });
-        seen.add(row.id);
-      }
+          { expectedCount: tasks.length, actualCount: rows.length });
       if (!sourceCurrent()) return refuse('legacy_changed_during_inspection');
       return {
         checked: true, previewOnly: true, match: true,
@@ -11742,9 +11763,9 @@
     const expectedEpoch = darkMirrorModeEpoch;
     const generation = currentGeneration({ create: false });
     if (!generation) return refuse('generation_unavailable');
-    let inventory, tasks, expectedIndex, fingerprint;
+    let source, tasks, expectedIndex, fingerprint;
     try {
-      inventory = captureReadOnlyFullStorageInventory();
+      source = captureTaskStorageSource();
       const pending = core.readPendingTaskMutations();
       if (pending?.malformed) return refuse('legacy_task_journal_malformed');
       const state = core.readTaskPointsStoredState();
@@ -11758,14 +11779,14 @@
         ids.add(String(task.id));
       }
       expectedIndex = tasks.findIndex(task => String(task.id) === id);
-      if (captureReadOnlyFullStorageInventory() !== inventory)
+      if (!source.isCurrent())
         return refuse('legacy_changed_during_capture');
       fingerprint = await previewRecoveryFingerprint(tasks);
     } catch (_) { return refuse('legacy_task_capture_unreadable'); }
     const sourceCurrent = () => isDarkEnabled()
       && darkMirrorModeEpoch === expectedEpoch
       && currentGeneration({ create: false }) === generation
-      && captureReadOnlyFullStorageInventory() === inventory;
+      && source.isCurrent();
     try {
       if (!sourceCurrent()) return refuse('legacy_changed_before_read');
     } catch (_) { return refuse('legacy_unreadable_before_read'); }
@@ -11788,7 +11809,7 @@
       if (!evidence) return refuse('task_preview_missing');
       if (evidence.schemaVersion !== 1 || evidence.resetGeneration !== generation)
         return refuse('task_preview_generation_mismatch');
-      const inventorySignature = `${fnv1a(inventory)}:${inventory.length}`;
+      const inventorySignature = `${fnv1a(source.token)}:${source.token.length}`;
       if (evidence.taskFingerprint !== fingerprint
         || evidence.sourceInventory !== inventorySignature)
         return refuse('task_preview_source_stale');

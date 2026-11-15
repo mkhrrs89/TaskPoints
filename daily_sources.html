@@ -158,11 +158,12 @@ function buildDailyBreakdownsFast(stateInput) {
   const today = TaskPointsCore.fromKey(TaskPointsCore.todayKey());
   const end = latestLogged > today ? latestLogged : today;
   const out = {};
+  const inertiaLookup = TaskPointsCore.computeInertiaMaps?.(dailyTotals, normalized);
 
   for (const cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
     const key = TaskPointsCore.dateKey(cursor);
     const categories = { ...(categoriesByDay.get(key) || emptyDailySourceCategories()) };
-    const inertiaInfo = TaskPointsCore.computeInertia(dailyTotals, key, normalized) || {};
+    const inertiaInfo = inertiaLookup?.forDay(key) ?? TaskPointsCore.computeInertia(dailyTotals, key, normalized);
     const inertia = Number.isFinite(Number(inertiaInfo.inertia)) ? Number(inertiaInfo.inertia) : 0;
     if (inertia) categories.inertia = addDailySourcePoints(categories.inertia, inertia);
 

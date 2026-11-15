@@ -29,3 +29,33 @@ test('Daily Sources preserves existing pagination and source rendering controls'
   assert.match(source, /CATEGORY_DEFS\s*\.map/);
   assert.match(source, /categories\.inertia/);
 });
+
+test('Daily Sources computes inertia history once and preserves scores across gaps and edits', () => {
+  global.window = global;
+  require('../scoring_core.js');
+  const core = global.TaskPointsCore;
+  const state = { scoringSettings: { inertia: { windowDays: 3, multiplier: 0.5 } }, completions: [] };
+  for (const [day, points] of [['2026-10-30', 10], ['2026-11-02', -4], ['2026-11-03', 0]]) {
+    state.completions.push({ id: day, title: 'Task', points, completedAtISO: day + 'T12:00:00' });
+  }
+  const functions = source.slice(source.indexOf('function addDailySourcePoints('),
+    source.indexOf('function getDailyBreakdowns('));
+  const run = new Function('TaskPointsCore', 'CATEGORY_DEFS', functions + '\nreturn buildDailyBreakdownsFast;');
+  let builds = 0;
+  const fast = run({ ...core, todayKey: () => '2026-11-06',
+    computeInertiaMaps(...args) { builds++; return core.computeInertiaMaps(...args); },
+    computeInertia() { assert.fail('history rebuilt inside calendar loop'); }
+  }, core.CATEGORY_DEFS);
+  const reference = run({ ...core, todayKey: () => '2026-11-06', computeInertiaMaps: undefined }, core.CATEGORY_DEFS);
+  const before = fast(state);
+  assert.deepEqual(before, reference(state));
+  assert.equal(before['2026-10-31'].categories.inertia, 5);
+  assert.equal(before['2026-11-01'].categories.inertia, 5, 'yesterday’s projected score cannot feed an unlogged day');
+  assert.equal(before['2026-11-02'].total, 1);
+  state.completions[0].points = 16;
+  state.scoringSettings.inertia.multiplier = 0.25;
+  const after = fast(state);
+  assert.deepEqual(after, reference(state));
+  assert.equal(after['2026-11-01'].categories.inertia, 4);
+  assert.equal(builds, 2, 'one fresh lookup per rebuild');
+});

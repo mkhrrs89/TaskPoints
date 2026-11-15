@@ -644,3 +644,19 @@ test('Task reconciliation preserves duplicate and ID-less Habit/vice pilot histo
   assert.equal(app.localStorage.getItem(KEY),v1);
 });
 
+
+test('Task seed readback refuses a wrong storage key or wrong position even when all Task values match', async () => {
+  const app = await seeded();
+  const store = app.indexedDB._databases.get(DB)._stores.get('tasks');
+  const row = store.get('a');
+  for (const corrupt of [{ ...row, id: 'wrong-key' }, { ...row, legacyIndex: -1 }, { ...row, legacyIndex: 1 }]) {
+    store.delete(row.id);
+    store.set(corrupt.id, corrupt);
+    assert.equal((await app.api.rehearsePreviewTaskCollectionSeed()).reason, 'task_preview_readback_mismatch');
+    assert.equal((await app.api.inspectPreviewTaskCollectionParity()).reason, 'task_preview_record_mismatch');
+    assert.deepEqual(store.get(corrupt.id), corrupt);
+    store.delete(corrupt.id);
+    store.set(row.id, row);
+  }
+  assert.equal((await app.api.rehearsePreviewTaskCollectionSeed()).verified, true);
+});

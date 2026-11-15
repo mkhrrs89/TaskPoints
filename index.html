@@ -5514,9 +5514,13 @@ function computeInertia(dailyTotals, todayK){
   return inertiaMap.get(todayK) || { inertia: 0, average: 0 };
 }
 
-function deriveTodayWithInertia(dailyTotals, todayK){
+function prepareHomeInertia(dailyTotals){
+  return window.TaskPointsCore?.computeInertiaMaps?.(dailyTotals, state);
+}
+
+function deriveTodayWithInertia(dailyTotals, todayK, inertiaLookup){
   if (window.TaskPointsCore?.deriveTodayWithInertia) {
-    return TaskPointsCore.deriveTodayWithInertia(dailyTotals, todayK, state);
+    return TaskPointsCore.deriveTodayWithInertia(dailyTotals, todayK, state, inertiaLookup);
   }
   const { inertia, average } = computeInertia(dailyTotals, todayK);
   const todayBase = Number(dailyTotals[todayK]) || 0;
@@ -5581,9 +5585,10 @@ function startOpponentDripTicker(){
     const todayK = todayKey();
     const matchupKey = getGameDayKey(new Date());
     const { dailyTotals } = getDerived().agg;
+    const inertiaLookup = prepareHomeInertia(dailyTotals);
 
-    const { todayPoints, inertia, average } = deriveTodayWithInertia(dailyTotals, todayK);
-    const { todayPoints: matchupPoints } = deriveTodayWithInertia(dailyTotals, matchupKey);
+    const { todayPoints, inertia, average } = deriveTodayWithInertia(dailyTotals, todayK, inertiaLookup);
+    const { todayPoints: matchupPoints } = deriveTodayWithInertia(dailyTotals, matchupKey, inertiaLookup);
 
     renderTodayPointsSummary(todayPoints, inertia, average);
 
@@ -5709,17 +5714,18 @@ state = cleanupLiveDiffHistory(state);
       const thisMonthK = monthKey(today);
       const matchupKey = getGameDayKey(today);
 
+      const inertiaLookup = prepareHomeInertia(dailyTotals);
       const { todayPoints, inertia: inertiaPts, average: inertiaAvg } =
-        deriveTodayWithInertia(dailyTotals, todayK);
+        deriveTodayWithInertia(dailyTotals, todayK, inertiaLookup);
 
       const { todayPoints: matchupPoints } =
-        deriveTodayWithInertia(dailyTotals, matchupKey);
+        deriveTodayWithInertia(dailyTotals, matchupKey, inertiaLookup);
 
       // Today's points bubble
       renderTodayPointsSummary(todayPoints, inertiaPts, inertiaAvg);
 
       renderTodaysMatchup(matchupKey, matchupPoints);
-      renderYesterdaysResult(dailyTotals);
+      renderYesterdaysResult(dailyTotals, inertiaLookup);
       bindYesterdayRecentResultsDropdown();
       if (yesterdayRecentResultsOpen) {
         renderYesterdayRecentResultsDropdown();
@@ -5876,8 +5882,9 @@ state = cleanupLiveDiffHistory(state);
       }
 
       // Build “with inertia” totals (daily -> weekly/monthly)
-      const dailyTotalsWithInertia =
-        window.TaskPointsCore?.computeDailyTotalsWithInertia
+      const dailyTotalsWithInertia = inertiaLookup
+        ? Object.fromEntries(inertiaLookup.totalsWithInertia)
+        : window.TaskPointsCore?.computeDailyTotalsWithInertia
           ? TaskPointsCore.computeDailyTotalsWithInertia(dailyTotals, state)
           : Object.fromEntries(
               Object.entries(dailyTotals).map(([k, v]) => {
@@ -6844,7 +6851,7 @@ function renderMatchupStreakPanel(){
   else panelEl.classList.add('streak-none');
 }
 
-function renderYesterdaysResult(dailyTotals){
+function renderYesterdaysResult(dailyTotals, inertiaLookup){
   const panelEl = $('yesterdayResultsPanel');
   const yourNameEl = $('yesterdayYouName');
   const yourScoreEl = $('yesterdayYourScore');
@@ -6870,7 +6877,7 @@ function renderYesterdaysResult(dailyTotals){
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayKey = getGameDayKey(yesterday);
 
-  const { todayPoints: yourScore } = deriveTodayWithInertia(dailyTotals, yesterdayKey);
+  const { todayPoints: yourScore } = deriveTodayWithInertia(dailyTotals, yesterdayKey, inertiaLookup);
 
   const matchups = Array.isArray(state.matchups) ? state.matchups : [];
   const matchupDateKey = (m) => {

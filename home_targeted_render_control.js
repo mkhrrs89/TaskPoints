@@ -163,8 +163,9 @@
         throw new Error('score derivation unavailable');
       }
 
-      const today = global.deriveTodayWithInertia(dailyTotals, todayKey) || {};
-      const matchup = global.deriveTodayWithInertia(dailyTotals, matchupKey) || {};
+      const inertiaLookup = global.prepareHomeInertia?.(dailyTotals);
+      const today = global.deriveTodayWithInertia(dailyTotals, todayKey, inertiaLookup) || {};
+      const matchup = global.deriveTodayWithInertia(dailyTotals, matchupKey, inertiaLookup) || {};
       setSimpleStats(derived, dailyTotals);
 
       global.renderTodayPointsSummary?.(
@@ -179,7 +180,7 @@
       global.renderHomeStreakBonusSidecar?.();
 
       if (options.includeYesterday === true || affectedYesterday()) {
-        global.renderYesterdaysResult?.(dailyTotals);
+        global.renderYesterdaysResult?.(dailyTotals, inertiaLookup);
       }
 
       counters.lightweightScoreRefreshes += 1;

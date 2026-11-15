@@ -2519,7 +2519,15 @@ try {
         request.onsuccess=()=>resolve(request.result);
         request.onerror=()=>reject(request.error);
       });
-      return {seeded,baseline,mismatch,stored,original,journal,
+      // A payload-only comparison used to accept this because a one-row
+      // collection sorts identically even if its position is corrupted.
+      await new Promise((resolve,reject)=>{
+        const tx=db.transaction('tasks','readwrite');
+        tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+        tx.objectStore('tasks').put({...row,legacyIndex:9});
+      });
+      const wrongPosition=await runtime.rehearsePreviewTaskCollectionSeed();
+      return {seeded,baseline,mismatch,stored,wrongPosition,original,journal,
         after:localStorage.getItem('taskpoints_v1'),
         afterJournal:localStorage.getItem('taskpoints_pending_task_mutations_v1'),
         authority:runtime.getStatus().readAuthority};
@@ -2529,6 +2537,8 @@ try {
     assert.equal(evidence.mismatch.match,false);
     assert.equal(evidence.mismatch.reason,'task_preview_record_mismatch',JSON.stringify(evidence.mismatch));
     assert.equal(evidence.stored.value.title,'Corrupt preview title');
+    assert.equal(evidence.wrongPosition.verified,false);
+    assert.equal(evidence.wrongPosition.reason,'task_preview_readback_mismatch');
     assert.equal(evidence.original,evidence.after);
     assert.equal(evidence.journal,evidence.afterJournal);
     assert.equal(evidence.authority,'legacy_only');

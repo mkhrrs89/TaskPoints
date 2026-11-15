@@ -13,7 +13,8 @@ test('nonpilot Tasks inspector requires preview host and never mutates any sourc
   assert.ok(start>=0 && end>start);
   assert.match(source,/isWalTestPreviewHost\(\)/);
   assert.match(source,/isDarkEnabled\(\)/);
-  assert.match(source,/captureReadOnlyFullStorageInventory\(\)/);
+  assert.match(source,/captureTaskStorageSource\(\)/);
+  assert.match(source,/source\.isCurrent\(\)/);
   assert.match(source,/core\.readPendingTaskMutations\(\)/);
   assert.match(source,/core\.readTaskPointsStoredState\(\)/);
   assert.match(source,/db\.transaction\(\['tasks', 'meta'\], 'readonly'\)/);
@@ -219,9 +220,13 @@ test('Task parity checks identity, payload, source inventory and generation with
   assert.match(source,/evidence\.taskFingerprint !== taskFingerprint/);
   assert.match(source,/evidence\.sourceInventory !== inventorySignature/);
   assert.match(source,/evidence\.resetGeneration !== generation/);
-  assert.match(source,/row\.legacyIndex !== index/);
-  assert.match(source,/String\(row\.value\.id\) !== row\.id/);
-  assert.match(source,/stableJson\(row\.value\) !== stableJson\(tasks\[index\]\)/);
+  assert.match(source,/storedTaskRowsMatch\(rows, tasks\)/);
+  const check = runtime.slice(runtime.indexOf('function storedTaskRowsMatch('),
+    runtime.indexOf('async function rehearsePreviewTaskCollectionSeed()'));
+  assert.match(check,/!Number\.isInteger\(index\).*index >= tasks\.length/);
+  assert.match(check,/seen\.has\(index\)/);
+  assert.match(check,/String\(row\.value\.id\) !== row\.id/);
+  assert.match(check,/stableJson\(row\.value\) !== stableJson\(tasks\[index\]\)/);
   assert.match(source,/if \(!sourceCurrent\(\)\) return refuse\('legacy_changed_during_inspection'\)/);
   assert.match(runtime,/rehearsePreviewTaskCollectionSeed,\s*rehearsePreviewTaskCollectionReconcile,\s*queueObservedLegacyTaskJournal,\s*flushObservedLegacyTaskJournal,\s*getObservedLegacyTaskStatus,\s*inspectPreviewTaskCollectionParity,/);
 });

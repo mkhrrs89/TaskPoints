@@ -9111,33 +9111,19 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
     const inertiaMap = new Map();
     const totalsWithInertia = new Map();
 
+    // An unlogged day can be queried independently. Feeding its projected
+    // score back into the map would inflate the scores of later gap days.
+    const forDay = key => inertiaMap.get(key)
+      ?? computeInertiaForExtraDayKey(key, totalsWithInertia, inertiaSettings);
+
     keys.forEach(k => {
-      const current = fromKey(k);
-      if (!current || isNaN(current.getTime())) return;
-
-      let sum = 0;
-      let count = 0;
-
-      for (let i = 1; i <= inertiaSettings.windowDays; i++) {
-        const d = new Date(current);
-        d.setDate(current.getDate() - i);
-        const key = dateKey(d);
-        const total = totalsWithInertia.get(key);
-        if (Number.isFinite(total)) {
-          sum += total;
-          count++;
-        }
-      }
-
-      const average = count ? sum / count : 0;
-      const inertia = count ? average * inertiaSettings.multiplier : 0;
-
-      inertiaMap.set(k, { inertia, average });
+      const info = forDay(k);
+      inertiaMap.set(k, info);
       const base = Number(totalsObj[k]) || 0;
-      totalsWithInertia.set(k, base + inertia);
+      totalsWithInertia.set(k, base + info.inertia);
     });
 
-    return { keys, inertiaMap, totalsWithInertia };
+    return { keys, inertiaMap, totalsWithInertia, forDay };
   }
 
   // Convenience: return a plain object of totals already including inertia
@@ -9154,8 +9140,9 @@ function computeCalLogBonusPoints(calorieEntries, settings) {
   }
 
 
-  function deriveTodayWithInertia(dailyTotals, todayK, settings){
-    const { inertia, average } = computeInertia(dailyTotals, todayK, settings);
+  function deriveTodayWithInertia(dailyTotals, todayK, settings, inertiaLookup){
+    const { inertia, average } = inertiaLookup
+      ? inertiaLookup.forDay(todayK) : computeInertia(dailyTotals, todayK, settings);
     const todayBase = Number(dailyTotals[todayK]) || 0;
     const todayPoints = roundPoints(todayBase + inertia, 2);
 
@@ -9213,8 +9200,9 @@ function buildDailyBreakdowns(state){
     const weeklyTotalsWithInertia = {};
     const monthlyTotalsWithInertia = {};
 
+    const inertiaLookup = computeInertiaMaps(dailyTotals, normalized);
     Object.entries(dailyTotals).forEach(([k, base]) => {
-      const { inertia } = computeInertia(dailyTotals, k, normalized);
+      const { inertia } = inertiaLookup.forDay(k);
       const inertiaVal = Number.isFinite(inertia) ? inertia : 0;
       const total = addPoints(base, inertiaVal);
       dailyTotalsWithInertia[k] = total;
@@ -9459,12 +9447,10 @@ function buildDailyBreakdowns(state){
     return dateKeyStr < today;
   }
 
-  function computeInertiaForExtraDayKey(dayKey, totalsWithInertiaMap, settings){
+  function computeInertiaForExtraDayKey(dayKey, totalsWithInertiaMap, inertiaSettings){
     const keyDate = fromKey(dayKey);
     if (!keyDate || isNaN(keyDate.getTime())) return { inertia: 0, average: 0 };
 
-    const scoring = getScoringSettings(settings);
-    const inertiaSettings = scoring.inertia;
     let sum = 0;
     let count = 0;
 
@@ -9505,15 +9491,13 @@ function buildDailyBreakdowns(state){
         .filter(Boolean),
     ]));
 
-    const { inertiaMap: baseInertiaMap, totalsWithInertia } = computeInertiaMaps(dailyTotals, normalized);
+    const inertiaLookup = computeInertiaMaps(dailyTotals, normalized);
     const dayScoreMap = new Map();
     const dailyKeySet = new Set(Object.keys(dailyTotals));
 
     dayKeys.forEach((key) => {
       const rawBaseTotal = Number(dailyTotals[key]) || 0;
-      const sourceInertia = dailyKeySet.has(key)
-        ? (baseInertiaMap.get(key) || { inertia: 0, average: 0 })
-        : computeInertiaForExtraDayKey(key, totalsWithInertia, normalized);
+      const sourceInertia = inertiaLookup.forDay(key);
       const rawInertia = Number.isFinite(sourceInertia.inertia) ? sourceInertia.inertia : 0;
       const rawAverage = Number.isFinite(sourceInertia.average) ? sourceInertia.average : 0;
       const roundedInertia = roundPoints(rawInertia, 2);
@@ -10857,6 +10841,7 @@ simulateAiScoreForPlayerCore,
     moodPoints,
     categorizeCompletion,
     aggregateCompletionsByDate,
+    computeInertiaMaps,
     computeInertia,
     computeDailyTotalsWithInertia,
     deriveTodayWithInertia,

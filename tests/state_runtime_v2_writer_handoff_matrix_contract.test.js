@@ -1121,7 +1121,8 @@ test('nonpilot Tasks store is additive, explicit, source-verified and cannot bec
     'core.readPendingTaskMutations()',
     'if (pending?.malformed)',
     'core.readTaskPointsStoredState()',
-    'inventoryBefore !== inventoryAfter',
+    'source = captureTaskStorageSource()',
+    "if (!source.isCurrent()) return refuse('legacy_changed_during_capture')",
     'await previewRecoveryFingerprint(tasks)',
     'const generation = currentGeneration({ create: false })',
     "db.transaction(['tasks','meta'], 'readwrite')",
@@ -1134,7 +1135,7 @@ test('nonpilot Tasks store is additive, explicit, source-verified and cannot bec
     "mutationAuthority:'legacy_only'",
     'canPromote:false'
   ]) assert.ok(preview.includes(evidence),'Missing nonpilot migration safety invariant: '+evidence);
-  assert.ok(preview.indexOf('captureReadOnlyFullStorageInventory()')
+  assert.ok(preview.indexOf('source = captureTaskStorageSource()')
     < preview.indexOf("db.transaction(['tasks','meta'], 'readwrite')"));
   assert.ok(!preview.includes('core.saveStateSnapshot('));
   assert.ok(!preview.includes('core.journalTaskMutation('));

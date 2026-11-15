@@ -858,3 +858,70 @@ test('new preview Task notification is independent from a discarded old reset ep
   assert.equal(app.indexedDB.dump(DB).tasks.length,0);
   assert.equal(app.snapshotSaves(),0);
 });
+
+test('Task seed rechecks large raw values at each boundary but encodes them once', async () => {
+  const app = install();
+  await app.api.seedFromLegacy();
+  const key = 'unrelated-backup';
+  const raw = JSON.stringify({ note: 'A "quoted" line\n'.repeat(16000) });
+  app.localStorage.setItem(key, raw);
+  let reads = 0, encodes = 0;
+  const get = app.localStorage.getItem.bind(app.localStorage);
+  app.localStorage.getItem = keyRead => {
+    if (keyRead === key) reads++;
+    return get(keyRead);
+  };
+  app.context.JSON = {
+    parse: JSON.parse,
+    stringify(value, ...args) {
+      if (value === raw) encodes++;
+      return JSON.stringify(value, ...args);
+    }
+  };
+  const seeded = await app.api.rehearsePreviewTaskCollectionSeed();
+  assert.equal(seeded.verified, true, seeded.reason);
+  assert.equal(encodes, 1);
+  assert.ok(reads >= 6, 'initial, precommit and postcommit source checks still read live storage');
+
+  const readTasks = app.core.readTaskPointsStoredState;
+  for (const change of ['same-length edit', 'rename']) {
+    const priorDb = app.indexedDB.dump(DB);
+    app.core.readTaskPointsStoredState = (...args) => {
+      const state = readTasks(...args);
+      if (change === 'rename') {
+        app.localStorage.removeItem(key);
+        app.localStorage.setItem(key + '-moved', raw);
+      } else {
+        app.localStorage.setItem(key, raw.replace('quoted', 'edited'));
+      }
+      return state;
+    };
+    const checked = await app.api.inspectPreviewTaskCollectionParity();
+    assert.equal(checked.match, false);
+    assert.equal(checked.reason, 'legacy_changed_during_capture');
+    assert.deepEqual(app.indexedDB.dump(DB), priorDb);
+    app.localStorage.removeItem(key + '-moved');
+    app.localStorage.setItem(key, raw);
+  }
+});
+
+test('Task seed checks emptiness with counts and still verifies the complete stored payload', async () => {
+  const app = install();
+  await app.api.seedFromLegacy();
+  const operations = [];
+  const consume = app.indexedDB._consumeFailure.bind(app.indexedDB);
+  app.indexedDB._consumeFailure = (store, operation) => {
+    if (store === 'tasks') operations.push(operation);
+    return consume(store, operation);
+  };
+  const seeded = await app.api.rehearsePreviewTaskCollectionSeed();
+  assert.equal(seeded.verified, true, seeded.reason);
+  assert.equal(operations.filter(op => op === 'count').length, 2);
+  assert.equal(operations.filter(op => op === 'getAll').length, 1, 'full independent readback');
+  const store = app.indexedDB._databases.get(DB)._stores.get('tasks');
+  const oldRow = store.get('a');
+  store.set('a', { ...oldRow, value: { ...oldRow.value, title: 'Corrupt but same row count' } });
+  const repeated = await app.api.rehearsePreviewTaskCollectionSeed();
+  assert.equal(repeated.verified, false);
+  assert.equal(repeated.reason, 'task_preview_readback_mismatch');
+});
