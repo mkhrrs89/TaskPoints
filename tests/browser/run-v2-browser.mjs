@@ -11668,75 +11668,77 @@ try {
       authorityStillV1:true};
   });
 
-  await run('Task no-op parity source race retries safely without treating unowned data as V1',async context=>{
+  await run('direct Task no-op parity refuses interleaved V1 change, then catches up without V1 writes',async context=>{
     const page=await open(context);
     const proof=await page.evaluate(async()=>{
       const api=window.TaskPointsStateRuntimeV2;
       const core=window.TaskPointsCore;
       await api.seedFromLegacy();
-      const seeded=await api.rehearsePreviewTaskCollectionSeed();
-      if(!seeded.verified)throw Error('initial Task preview seed refused: '+seeded.reason);
+      const seed=await api.rehearsePreviewTaskCollectionSeed();
+      if(!seed.verified)throw Error('initial Task preview seed refused: '+seed.reason);
       const originalRaw=localStorage.getItem('taskpoints_v1');
-      const taskBefore=core.readTaskPointsStoredState().tasks.find(row=>
+      const before=core.readTaskPointsStoredState().tasks.find(row=>
         row.id==='synthetic-task')?.title;
+      const originToken=()=>JSON.stringify(Array.from({length:localStorage.length},
+        (_,i)=>localStorage.key(i)).sort().map(k=>[k,localStorage.getItem(k)]));
+      const sourceToken=originToken();
       const originalRead=core.readTaskPointsStoredState;
       let reads=0,newerRaw=null;
       core.readTaskPointsStoredState=function(...args){
-        if(++reads===3){
+        if(++reads===2){
+          // The first read is reconcile's source capture, the second
+          // is the independent nested no-op parity scan.
           const peer=JSON.parse(localStorage.getItem('taskpoints_v1'));
           peer.tasks=peer.tasks.map(row=>row.id==='synthetic-task'
-            ? {...row,title:'Second-tab V1 Task no-op race'}
+            ? {...row,title:'V1 Task changed during no-op parity'}
             :row);
           newerRaw=JSON.stringify(peer);
           localStorage.setItem('taskpoints_v1',newerRaw);
         }
         return originalRead.apply(this,args);
       };
-      let refused;
+      let declined;
       try{
-        api.queueObservedLegacyTaskJournal();
-        refused=await api.flushObservedLegacyTaskJournal();
-      }finally{
-        core.readTaskPointsStoredState=originalRead;
-      }
-      const pendingAfterRace=api.getObservedLegacyTaskStatus();
-      const preserved=localStorage.getItem('taskpoints_v1')===newerRaw;
-      const retry=await api.flushObservedLegacyTaskJournal();
+        declined=await api.rehearsePreviewTaskCollectionReconcile(
+          sourceToken,'test-noop-parity-source-race');
+      }finally{core.readTaskPointsStoredState=originalRead;}
+      const retained=localStorage.getItem('taskpoints_v1')===newerRaw;
+      const journalBefore=localStorage.getItem(
+        'taskpoints_pending_task_mutations_v1');
+      api.queueObservedLegacyTaskJournal();
+      const observed=await api.flushObservedLegacyTaskJournal();
       const parity=await api.inspectPreviewTaskCollectionParity();
       const db=await api.open();
-      const tx=db.transaction('tasks','readonly');
       const row=await new Promise((resolve,reject)=>{
-        const req=tx.objectStore('tasks').get('synthetic-task');
+        const req=db.transaction('tasks','readonly')
+          .objectStore('tasks').get('synthetic-task');
         req.onsuccess=()=>resolve(req.result);
         req.onerror=()=>reject(req.error);
       });
-      return {taskBefore,originalRaw,newerRaw,reads,
-        refused:refused.reason,firstVerified:refused.verified,
-        retryReason:retry.reason,retryVerified:retry.verified,
-        pendingAfterRace:pendingAfterRace.pending,
-        retryBudget:pendingAfterRace.transientRetryCount,
-        rowTitle:row?.value?.title,
-        parityMatch:parity.match,
-        preserved,journal:localStorage.getItem(
+      return {reads,before,declinedReason:declined.reason,
+        prerequisiteReason:declined.prerequisiteReason,
+        declinedVerified:declined.verified,
+        observedVerified:observed.verified,observedReason:observed.reason,
+        title:row?.value?.title,parityMatch:parity.match,
+        oldRaw:originalRaw,newerRaw,retained,
+        journalBefore,journalAfter:localStorage.getItem(
           'taskpoints_pending_task_mutations_v1'),
         authority:api.getStatus().readAuthority};
     });
-    assert.ok(proof.reads>=3,'reconcile and nested parity must re-read V1');
-    assert.equal(proof.firstVerified,false);
-    assert.equal(proof.refused,'task_preview_source_stale');
-    assert.equal(proof.pendingAfterRace,true);
-    assert.equal(proof.retryBudget,1);
-    assert.equal(proof.retryVerified,true,proof.retryReason);
+    assert.ok(proof.reads>=2,'nested no-op parity must read V1 again');
+    assert.equal(proof.declinedVerified,false);
+    assert.equal(proof.declinedReason,'task_preview_noop_parity_mismatch');
+    assert.equal(proof.prerequisiteReason,'task_preview_source_stale');
+    assert.equal(proof.observedVerified,true,proof.observedReason);
     assert.equal(proof.parityMatch,true);
-    assert.equal(proof.rowTitle,'Second-tab V1 Task no-op race');
-    assert.notEqual(proof.taskBefore,'Second-tab V1 Task no-op race');
-    assert.notEqual(proof.originalRaw,proof.newerRaw);
-    assert.equal(proof.preserved,true);
-    assert.equal(proof.journal,null);
+    assert.equal(proof.title,'V1 Task changed during no-op parity');
+    assert.notEqual(proof.before,proof.title);
+    assert.notEqual(proof.oldRaw,proof.newerRaw);
+    assert.equal(proof.retained,true);
+    assert.equal(proof.journalBefore,proof.journalAfter);
     assert.equal(proof.authority,'legacy_only');
-    return {wrappedSourceRefusalRetried:true,
-      parityAfterRetry:true,v1BytesPreserved:true,
-      noPendingJournalCleanup:true,noCutover:true};
+    return {nestedSourceRaceRefused:true,latestV1Mirrored:true,
+      originalV1JournalUntouched:true,noAuthorityHandoff:true};
   });
 
   await run('stale Home-like Task save after other tab compacted a newer Task edit preserves that row',async context=>{
