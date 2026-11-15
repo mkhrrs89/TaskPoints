@@ -11728,7 +11728,8 @@ try {
     assert.ok(proof.reads>=2,'nested no-op parity must read V1 again');
     assert.equal(proof.declinedVerified,false);
     assert.equal(proof.declinedReason,'task_preview_noop_parity_mismatch');
-    assert.equal(proof.prerequisiteReason,'task_preview_source_stale');
+    assert.equal(proof.prerequisiteReason,'legacy_changed_during_capture',
+      'peer mutation during the nested parity capture is a source conflict, not a V2 row mismatch');
     assert.equal(proof.observedVerified,true,proof.observedReason);
     assert.equal(proof.parityMatch,true);
     assert.equal(proof.title,'V1 Task changed during no-op parity');
