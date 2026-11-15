@@ -662,3 +662,40 @@ localStorage snapshot cannot fence an uncooperative old tab. M01/M02 remain
 Working, C03 Open; 0/78 production writer ownerships verified, 8/23
 preview foundations verified, 67/100 weighted rubric unchanged.
 Main is neither modified nor synchronized; V1 is the only authority.
+
+
+## November 14 — M02 wrapped no-op Task parity races
+
+A narrow observer race remained after the earlier final-parity retry work:
+`rehearsePreviewTaskCollectionReconcile` performs a second, independent
+read-only parity check when no V2 Task row changes appear necessary.
+If an actual V1 Task edit lands during that check, the reconciliation
+fails closed with `task_preview_noop_parity_mismatch` and an attached
+`prerequisiteReason` (such as `task_preview_source_stale`).
+The observer previously used only the outer generic refusal reason,
+which meant the optional preview mirror could stop rather than request
+its existing bounded follow-up.
+
+The V2-only Task observer now **unwraps only seven explicitly enumerated
+transient V1 source-read or source-change reasons** from this narrow
+nested no-op outcome. These reasons feed the existing maximum of two
+delayed, idle-only retry opportunities. It does **not** reinterpret
+unknown V2 row differences, invalid preview receipts, generation
+mismatches or unowned evidence as transient. The underlying no-op
+reconciliation still refuses the peer race; no stale parity success is
+reported, no source bytes are altered and no new Task writer is enabled.
+
+Regression evidence uses the production observer decision logic with a
+controlled nested-parity result to prove that source drift retries while
+unexpected V2 record/evidence/generation mismatch cannot retry. A
+Chromium/WebKit scenario exercises the real no-op reconciliation by
+changing the legacy Task source just before its independent parity
+read, checks the original refusal and then verifies a separately
+requested, read-only-source Task catch-up.
+
+**Limits:** This is recovery for an isolated developer-preview mirror,
+not M02 live transactional Task admission or an atomic exclusion of old
+V1 tabs. V1 remains the only live authority. M01/M02 remain Working,
+0/78 production writer owners are independently certified, 8/23
+preview prerequisites are verified, and the weighted score stays 67/100.
+Main was neither changed nor synchronized.
