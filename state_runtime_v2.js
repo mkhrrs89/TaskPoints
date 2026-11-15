@@ -11542,6 +11542,10 @@
         readAuthority:'legacy_only', mutationAuthority:'legacy_only'
       };
     }
+    // A versioned editor may have restored the original V1 contents. Its
+    // revision still belongs to the editor even when the Task bytes match.
+    if (priorRows.some(row => row.previewActionId !== undefined))
+      return refuse('task_preview_existing_evidence_preserved');
     const target = desired.map((task,i)=>({
       id:String(task.id),legacyIndex:i,value:task
     }));
@@ -11837,7 +11841,7 @@
   // store. This intentionally does NOT journal into V1 or claim parity:
   // the resulting V2 Task differs from authoritative V1 until rollback.
   // Task bytes and an idempotent action receipt commit in ONE IDB transaction.
-  async function rehearsePreviewTaskRecordUpdate(nextInput, sourceToken, actionInput) {
+  async function rehearsePreviewTaskRecordUpdate(nextInput, sourceToken, actionInput, previousEdit) {
     const refuse = (reason, detail = {}) => ({
       checked: true, previewOnly: true, committed: false,
       confirmedDurable: false, canPromote: false,
@@ -11854,31 +11858,41 @@
       || typeof core.readTaskPointsStoredState !== 'function')
       return refuse('legacy_task_reader_unavailable');
 
-    // Freeze the caller's Task before any await: mutable JS references must
-    // never change the payload after its SHA-256 receipt was calculated.
-    let nextTask, taskId, nextFingerprint;
-    try {
-      const json = JSON.stringify(nextInput);
-      if (typeof json !== 'string' || json.length > 131072) 
-        return refuse('invalid_task_payload');
-      nextTask = JSON.parse(json);
-      if (!nextTask || typeof nextTask !== 'object' || Array.isArray(nextTask)
-        || typeof nextTask.id !== 'string' || !nextTask.id
-        || nextTask.id.length > 128)
-        return refuse('invalid_task_payload');
-      taskId = nextTask.id;
-      if (stableJson(nextInput) !== stableJson(nextTask))
-        return refuse('invalid_task_payload');
-      nextFingerprint = await previewRecoveryFingerprint(nextTask);
-    } catch (_) { return refuse('invalid_task_payload'); }
     const modeEpoch = darkMirrorModeEpoch;
     const generation = currentGeneration({ create: false });
     if (!generation) return refuse('generation_unavailable');
 
-    let tasks, baseTask, baseIndex, sourceFingerprint, baseFingerprint;
+    // Snapshot both intents before yielding. A follow-up edit identifies the
+    // version the editor saw by its action ID and exact Task contents.
+    const snapshotTask = input => {
+      const json = JSON.stringify(input);
+      if (typeof json !== 'string' || json.length > 131072) return null;
+      const task = JSON.parse(json);
+      if (!task || typeof task !== 'object' || Array.isArray(task)
+        || typeof task.id !== 'string' || !task.id || task.id.length > 128
+        || stableJson(input) !== stableJson(task)) return null;
+      return task;
+    };
+    let nextTask, nextFingerprint, previousTask, previousActionId;
     try {
-      const firstInventory = captureReadOnlyFullStorageInventory();
-      if (firstInventory !== sourceToken)
+      nextTask = snapshotTask(nextInput);
+      if (!nextTask) return refuse('invalid_task_payload');
+      if (previousEdit !== undefined) {
+        previousActionId = previousEdit?.actionId;
+        if (typeof previousActionId !== 'string' || !previousActionId
+          || previousActionId.length > 128 || previousActionId === actionInput)
+          return refuse('invalid_previous_task_edit');
+        previousTask = snapshotTask(previousEdit.task);
+        if (!previousTask || previousTask.id !== nextTask.id)
+          return refuse('invalid_previous_task_edit');
+      }
+      nextFingerprint = await previewRecoveryFingerprint(nextTask);
+    } catch (_) { return refuse('invalid_task_payload'); }
+    const taskId = nextTask.id;
+    let source, tasks, baseTask, baseIndex, sourceFingerprint, baseFingerprint;
+    try {
+      source = captureTaskStorageSource();
+      if (source.token !== sourceToken)
         return refuse('full_origin_changed');
       const pending = core.readPendingTaskMutations();
       if (pending?.malformed) return refuse('legacy_task_journal_malformed');
@@ -11896,10 +11910,10 @@
       }
       baseIndex = tasks.findIndex(task => String(task.id) === taskId);
       if (baseIndex < 0) return refuse('legacy_task_not_found');
-      baseTask = tasks[baseIndex];
+      baseTask = previousTask || tasks[baseIndex];
       if (stableJson(baseTask) === stableJson(nextTask))
         return refuse('task_payload_unchanged');
-      if (captureReadOnlyFullStorageInventory() !== sourceToken)
+      if (!source.isCurrent())
         return refuse('legacy_changed_during_capture');
       sourceFingerprint = await previewRecoveryFingerprint(tasks);
       baseFingerprint = await previewRecoveryFingerprint(baseTask);
@@ -11907,7 +11921,7 @@
     const sourceCurrent = () => isDarkEnabled()
       && darkMirrorModeEpoch === modeEpoch
       && currentGeneration({ create: false }) === generation
-      && captureReadOnlyFullStorageInventory() === sourceToken;
+      && source.isCurrent();
     try {
       if (!sourceCurrent()) return refuse('legacy_changed_before_update');
     } catch (_) { return refuse('legacy_unreadable_before_update'); }
@@ -11915,17 +11929,18 @@
     const receiptId = 'task-preview-action:' + actionInput;
     const sourceSignature = `${fnv1a(sourceToken)}:${sourceToken.length}`;
     const receipt = {
-      id: receiptId, type: 'task-preview-update',
+      id: receiptId, type: 'task-preview-update', schemaVersion: 2,
       taskId, resetGeneration: generation,
       sourceInventory: sourceSignature, sourceFingerprint,
-      priorFingerprint: baseFingerprint, nextFingerprint
+      priorFingerprint: baseFingerprint, nextFingerprint,
+      ...(previousActionId ? { previousActionId } : {})
     };
     let db;
     try {
       db = await open();
       if (!db) return refuse('dark_disabled');
     } catch (_) { return refuse('task_preview_db_unavailable'); }
-    let failure = null, repeated = false;
+    let failure = null, repeated = false, expectedReceipt = receipt;
     try {
       if (!sourceCurrent()) return refuse('legacy_changed_before_update');
       const tx = db.transaction(['tasks', 'mutations', 'meta'], 'readwrite');
@@ -11936,13 +11951,15 @@
       const receiptRequest = mutationsStore.get(receiptId);
       const evidenceRequest = metaStore.get('task-preview');
       const metaRequest = metaStore.get(RUNTIME_META_ID);
-      let taskRow, previousReceipt, evidence, meta, count = 0;
+      const parentRequest = previousActionId
+        ? mutationsStore.get('task-preview-action:' + previousActionId) : null;
+      let taskRow, previousReceipt, parent, evidence, meta, count = 0;
       const abort = reason => {
         failure = reason;
         try { tx.abort(); } catch (_) {}
       };
       const decide = () => {
-        if (++count !== 4) return;
+        if (++count !== (parentRequest ? 5 : 4)) return;
         try {
           if (!sourceCurrent()) return abort('legacy_changed_under_transaction');
           if (meta?.schemaVersion !== SCHEMA_VERSION
@@ -11955,8 +11972,20 @@
             || evidence.sourceInventory !== sourceSignature
             || evidence.taskCount !== tasks.length)
             return abort('task_preview_source_not_seeded');
+          if (previousActionId && (!parent || parent.type !== 'task-preview-update'
+            || (parent.schemaVersion !== undefined && parent.schemaVersion !== 2)
+            || parent.taskId !== taskId || parent.resetGeneration !== generation
+            || parent.sourceInventory !== sourceSignature
+            || parent.sourceFingerprint !== sourceFingerprint
+            || parent.nextFingerprint !== baseFingerprint))
+            return abort('task_preview_target_stale');
           if (previousReceipt) {
-            if (stableJson(previousReceipt) !== stableJson(receipt))
+            // Earlier receipts have no version tag or Task-row action ID.
+            if (previousReceipt.schemaVersion === undefined && !previousActionId) {
+              expectedReceipt = { ...receipt };
+              delete expectedReceipt.schemaVersion;
+            }
+            if (stableJson(previousReceipt) !== stableJson(expectedReceipt))
               return abort('task_action_id_conflict');
             repeated = true;
             // Do not write on a duplicate. Posttransaction readback must
@@ -11965,12 +11994,16 @@
           }
           if (!taskRow || taskRow.id !== taskId
             || taskRow.legacyIndex !== baseIndex
+            || taskRow.previewActionId !== (parent?.schemaVersion === 2 ? previousActionId : undefined)
             || stableJson(taskRow.value) !== stableJson(baseTask))
             return abort('task_preview_target_stale');
-          tasksStore.put({id: taskId, legacyIndex: baseIndex, value: nextTask});
+          tasksStore.put({
+            id: taskId, legacyIndex: baseIndex, value: nextTask, previewActionId: actionInput
+          });
           mutationsStore.add(receipt);
         } catch (_) { abort('task_preview_atomic_write_failed'); }
       };
+      if (parentRequest) parentRequest.onsuccess = () => { parent = parentRequest.result; decide(); };
       taskRequest.onsuccess = () => { taskRow = taskRequest.result; decide(); };
       receiptRequest.onsuccess = () => { previousReceipt = receiptRequest.result; decide(); };
       evidenceRequest.onsuccess = () => { evidence = evidenceRequest.result; decide(); };
@@ -11989,8 +12022,10 @@
         requestPromise(tx.objectStore('mutations').get(receiptId))
       ]);
       if (!row || row.id !== taskId || row.legacyIndex !== baseIndex
+        || (row.previewActionId !== actionInput
+          && !(expectedReceipt.schemaVersion === undefined && row.previewActionId === undefined))
         || stableJson(row.value) !== stableJson(nextTask)
-        || stableJson(savedReceipt) !== stableJson(receipt))
+        || stableJson(savedReceipt) !== stableJson(expectedReceipt))
         return refuse('task_preview_readback_unverified', {
           committed: !repeated, writeOutcomeUncertain: true
         });
@@ -12173,6 +12208,7 @@
             });
           } else {
             if (!row || row.id !== taskId || row.legacyIndex !== baseIndex
+              || row.previewActionId !== undefined
               || stableJson(row.value) !== stableJson(baseTask))
               return abort('task_preview_target_stale');
             committedIndex = baseIndex;

@@ -1072,6 +1072,7 @@ try {
     });
     assert.equal(current.skipped,false);
     assert.notEqual(current.raw,sourceRaw);
+    await requireCrossTabStorageValue(writer,'taskpoints_v1',current.raw);
     await writer.evaluate(()=>window.__resumeStaleSnapshotWriter());
     const result=await pending;
     assert.equal(result.reason,'serialized_operation_snapshot_changed',JSON.stringify(result));
@@ -2678,6 +2679,123 @@ try {
     assert.equal(result.authority,'legacy_only');
     return {atomicTaskAndReceipt:true,verifiedReadback:true,duplicateIdempotent:true,
       competingIntentRejected:true,parityFailClosed:true,noV1Writes:true};
+  });
+
+  await run('two V2 editors racing from the same Task revision preserve exactly one edit',async context=>{
+    const first=await open(context), second=await open(context);
+    const {token,legacy,seedTask}=await first.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const seed=await api.rehearsePreviewTaskCollectionSeed();
+      if (!seed.verified) throw Error(seed.reason);
+      const keys=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i)).sort();
+      return {token:JSON.stringify(keys.map(key=>[key,localStorage.getItem(key)])),
+        legacy:localStorage.getItem('taskpoints_v1'),
+        seedTask:window.TaskPointsCore.readTaskPointsStoredState().tasks.find(t=>t.id==='synthetic-task')};
+    });
+    const task=title=>({id:'synthetic-task',title});
+    const edit=(page,value,actionId,previousEdit)=>page.evaluate(
+      ({next,token,actionId,previousEdit})=>window.TaskPointsStateRuntimeV2
+        .rehearsePreviewTaskRecordUpdate(next,token,actionId,previousEdit),
+      {next:typeof value==='string' ? task(value) : value,token,actionId,previousEdit});
+    const prior={actionId:'first-edit',task:task('Draft')};
+    assert.equal((await edit(first,'Draft',prior.actionId)).confirmedDurable,true);
+    const titles=['Left edit','Right edit'], actions=['left','right'];
+    const writes=await Promise.all([
+      edit(first,titles[0],actions[0],prior),edit(second,titles[1],actions[1],prior)
+    ]);
+    const winner=writes.findIndex(r=>r.committed && r.confirmedDurable);
+    assert.ok(winner>=0,JSON.stringify(writes));
+    const loser=1-winner;
+    assert.equal(writes[loser].reason,'task_preview_target_stale',JSON.stringify(writes));
+    const persisted=await second.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2,db=await api.open();
+      const tx=db.transaction(['tasks','mutations'],'readonly');
+      const read=req=>new Promise((resolve,reject)=>{
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      const [row,left,right]=await Promise.all([
+        read(tx.objectStore('tasks').get('synthetic-task')),
+        ...['left','right'].map(id=>read(tx.objectStore('mutations').get('task-preview-action:'+id)))
+      ]);
+      return {row,receipts:[left,right]};
+    });
+    assert.equal(persisted.row.previewActionId,actions[winner]);
+    assert.deepEqual(persisted.row.value,task(titles[winner]));
+    assert.equal(persisted.receipts[winner].previousActionId,prior.actionId);
+    assert.ok(!persisted.receipts[loser]);
+    const retry=await edit(second,titles[winner],actions[winner],prior);
+    assert.ok(retry.replayed && retry.confirmedDurable && !retry.committed);
+    // Return to the original draft bytes, then retry both old edit paths.
+    const revert=await edit(second,'Draft','back-to-draft',
+      {actionId:actions[winner],task:task(titles[winner])});
+    assert.equal(revert.confirmedDurable,true);
+    await first.reload();
+    const stale=await edit(first,'Outdated editor','stale-after-reload',prior);
+    assert.equal(stale.reason,'task_preview_target_stale');
+    assert.equal((await edit(first,'Draft',prior.actionId)).confirmedDurable,false);
+    const refreshed=await edit(first,'Refreshed edit','fresh-after-reload',
+      {actionId:'back-to-draft',task:task('Draft')});
+    assert.ok(refreshed.committed && refreshed.confirmedDurable,JSON.stringify(refreshed));
+    const backToSeed=await edit(first,seedTask,'restore-seed-value',
+      {actionId:'fresh-after-reload',task:task('Refreshed edit')});
+    assert.equal(backToSeed.confirmedDurable,true);
+    const staleDelete=await second.evaluate(token=>window.TaskPointsStateRuntimeV2
+      .rehearsePreviewTaskLifecycleMutation({operation:'delete',taskId:'synthetic-task'},
+        token,'stale-seed-delete'),token);
+    assert.equal(staleDelete.reason,'task_preview_target_stale');
+    const reconciliation=await first.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      localStorage.setItem('tp_projects_v1','an independent source update');
+      const keys=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i)).sort();
+      const current=JSON.stringify(keys.map(key=>[key,localStorage.getItem(key)]));
+      const result=await api.rehearsePreviewTaskCollectionReconcile(current,'after-restore');
+      const db=await api.open();
+      const row=await new Promise((resolve,reject)=>{
+        const req=db.transaction('tasks','readonly').objectStore('tasks').get('synthetic-task');
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      return {reason:result.reason,actionId:row.previewActionId};
+    });
+    assert.equal(reconciliation.reason,'task_preview_existing_evidence_preserved');
+    assert.equal(reconciliation.actionId,'restore-seed-value');
+    assert.equal(await first.evaluate(()=>localStorage.getItem('taskpoints_v1')),legacy);
+    return {oneDurableWinner:true,losingReceiptAbsent:true,retryIdempotent:true,
+      outdatedEditorRejectedAfterReload:true,legacySnapshotPreserved:true};
+  });
+
+  await run('an earlier-format Task edit can be retried and used for a versioned edit',async context=>{
+    const page=await open(context);
+    const result=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const seeded=await api.rehearsePreviewTaskCollectionSeed();
+      if (!seeded.verified) throw Error(seeded.reason);
+      const keys=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i)).sort();
+      const token=JSON.stringify(keys.map(key=>[key,localStorage.getItem(key)]));
+      const task={id:'synthetic-task',title:'Earlier edit'},actionId='older-edit';
+      const first=await api.rehearsePreviewTaskRecordUpdate(task,token,actionId);
+      if (!first.confirmedDurable) throw Error(first.reason);
+      const db=await api.open();
+      // Reproduce the exact row and receipt shapes written before revision tracking.
+      const tx=db.transaction(['tasks','mutations'],'readwrite');
+      const rows=tx.objectStore('tasks'),receipts=tx.objectStore('mutations');
+      const row=rows.get(task.id),receipt=receipts.get('task-preview-action:'+actionId);
+      row.onsuccess=()=>{delete row.result.previewActionId;rows.put(row.result);};
+      receipt.onsuccess=()=>{delete receipt.result.schemaVersion;receipts.put(receipt.result);};
+      await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);});
+      const retry=await api.rehearsePreviewTaskRecordUpdate(task,token,actionId);
+      const next={...task,title:'After upgrade'};
+      const wrong=await api.rehearsePreviewTaskRecordUpdate(next,token,'new-edit',
+        {actionId,task:{...task,title:'Wrong prior contents'}});
+      const adopted=await api.rehearsePreviewTaskRecordUpdate(next,token,'new-edit',{actionId,task});
+      const stale=await api.rehearsePreviewTaskRecordUpdate({...task,title:'Another older edit'},
+        token,'late-edit',{actionId,task});
+      return {retry,wrong,adopted,stale};
+    });
+    assert.ok(result.retry.replayed && result.retry.confirmedDurable && !result.retry.committed);
+    assert.equal(result.wrong.reason,'task_preview_target_stale');
+    assert.ok(result.adopted.committed && result.adopted.confirmedDurable);
+    assert.equal(result.stale.reason,'task_preview_target_stale');
+    return {previousFormatReplayed:true,followUpVerified:true,staleEditRejected:true};
   });
 
   await run('preview Task atomic failure cannot leave a partial V2 row or receipt',async context=>{

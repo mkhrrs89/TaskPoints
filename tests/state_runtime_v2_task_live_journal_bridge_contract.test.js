@@ -925,3 +925,34 @@ test('Task seed checks emptiness with counts and still verifies the complete sto
   assert.equal(repeated.verified, false);
   assert.equal(repeated.reason, 'task_preview_readback_mismatch');
 });
+
+test('record-level Task edits recheck the entire source without serializing backups at each boundary', async () => {
+  const app = install();
+  await app.api.seedFromLegacy();
+  const key = 'unrelated-backup';
+  const raw = JSON.stringify({ note: 'Long backup line\n'.repeat(16000) });
+  app.localStorage.setItem(key, raw);
+  const seeded = await app.api.rehearsePreviewTaskCollectionSeed();
+  assert.equal(seeded.verified, true, seeded.reason);
+  const storage = app.localStorage;
+  const keys = Array.from({ length: storage.length }, (_, i) => storage.key(i)).sort();
+  const token = JSON.stringify(keys.map(k => [k, storage.getItem(k)]));
+  const get = storage.getItem.bind(storage);
+  let reads = 0, encodes = 0;
+  storage.getItem = k => {
+    if (k === key) reads++;
+    return get(k);
+  };
+  app.context.JSON = {
+    parse: JSON.parse,
+    stringify(value, ...args) {
+      if (value === raw) encodes++;
+      return JSON.stringify(value, ...args);
+    }
+  };
+  const result = await app.api.rehearsePreviewTaskRecordUpdate(
+    { id: 'a', title: 'Revised task' }, token, 'first-edit');
+  assert.equal(result.confirmedDurable, true, result.reason);
+  assert.ok(reads >= 6, 'the backup is still checked through transaction and readback');
+  assert.equal(encodes, 1);
+});
