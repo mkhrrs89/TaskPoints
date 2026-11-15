@@ -708,7 +708,7 @@ function makeNestedNoopObserver(prerequisiteReason){
     inspectPreviewTaskCollectionParity:async()=>({match:true}),
     scheduleObservedTaskMirror:()=>{scheduled++;return true;}
   };
-  const exposed=vm.runInNewContext(V2.slice(first,last)+\`
+  const exposed=vm.runInNewContext(V2.slice(first,last)+`
     ({
       queue(){observedTaskRequested=true;},
       status(){return {pending:observedTaskRequested,
@@ -716,7 +716,7 @@ function makeNestedNoopObserver(prerequisiteReason){
         verified:observedTaskVerified};},
       flush:flushObservedLegacyTaskJournal
     })
-  \`,scope,{filename:'v2_observed_task_noop_retry_source.js'});
+  `,scope,{filename:'v2_observed_task_noop_retry_source.js'});
   return {...exposed,reconciled:()=>reconciled,scheduled:()=>scheduled,
     setSource:next=>{sourceValue=next}};
 }
