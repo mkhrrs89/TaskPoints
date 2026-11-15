@@ -11668,6 +11668,67 @@ try {
       authorityStillV1:true};
   });
 
+  await run('queued Task observer refuses a reset generation before touching V1 Tasks',async context=>{
+    const page=await open(context);
+    const proof=await page.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      const core=window.TaskPointsCore;
+      await api.seedFromLegacy();
+      const seeded=await api.rehearsePreviewTaskCollectionSeed();
+      if(!seeded.verified)throw Error('initial Task preview seed refused: '+seeded.reason);
+      const key='taskpoints_v1',journalKey='taskpoints_pending_task_mutations_v1';
+      const before=localStorage.getItem(key);
+      const journalBefore=localStorage.getItem(journalKey);
+      api.queueObservedLegacyTaskJournal();
+      const beforeStatus=api.getObservedLegacyTaskStatus();
+      const db=await api.open();
+      const readRow=async()=>new Promise((resolve,reject)=>{
+        const req=db.transaction('tasks','readonly')
+          .objectStore('tasks').get('synthetic-task');
+        req.onsuccess=()=>resolve(req.result);
+        req.onerror=()=>reject(req.error);
+      });
+      const rowBefore=await readRow();
+      localStorage.setItem(api.GENERATION_KEY,'reset-rotated-before-idle-task');
+      const get=Storage.prototype.getItem;
+      let legacyReads=0,declined;
+      Storage.prototype.getItem=function(k){
+        if(k===key||k===journalKey){
+          legacyReads++;
+          throw Error('queued pre-reset Task observer must not read V1');
+        }
+        return get.call(this,k);
+      };
+      try{declined=await api.flushObservedLegacyTaskJournal();}
+      finally{Storage.prototype.getItem=get;}
+      const rowAfter=await readRow();
+      const afterStatus=api.getObservedLegacyTaskStatus();
+      return {queued:beforeStatus.pending,
+        refusedReason:declined.reason,verified:declined.verified,
+        legacyReads,attemptsBefore:beforeStatus.attempts,
+        attemptsAfter:afterStatus.attempts,
+        staleCancellations:afterStatus.staleRequestCancellations,
+        pendingAfter:afterStatus.pending,
+        v1Untouched:localStorage.getItem(key)===before,
+        journalUntouched:localStorage.getItem(journalKey)===journalBefore,
+        v2RowUntouched:JSON.stringify(rowBefore)===JSON.stringify(rowAfter),
+        authority:api.getStatus().readAuthority};
+    });
+    assert.equal(proof.queued,true);
+    assert.equal(proof.refusedReason,'preview_request_generation_changed');
+    assert.equal(proof.verified,false);
+    assert.equal(proof.legacyReads,0);
+    assert.equal(proof.attemptsAfter,proof.attemptsBefore);
+    assert.equal(proof.staleCancellations,1);
+    assert.equal(proof.pendingAfter,false);
+    assert.equal(proof.v1Untouched,true);
+    assert.equal(proof.journalUntouched,true);
+    assert.equal(proof.v2RowUntouched,true);
+    assert.equal(proof.authority,'legacy_only');
+    return {staleQueuedWorkCancelled:true,noV1Read:true,
+      noV2Write:true,legacyBytesPreserved:true,noAuthorityPromotion:true};
+  });
+
   await run('direct Task no-op parity refuses interleaved V1 change, then catches up without V1 writes',async context=>{
     const page=await open(context);
     const proof=await page.evaluate(async()=>{
