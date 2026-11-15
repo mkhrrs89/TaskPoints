@@ -22,6 +22,20 @@ test('M01 discovery covers every root source file and fails closed on new filena
     'source discovery must not be falsely described as full writer ownership');
 });
 
+test('M01 evidence cannot silently duplicate fields or claim verified writer ownership',()=>{
+  const named=inventory.primarySnapshotNamedFields;
+  assert.equal(new Set(named).size,named.length,
+    'duplicate named fields hide missing snapshot coverage');
+  const evidence=inventory.keyEvidence.map(row=>
+    JSON.stringify([row.key,row.family,row.evidencePath,row.role]));
+  assert.equal(new Set(evidence).size,evidence.length,
+    'duplicate key evidence must be reviewed rather than double-counted');
+  assert.equal(inventory.writerOwnershipAudit.productionWritersFenced,false,
+    'discovery evidence must never certify live writer fencing');
+  assert.equal(inventory.writerOwnershipAudit.status,'incomplete',
+    'M01 remains blocked until independently verified writer ownership');
+});
+
 test('M01 first-pass inspection is distinct from full owner/writer validation',()=>{
   const files=new Set(inventory.sourceFiles);
   assert.ok(inventory.firstPassInspected.length>0);
