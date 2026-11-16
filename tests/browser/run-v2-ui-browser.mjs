@@ -1275,9 +1275,29 @@ try{
     assert.equal(final.count,1,'Task must never be duplicated');
     assert.equal(final.status,'trashed','explicitly deleted task must not resurrect');
     assert.equal(final.visible,false);
+    // Verify that the REAL Home create/edit/trash history is represented in
+    // the isolated nonpilot V2 Tasks collection after reload. Pilot Habit
+    // parity alone cannot establish this Task migration groundwork.
+    const taskPreview=await page.evaluate(async id=>{
+      const api=window.TaskPointsStateRuntimeV2;
+      api.queueObservedLegacyTaskJournal();
+      const observed=await api.flushObservedLegacyTaskJournal();
+      const parity=await api.inspectPreviewTaskCollectionParity();
+      const record=await api.inspectPreviewTaskRecord(id);
+      return {observed,parity,record};
+    },id);
+    assert.equal(taskPreview.observed.verified,true,taskPreview.observed.reason);
+    assert.equal(taskPreview.parity.match,true,taskPreview.parity.reason);
+    assert.equal(taskPreview.record.recordVerified,true,taskPreview.record.reason);
+    assert.equal(taskPreview.record.exists,true,'trashed Task stays in the protected recovery record');
+    assert.equal(taskPreview.parity.readAuthority,'legacy_only');
+    assert.equal(taskPreview.record.canPromote,false,
+      'nonpilot preview parity cannot authorize a production Task writer');
     const p=await page.evaluate(()=>window.TaskPointsStateRuntimeV2.verifyParity());
     assert.equal(p.match,true,JSON.stringify(p.differences));
-    return {taskEditsPersisted:true,trashPersisted:true,reloads:3,habitParity:p.match};
+    return {taskEditsPersisted:true,trashPersisted:true,reloads:3,
+      habitParity:p.match,taskPreviewParity:taskPreview.parity.match,
+      trashedTaskRecordVerified:taskPreview.record.recordVerified};
   });
 
   await test('repeated Mood edits interleaved with Habit and Sleep preserve the latest note and no duplicates',async ctx=>{
