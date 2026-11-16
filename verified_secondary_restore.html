@@ -8,19 +8,43 @@
   <link rel="stylesheet" href="assets/tailwind.css">
   <link rel="stylesheet" href="styles.css">
   <script>
+    // Independent protection attempts: one failed storage operation cannot
+    // skip mode-off, and unreadable journals can never be considered empty.
+    const preload = {
+      capturedAtISO: new Date().toISOString(),
+      habitJournalRaw: '',
+      legacyJournalRaw: '',
+      journalCaptureVerified: false,
+      recoveryHoldVerified: false,
+      indexedDbPrimaryOffVerified: false
+    };
+    window.__taskPointsVerifiedSecondaryRestorePreload = preload;
     try {
-      window.__taskPointsVerifiedSecondaryRestorePreload = {
-        capturedAtISO: new Date().toISOString(),
-        habitJournalRaw: localStorage.getItem('taskpoints_pending_habit_deltas_v1') || '',
-        legacyJournalRaw: localStorage.getItem('taskpoints_phase5b_pending_changes_v1') || ''
-      };
+      preload.habitJournalRaw = localStorage.getItem('taskpoints_pending_habit_deltas_v1') || '';
+      preload.legacyJournalRaw = localStorage.getItem('taskpoints_phase5b_pending_changes_v1') || '';
+      preload.journalCaptureVerified = true;
+    } catch (_) {
+      // Unknown pending journals block the restore.
+    }
+    try {
       localStorage.setItem('taskpoints_emergency_recovery_hold_v1', JSON.stringify({
         active: true,
         enteredAtISO: new Date().toISOString(),
         reason: 'verified_secondary_manual_restore_preview'
       }));
+      const hold = JSON.parse(localStorage.getItem('taskpoints_emergency_recovery_hold_v1') || 'null');
+      preload.recoveryHoldVerified = hold?.active === true
+        && hold.reason === 'verified_secondary_manual_restore_preview';
+    } catch (_) {
+      // A missing or unreadable hold must not authorize restoration.
+    }
+    try {
       localStorage.setItem('taskpoints_phase4_storage_mode_v1', 'off');
-    } catch (_) {}
+      preload.indexedDbPrimaryOffVerified =
+        localStorage.getItem('taskpoints_phase4_storage_mode_v1') === 'off';
+    } catch (_) {
+      // Failure never counts as a verified off switch.
+    }
   </script>
   <script src="state_runtime_v2_generation.js" defer></script>
   <script src="storage_health_codec.js" defer></script>

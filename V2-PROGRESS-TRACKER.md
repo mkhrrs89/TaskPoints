@@ -111,6 +111,8 @@ See [weighted acceptance rubric](docs/state-runtime-v2-weighted-milestones.md) f
 
 ## Daily change log
 
+| 2026-11-16 — M01 verified-secondary restore fail-closed guard | **8 → 8 / 23** | **0 newly verified.** Journal capture and both recovery-protection writes now happen independently, with readback verification. A failed hold no longer skips the IndexedDB Primary Off attempt; refused journal reads, failed/ignored protection writes or a removed hold prevent restore. Source-executed regression tests added; V1 snapshot unchanged. | **M01 Working; C02 Open.** One recovery safety gap addressed, not a complete handoff or whole-app recovery proof. **0/78** production V2 writer owners certified; **67/100** unchanged; V1 authoritative; Main untouched/unsynced. Latest-head CI required before crediting passing evidence. | [Restore page](verified_secondary_restore.html) · [Runtime guard](verified_secondary_restore.js) · [Regression tests](tests/state_runtime_v2_m01_preview_recovery_nine_writer_behavior_contract.test.js) |
+
 | Date/session | Verified checkpoints | New verification | Outstanding checkpoint change | GitHub proof |
 | --- | ---: | --- | --- | --- |
 | 2026-11-10 — audited baseline | **8/23** | Inspected V2 runtime, live page writers, source/contract suites and green browser/contract CI. All 8 completed rows are **preview-scoped** only. | **6 Working, 9 Open**. Next: M01 exhaustive source/writer inventory. No nonpilot gate credited. | [Baseline V2 head](https://github.com/mkhrrs89/TaskPoints/commit/e64ccebe21ec5b8f6af2688ea6b47fd10b9ac6a7) · [CI contracts](https://github.com/mkhrrs89/TaskPoints/actions/runs/42846573945) · [CI browser](https://github.com/mkhrrs89/TaskPoints/actions/runs/42846574123) |

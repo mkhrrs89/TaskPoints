@@ -227,12 +227,72 @@ test('verified-secondary preload forces IndexedDB primary mode off; failed hold 
   assert.equal(success.s.getItem(HOLD_KEY) !== null, true);
   const blocked = verifiedRestoreHarness({failWrite: HOLD_KEY});
   assert.equal(blocked.s.getItem(HOLD_KEY), null);
-  assert.equal(blocked.s.getItem(MODE_KEY), 'indexeddb_primary',
-    'initial try block aborts before mode-off; important unresolved fail-closed safety risk');
+  assert.equal(blocked.s.getItem(MODE_KEY), 'off',
+    'mode-off must still be attempted when the independent recovery hold fails');
+  assert.equal(blocked.c.__taskPointsVerifiedSecondaryRestorePreload.recoveryHoldVerified, false);
+  assert.equal(blocked.c.__taskPointsVerifiedSecondaryRestorePreload.indexedDbPrimaryOffVerified, true);
   assertMainUnchanged(success.s);
   assertMainUnchanged(blocked.s);
 });
 
+
+test('verified-secondary preload detects unreadable journals and unconfirmed protection writes', () => {
+  const unreadable = verifiedRestoreHarness({failRead: 'taskpoints_pending_habit_deltas_v1'});
+  assert.equal(unreadable.c.__taskPointsVerifiedSecondaryRestorePreload.journalCaptureVerified, false);
+  assert.equal(unreadable.s.getItem(HOLD_KEY) !== null, true);
+  assert.equal(unreadable.s.getItem(MODE_KEY), 'off');
+  const uncommittedHold = verifiedRestoreHarness({ignoreWrite: HOLD_KEY});
+  assert.equal(uncommittedHold.c.__taskPointsVerifiedSecondaryRestorePreload.recoveryHoldVerified, false);
+  assert.equal(uncommittedHold.s.getItem(MODE_KEY), 'off');
+  const uncommittedMode = verifiedRestoreHarness({ignoreWrite: MODE_KEY});
+  assert.equal(uncommittedMode.c.__taskPointsVerifiedSecondaryRestorePreload.indexedDbPrimaryOffVerified, false);
+  assert.equal(uncommittedMode.s.getItem(MODE_KEY), 'indexeddb_primary');
+  const blockedMode = verifiedRestoreHarness({failWrite: MODE_KEY});
+  assert.equal(blockedMode.c.__taskPointsVerifiedSecondaryRestorePreload.indexedDbPrimaryOffVerified, false);
+  for (const result of [unreadable, uncommittedHold, uncommittedMode, blockedMode])
+    assertMainUnchanged(result.s);
+});
+
+async function secondaryRestorePreloadGate(options = {}, mutate) {
+  const {s, c: preload} = verifiedRestoreHarness(options);
+  if (mutate) mutate(s);
+  const nodes = new Map();
+  const events = new Map();
+  execute(production('verified_secondary_restore.js'), {
+    localStorage: s,
+    document: {getElementById(id) {
+      if (!nodes.has(id)) nodes.set(id, {
+        disabled: true, className: '', textContent: '', addEventListener() {}
+      });
+      return nodes.get(id);
+    }},
+    __taskPointsVerifiedSecondaryRestorePreload: preload.__taskPointsVerifiedSecondaryRestorePreload,
+    addEventListener(type, fn) {events.set(type, fn);}
+  }, 'verified_secondary_restore.js');
+  await events.get('load')();
+  return {s, nodes};
+}
+
+test('secondary restore runtime fails closed before candidate access when preload protections fail', async () => {
+  for (const [options, expected] of [
+    [{failRead: 'taskpoints_phase5b_pending_changes_v1'}, /pending recovery journals could not be safely read/i],
+    [{failWrite: HOLD_KEY}, /recovery protection could not be verified/i],
+    [{ignoreWrite: MODE_KEY}, /recovery protection could not be verified/i]
+  ]) {
+    const result = await secondaryRestorePreloadGate(options);
+    assert.match(result.nodes.get('message').textContent, expected);
+    assert.equal(result.nodes.get('restoreBtn').disabled, true);
+    assertMainUnchanged(result.s);
+  }
+  const replacedHold = await secondaryRestorePreloadGate({}, s => s.removeItem(HOLD_KEY));
+  assert.match(replacedHold.nodes.get('message').textContent,
+    /recovery hold or indexeddb primary off is not active/i);
+  assert.equal(replacedHold.nodes.get('restoreBtn').disabled, true);
+  assertMainUnchanged(replacedHold.s);
+  const good = await secondaryRestorePreloadGate();
+  assert.match(good.nodes.get('message').textContent, /storage decoder did not load/i,
+    'with protections installed, validation reaches its normal decoder check');
+});
 // Route 6 — emergency recovery must establish hold before loading V1.
 test('emergency recovery first script immediately engages hold and disables faster storage without writing V1', () => {
   const s = makeStorage({[V1_KEY]: V1_VALUE, [MODE_KEY]: 'indexeddb_primary'});

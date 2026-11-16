@@ -45,6 +45,30 @@
   });
   const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
+  function assertRecoveryHoldAndMode() {
+    let hold, mode;
+    try {
+      hold = JSON.parse(localStorage.getItem(HOLD_KEY) || 'null');
+      mode = localStorage.getItem(MODE_KEY);
+    } catch (_) {
+      throw new Error('Recovery hold and IndexedDB Primary Off could not be read back. Restoration is disabled; use full Emergency Data Recovery.');
+    }
+    if (hold?.active !== true || mode !== 'off') {
+      throw new Error('Recovery hold or IndexedDB Primary Off is not active. Restoration is disabled; use full Emergency Data Recovery.');
+    }
+  }
+
+  function assertProtectedRecoveryPreload() {
+    if (preloadJournals.journalCaptureVerified !== true) {
+      throw new Error('Pending recovery journals could not be safely read when this page opened. Restoration is disabled; use full Emergency Data Recovery.');
+    }
+    if (preloadJournals.recoveryHoldVerified !== true
+      || preloadJournals.indexedDbPrimaryOffVerified !== true) {
+      throw new Error('Recovery protection could not be verified when this page opened. Restoration is disabled; use full Emergency Data Recovery.');
+    }
+    assertRecoveryHoldAndMode();
+  }
+
   async function openExistingDatabase() {
     if (!global.indexedDB) return null;
     if (typeof global.indexedDB.databases === 'function') {
@@ -249,6 +273,7 @@
   }
 
   async function validate() {
+    assertProtectedRecoveryPreload();
     const api = global.TaskPointsStorageHealth;
     const split = global.TaskPointsVerifiedSecondaryRecoveryLockSplit;
     const guard = global.TaskPointsVerifiedSecondaryRestoreLockGuard;
@@ -271,6 +296,7 @@
   }
 
   async function revalidateImmediatelyBeforeRestore() {
+    assertProtectedRecoveryPreload();
     const api = validation?.api || global.TaskPointsStorageHealth;
     if (!api || !candidate) throw new Error('Recovery candidate is not initialized.');
     if ((localStorage.getItem(STORAGE_KEY) || '') !== validation.currentRaw) {
@@ -327,6 +353,8 @@
         enteredAtISO: new Date().toISOString(),
         reason: 'verified_secondary_restore_in_progress'
       }));
+      // Verify protection readback before any authoritative byte is replaced.
+      assertRecoveryHoldAndMode();
       markRecoveryAttemptWriteBoundary();
       localStorage.setItem(STORAGE_KEY, candidate.raw);
       authoritativeWriteOccurred = true;
