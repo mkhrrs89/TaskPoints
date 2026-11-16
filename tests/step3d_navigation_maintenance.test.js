@@ -207,10 +207,20 @@ test('Phase 5C waits through page startup and a navigation intent before opening
   h.runNextTimer();
   assert.equal(h.indexedDB.openCalls(), 0, 'a navigation click must extend the maintenance quiet window');
 
+  // Home's heavy-maintenance guard requires 20 seconds since the last
+  // interaction, IN ADDITION to the shorter startup/navigation grace. Do not
+  // accidentally weaken that guard just to satisfy this browser rehearsal.
   h.setClock(7000);
   h.runNextTimer();
   await h.settle();
-  assert.ok(h.indexedDB.openCalls() > 0, 'verification may begin only after startup/navigation and interaction quiet windows clear');
+  assert.equal(h.indexedDB.openCalls(), 0,
+    'heavy verification must not start after only 4 seconds of interaction quiet');
+
+  h.setClock(24000); // 21 seconds after the link click: both gates are clear.
+  h.runNextTimer();
+  await h.settle();
+  assert.ok(h.indexedDB.openCalls() > 0,
+    'verification must eventually begin after both startup/navigation and 20-second interaction quiet windows clear');
   await h.core.flushPhase5CVerifiedSecondaryWrites();
   assert.equal(h.indexedDB.read(DB_NAME, 'latest').raw, nextRaw);
 });
