@@ -12333,6 +12333,53 @@ try {
       TaskJournalReplayedOnRetry:true,readAuthority:'legacy_only'};
   });
 
+  await run('Task cleanup retains its journal across reload when the verified snapshot changes', async context => {
+    const page = await open(context);
+    const before = await page.evaluate(() => {
+      const core = window.TaskPointsCore;
+      const key = core.STORAGE_KEY;
+      const journalKey = 'taskpoints_pending_task_mutations_v1';
+      const peer = window.V2BrowserFixture.rawLegacy();
+      peer.notes = 'Peer saved before Task cleanup';
+      const peerRaw = JSON.stringify(peer);
+      core.journalTaskMutation({task:{id:'synthetic-task',title:'Pending Task edit'}});
+      const journalRaw = localStorage.getItem(journalKey);
+      const read = Storage.prototype.getItem;
+      const write = Storage.prototype.setItem;
+      let committed = false;
+      // Interleave a snapshot replacement at the first cleanup journal read,
+      // after the full save and its readback, before the guarded removal.
+      Storage.prototype.setItem = function(k,v) {
+        const result = write.call(this,k,v);
+        if (this === localStorage && k === key) committed = true;
+        return result;
+      };
+      Storage.prototype.getItem = function(k) {
+        if (this === localStorage && k === journalKey && committed) {
+          committed = false;
+          write.call(this,key,peerRaw);
+        }
+        return read.call(this,k);
+      };
+      let flushed;
+      try { flushed = core.flushPendingTaskMutations(); }
+      finally { Storage.prototype.getItem = read; Storage.prototype.setItem = write; }
+      return {flushed,peerPreserved:localStorage.getItem(key) === peerRaw,
+        journalPreserved:localStorage.getItem(journalKey) === journalRaw};
+    });
+    assert.deepEqual(before,{flushed:false,peerPreserved:true,journalPreserved:true});
+    await page.reload();
+    const after = await page.evaluate(() => {
+      const core = window.TaskPointsCore;
+      const flushed = core.flushPendingTaskMutations();
+      const saved = window.V2BrowserFixture.rawLegacy();
+      return {flushed,notes:saved.notes,title:saved.tasks.find(t => t.id === 'synthetic-task')?.title,
+        cleared:localStorage.getItem('taskpoints_pending_task_mutations_v1') === null};
+    });
+    assert.deepEqual(after,{flushed:true,notes:'Peer saved before Task cleanup',title:'Pending Task edit',cleared:true});
+    return {snapshotReplacementDetected:true,pendingEditRecoveredAfterReload:true};
+  });
+
   await run('newer Task completion edit during verified journal compaction survives cleanup and retry',async context=>{
     const page=await open(context);
     const proof=await page.evaluate(()=>{

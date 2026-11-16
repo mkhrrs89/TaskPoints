@@ -800,6 +800,80 @@ test('compaction cleanup does not erase an edit another tab saved after the clea
   assert.equal(h.core.getTaskMutationJournalStatus().compactionsCompleted,0);
 });
 
+for (const route of ['idle compaction', 'ordinary save']) {
+  test(route + ' keeps the journal if the verified snapshot is replaced before cleanup', () => {
+    const h = makeHarness();
+    h.core.journalTaskMutation({task:{id:'t1',title:'Pending title'}});
+    const pending = h.storage.getItem(JOURNAL_KEY);
+    const originalState = JSON.parse(h.storage.getItem(STORAGE_KEY));
+    const peer = JSON.stringify({...originalState, notes:'New peer note'});
+    const read = h.storage.getItem.bind(h.storage);
+    const write = h.storage.setItem.bind(h.storage);
+    let committed = false;
+    h.storage.setItem = (key, value) => {
+      write(key, value);
+      if (key === STORAGE_KEY) committed = true;
+    };
+    h.storage.getItem = key => {
+      // First journal inspection after the full write is inside cleanup,
+      // after the writer has read back and verified its Task snapshot.
+      if (key === JOURNAL_KEY && committed) {
+        committed = false;
+        write(STORAGE_KEY, peer);
+      }
+      return read(key);
+    };
+    if (route === 'idle compaction') assert.equal(h.core.flushPendingTaskMutations(), false);
+    else h.core.saveStateSnapshot(originalState);
+    assert.equal(h.storage.getItem(STORAGE_KEY), peer);
+    assert.equal(h.storage.getItem(JOURNAL_KEY), pending);
+    assert.equal(h.core.getTaskMutationJournalStatus().snapshotSourceConflicts, 1);
+    h.storage.getItem = read;
+    h.storage.setItem = write;
+    const reopened = makeHarness({}, {storage:h.storage});
+    assert.equal(reopened.core.flushPendingTaskMutations(), true);
+    const saved = reopened.core.readTaskPointsStoredState();
+    assert.equal(saved.tasks[0].title, 'Pending title');
+    assert.equal(saved.notes, 'New peer note');
+    assert.equal(reopened.storage.getItem(JOURNAL_KEY), null);
+  });
+}
+
+test('a missing completion history cannot verify a pending deletion', () => {
+  const h = makeHarness({}, {saveTransform:state => {
+    delete state.completions;
+    return state;
+  }});
+  h.core.journalTaskMutation({completionDeleteId:'old'});
+  const pending = h.storage.getItem(JOURNAL_KEY);
+  assert.equal(h.core.flushPendingTaskMutations(), false);
+  assert.equal(h.storage.getItem(JOURNAL_KEY), pending);
+});
+
+test('partial cleanup compares full nested rows and preserves peer order and tombstones', () => {
+  const t = {id:'t1', title:'Pending title', meta:{nested:[1,2]}};
+  const c = {id:'new', taskId:'t1', points:2, meta:{nested:[2,3]}};
+  const record = {schemaVersion:1,tasks:[t],completionUpserts:[c],completionDeletes:['old']};
+  const t2 = {...t, meta:{nested:[2,1]}};
+  const c2 = {...c, meta:{nested:[3,2]}};
+  const peer = {...record, tasks:[{id:'peer'},t,t2], completionUpserts:[c2,c],
+    completionDeletes:['peer-delete','old','new']};
+  const h = makeHarness({[JOURNAL_KEY]:JSON.stringify(record)});
+  const write = h.storage.setItem.bind(h.storage);
+  h.storage.setItem = (key, value) => {
+    write(key, value);
+    if (key === STORAGE_KEY) write(JOURNAL_KEY, JSON.stringify(peer));
+  };
+  assert.equal(h.core.flushPendingTaskMutations(), true);
+  const left = JSON.parse(h.storage.getItem(JOURNAL_KEY));
+  assert.deepEqual(left.tasks, [{id:'peer'},t,t2]);
+  assert.deepEqual(left.completionUpserts, [c2,c]);
+  assert.deepEqual(left.completionDeletes, ['peer-delete','new']);
+  const effective = h.core.readTaskPointsStoredState();
+  assert.deepEqual(clone(effective.completions.find(row => row.id === 'new')), c);
+  assert.deepEqual(clone(effective.tasks.find(row => row.id === t.id)), t2);
+});
+
 test('compaction cannot report success if pending journal becomes malformed during snapshot write', () => {
   const pending={
     schemaVersion:1,
@@ -2312,7 +2386,7 @@ test('Home postponement keeps the snapshot fallback and restores the list on a f
 
 test('bulk snapshot verification scans each history once and keeps first-match and deletion checks',()=>{
   const begin=moduleSource.indexOf('  function valueMatches(');
-  const end=moduleSource.indexOf('  function sameRow(',begin);
+  const end=moduleSource.indexOf('  function clearVerifiedSnapshot(',begin);
   const verify=vm.runInNewContext(moduleSource.slice(begin,end)+'\nsnapshotVerified');
   let reads=0;
   const rows=Array.from({length:1000},(_,i)=>({get id(){reads++;return String(i);},points:i}));

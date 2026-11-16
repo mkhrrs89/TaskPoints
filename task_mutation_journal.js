@@ -214,8 +214,7 @@
     return true;
   }
 
-  function readRecord() {
-    const raw = storage.getItem(JOURNAL_KEY);
+  function readRecord(raw = storage.getItem(JOURNAL_KEY)) {
     // Only a genuinely absent key is an empty journal. A present but empty
     // string (or a nonstandard storage shim returning undefined) is
     // unreadable evidence: treating it as absent would let the next Task tap
@@ -606,6 +605,8 @@
       if (!taskPatchVerified(savedTask(id), patch, normalized, compactedStorage)) return false;
     }
     const deletes = record.completionDeletes;
+    if (deletes.length && (!Array.isArray(savedState.completions)
+      || !Array.isArray(normalizedExpectedState?.completions))) return false;
     const savedCompletion = firstRowLookup(savedState.completions || [], record.completionUpserts.length + deletes.length);
     const expectedCompletion = firstRowLookup(normalizedExpectedState?.completions || [], deletes.length);
     for (const patch of record.completionUpserts) {
@@ -617,20 +618,45 @@
     return true;
   }
 
-  function sameRow(a, b) {
-    try { return JSON.stringify(a) === JSON.stringify(b); }
-    catch (_) { return false; }
-  }
+  function clearVerifiedSnapshot(original, normalizedState) {
+    // Keep the specific bytes that passed verification as a condition of
+    // cleanup. Another tab can replace the full save while we examine it.
+    const savedRaw = storage.getItem(STORAGE_KEY);
+    if (typeof savedRaw !== 'string' || !savedRaw) return false;
+    const saved = persistedState(savedRaw);
+    if (!snapshotVerified(saved, original.record, normalizedState)) return false;
 
-  function clearVerifiedSnapshot(snapshot) {
-    const current = readRecord();
-    if (current.malformed) return false;
-    const record = current.record;
-    record.tasks = record.tasks.filter((row) => !snapshot.tasks.some((saved) => String(saved.id) === String(row.id) && sameRow(saved, row)));
-    record.completionUpserts = record.completionUpserts.filter((row) => !snapshot.completionUpserts.some((saved) => String(saved.id) === String(row.id) && sameRow(saved, row)));
-    record.completionDeletes = record.completionDeletes.filter((id) => !snapshot.completionDeletes.includes(id));
-    record.updatedAtISO = new Date().toISOString();
-    writeRecord(record, true, current.raw);
+    const journalRaw = storage.getItem(JOURNAL_KEY);
+    let remaining = emptyRecord();
+    if (journalRaw !== original.raw) {
+      if (journalRaw === undefined) return false;
+      const current = readRecord(journalRaw);
+      if (current.malformed) return false;
+      remaining = current.record;
+      // A legacy journal can contain repeated IDs, or a deletion followed by
+      // an upsert. Keep those operations together: removing only the last
+      // matching row could replay an older edit or a deletion on reload.
+      const verifiedDeletes = new Set(original.record.completionDeletes);
+      for (const field of ['tasks', 'completionUpserts']) {
+        const completions = field === 'completionUpserts';
+        const seen = new Set(completions ? remaining.completionDeletes : []);
+        const repeated = new Set();
+        for (const row of remaining[field]) {
+          const id = String(row.id);
+          if (seen.has(id)) repeated.add(id);
+          seen.add(id);
+        }
+        if (original.record[field].length) {
+          const verified = new Set(original.record[field].map(row => JSON.stringify(row)));
+          remaining[field] = remaining[field].filter(row =>
+            repeated.has(String(row.id)) || !verified.has(JSON.stringify(row)));
+        }
+        if (completions) remaining.completionDeletes = remaining.completionDeletes.filter(id =>
+          repeated.has(id) || !verifiedDeletes.has(id));
+      }
+      remaining.updatedAtISO = new Date().toISOString();
+    }
+    writeRecord(remaining, true, journalRaw, savedRaw);
     return true;
   }
 
@@ -843,7 +869,7 @@
     compactionRunning = true;
     compactionsStarted += 1;
     try { global.TaskPointsPerf?.mark?.('taskMutation.compactionStart', { reason }); } catch (_) {}
-    const snapshot = clone(current.record);
+    const snapshot = current.record;
     try {
       // Freeze the *raw* V1 snapshot used to build this candidate. Reading
       // and decoding a large compressed snapshot can give a peer tab time
@@ -889,16 +915,9 @@
         taskMutationReason: reason
       });
       if (result?.skipped || result?.blockedByQuotaCircuit || !result?.state) throw new Error('Task mutation journal compaction was not committed.');
-      const saved = persistedState();
-      // saveStateSnapshot may intentionally normalize task rows. Verify the
-      // canonical snapshot against the normalized state it actually committed,
-      // rather than requiring byte-for-byte equality with the pre-save patch.
-      if (!snapshotVerified(saved, snapshot, result.state)) throw new Error('Task mutation journal compaction verification failed.');
-      // The underlying V1 snapshot can be correct while a peer/reset has
-      // replaced the pending journal with malformed or newer evidence.
-      // Decline completion unless cleanup explicitly succeeded; an older
-      // "false" return must never become an acknowledged compacted edit.
-      if (clearVerifiedSnapshot(snapshot) !== true)
+      // Verify the actual persisted rows against the normalized result before
+      // removing any acknowledged edits from the journal.
+      if (!clearVerifiedSnapshot(current, result.state))
         throw new Error('Task mutation journal cleanup could not be confirmed; pending changes retained.');
       retryCount = 0;
       compactionsCompleted += 1;
@@ -1147,8 +1166,7 @@
       const result = originalSaveStateSnapshot(candidate, protectedSaveOptions);
       if (!current.malformed && !isEmpty(current.record) && !result?.skipped && !result?.blockedByQuotaCircuit && result?.state) {
         try {
-          const saved = persistedState();
-          if (snapshotVerified(saved, current.record, result.state)) clearVerifiedSnapshot(current.record);
+          clearVerifiedSnapshot(current, result.state);
         } catch (_) {}
       }
       return result;
