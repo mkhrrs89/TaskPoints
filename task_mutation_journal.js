@@ -558,13 +558,8 @@
     return false;
   }
 
-  function taskPatchVerified(saved, patch, normalizedExpectedState, compactedStorage = false) {
+  function taskPatchVerified(saved, patch, normalized, compactedStorage) {
     if (!saved || !patch) return false;
-    const id = String(patch.id || '');
-    const normalized = normalizedExpectedState
-      ? (normalizedExpectedState.tasks || []).find((task) => String(task?.id || '') === id)
-      : null;
-    if (normalizedExpectedState && !normalized) return false;
     for (const [key, patchValue] of Object.entries(patch)) {
       // `deletedAt` is a legacy alias. The canonical save path may retain only
       // `deletedAtISO`; that omission is safe only when the normalized output
@@ -589,22 +584,35 @@
     return true;
   }
 
+  function firstRowLookup(rows, lookups) {
+    if (lookups < 8) return id => rows.find(row => String(row?.id || '') === id);
+    const first = new Map();
+    for (const row of rows) {
+      const id = String(row?.id || '');
+      if (!first.has(id)) first.set(id, row);
+    }
+    return id => first.get(id);
+  }
+
   function snapshotVerified(savedState, record, normalizedExpectedState = null) {
     if (!savedState || typeof savedState !== 'object') return false;
     const compactedStorage = Number(savedState.__storageCompactVersion) === 1;
+    const savedTask = firstRowLookup(savedState.tasks || [], record.tasks.length);
+    const expectedTask = firstRowLookup(normalizedExpectedState?.tasks || [], record.tasks.length);
     for (const patch of record.tasks) {
       const id = String(patch.id);
-      const saved = (savedState.tasks || []).find((task) => String(task?.id || '') === id);
-      if (!taskPatchVerified(saved, patch, normalizedExpectedState, compactedStorage)) return false;
+      const normalized = expectedTask(id);
+      if (normalizedExpectedState && !normalized) return false;
+      if (!taskPatchVerified(savedTask(id), patch, normalized, compactedStorage)) return false;
     }
+    const deletes = record.completionDeletes;
+    const savedCompletion = firstRowLookup(savedState.completions || [], record.completionUpserts.length + deletes.length);
+    const expectedCompletion = firstRowLookup(normalizedExpectedState?.completions || [], deletes.length);
     for (const patch of record.completionUpserts) {
-      const id = String(patch.id);
-      const saved = (savedState.completions || []).find((entry) => String(entry?.id || '') === id);
-      if (!rowMatchesExpected(saved, patch)) return false;
+      if (!rowMatchesExpected(savedCompletion(String(patch.id)), patch)) return false;
     }
-    for (const id of record.completionDeletes) {
-      if ((savedState.completions || []).some((entry) => String(entry?.id || '') === String(id))) return false;
-      if (normalizedExpectedState && (normalizedExpectedState.completions || []).some((entry) => String(entry?.id || '') === String(id))) return false;
+    for (const id of deletes) {
+      if (savedCompletion(String(id)) || expectedCompletion(String(id))) return false;
     }
     return true;
   }

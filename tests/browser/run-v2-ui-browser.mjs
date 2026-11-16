@@ -1057,6 +1057,57 @@ try{
   });
 
 
+  await test('Home +1 Day uses the latest peer date and never displays a refused edit',async ctx=>{
+    const {page}=await home(ctx);
+    const id='peer-bump';
+    await page.evaluate(id=>{
+      const row={id,title:'Original',status:'active',dueDateISO:'2026-11-12',
+        originalDueDateISO:'2026-11-12',postponedDays:0,points:1};
+      window.TaskPointsCore.journalTaskMutation({task:row});
+      state.tasks.push(row);
+      renderTasks(state);
+    },id);
+    const peer=await ctx.newPage();
+    await peer.goto(origin+'/tests/browser/v2-upgrade-seed.html');
+    for (const file of ['scoring_core.js','task_mutation_journal.js'])
+      await peer.addScriptTag({url:origin+'/'+file});
+    await peer.evaluate(id=>{
+      window.TaskPointsCore.journalTaskMutation({task:{id,title:'Peer title',points:7,
+        status:'active',dueDateISO:'2026-11-20',originalDueDateISO:'2026-11-12',postponedDays:8}});
+    },id);
+    await page.waitForFunction(id=>window.TaskPointsCore.readPendingTaskMutations()
+      .record.tasks.find(t=>t.id===id)?.title==='Peer title',id);
+    const result=await page.evaluate(id=>{
+      const core=window.TaskPointsCore;
+      const live=()=>state.tasks.find(t=>t.id===id);
+      const click=()=>document.querySelector('[data-task-action="bump"][data-task-id="peer-bump"]').click();
+      const before=JSON.stringify(live()), raw=localStorage.getItem('taskpoints_pending_task_mutations_v1');
+      const original=window.TaskPointsRecoveryAttemptWriteLockGuard, alert=window.alert;
+      let alerts=0;
+      try {
+        window.alert=()=>{alerts++;};
+        window.TaskPointsRecoveryAttemptWriteLockGuard={readAttemptLock:()=>({locked:true})};
+        click();
+      } finally {window.TaskPointsRecoveryAttemptWriteLockGuard=original;window.alert=alert;}
+      const preserved=JSON.stringify(live())===before && localStorage.getItem('taskpoints_pending_task_mutations_v1')===raw;
+      const full=localStorage.getItem('taskpoints_v1');
+      click();
+      return {preserved,alerts,live:live(),saved:core.readPendingTaskMutations().record.tasks.find(t=>t.id===id),
+        fullUnchanged:full===localStorage.getItem('taskpoints_v1')};
+    },id);
+    assert.ok(result.preserved && result.alerts===1 && result.fullUnchanged,JSON.stringify(result));
+    for(const row of [result.live,result.saved]){
+      assert.equal(row.dueDateISO,'2026-11-21');
+      assert.equal(row.title,'Peer title');
+      assert.equal(row.postponedDays,9);
+      assert.equal(row.points,7);
+    }
+    await page.reload({waitUntil:'load'});
+    await page.waitForFunction(id=>window.TaskPointsCore?.readTaskPointsStoredState()
+      ?.tasks.find(t=>t.id===id)?.dueDateISO==='2026-11-21',id);
+    return {peerFieldsPreserved:true,refusedEditInvisible:true,reloadVerified:true};
+  });
+
   await test('Home postpones one or all overdue tasks through a single journal write per tap',async ctx=>{
     // Home wraps Storage methods during bootstrap. Install instrumentation
     // underneath those wrappers so both browsers exercise the real save path.

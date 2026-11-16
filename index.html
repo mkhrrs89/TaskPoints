@@ -13662,10 +13662,44 @@ function persistTaskActionMutation(task, action){
 }
 
 function bumpTaskOneDay(id){
-  const t = state.tasks.find(x => x.id === id);
-  if (!t || !assertTaskActionMutationWritable()) return;
-  bumpOneDay(t);
-  persistTaskActionMutation(t, 'bump-one-day');
+  const index = state.tasks.findIndex(row => row.id === id);
+  if (index < 0) return;
+  let advanced = false;
+  const advance = task => {
+    if (!task.dueDateISO || task.completedAtISO || task.hidden || getTaskStatus(task) !== 'active')
+      return false;
+    task.originalDueDateISO ||= task.dueDateISO;
+    bumpOneDay(task);
+    advanced = true;
+    return true;
+  };
+  try {
+    if (TaskPointsCore?.journalTaskUpdates) {
+      const latest = TaskPointsCore.journalTaskUpdates([id], advance);
+      state.tasks[index] = latest.get(String(id));
+      if (advanced) {
+        try { window.TaskPointsPerf?.mark?.('taskAction.journaled', {action:'bump-one-day',taskId:id}); } catch (_) {}
+      }
+    } else {
+      if (!assertTaskActionMutationWritable()) return;
+      const before = state.tasks[index];
+      const t = { ...before };
+      if (!advance(t)) return;
+      if (TaskPointsCore?.journalTaskMutation) {
+        persistTaskActionMutation(t, 'bump-one-day');
+        state.tasks[index] = t;
+      } else {
+        state.tasks[index] = t;
+        if (!save()) {
+          state.tasks[index] = before;
+          throw new Error('The new due date could not be saved.');
+        }
+      }
+    }
+  } catch (error) {
+    alert(error?.message || 'The new due date could not be saved.');
+    return;
+  }
   renderTasks(state);
 }
 

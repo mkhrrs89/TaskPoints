@@ -2309,3 +2309,22 @@ test('Home postponement keeps the snapshot fallback and restores the list on a f
     assert.equal(scope.state.tasks[0].metadata.keep,true);
   }
 });
+
+test('bulk snapshot verification scans each history once and keeps first-match and deletion checks',()=>{
+  const begin=moduleSource.indexOf('  function valueMatches(');
+  const end=moduleSource.indexOf('  function sameRow(',begin);
+  const verify=vm.runInNewContext(moduleSource.slice(begin,end)+'\nsnapshotVerified');
+  let reads=0;
+  const rows=Array.from({length:1000},(_,i)=>({get id(){reads++;return String(i);},points:i}));
+  const patches=Array.from({length:40},(_,i)=>({id:String(999-i),points:999-i}));
+  const record={tasks:patches,completionUpserts:patches,
+    completionDeletes:Array.from({length:10},(_,i)=>'gone-'+i)};
+  const state={tasks:rows,completions:rows};
+  assert.equal(verify(state,record,state),true);
+  assert.ok(reads<5000,'verification must not scan the full history per patch');
+  const wrong={id:'999',points:-1};
+  assert.equal(verify({...state,tasks:[wrong,...rows]},record,state),false);
+  assert.equal(verify({...state,completions:[wrong,...rows]},record,state),false);
+  assert.equal(verify(state,record,{tasks:[],completions:rows}),false);
+  assert.equal(verify(state,record,{tasks:rows,completions:[...rows,{id:'gone-0'}]}),false);
+});

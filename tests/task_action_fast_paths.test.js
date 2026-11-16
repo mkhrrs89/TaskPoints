@@ -29,7 +29,8 @@ test('+1 Day preflights and journals the changed task only', () => {
   const body = between('function bumpTaskOneDay', 'function applyPostponeToTask');
   assert.match(body, /assertTaskActionMutationWritable\(\)/);
   assert.match(body, /persistTaskActionMutation\(t, 'bump-one-day'\)/);
-  assert.doesNotMatch(body, /\bsave\(\)/);
+  assert.match(body, /journalTaskUpdates\(\[id\], advance\)/);
+  assert.match(body, /if \(!save\(\)\)/, 'older bundles retain a checked snapshot fallback');
 });
 
 test("Won't Do preserves confirmation while journaling the resulting task only", () => {
