@@ -21,6 +21,8 @@ on:
       - rankings.html
       - tests/rankings_three_digit_fit.test.js
       - tests/power_rankings_weighted_gold.test.js
+      - tests/home_scoreboard_power_rank_sync.test.js
+      - season_champion_gold_bonus.js
       - rankings_tournament_trophies.js
       - standings.html
       - tests/standings_gold_sort.test.js
@@ -63,6 +65,11 @@ jobs:
           node --test
           tests/rankings_three_digit_fit.test.js
           tests/power_rankings_weighted_gold.test.js
+          tests/home_scoreboard_power_rank_sync.test.js
+          tests/home_scoreboard_rank_gold.test.js
+          tests/home_scoreboard_season3_scope.test.js
+          tests/home_rank_percentile_line.test.js
+          tests/season_champion_gold_bonus.test.js
           tests/rankings_tournament_trophies.test.js
           tests/player_badge_power_rankings.test.js
           tests/greed_gold_economy.test.js

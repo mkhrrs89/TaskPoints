@@ -4204,17 +4204,60 @@ function getHomeScoreboardCurrentSeasonState(asOfKey = getGameDayKey(new Date())
   };
 }
 
+// Home ranks now use the same 75% Win% + 25% total Gold calculation
+// as Power Rankings; canonical scores for gameplay and standings stay intact.
+let homePowerRankingCache = null;
 function getCanonicalRankingMap(){
   if (!window.TaskPointsCore?.computeCanonicalRankings) return new Map();
-
+  const snapshot = state || {};
+  const date = getGameDayKey(new Date());
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const goldBuilder = window.TaskPointsSeasonChampionGoldBonus?.buildPowerRankingTotalGoldMap;
+  // Only coalesce multiple reads in one screen update. Never cache results
+  // indefinitely across player edits, Gold adjustments or new game days.
+  if (homePowerRankingCache?.snapshot === snapshot
+      && homePowerRankingCache.date === date
+      && homePowerRankingCache.goldBuilder === goldBuilder
+      && now - homePowerRankingCache.at < 100) return homePowerRankingCache.map;
   const scopedState = getHomeScoreboardCurrentSeasonState();
-  const rows = TaskPointsCore.computeCanonicalRankings(scopedState);
-  const byId = new Map();
-
-  rows.forEach((row) => {
-    byId.set(row.playerId, row);
-  });
-
+  const canonical = TaskPointsCore.computeCanonicalRankings(scopedState, { preindexed: true });
+  let gold = goldBuilder?.(snapshot, scopedState, { todayKey: date });
+  if (!(gold instanceof Map)) {
+    // The addon loads asynchronously; use a one-pass provisional Gold index
+    // until the full historical/championship calculation is available.
+    gold = new Map();
+    if (Number(snapshot.goldEconomy?.version) === 1) {
+      for (const row of (Array.isArray(snapshot.goldLedger) ? snapshot.goldLedger : [])) {
+        const id = String(row?.playerId || '');
+        gold.set(id, (gold.get(id) || 0) + (Number(row?.amount) || 0));
+      }
+    } else {
+      for (const row of (Array.isArray(snapshot.matchups) ? snapshot.matchups : [])) {
+        const key = getHomeScoreboardDateKey(row);
+        if (!key || key < HOME_SCOREBOARD_SEASON_TWO_START || key >= date) continue;
+        const a = Number(row.scoreA), b = Number(row.scoreB);
+        if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+        if (a > b) gold.set(row.playerAId, (gold.get(row.playerAId) || 0) + (a - b) / 10);
+        else if (b > a) gold.set(row.playerBId, (gold.get(row.playerBId) || 0) + (b - a) / 10);
+      }
+    }
+    for (const [id, amount] of gold)
+      gold.set(id, Math.round((amount + Number.EPSILON) * 10) / 10);
+  }
+  const rows = canonical.map((row, canonicalIndex) => ({
+    ...row, canonicalIndex,
+    powerGold: Math.max(0, Number(gold.get(row.playerId)) || 0)
+  }));
+  const goldLeader = rows.reduce((max, row) => Math.max(max, row.powerGold), 0);
+  for (const row of rows) {
+    const winShare = Number.isFinite(row.winPct)
+      ? Math.min(1, Math.max(0, row.winPct)) : 0;
+    const goldShare = goldLeader > 0 ? row.powerGold / goldLeader : 0;
+    row.powerScore = 0.75 * winShare + 0.25 * goldShare;
+  }
+  rows.sort((a, b) => b.powerScore - a.powerScore || a.canonicalIndex - b.canonicalIndex);
+  const byId = new Map(rows.map((row, index) => [row.playerId, { ...row, rank: index + 1 }]));
+  homePowerRankingCache = { snapshot, date, at: now, goldBuilder, map: byId };
   return byId;
 }
   
