@@ -164,7 +164,7 @@ test('Home includes the same archived results that Power Rankings counts',()=>{
     getHomeScoreboardCurrentSeasonState:()=>state,
     getHomeScoreboardCurrentSeasonRows:rows=>rows.filter(m=>m.dateKey>='2026-11-01')
   });
-  vm.runInContext('let homePowerRankingCache = null;\\n'+fn(home,'getCanonicalRankingMap'),context);
+  vm.runInContext('let homePowerRankingCache = null;\n'+fn(home,'getCanonicalRankingMap'),context);
   const result=context.getCanonicalRankingMap();
   assert.deepEqual(seen,['regular','tourney']);
   assert.equal(result.get('DONUT').rank,1);
