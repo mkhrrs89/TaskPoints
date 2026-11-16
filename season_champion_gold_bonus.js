@@ -251,7 +251,7 @@
       const a = sideScore(match, 'A'), b = sideScore(match, 'B');
       if (a === null || b === null) continue;
       if (a > b) add(historical, match.playerAId, (a - b) / 10);
-      else if (b > a) add(historical, match.playerBId, (b - a) / 10);
+      else if (b > a && match.playerBId !== match.playerAId) add(historical, match.playerBId, (b - a) / 10);
     }
     // The legacy/no-ledger path uses the same Number(scoreA/B) semantics
     // as the Rankings page's original scope-specific MOV/Gold helper.
@@ -261,7 +261,7 @@
       const a = Number(match.scoreA), b = Number(match.scoreB);
       if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
       if (a > b) add(scopedMargins, match.playerAId, (a - b) / 10);
-      else if (b > a) add(scopedMargins, match.playerBId, (b - a) / 10);
+      else if (b > a && match.playerBId !== match.playerAId) add(scopedMargins, match.playerBId, (b - a) / 10);
     }
     const officialLedger = Number(source.goldEconomy?.version) === 1;
     if (officialLedger) {

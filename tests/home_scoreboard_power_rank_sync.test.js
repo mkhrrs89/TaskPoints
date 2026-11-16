@@ -88,3 +88,55 @@ test('Home rank helper remains read-only and the rank marker uses its order',()=
   assert.match(home,/function getHomepageRankValue\(playerId\)/);
   assert.match(home,/function getHomepagePpdValue\(playerId\)/);
 });
+
+
+test('batched Home Gold equals individual existing Power Rankings Gold across historical quirks',()=>{
+  const helper=setupBonus();
+  const state={
+    players:[{id:'A',active:true},{id:'B',active:true},{id:'C',active:true}],
+    gameHistory:[],
+    seasonHistory:[{id:'champion',endDateKey:'2026-10-31',championId:'A'},
+                   {id:'champion',endDateKey:'2026-10-31',championId:'A'}],
+    matchups:[
+      {id:'self-loss',dateKey:'2026-11-10',playerAId:'A',playerBId:'A',scoreA:10,scoreB:90},
+      {id:'self-win',dateKey:'2026-11-11',playerAId:'A',playerBId:'A',scoreA:30,scoreB:10},
+      {id:'A-B',dateKey:'2026-11-12',playerAId:'A',playerBId:'B',scoreA:54,scoreB:23},
+      {id:'B-C',dateKey:'2026-11-13',playerAId:'B',playerBId:'C',scoreA:18,scoreB:32},
+      {id:'invalid',dateKey:'2026-11-14',playerAId:'B',playerBId:'C',scoreA:'N/A',scoreB:20},
+      {id:'today',dateKey:'2026-11-16',playerAId:'A',playerBId:'C',scoreA:1000,scoreB:0},
+      {id:'pre-Gold',dateKey:'2026-06-30',playerAId:'A',playerBId:'B',scoreA:100,scoreB:0}
+    ]
+  };
+  const scope={...state,matchups:state.matchups.filter(m=>m.dateKey>='2026-11-01')};
+  const round=value=>Math.round((Number(value)+Number.EPSILON)*10)/10;
+  for(const withLedger of [false,true]){
+    if(withLedger){
+      state.goldEconomy={version:1};
+      state.goldLedger=[{playerId:'A',amount:8.1},{playerId:'A',amount:-0.3},
+                        {playerId:'B',amount:20},{playerId:'C',amount:1.1}];
+    }else{
+      delete state.goldEconomy;
+      delete state.goldLedger;
+    }
+    const totals=helper.buildPowerRankingTotalGoldMap(state,scope,{todayKey:'2026-11-16'});
+    for(const id of ['A','B','C','YOU']){
+      let scopedMargin=0;
+      for(const m of scope.matchups){
+        if(m.dateKey>='2026-11-16'||m.dateKey<'2026-07-01')continue;
+        const isA=m.playerAId===id, isB=m.playerBId===id;
+        if(!isA&&!isB)continue;
+        const a=Number(m.scoreA), b=Number(m.scoreB);
+        if(!Number.isFinite(a)||!Number.isFinite(b))continue;
+        const margin=isA?a-b:b-a;
+        if(margin>0)scopedMargin+=margin/10;
+      }
+      const wallet=(state.goldLedger||[]).filter(row=>row.playerId===id).reduce((sum,row)=>sum+row.amount,0);
+      const base=round(withLedger?wallet:scopedMargin);
+      const cumulative=helper.getCumulativeMatchupGold(id,state,{todayKey:'2026-11-16'});
+      const bonusGold=helper.getTournamentChampionGoldBonus(id,state);
+      assert.equal(totals.get(id),round(Math.max(base,cumulative)+bonusGold),
+        'batch equals previous Gold formula for '+id+' (ledger='+withLedger+')');
+    }
+    assert.ok(totals.get('A')<120,'self-match reverse side and today match cannot inflate Gold');
+  }
+});
