@@ -140,3 +140,33 @@ test('batched Home Gold equals individual existing Power Rankings Gold across hi
     assert.ok(totals.get('A')<120,'self-match reverse side and today match cannot inflate Gold');
   }
 });
+
+test('Home includes the same archived results that Power Rankings counts',()=>{
+  const state={
+    players:[{id:'DONUT',active:true},{id:'HOLLIS',active:true}],
+    matchups:[{id:'regular',dateKey:'2026-11-07',playerAId:'DONUT',playerBId:'HOLLIS',scoreA:30,scoreB:10}],
+    seasonHistory:[{id:'archive',endDateKey:'2026-11-15',
+      tournamentMatchupResults:[
+        {id:'tourney',dateKey:'2026-11-08',playerAId:'DONUT',playerBId:'HOLLIS',scoreA:60,scoreB:20},
+        {id:'today',dateKey:'2026-11-16',playerAId:'HOLLIS',playerBId:'DONUT',scoreA:100,scoreB:0}
+      ]}]
+  };
+  const api=setupBonus();
+  let seen=[];
+  const core={computeCanonicalRankings: candidate=>{
+    seen=candidate.matchups.map(m=>m.id);
+    return [{playerId:'DONUT',winPct:1,ppd:52},{playerId:'HOLLIS',winPct:0,ppd:46}];
+  }};
+  const context=vm.createContext({
+    state,window:{TaskPointsCore:core,TaskPointsSeasonChampionGoldBonus:api},
+    TaskPointsCore:core,performance:{now:()=>100},Date,Map,Number,Math,
+    getGameDayKey:()=> '2026-11-16',
+    getHomeScoreboardCurrentSeasonState:()=>state,
+    getHomeScoreboardCurrentSeasonRows:rows=>rows.filter(m=>m.dateKey>='2026-11-01')
+  });
+  vm.runInContext('let homePowerRankingCache = null;\\n'+fn(home,'getCanonicalRankingMap'),context);
+  const result=context.getCanonicalRankingMap();
+  assert.deepEqual(seen,['regular','tourney']);
+  assert.equal(result.get('DONUT').rank,1);
+  assert.equal(state.matchups.length,1,'archives used for read-only ranking only');
+});

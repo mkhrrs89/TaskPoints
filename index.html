@@ -4220,8 +4220,22 @@ function getCanonicalRankingMap(){
       && homePowerRankingCache.goldBuilder === goldBuilder
       && now - homePowerRankingCache.at < 100) return homePowerRankingCache.map;
   const scopedState = getHomeScoreboardCurrentSeasonState();
-  const canonical = TaskPointsCore.computeCanonicalRankings(scopedState, { preindexed: true });
-  let gold = goldBuilder?.(snapshot, scopedState, { todayKey: date });
+  // Power Rankings' historical helper also restores archived tournament and
+  // recoverable gameHistory matchups before filtering by season. Apply the
+  // SAME list to the rank calculation, without changing Home records, game
+  // simulation or the authoritative state stored on disk.
+  const historyApi = window.TaskPointsSeasonChampionGoldBonus;
+  const completeMatchups = typeof historyApi?.collectCompleteRankingMatchups === 'function'
+    ? historyApi.collectCompleteRankingMatchups(snapshot)
+    : null;
+  const rankingState = Array.isArray(completeMatchups)
+    ? { ...scopedState, matchups: getHomeScoreboardCurrentSeasonRows(completeMatchups, date) }
+    : scopedState;
+  const goldSource = Array.isArray(completeMatchups)
+    ? { ...snapshot, [historyApi.ALL_MATCHUPS_KEY]: completeMatchups }
+    : snapshot;
+  const canonical = TaskPointsCore.computeCanonicalRankings(rankingState, { preindexed: true });
+  let gold = goldBuilder?.(goldSource, rankingState, { todayKey: date });
   if (!(gold instanceof Map)) {
     // The addon loads asynchronously; use a one-pass provisional Gold index
     // until the full historical/championship calculation is available.
