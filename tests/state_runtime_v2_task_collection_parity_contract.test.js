@@ -225,8 +225,8 @@ test('Task parity checks identity, payload, source inventory and generation with
     runtime.indexOf('async function rehearsePreviewTaskCollectionSeed()'));
   assert.match(check,/!Number\.isInteger\(index\).*index >= tasks\.length/);
   assert.match(check,/seen\.has\(index\)/);
-  assert.match(check,/String\(row\.value\.id\) !== row\.id/);
-  assert.match(check,/stableJson\(row\.value\) !== stableJson\(tasks\[index\]\)/);
+  assert.match(check,/!validStoredTaskRow\(row\)/);
+  assert.match(check,/!sameTaskJson\(row\.value, tasks\[index\]\)/);
   assert.match(source,/if \(!sourceCurrent\(\)\) return refuse\('legacy_changed_during_inspection'\)/);
   assert.match(runtime,/rehearsePreviewTaskCollectionSeed,\s*rehearsePreviewTaskCollectionReconcile,\s*queueObservedLegacyTaskJournal,\s*flushObservedLegacyTaskJournal,\s*getObservedLegacyTaskStatus,\s*inspectPreviewTaskCollectionParity,/);
 });

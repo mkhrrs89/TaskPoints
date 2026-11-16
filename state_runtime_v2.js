@@ -11251,6 +11251,44 @@
     }); }
   }
 
+  // Task payloads originate in JSON. Compare stored values directly without
+  // sorting keys or building two serialized copies of the full collection.
+  function sameTaskJson(left, right) {
+    if (left === null || typeof left !== 'object') {
+      return left === right && (left === null || typeof left === 'string'
+        || typeof left === 'boolean' || Number.isFinite(left));
+    }
+    if (!right || typeof right !== 'object') return false;
+    if (Array.isArray(left)) {
+      if (!Array.isArray(right) || left.length !== right.length) return false;
+      if (Object.keys(left).length !== left.length || Object.keys(right).length !== right.length)
+        return false;
+      for (let i = 0; i < left.length; i++) {
+        if (!sameTaskJson(left[i], right[i])) return false;
+      }
+      return true;
+    }
+    if (Object.prototype.toString.call(left) !== '[object Object]'
+      || Object.prototype.toString.call(right) !== '[object Object]') return false;
+    const keys = Object.keys(left);
+    if (keys.length !== Object.keys(right).length) return false;
+    for (const key of keys) {
+      if (!Object.prototype.hasOwnProperty.call(right, key)
+        || !sameTaskJson(left[key], right[key])) return false;
+    }
+    return true;
+  }
+
+  const storedTaskRowFields = new Set(['id','legacyIndex','value','previewActionId']);
+  function validStoredTaskRow(row) {
+    return typeof row?.id === 'string' && row.id.length > 0
+      && row.value && typeof row.value === 'object' && !Array.isArray(row.value)
+      && row.value.id != null && String(row.value.id) === row.id
+      && Object.keys(row).every(key => storedTaskRowFields.has(key))
+      && (!Object.prototype.hasOwnProperty.call(row,'previewActionId')
+        || (typeof row.previewActionId === 'string' && row.previewActionId.length > 0));
+  }
+
   function storedTaskRowsMatch(rows, tasks) {
     if (rows.length !== tasks.length) return false;
     // IndexedDB returns primary-key order. Match each record directly to
@@ -11259,9 +11297,8 @@
     for (const row of rows) {
       const index = row?.legacyIndex;
       if (!Number.isInteger(index) || index < 0 || index >= tasks.length
-        || seen.has(index) || typeof row.id !== 'string' || !row.value
-        || String(row.value.id) !== row.id || String(tasks[index].id) !== row.id
-        || stableJson(row.value) !== stableJson(tasks[index])) return false;
+        || seen.has(index) || !validStoredTaskRow(row) || String(tasks[index].id) !== row.id
+        || !sameTaskJson(row.value, tasks[index])) return false;
       seen.add(index);
     }
     return true;
@@ -11520,15 +11557,17 @@
     // to rebase them as V1 changes without independently proving ownership.
     if (lifecycleCursor) return refuse('task_preview_lifecycle_evidence_preserved');
 
-    const priorOrdered = priorRows.slice().sort((a,b)=>a.legacyIndex-b.legacyIndex);
-    const oldIds = new Set();
-    for (let i = 0; i < priorOrdered.length; i += 1) {
-      const row = priorOrdered[i];
-      if (!row || row.id == null || !String(row.id)
-        || oldIds.has(String(row.id)) || row.legacyIndex !== i
-        || !row.value || String(row.value.id) !== String(row.id))
+    // The legacy positions must form a permutation. Validate while placing
+    // each stored record in its slot, before trusting its key for any delete.
+    const priorOrdered = new Array(priorRows.length);
+    const oldMap = new Map();
+    for (const row of priorRows) {
+      const index = row?.legacyIndex;
+      if (!validStoredTaskRow(row) || oldMap.has(row.id)
+        || !Number.isInteger(index) || index < 0 || index >= priorRows.length || priorOrdered[index])
         return refuse('task_preview_prior_rows_invalid');
-      oldIds.add(String(row.id));
+      priorOrdered[index] = row;
+      oldMap.set(row.id,row);
     }
     let oldFingerprint;
     try { oldFingerprint = await previewRecoveryFingerprint(priorOrdered.map(r=>r.value)); }
@@ -11571,11 +11610,10 @@
     const target = desired.map((task,i)=>({
       id:String(task.id),legacyIndex:i,value:task
     }));
-    const oldMap = new Map(priorOrdered.map(row=>[String(row.id),row]));
-    const newMap = new Map(target.map(row=>[row.id,row]));
-    const removed = priorOrdered.filter(row=>!newMap.has(String(row.id)));
+    const targetIds = new Set(target.map(row=>row.id));
+    const removed = priorOrdered.filter(row=>!targetIds.has(row.id));
     const changed = target.filter(row=>
-      stableJson(row)!==stableJson(oldMap.get(row.id)));
+      !sameTaskJson(row,oldMap.get(row.id)));
     if (removed.length + changed.length > 64)
       return refuse('task_reconcile_batch_too_large', {
         changedRows:removed.length+changed.length, maxAtomicRows:64
@@ -11620,7 +11658,7 @@
           try {
             if (!sourceCurrent())
               return refuseAbort(tx,'legacy_changed_under_transaction');
-            if (stableJson(values[0])!==stableJson(priorRows)
+            if (!sameTaskJson(values[0],priorRows)
               || stableJson(values[1])!==stableJson(runtimeMeta)
               || stableJson(values[2])!==stableJson(priorEvidence)
               || stableJson(values[3])!==stableJson(lifecycleCursor))
@@ -11648,8 +11686,9 @@
         requestPromise(tx.objectStore('mutations').get(receipt.id)),
         requestPromise(tx.objectStore('meta').get(RUNTIME_META_ID))
       ]);
-      const ordered=rows.slice().sort((a,b)=>a.legacyIndex-b.legacyIndex);
-      if (stableJson(ordered)!==stableJson(target)
+      const exactRows = storedTaskRowsMatch(rows,desired)
+        && rows.every(row => Object.keys(row).length === 3);
+      if (!exactRows
         || stableJson(evidence)!==stableJson(nextEvidence)
         || stableJson(savedReceipt)!==stableJson(receipt)
         || stableJson(postMeta)!==stableJson(runtimeMeta))

@@ -2332,6 +2332,53 @@ try {
       fullReseedAvoided:true,reloadParity:true,noProductionAuthorityChange:true};
   });
 
+  await run('large Task mirror keeps its 64-row limit and preserves peer metadata after reload',async context=>{
+    const editor=await open(context),peer=await open(context);
+    const first=await editor.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2,source=window.V2BrowserFixture.rawLegacy();
+      const tasks=Array.from({length:1000},(_,i)=>({id:String(i),title:'Task '+i,
+        extra:{nested:[true,null,{points:i}]}}));
+      const save=rows=>localStorage.setItem('taskpoints_v1',JSON.stringify({...source,tasks:rows}));
+      const token=()=>JSON.stringify(Array.from({length:localStorage.length},(_,i)=>localStorage.key(i))
+        .sort().map(key=>[key,localStorage.getItem(key)]));
+      save(tasks);
+      const seed=await api.rehearsePreviewTaskCollectionSeed();
+      if (!seed.verified) throw Error(seed.reason);
+      const edit=n=>tasks.map((task,i)=>i<n ? {...task,title:'Changed '+i} : task);
+      save(edit(65));
+      const large=await api.rehearsePreviewTaskCollectionReconcile(token(),'too-many');
+      save(edit(64));
+      const allowed=await api.rehearsePreviewTaskCollectionReconcile(token(),'at-limit');
+      return {large,allowed};
+    });
+    assert.equal(first.large.reason,'task_reconcile_batch_too_large');
+    assert.equal(first.large.committed,false);
+    assert.ok(first.allowed.confirmedDurable && first.allowed.changedRows===64,JSON.stringify(first.allowed));
+    await editor.reload();
+    assert.equal(await editor.evaluate(async()=>(await window.TaskPointsStateRuntimeV2.inspectPreviewTaskCollectionParity()).match),true);
+    await peer.evaluate(async()=>{
+      const db=await window.TaskPointsStateRuntimeV2.open(),tx=db.transaction('tasks','readwrite');
+      const store=tx.objectStore('tasks'),q=store.get('999');
+      q.onsuccess=()=>store.put({...q.result,unknownOwner:'peer'});
+      await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);});
+    });
+    const refusal=await editor.evaluate(async()=>{
+      const api=window.TaskPointsStateRuntimeV2,core=window.TaskPointsCore;
+      core.journalTaskMutation({task:{id:'999',title:'Next edit'}});
+      const keys=Array.from({length:localStorage.length},(_,i)=>localStorage.key(i)).sort();
+      const result=await api.rehearsePreviewTaskCollectionReconcile(
+        JSON.stringify(keys.map(k=>[k,localStorage.getItem(k)])),'peer-owner');
+      const db=await api.open(),q=db.transaction('tasks','readonly').objectStore('tasks').get('999');
+      const row=await new Promise((resolve,reject)=>{q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error);});
+      return {result,row};
+    });
+    assert.equal(refusal.result.reason,'task_preview_prior_rows_invalid');
+    assert.equal(refusal.result.committed,false);
+    assert.equal(refusal.row.unknownOwner,'peer');
+    assert.equal(refusal.row.value.title,'Task 999');
+    return {totalTasks:1000,atomicEdits:64,aboveLimitRefused:true,reloadVerified:true,peerDataPreserved:true};
+  });
+
   await run('Task reconciliation refuses V2-only edits and preserves diverged evidence',async context=>{
     const page=await open(context);
     const outcome=await page.evaluate(async()=>{

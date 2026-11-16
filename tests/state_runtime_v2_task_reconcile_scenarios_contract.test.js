@@ -660,3 +660,66 @@ test('Task seed readback refuses a wrong storage key or wrong position even when
   }
   assert.equal((await app.api.rehearsePreviewTaskCollectionSeed()).verified, true);
 });
+
+test('numeric IndexedDB keys and unrecognized row metadata cannot be rewritten as V1 edits',async()=>{
+  const app=install();
+  app.change([{id:1,title:'Original'}]);
+  await app.api.seedFromLegacy();
+  assert.equal((await app.api.rehearsePreviewTaskCollectionSeed()).verified,true);
+  const rows=app.indexedDB._databases.get(DB)._stores.get('tasks');
+  const original=rows.get('1');
+  for(const bad of [{...original,id:1},{...original,unknownOwnership:'older preview'}]){
+    app.change([{id:1,title:'Original'}]);
+    rows.clear(); rows.set(bad.id,bad);
+    assert.equal((await app.api.inspectPreviewTaskCollectionParity()).match,false);
+    app.change([{id:1,title:'New V1 title'}]);
+    const before=app.indexedDB.dump(DB);
+    const outcome=await app.api.rehearsePreviewTaskCollectionReconcile(app.token(),'bad-key');
+    assert.equal(outcome.reason,'task_preview_prior_rows_invalid');
+    assert.deepEqual(app.indexedDB.dump(DB),before);
+  }
+});
+
+test('Task comparison accepts reordered JSON keys but rejects non-JSON nested data',async()=>{
+  const app=install();
+  app.change([{id:'a',details:{left:{},right:[1,null,true]}}]);
+  await app.api.seedFromLegacy();
+  assert.equal((await app.api.rehearsePreviewTaskCollectionSeed()).verified,true);
+  const rows=app.indexedDB._databases.get(DB)._stores.get('tasks');
+  const original=rows.get('a');
+  rows.set('a',{...original,value:{details:{right:[1,null,true],left:{}},id:'a'}});
+  assert.equal((await app.api.inspectPreviewTaskCollectionParity()).match,true);
+  for(const details of [{right:[1,null,true],left:new Map()}, {left:{},right:[1,NaN,true]},
+    {left:{},right:[1,,true]}]){
+    rows.set('a',{...original,value:{id:'a',details}});
+    assert.equal((await app.api.inspectPreviewTaskCollectionParity()).match,false);
+  }
+});
+
+test('a peer substituting a Map for an empty JSON object before the write aborts the entire update', async()=>{
+  let app,armed=false,digests=0;
+  const subtle={digest:async(...args)=>{
+    const hash=await webcrypto.subtle.digest(...args);
+    if(armed && ++digests===2){
+      const rows=app.indexedDB._databases.get(DB)._stores.get('tasks');
+      const row=rows.get('a');
+      rows.set('a',{...row,value:{...row.value,extra:new Map([['peer','retained']])}});
+    }
+    return hash;
+  }};
+  app=install(undefined,undefined,subtle);
+  app.change([{id:'a',title:'Original',extra:{}}]);
+  await app.api.seedFromLegacy();
+  assert.equal((await app.api.rehearsePreviewTaskCollectionSeed()).verified,true);
+  const before=app.indexedDB.dump(DB);
+  app.change([{id:'a',title:'Changed',extra:{}}]);
+  armed=true;
+  const result=await app.api.rehearsePreviewTaskCollectionReconcile(app.token(),'raced');
+  assert.equal(result.reason,'task_preview_concurrent_change');
+  assert.equal(result.committed,false);
+  const after=app.indexedDB.dump(DB);
+  assert.deepEqual(after.meta,before.meta);
+  assert.deepEqual(after.mutations,before.mutations);
+  assert.equal(after.tasks[0].value.title,'Original');
+  assert.equal(after.tasks[0].value.extra.get('peer'),'retained');
+});
