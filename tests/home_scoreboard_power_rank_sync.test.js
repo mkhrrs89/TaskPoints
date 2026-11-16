@@ -166,7 +166,7 @@ test('Home includes the same archived results that Power Rankings counts',()=>{
   });
   vm.runInContext('let homePowerRankingCache = null;\n'+fn(home,'getCanonicalRankingMap'),context);
   const result=context.getCanonicalRankingMap();
-  assert.deepEqual(seen,['regular','tourney','today'], 'matchup scope includes today; canonical ranking excludes unrevealed scores');
+  assert.deepEqual(Array.from(seen),['regular','tourney','today'], 'matchup scope includes today; canonical ranking excludes unrevealed scores');
   assert.equal(result.get('DONUT').rank,1);
   assert.equal(state.matchups.length,1,'archives used for read-only ranking only');
 });
