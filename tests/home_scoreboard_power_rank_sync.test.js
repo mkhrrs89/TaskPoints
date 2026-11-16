@@ -81,7 +81,7 @@ test('Home rank matches the Power Rankings 75/25 order and keeps canonical PPD',
 });
 test('Home rank helper remains read-only and the rank marker uses its order',()=>{
   const source=fn(home,'getCanonicalRankingMap');
-  assert.match(source,/computeCanonicalRankings\(scopedState, \{ preindexed: true \}\)/);
+  assert.match(source,/computeCanonicalRankings\(rankingState, \{ preindexed: true \}\)/);
   assert.match(source,/row.powerScore = 0.75 \* winShare \+ 0.25 \* goldShare/);
   assert.doesNotMatch(source,/saveStateSnapshot|mergeAndSaveState|localStorage\.setItem/);
   assert.match(bonus,/global\.TaskPointsHomeRankPercentileLine\?\.scheduleRender\?\.\(\)/);
@@ -166,7 +166,7 @@ test('Home includes the same archived results that Power Rankings counts',()=>{
   });
   vm.runInContext('let homePowerRankingCache = null;\n'+fn(home,'getCanonicalRankingMap'),context);
   const result=context.getCanonicalRankingMap();
-  assert.deepEqual(seen,['regular','tourney']);
+  assert.deepEqual(seen,['regular','tourney','today'], 'matchup scope includes today; canonical ranking excludes unrevealed scores');
   assert.equal(result.get('DONUT').rank,1);
   assert.equal(state.matchups.length,1,'archives used for read-only ranking only');
 });
