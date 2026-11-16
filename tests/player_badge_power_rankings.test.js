@@ -74,7 +74,7 @@ test('badge normalization accepts both string and object-backed historical entri
 
 test('Power Rankings bronze badge uses the same compact scale as the tournament trophy marker', () => {
   assert.match(rankingsSource, /RETRO_BADGE_ICON = 'assets\/retrowinner\.PNG'/);
-  assert.match(rankingsSource, /\.ranking-trophy-mark\}\{?[^`]*font-size:0\.72em/);
+  assert.match(rankingsSource, /\.\$\{TROPHY_CLASS\}\{font-size:0\.72em/);
   assert.match(rankingsSource, /\.\$\{RETRO_BADGE_CLASS\}\{width:0\.72em;height:0\.72em/);
 });
 

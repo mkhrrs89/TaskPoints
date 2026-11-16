@@ -7,7 +7,8 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
-const worker = fs.readFileSync(path.join(root, '_worker.js'), 'utf8');
+// The V2 bundle worker delegates CSS overrides to its stable core worker.
+const worker = fs.readFileSync(path.join(root, '_worker_core.js'), 'utf8');
 const routes = JSON.parse(fs.readFileSync(path.join(root, '_routes.json'), 'utf8'));
 
 function functionSource(name) {

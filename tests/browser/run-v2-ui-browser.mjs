@@ -1190,8 +1190,17 @@ try{
     await page.waitForFunction(()=>document.querySelectorAll('#habitsList .habitDay').length>=21);
     const mirrored=await page.evaluate(async()=>{
       const api=window.TaskPointsStateRuntimeV2;
-      api.queueObservedLegacyTaskJournal();
-      const outcome=await api.flushObservedLegacyTaskJournal();
+      // Startup and V1 Task journal compaction can overlap the first optional
+      // preview seed. A changed legacy source is a safe refusal, not lost data.
+      // Retry only this one documented transient refusal, never parity/storage
+      // mismatches or reset-generation changes.
+      let outcome;
+      for(let attempt=0;attempt<3;attempt++){
+        api.queueObservedLegacyTaskJournal();
+        outcome=await api.flushObservedLegacyTaskJournal();
+        if(outcome.verified || outcome.reason!=='legacy_changed_before_seed')break;
+        await api.startCoordinatedDarkMirror();
+      }
       return {verified:outcome.verified,reason:outcome.reason,
         tasks:window.TaskPointsCore.readTaskPointsStoredState().tasks};
     });
