@@ -10,13 +10,22 @@
   <meta name="apple-mobile-web-app-title" content="TaskPoints"/><link rel="stylesheet" href="assets/tailwind.css">
 
 <link rel="stylesheet" href="styles.css">
+  <style>
+    /* Settings does not use #appRoot: give its first row the same iPhone
+       safe-area clearance as Home, plus a small minimum mobile offset. */
+    @media (max-width: 767px) {
+      #settingsContentRoot {
+        padding-top: max(44px, calc(env(safe-area-inset-top, 0px) + 10px));
+      }
+    }
+  </style>
   
   <link rel="preload" href="toolbar.js" as="script">
   <script src="toolbar.js" defer></script>
 </head>
 
 <body class="min-h-screen">
-  <div class="mx-auto max-w-6xl p-4 sm:p-6 pb-20 md:pb-6">
+  <div id="settingsContentRoot" class="mx-auto max-w-6xl p-4 sm:p-6 pb-20 md:pb-6">
 
     <div class="flex items-center justify-between gap-3 mb-3 md:hidden">
       <a href="index.html" class="flex items-center gap-3">
