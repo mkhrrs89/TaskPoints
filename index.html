@@ -4298,6 +4298,27 @@ function getHomepageRankValue(playerId) {
 function getHomepageGoldValue(playerId) {
   if (!playerId) return null;
 
+  // Do not show an estimated win-margin total and then swap to wallet Gold.
+  // Before the Gold runtime is ready, show a placeholder, never a fake balance.
+  const goldApi = window.TaskPointsGreedGoldEconomy;
+  if (!goldApi) return null;
+  let snapshot = state || {};
+  if (Number(snapshot.goldEconomy?.version) !== 1 || !Array.isArray(snapshot.goldLedger)) {
+    snapshot = goldApi.getGoldLedgerViewState?.() || snapshot;
+  }
+  if (Number(snapshot.goldEconomy?.version) === 1) {
+    if (!Array.isArray(snapshot.goldLedger)) return null;
+    return goldApi.goldBalance(snapshot, playerId);
+  }
+  if (snapshot.goldEconomy || snapshot.goldLedger) return null;
+  return goldApi.legacyGoldForPlayer(snapshot, playerId, getGameDayKey(new Date()));
+}
+
+// Retain the pre-ledger margin logic as a reference for older stored data,
+// but never use it to show a provisional current-wallet total.
+function getHomeHistoricalMarginGoldForReference(playerId) {
+  if (!playerId) return null;
+
   const today = getGameDayKey(new Date());
   const matchups = Array.isArray(state?.matchups)
     ? state.matchups

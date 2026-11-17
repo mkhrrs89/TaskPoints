@@ -477,6 +477,12 @@
     if (settled.has(identity)) return false;
     const date = rowDateKey(matchup);
     if (!date || date < economy.launchDateKey) return false;
+    // The live YOUR score can still change after the opponent's score has
+    // appeared. Do not permanently settle today's provisional result:
+    // yesterday's completed result is handled normally on next load.
+    // Existing ledger entries are never rewritten by this rule.
+    if (date >= localDateKey() && (String(matchup.playerAId || '') === 'YOU'
+      || String(matchup.playerBId || '') === 'YOU')) return false;
     if (date === economy.launchDateKey && (Array.isArray(economy.ignoredSameDayMatchupKeys) ? economy.ignoredSameDayMatchupKeys : []).includes(identity)) return false;
 
     const scoreA = sideScore(matchup, 'A');

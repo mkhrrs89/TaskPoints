@@ -496,3 +496,36 @@ test('Gold reconciliation skips long settled history without recopying settled k
     context.Set = OriginalSet;
   }
 });
+
+test('today changing YOU score never permanently settles loss theft before day ends', () => {
+  const { api } = install();
+  const today = new Date();
+  const dayKey = (date) => [date.getFullYear(), String(date.getMonth()+1).padStart(2,'0'),
+    String(date.getDate()).padStart(2,'0')].join('-');
+  const yesterday = new Date(today.getFullYear(),today.getMonth(),today.getDate()-1);
+  const state = {
+    players:[{id:'X',name:'Opponent',greed:100,active:true}],
+    goldEconomy:{version:1,launchDateKey:'2026-07-01',
+      settledMatchupKeys:[],ignoredSameDayMatchupKeys:[],settledChampionKeys:[],ignoredChampionKeys:[]},
+    goldLedger:[{id:'opening-you',type:'opening_balance',playerId:'YOU',amount:60,balanceAfter:60},
+                {id:'opening-x',type:'opening_balance',playerId:'X',amount:60,balanceAfter:60}],
+    matchups:[],gameHistory:[],seasonHistory:[]
+  };
+  const game={id:'changing-user-score',dateKey:dayKey(today),
+    playerAId:'YOU',playerBId:'X',scoreA:0,scoreB:50};
+  state.matchups.push(game);
+  const before=JSON.stringify(state.goldLedger);
+  assert.equal(api.settleOneMatchup(state,game),false);
+  assert.equal(JSON.stringify(state.goldLedger),before);
+  game.scoreA=70;
+  assert.equal(api.settleOneMatchup(state,game),false);
+  assert.equal(JSON.stringify(state.goldLedger),before);
+  game.dateKey=dayKey(yesterday);
+  assert.equal(api.settleOneMatchup(state,game),true);
+  assert.equal(state.goldLedger.filter(row=>row.playerId==='YOU'
+    && row.type==='matchup_theft' && row.amount<0).length,0);
+  assert.equal(state.goldLedger.filter(row=>row.playerId==='YOU'
+    && row.type==='matchup_margin' && row.amount>0).length,1);
+  assert.equal(state.goldLedger.filter(row=>row.playerId==='YOU'
+    && row.type==='matchup_theft' && row.amount>0).length,1);
+});
