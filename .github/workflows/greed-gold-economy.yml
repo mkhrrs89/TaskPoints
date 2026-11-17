@@ -10,6 +10,7 @@ on:
       - greed_gold_economy.js
       - index.html
       - gold_manual_adjustment.js
+      - gold_recalculation.js
       - gold_season_interest.js
       - settings.html
       - scoring_core.js
@@ -27,6 +28,7 @@ on:
       - standings.html
       - tests/standings_gold_sort.test.js
       - tests/gold_manual_adjustment.test.js
+      - tests/gold_recalculation.test.js
       - tests/gold_season_interest.test.js
       - tests/gold_season_interest_core_integration.test.js
       - tests/gold_circulation_total.test.js
@@ -56,6 +58,7 @@ jobs:
       - name: Check Manual Gold adjustment syntax
         run: |
           node --check gold_manual_adjustment.js
+          node --check gold_recalculation.js
           node --check gold_season_interest.js
           node --check gold_circulation_total.js
       - name: Check Gold Theft inbox notification syntax
@@ -78,6 +81,7 @@ jobs:
           tests/home_gold_ledger_dropdown.test.js
           tests/greed_gold_daily_scoring_batch.test.js
           tests/gold_manual_adjustment.test.js
+          tests/gold_recalculation.test.js
           tests/gold_season_interest.test.js
           tests/gold_season_interest_core_integration.test.js
           tests/gold_circulation_total.test.js
