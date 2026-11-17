@@ -1011,6 +1011,27 @@
     return stored;
   }
 
+  // Home may have a partial boot state while the Gold display has loaded
+  // complete saved data. Expose only a read-only authoritative view.
+  function getGoldLedgerViewState() {
+    let live = null;
+    try { live = global.TaskPointsHomeLiveState?.getState?.() || null; } catch (_) {}
+    const revision = currentStorageRevision();
+    if (Array.isArray(live?.goldLedger) && live.goldLedger.length) return live;
+    if (Array.isArray(displayStateCache?.goldLedger)
+      && displayStateCache.goldLedger.length
+      && (!revision || revision === displayStateCacheRevision)) return displayStateCache;
+    // The original stored-state loader avoids the Greed load wrapper, which
+    // can reconcile and write Gold. No transactions are created by this read.
+    const stored = readStoredState();
+    if (stored && typeof stored === 'object') {
+      displayStateCache = stored;
+      displayStateCacheRevision = currentStorageRevision() || revision;
+      return stored;
+    }
+    return displayStateCache || live || {};
+  }
+
   function patchGoldDisplays() {
     let changed = false;
     if (typeof global.getHomepageGoldValue === 'function' && !global.getHomepageGoldValue.__taskPointsLedgerGold) {
@@ -1164,6 +1185,7 @@
     reconcileChampionBonuses,
     settleOneMatchup,
     goldBalance,
+    getGoldLedgerViewState,
     activeNpcPlayers,
     richestActiveNpcGold,
     opponentGoldRating,

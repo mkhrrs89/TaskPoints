@@ -7179,20 +7179,74 @@ let homePersonalGoldLedgerPositionFrame = 0;
 let homePersonalGoldLedgerRows = [];
 let homePersonalGoldLedgerShown = HOME_GOLD_LEDGER_PAGE_SIZE;
 
+function getHomePersonalGoldLedgerSource() {
+  try {
+    const source = window.TaskPointsGreedGoldEconomy?.getGoldLedgerViewState?.();
+    if (source && typeof source === 'object') return source;
+  } catch (error) {
+    console.warn('Read-only personal Gold history unavailable', error);
+  }
+  return state || {};
+}
+
 function buildHomePersonalGoldLedgerRows(candidateState, playerId = 'YOU') {
   const ledger = Array.isArray(candidateState?.goldLedger) ? candidateState.goldLedger : [];
-  return ledger.filter(row => row && String(row.playerId || '') === playerId)
-    .slice()
-    .sort((a, b) =>
-      String(b.createdAtISO || b.dateKey || '').localeCompare(String(a.createdAtISO || a.dateKey || ''))
-      || String(b.id || '').localeCompare(String(a.id || ''))
-    );
+  const official = ledger.filter(row => row && String(row.playerId || '') === playerId);
+  if (official.length) return official.slice().sort((a, b) =>
+    String(b.createdAtISO || b.dateKey || '').localeCompare(String(a.createdAtISO || a.dateKey || ''))
+    || String(b.id || '').localeCompare(String(a.id || ''))
+  );
+  return buildHomePersonalHistoricalGoldRows(candidateState, playerId);
+}
+
+function buildHomePersonalHistoricalGoldRows(candidateState, playerId = 'YOU') {
+  // Before the official ledger, Gold from winning margins was recorded as
+  // matchup results, then folded into one opening balance. Show these only
+  // when there are NO real personal transactions, clearly labeled historical.
+  const api = window.TaskPointsGreedGoldEconomy;
+  const matches = typeof api?.collectCompleteMatchups === 'function'
+    ? api.collectCompleteMatchups(candidateState)
+    : (Array.isArray(candidateState?.matchups) ? candidateState.matchups : []);
+  const launch = String(candidateState?.goldEconomy?.launchDateKey || '').slice(0, 10);
+  const today = getGameDayKey(new Date());
+  const seen = new Set(), rows = [];
+  for (let i = 0; i < matches.length; i++) {
+    const m = matches[i];
+    if (!m || m.completed === false || m.result === 'pending') continue;
+    const date = String(m.dateKey || m.date || m.dateISO || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < '2026-07-01'
+      || (launch && date >= launch) || date >= today) continue;
+    const isA = String(m.playerAId || '') === playerId;
+    const isB = String(m.playerBId || '') === playerId;
+    if (!isA && !isB) continue;
+    const a = m.scoreA == null || m.scoreA === '' ? NaN : Number(m.scoreA);
+    const b = m.scoreB == null || m.scoreB === '' ? NaN : Number(m.scoreB);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+    const margin = isA ? a - b : b - a;
+    if (margin <= 0) continue;
+    const opponentId = isA ? m.playerBId : m.playerAId;
+    const id = String(m.id || m.matchupId || date + ':' + opponentId + ':' + i);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    rows.push({
+      id: 'historical:' + id, playerId, opponentId, dateKey: date,
+      type: 'historical_matchup_margin',
+      createdAtISO: String(m.completedAtISO || m.finalizedAtISO || m.createdAtISO || date),
+      amount: Math.round((margin / 10 + Number.EPSILON) * 10) / 10,
+      __homeHistoricalGold: true
+    });
+  }
+  return rows.sort((a, b) =>
+    String(b.createdAtISO || b.dateKey || '').localeCompare(String(a.createdAtISO || a.dateKey || ''))
+    || String(b.id || '').localeCompare(String(a.id || ''))
+  );
 }
 
 function homePersonalGoldTransactionLabel(row, playerName) {
   const opponent = row?.opponentId ? playerName(row.opponentId) : '';
   switch (row?.type) {
     case 'opening_balance': return 'Opening balance';
+    case 'historical_matchup_margin': return opponent ? 'Historical win vs ' + opponent : 'Historical win margin';
     case 'matchup_margin': return opponent ? 'Win margin vs ' + opponent : 'Matchup win margin';
     case 'matchup_theft': return Number(row.amount) < 0
       ? 'Stolen by ' + (opponent || 'opponent')
@@ -7234,7 +7288,10 @@ function buildHomePersonalGoldLedgerHtml(rows, shown = HOME_GOLD_LEDGER_PAGE_SIZ
   const next = shown < rows.length
     ? '<button type="button" class="home-gold-ledger-see-more" data-home-gold-see-more>See more</button>'
     : '';
-  return list + next;
+  const historicalNote = rows[0]?.__homeHistoricalGold
+    ? '<div class="home-gold-ledger-history-note">Historical winning margins from saved games before the ledger began. These are not separate transactions or extra Gold.</div>'
+    : '';
+  return historicalNote + list + next;
 }
 
 function ensureHomePersonalGoldLedgerDropdown() {
@@ -7259,7 +7316,7 @@ function renderHomePersonalGoldLedgerDropdown() {
 
 function refreshHomePersonalGoldLedgerDropdown() {
   if (!homePersonalGoldLedgerOpen) return;
-  homePersonalGoldLedgerRows = buildHomePersonalGoldLedgerRows(state);
+  homePersonalGoldLedgerRows = buildHomePersonalGoldLedgerRows(getHomePersonalGoldLedgerSource());
   renderHomePersonalGoldLedgerDropdown();
 }
 
@@ -7309,7 +7366,7 @@ function openHomePersonalGoldLedgerDropdown() {
   if (!trigger) return;
   closeYesterdayRecentResultsDropdown();
   homePersonalGoldLedgerShown = HOME_GOLD_LEDGER_PAGE_SIZE;
-  homePersonalGoldLedgerRows = buildHomePersonalGoldLedgerRows(state);
+  homePersonalGoldLedgerRows = buildHomePersonalGoldLedgerRows(getHomePersonalGoldLedgerSource());
   const dropdown = ensureHomePersonalGoldLedgerDropdown();
   dropdown.scrollTop = 0;
   renderHomePersonalGoldLedgerDropdown();

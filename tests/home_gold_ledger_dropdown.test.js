@@ -20,6 +20,7 @@ function setup(candidateState) {
     formatRecentMatchupDate: key => String(key).slice(0, 10),
     escapeHtml: text => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;')
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;'),
+    getGameDayKey: () => '2026-11-17',
     Map, String, Number, Math, Array, Date
   });
   vm.runInContext(source, context);
@@ -119,4 +120,58 @@ test('same pop-down animation as Yesterday, anchored below scoreboard and above 
   assert.match(css, /\.yesterday-recent-results-dropdown\.is-open/);
   assert.match(source, /window\.innerHeight - cardRect\.bottom - toolbarHeight/);
   assert.match(source, /dropdown\.style\.top = Math\.round\(cardRect\.bottom\)/);
+});
+
+test('popup reads authoritative Gold view even if Home boot state lacks transactions', () => {
+  const ctx = setup({goldLedger:[],matchups:[]});
+  ctx.window.TaskPointsGreedGoldEconomy = {getGoldLedgerViewState:()=>({
+    goldEconomy:{version:1},goldLedger:[
+      {id:'actual',playerId:'YOU',type:'season_interest',amount:2.5,dateKey:'2026-11-16'}
+    ]
+  })};
+  const rows = ctx.buildHomePersonalGoldLedgerRows(ctx.getHomePersonalGoldLedgerSource());
+  assert.deepEqual(Array.from(rows,r=>r.id), ['actual']);
+  assert.equal(rows[0].amount,2.5);
+  assert.doesNotMatch(ctx.buildHomePersonalGoldLedgerHtml(rows),/Historical winning margins/);
+});
+
+test('historical win margins are visible but not misrepresented as ledger entries', () => {
+  const ctx=setup({goldEconomy:{version:1,launchDateKey:'2026-11-15'},goldLedger:[],matchups:[
+    {id:'old-win',dateKey:'2026-11-14',playerAId:'YOU',playerBId:'X',scoreA:51,scoreB:28},
+    {id:'loss',dateKey:'2026-11-13',playerAId:'YOU',playerBId:'X',scoreA:11,scoreB:28},
+    {id:'invalid',dateKey:'2026-11-12',playerAId:'YOU',playerBId:'X',scoreA:null,scoreB:22},
+    {id:'after-launch',dateKey:'2026-11-16',playerAId:'YOU',playerBId:'X',scoreA:61,scoreB:30},
+    {id:'before-start',dateKey:'2026-06-30',playerAId:'YOU',playerBId:'X',scoreA:61,scoreB:30}
+  ]});
+  const before=JSON.stringify(ctx.state);
+  const rows=ctx.buildHomePersonalGoldLedgerRows(ctx.state);
+  assert.deepEqual(Array.from(rows,r=>r.id), ['historical:old-win']);
+  assert.equal(rows[0].amount,2.3);
+  assert.equal(rows[0].balanceAfter,undefined);
+  const markup=ctx.buildHomePersonalGoldLedgerHtml(rows);
+  assert.match(markup,/Historical win vs Alex/);
+  assert.match(markup,/not separate transactions or extra Gold/);
+  assert.doesNotMatch(markup,/Balance:/);
+  assert.equal(JSON.stringify(ctx.state),before);
+});
+
+test('official Gold ledger always wins over legacy events without double counting', () => {
+  const ctx=setup({goldEconomy:{version:1,launchDateKey:'2026-11-15'},
+    goldLedger:[{id:'official',playerId:'YOU',amount:5,type:'manual_adjustment'}],
+    matchups:[{id:'older',dateKey:'2026-11-10',playerAId:'YOU',playerBId:'X',scoreA:65,scoreB:20}]});
+  const rows=ctx.buildHomePersonalGoldLedgerRows(ctx.state);
+  assert.deepEqual(Array.from(rows,r=>r.id), ['official']);
+  assert.doesNotMatch(ctx.buildHomePersonalGoldLedgerHtml(rows),/Historical winning margins/);
+});
+
+test('authoritative Greed accessor does not reconcile or write storage', () => {
+  const src=fs.readFileSync(path.join(__dirname,'..','greed_gold_economy.js'),'utf8');
+  const start=src.indexOf('function getGoldLedgerViewState()');
+  const end=src.indexOf('function patchGoldDisplays()',start);
+  assert.ok(start>0&&end>start);
+  const getter=src.slice(start,end);
+  assert.match(getter,/readStoredState\(\)/);
+  assert.match(getter,/displayStateCache/);
+  assert.doesNotMatch(getter,/reconcileGoldEconomy|saveStateSnapshot|mergeAndSaveState|loadCurrentState/);
+  assert.match(src,/    getGoldLedgerViewState,/);
 });
