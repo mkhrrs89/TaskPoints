@@ -3614,6 +3614,12 @@ function load() {
       vo2MaxHistory: Array.isArray(p.vo2MaxHistory) ? p.vo2MaxHistory : [],
       liveDiffHistory: p.liveDiffHistory && typeof p.liveDiffHistory === "object" ? p.liveDiffHistory : {},
       liveDiffSnapshots: p.liveDiffSnapshots && typeof p.liveDiffSnapshots === "object" ? p.liveDiffSnapshots : {},
+      // Preserve the authoritative Gold economy during Home's localStorage
+      // fallback boot. Dropping these fields makes the scoreboard briefly
+      // calculate legacy win-margin Gold before the wallet module catches up.
+      // Keep the complete ledger unchanged; save/recovery guards remain intact.
+      goldEconomy: p.goldEconomy && typeof p.goldEconomy === "object" ? p.goldEconomy : undefined,
+      goldLedger: Array.isArray(p.goldLedger) ? p.goldLedger : undefined,
       gameHistory:  Array.isArray(p.gameHistory)  ? p.gameHistory  : [],
       matchups:     Array.isArray(p.matchups)     ? p.matchups     : [],
       schedule:     Array.isArray(p.schedule)     ? p.schedule     : [],
