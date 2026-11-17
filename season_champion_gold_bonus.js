@@ -394,8 +394,27 @@
 
     const wrapped = function getHomepageGoldValueWithChampionBonus(playerId) {
       const base = original.apply(this, arguments);
+      // The pre-ledger historical margin + championship calculation is ONLY
+      // appropriate before the November 2026 Gold wallet launched. During
+      // Home boot this addon can install before/after the Greed Gold adapter.
+      // Never let its legacy cumulative/max logic temporarily inflate the
+      // actual wallet (or re-add a championship bonus already in the ledger).
+      // Prefer Home's live state to avoid loading/parsing the whole snapshot
+      // on each scoreboard repaint.
+      let live = null;
+      try { live = global.TaskPointsHomeLiveState?.getState?.() || null; } catch (_) {}
+      let state = live;
+      if (Number(state?.goldEconomy?.version) !== 1
+        || !Array.isArray(state?.goldLedger)) {
+        state = loadState() || live;
+      }
+      if (Number(state?.goldEconomy?.version) === 1) {
+        if (!Array.isArray(state.goldLedger)) return null;
+        const id = String(playerId || '');
+        return roundGold(state.goldLedger.reduce((sum, row) =>
+          String(row?.playerId || '') === id ? sum + (Number(row?.amount) || 0) : sum, 0));
+      }
       if (base == null) return base;
-      const state = loadState();
       const cumulative = state ? getCumulativeMatchupGold(playerId, state) : 0;
       const marginGold = Math.max(Number(base) || 0, cumulative);
       return roundGold(marginGold + getTournamentChampionGoldBonus(playerId, state));

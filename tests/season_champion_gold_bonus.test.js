@@ -227,3 +227,52 @@ test('shared scoring bundle loader requests the champion Gold module once', () =
   assert.equal(championGoldScripts.length, 1);
   assert.equal(championGoldScripts[0].dataset.taskpointsChampionGold, 'true');
 });
+
+
+test('Home always displays authoritative ledger Gold, not higher legacy winnings during late adapter load', () => {
+  const { context, state } = makeContext('/index.html');
+  state.goldEconomy = { version: 1, launchDateKey: '2026-11-05' };
+  state.goldLedger = [
+    { id: 'opening', playerId: 'A', type: 'opening_balance', amount: 62.5 },
+    { id: 'replay', playerId: 'A', type: 'gold_recalculation_adjustment', amount: 52.4 }
+  ];
+  context.TaskPointsHomeLiveState = { getState: () => state };
+  // Simulate a stale earlier addon returning the higher historical estimate.
+  context.getHomepageGoldValue = () => 120.6;
+  const before = JSON.stringify(state.goldLedger);
+  assert.equal(context.TaskPointsSeasonChampionGoldBonus.patchHomepageGold(), true);
+  assert.equal(context.getHomepageGoldValue('A'), 114.9);
+  assert.equal(context.formatHomepageGold('A'), 'Gold: 114.9');
+  assert.equal(JSON.stringify(state.goldLedger), before, 'Gold display must not mutate transactions');
+  assert.equal(context.TaskPointsSeasonChampionGoldBonus.patchHomepageGold(), true);
+  assert.equal(context.getHomepageGoldValue('A'), 114.9, 'repeat patch must not double-award bonuses');
+});
+
+test('Home wallet Gold follows new saved entries rather than caching or re-adding championship bonuses', () => {
+  const { context, state } = makeContext('/index.html');
+  state.goldEconomy = { version: 1, launchDateKey: '2026-11-05' };
+  state.goldLedger = [
+    { id: 'opening', playerId: 'A', amount: 100 },
+    { id: 'margin', playerId: 'A', amount: 10 },
+    { id: 'champion', playerId: 'A', type: 'champion_bonus', amount: 30 },
+    { id: 'correction', playerId: 'A', type: 'gold_recalculation_adjustment', amount: -25.1 }
+  ];
+  context.TaskPointsHomeLiveState = { getState: () => state };
+  context.getHomepageGoldValue = () => 114.9;
+  context.TaskPointsSeasonChampionGoldBonus.patchHomepageGold();
+  assert.equal(context.getHomepageGoldValue('A'), 114.9);
+  state.goldLedger.push({ id: 'next', playerId: 'A', type: 'matchup_theft', amount: -5.7 });
+  assert.equal(context.getHomepageGoldValue('A'), 109.2);
+  assert.equal(context.getHomepageGoldValue('B'), 0);
+});
+
+test('Home does not show historical estimated Gold if an existing economy has an unreadable ledger', () => {
+  const { context, state } = makeContext('/index.html');
+  state.goldEconomy = { version: 1, launchDateKey: '2026-11-05' };
+  delete state.goldLedger;
+  context.TaskPointsHomeLiveState = { getState: () => state };
+  context.getHomepageGoldValue = () => 120.6;
+  context.TaskPointsSeasonChampionGoldBonus.patchHomepageGold();
+  assert.equal(context.getHomepageGoldValue('A'), null);
+  assert.equal(context.formatHomepageGold('A'), 'Gold: —');
+});
