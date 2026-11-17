@@ -175,3 +175,51 @@ test('authoritative Greed accessor does not reconcile or write storage', () => {
   assert.doesNotMatch(getter,/reconcileGoldEconomy|saveStateSnapshot|mergeAndSaveState|loadCurrentState/);
   assert.match(src,/    getGoldLedgerViewState,/);
 });
+
+test('a saved Gold debit that disagrees with a recorded win is flagged without changing balance', () => {
+  const match={id:'winning-game',dateKey:'2026-11-15',
+    playerAId:'YOU',playerBId:'X',scoreA:67,scoreB:41};
+  const debit={id:'debit',playerId:'YOU',opponentId:'X',
+    matchupId:'winning-game',type:'matchup_theft',amount:-2.1,dateKey:'2026-11-15'};
+  const state={goldLedger:[debit],matchups:[match]};
+  const untouched=JSON.stringify(state);
+  const context=setup(state);
+  const rows=context.buildHomePersonalGoldLedgerRows(context.state);
+  assert.equal(rows.length,1);
+  assert.equal(rows[0].__homeGoldResultConflict,true);
+  assert.equal(rows[0].amount,-2.1);
+  const html=context.buildHomePersonalGoldLedgerHtml(rows);
+  assert.match(html,/Review Gold debit: recorded win vs Alex/);
+  assert.match(html,/saved debit conflicts with the recorded win/);
+  assert.doesNotMatch(html,/Stolen by Alex/);
+  assert.equal(JSON.stringify(state),untouched);
+});
+
+test('a genuine recorded loss retains the ordinary theft description', () => {
+  const context=setup({goldLedger:[
+    {id:'real-debit',type:'matchup_theft',playerId:'YOU',opponentId:'X',
+      matchupId:'losing-game',dateKey:'2026-11-15',amount:-1.2}
+  ],matchups:[{id:'losing-game',dateKey:'2026-11-15',
+    playerAId:'YOU',playerBId:'X',scoreA:20,scoreB:41}]});
+  const rows=context.buildHomePersonalGoldLedgerRows(context.state);
+  assert.equal(Boolean(rows[0].__homeGoldResultConflict),false);
+  assert.match(context.buildHomePersonalGoldLedgerHtml(rows),/Stolen by Alex/);
+});
+
+test('official winner-margin Gold credits are still displayed with historical wins', () => {
+  const context=setup({goldEconomy:{version:1,launchDateKey:'2026-11-14'},
+    goldLedger:[{id:'win-credit',playerId:'YOU',opponentId:'X',type:'matchup_margin',
+      matchupId:'win-11-16',dateKey:'2026-11-16',amount:3.4,balanceAfter:63.4},
+      {id:'loss-debit',playerId:'YOU',opponentId:'X',type:'matchup_theft',
+        matchupId:'loss-11-15',dateKey:'2026-11-15',amount:-0.8,balanceAfter:60}],
+    matchups:[{id:'historic-win',dateKey:'2026-11-13',
+      playerAId:'YOU',playerBId:'X',scoreA:62,scoreB:49}]
+  });
+  const rows=context.buildHomePersonalGoldLedgerRows(context.state);
+  assert.equal(rows.length,3);
+  const markup=context.buildHomePersonalGoldLedgerHtml(rows);
+  assert.match(markup,/Win margin vs Alex/);
+  assert.match(markup,/\+3\.4/);
+  assert.match(markup,/Historical win vs Alex/);
+  assert.match(markup,/Stolen by Alex/);
+});

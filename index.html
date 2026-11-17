@@ -7219,7 +7219,42 @@ function buildHomePersonalGoldLedgerRows(candidateState, playerId = 'YOU') {
   // Historical entries remain display-only and never affect the Gold balance.
   const historical = official.length && !candidateState?.goldEconomy?.launchDateKey
     ? [] : buildHomePersonalHistoricalGoldRows(candidateState, playerId);
-  return [...official, ...historical].sort((a, b) =>
+  // Read-only consistency check. Some previous live scores may have been
+  // settled before the day finished. Compare saved debit entries against the
+  // final recorded score; do not delete, reverse, or add any Gold transactions.
+  const hasDebits = official.some(row => row.type === 'matchup_theft'
+    && Number(row.amount) < 0 && row.matchupId);
+  let matchupsById = null;
+  if (hasDebits) {
+    matchupsById = new Map();
+    const all = [
+      ...(Array.isArray(candidateState?.matchups) ? candidateState.matchups : []),
+      ...(Array.isArray(candidateState?.currentSeason?.tournamentMatchupResults)
+        ? candidateState.currentSeason.tournamentMatchupResults : []),
+      ...(Array.isArray(candidateState?.seasonHistory)
+        ? candidateState.seasonHistory.flatMap(season =>
+            Array.isArray(season?.tournamentMatchupResults)
+              ? season.tournamentMatchupResults : []) : [])
+    ];
+    for (const match of all) {
+      const id = String(match?.id || match?.matchupId || '');
+      if (id && !matchupsById.has(id)) matchupsById.set(id, match);
+    }
+  }
+  const reviewed = official.map(row => {
+    if (row.type !== 'matchup_theft' || !(Number(row.amount) < 0)) return row;
+    const match = matchupsById?.get(String(row.matchupId || ''));
+    if (!match) return row;
+    const isA = String(match.playerAId || '') === playerId;
+    const isB = String(match.playerBId || '') === playerId;
+    if (!isA && !isB) return row;
+    const a = match.scoreA == null || match.scoreA === '' ? NaN : Number(match.scoreA);
+    const b = match.scoreB == null || match.scoreB === '' ? NaN : Number(match.scoreB);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return row;
+    if ((isA ? a - b : b - a) > 0) return { ...row, __homeGoldResultConflict: true };
+    return row;
+  });
+  return [...reviewed, ...historical].sort((a, b) =>
     String(b.createdAtISO || b.dateKey || '').localeCompare(String(a.createdAtISO || a.dateKey || ''))
     || String(b.id || '').localeCompare(String(a.id || ''))
   );
@@ -7270,6 +7305,9 @@ function buildHomePersonalHistoricalGoldRows(candidateState, playerId = 'YOU') {
 
 function homePersonalGoldTransactionLabel(row, playerName) {
   const opponent = row?.opponentId ? playerName(row.opponentId) : '';
+  if (row?.__homeGoldResultConflict) {
+    return 'Review Gold debit: recorded win' + (opponent ? ' vs ' + opponent : '');
+  }
   switch (row?.type) {
     case 'opening_balance': return 'Opening balance';
     case 'historical_matchup_margin': return opponent ? 'Historical win vs ' + opponent : 'Historical win margin';
@@ -7306,6 +7344,9 @@ function buildHomePersonalGoldLedgerHtml(rows, shown = HOME_GOLD_LEDGER_PAGE_SIZ
       '<div class="home-gold-ledger-main">',
       '<div class="home-gold-ledger-description" title="' + escapeHtml(description) + '">' + escapeHtml(description) + '</div>',
       balance ? '<div class="home-gold-ledger-balance">' + escapeHtml(balance) + '</div>' : '',
+      row.__homeGoldResultConflict
+        ? '<div class="home-gold-ledger-review">This saved debit conflicts with the recorded win. Your Gold has not been changed.</div>'
+        : '',
       '</div>',
       '<div class="home-gold-ledger-amount ' + color + '">' + escapeHtml(amountText) + '</div>',
       '</div>'

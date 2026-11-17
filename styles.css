@@ -831,6 +831,14 @@ body {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.home-gold-ledger-review {
+  margin-top: 3px;
+  color: #fbbf24;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.3;
+  white-space: normal;
+}
 .home-gold-ledger-balance {
   margin-top: 2px;
   font-size: 10px;
