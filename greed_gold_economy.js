@@ -1164,7 +1164,25 @@
   }
 
   function patchWhenReady() {
-    patchGoldDisplays();
+    const installed = patchGoldDisplays();
+    if (installed) {
+      // After the late Gold adapter installs, repaint just the Gold text.
+      // Do not resimulate scores, change transactions, or force a full save.
+      try {
+        const yourGold = global.document?.getElementById?.('matchupYourGold');
+        if (yourGold && typeof global.formatHomepageGold === 'function') {
+          yourGold.textContent = global.formatHomepageGold('YOU');
+          const opponentGold = global.document.getElementById('matchupOpponentGold');
+          const snapshot = global.TaskPointsHomeLiveState?.getState?.() || null;
+          const todayMatch = snapshot && typeof core.chooseUserMatchupForDate === 'function'
+            ? core.chooseUserMatchupForDate(snapshot, localDateKey(), 'YOU') : null;
+          const opponentId = todayMatch?.playerAId === 'YOU' ? todayMatch.playerBId
+            : todayMatch?.playerBId === 'YOU' ? todayMatch.playerAId : '';
+          if (opponentGold) opponentGold.textContent = opponentId
+            ? global.formatHomepageGold(opponentId) : 'Gold: —';
+        }
+      } catch (error) { console.warn('Gold scoreboard refresh skipped', error); }
+    }
     patchMatchupDescriptions();
     installLedgerNavLink();
     patchAttempts += 1;

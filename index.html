@@ -7199,6 +7199,7 @@ let homePersonalGoldLedgerOpen = false;
 let homePersonalGoldLedgerPositionFrame = 0;
 let homePersonalGoldLedgerRows = [];
 let homePersonalGoldLedgerShown = HOME_GOLD_LEDGER_PAGE_SIZE;
+let homePersonalGoldLedgerAuditMessage = '';
 
 function getHomePersonalGoldLedgerSource() {
   try {
@@ -7303,6 +7304,49 @@ function buildHomePersonalHistoricalGoldRows(candidateState, playerId = 'YOU') {
   );
 }
 
+// Audit missing *records* only; do not fabricate credits, balances, or
+// ledger transactions from completed games.
+function getHomePersonalMissingGoldCreditNotice(candidateState, playerId = 'YOU') {
+  const launch = String(candidateState?.goldEconomy?.launchDateKey || '').slice(0, 10);
+  if (Number(candidateState?.goldEconomy?.version) !== 1 || !/^\d{4}-\d{2}-\d{2}$/.test(launch)) return '';
+  const today = getGameDayKey(new Date());
+  const credited = new Set((Array.isArray(candidateState?.goldLedger) ? candidateState.goldLedger : [])
+    .filter(row => row?.type === 'matchup_margin' && String(row.playerId || '') === playerId
+      && Number(row.amount) > 0)
+    .map(row => String(row.matchupId || ''))
+    .filter(Boolean));
+  const rows = [
+    ...(Array.isArray(candidateState?.matchups) ? candidateState.matchups : []),
+    ...(Array.isArray(candidateState?.currentSeason?.tournamentMatchupResults)
+      ? candidateState.currentSeason.tournamentMatchupResults : []),
+    ...(Array.isArray(candidateState?.seasonHistory)
+      ? candidateState.seasonHistory.flatMap(season =>
+          Array.isArray(season?.tournamentMatchupResults) ? season.tournamentMatchupResults : []) : [])
+  ];
+  const checked = new Set();
+  let missing = 0;
+  for (const m of rows) {
+    if (!m || m.completed === false || m.result === 'pending') continue;
+    const id = String(m.id || m.matchupId || '');
+    const date = String(m.dateKey || m.date || m.dateISO || '').slice(0, 10);
+    if (!id || !/^\d{4}-\d{2}-\d{2}$/.test(date) || date <= launch
+      || date >= today || checked.has(id + '|' + date)) continue;
+    checked.add(id + '|' + date);
+    if (credited.has(id)) continue;
+    const aIsYou = String(m.playerAId || '') === playerId;
+    const bIsYou = String(m.playerBId || '') === playerId;
+    if (!aIsYou && !bIsYou) continue;
+    const rawA = m.scoreA ?? m.playerAScore, rawB = m.scoreB ?? m.playerBScore;
+    if (rawA == null || rawA === '' || rawB == null || rawB === '') continue;
+    const a = Number(rawA), b = Number(rawB);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+    if ((aIsYou ? a - b : b - a) > 0) missing += 1;
+  }
+  if (!missing) return '';
+  return missing + ' recorded win' + (missing === 1 ? '' : 's')
+    + ' without a matching Gold margin-credit entry. This is a read-only warning; your balance was not changed.';
+}
+
 function homePersonalGoldTransactionLabel(row, playerName) {
   const opponent = row?.opponentId ? playerName(row.opponentId) : '';
   if (row?.__homeGoldResultConflict) {
@@ -7326,8 +7370,11 @@ function homePersonalGoldTransactionLabel(row, playerName) {
   }
 }
 
-function buildHomePersonalGoldLedgerHtml(rows, shown = HOME_GOLD_LEDGER_PAGE_SIZE, playerName = getPlayerNameById) {
-  if (!rows.length) return '<div class="yesterday-recent-result-empty">No Gold transactions recorded yet.</div>';
+function buildHomePersonalGoldLedgerHtml(rows, shown = HOME_GOLD_LEDGER_PAGE_SIZE, playerName = getPlayerNameById, auditMessage = '') {
+  const auditNote = auditMessage
+    ? '<div class="home-gold-ledger-review-note">' + escapeHtml(auditMessage) + '</div>'
+    : '';
+  if (!rows.length) return auditNote + '<div class="yesterday-recent-result-empty">No Gold transactions recorded yet.</div>';
   const list = rows.slice(0, shown).map(row => {
     const rawAmount = Number(row.amount);
     const amount = Number.isFinite(rawAmount) ? Math.round((rawAmount + Number.EPSILON) * 10) / 10 : null;
@@ -7358,7 +7405,7 @@ function buildHomePersonalGoldLedgerHtml(rows, shown = HOME_GOLD_LEDGER_PAGE_SIZ
   const historicalNote = rows.some(row => row.__homeHistoricalGold)
     ? '<div class="home-gold-ledger-history-note">Historical wins were already included in your opening balance. They are not separate transactions or extra Gold.</div>'
     : '';
-  return historicalNote + list + next;
+  return auditNote + historicalNote + list + next;
 }
 
 function ensureHomePersonalGoldLedgerDropdown() {
@@ -7377,13 +7424,18 @@ function ensureHomePersonalGoldLedgerDropdown() {
 function renderHomePersonalGoldLedgerDropdown() {
   const dropdown = ensureHomePersonalGoldLedgerDropdown();
   const previousScroll = dropdown.scrollTop;
-  dropdown.innerHTML = buildHomePersonalGoldLedgerHtml(homePersonalGoldLedgerRows, homePersonalGoldLedgerShown);
+  dropdown.innerHTML = buildHomePersonalGoldLedgerHtml(
+    homePersonalGoldLedgerRows, homePersonalGoldLedgerShown,
+    getPlayerNameById, homePersonalGoldLedgerAuditMessage
+  );
   dropdown.scrollTop = previousScroll;
 }
 
 function refreshHomePersonalGoldLedgerDropdown() {
   if (!homePersonalGoldLedgerOpen) return;
-  homePersonalGoldLedgerRows = buildHomePersonalGoldLedgerRows(getHomePersonalGoldLedgerSource());
+  const snapshot = getHomePersonalGoldLedgerSource();
+  homePersonalGoldLedgerRows = buildHomePersonalGoldLedgerRows(snapshot);
+  homePersonalGoldLedgerAuditMessage = getHomePersonalMissingGoldCreditNotice(snapshot);
   renderHomePersonalGoldLedgerDropdown();
 }
 
@@ -7433,7 +7485,9 @@ function openHomePersonalGoldLedgerDropdown() {
   if (!trigger) return;
   closeYesterdayRecentResultsDropdown();
   homePersonalGoldLedgerShown = HOME_GOLD_LEDGER_PAGE_SIZE;
-  homePersonalGoldLedgerRows = buildHomePersonalGoldLedgerRows(getHomePersonalGoldLedgerSource());
+  const snapshot = getHomePersonalGoldLedgerSource();
+  homePersonalGoldLedgerRows = buildHomePersonalGoldLedgerRows(snapshot);
+  homePersonalGoldLedgerAuditMessage = getHomePersonalMissingGoldCreditNotice(snapshot);
   const dropdown = ensureHomePersonalGoldLedgerDropdown();
   dropdown.scrollTop = 0;
   renderHomePersonalGoldLedgerDropdown();

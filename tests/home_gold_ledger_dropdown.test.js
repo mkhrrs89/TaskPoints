@@ -226,3 +226,33 @@ test('official winner-margin Gold credits are still displayed with historical wi
   assert.match(markup,/Historical win vs Alex/);
   assert.match(markup,/Stolen by Alex/);
 });
+
+test('Gold popup reports recorded wins without corresponding wallet credits, without adding Gold', () => {
+  const state={goldEconomy:{version:1,launchDateKey:'2026-11-10'},
+    goldLedger:[{id:'loss',type:'matchup_theft',playerId:'YOU',amount:-1.1}],
+    matchups:[
+      {id:'uncredited-win',dateKey:'2026-11-14',playerAId:'YOU',playerBId:'X',scoreA:72,scoreB:51},
+      {id:'credited-win',dateKey:'2026-11-15',playerAId:'YOU',playerBId:'X',scoreA:45,scoreB:22},
+      {id:'loss',dateKey:'2026-11-16',playerAId:'YOU',playerBId:'X',scoreA:12,scoreB:52},
+      {id:'launch-day',dateKey:'2026-11-10',playerAId:'YOU',playerBId:'X',scoreA:50,scoreB:12}
+    ]};
+  state.goldLedger.push({id:'margin',type:'matchup_margin',playerId:'YOU',
+    matchupId:'credited-win',amount:2.3});
+  const before=JSON.stringify(state);
+  const ctx=setup(state);
+  const note=ctx.getHomePersonalMissingGoldCreditNotice(ctx.state);
+  assert.match(note,/1 recorded win without a matching Gold margin-credit entry/);
+  assert.match(ctx.buildHomePersonalGoldLedgerHtml(
+    ctx.buildHomePersonalGoldLedgerRows(ctx.state),5,ctx.getPlayerNameById,note),
+    /read-only warning/);
+  assert.equal(JSON.stringify(state),before);
+});
+
+test('late Gold runtime repaints wallet text without causing saves', () => {
+  const greed=fs.readFileSync(path.join(__dirname,'..','greed_gold_economy.js'),'utf8');
+  const begin=greed.indexOf('function patchWhenReady()');
+  const section=greed.slice(begin,greed.indexOf('const api = {',begin));
+  assert.match(section,/const installed = patchGoldDisplays\(\)/);
+  assert.match(section,/yourGold\.textContent = global\.formatHomepageGold\('YOU'\)/);
+  assert.doesNotMatch(section,/saveStateSnapshot|mergeAndSaveState|reconcileGoldEconomy/);
+});

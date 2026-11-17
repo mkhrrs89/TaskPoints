@@ -799,6 +799,13 @@ body {
   content: " ▴";
 }
 .home-gold-ledger-dropdown { min-width: 0; }
+.home-gold-ledger-review-note {
+  padding: 9px 12px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: #fbbf24;
+  border-bottom: 1px solid rgba(71, 85, 105, 0.5);
+}
 .home-gold-ledger-history-note {
   padding: 9px 12px;
   border-bottom: 1px solid rgba(71, 85, 105, 0.5);
