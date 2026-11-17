@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Synthetic Capture">
+<meta name="theme-color" content="#164e43"><meta name="referrer" content="no-referrer">
+<title>Synthetic iPhone Capture</title><link rel="manifest" href="./manifest.webmanifest"><link rel="apple-touch-icon" href="./icon.png">
+<link rel="stylesheet" href="./style.css"><script defer src="./config.js"></script><script defer src="./capture.js"></script><script defer src="./ui.js"></script></head>
+<body><main><p class="badge">SYNTHETIC DATA ONLY · BUILD 1</p><h1>iPhone storage capture</h1>
+<p>This separate test contains invented records only. It cannot capture or restore TaskPoints data.</p>
+<section><h2>1. Check this app</h2><dl><dt>Website</dt><dd id="origin"></dd><dt>Opened as</dt><dd id="mode"></dd><dt>Storage ID</dt><dd id="identity">Not checked</dd><dt>Records first created in</dt><dd id="createdMode">Not checked</dd></dl>
+<p id="health" role="status">Checking…</p><button id="inspect">Check records</button><button id="seed">Create or resume synthetic records</button>
+<p>Creation is the only step that writes source records. It never replaces existing records or deletes anything.</p><p>Synthetic image: teal and gold checkerboard.</p><img id="preview" width="64" height="64" alt="Synthetic image preview" hidden></section>
+<section><h2>2. Compare Safari and Home Screen</h2><p>In Safari, use Share → Add to Home Screen (enable Open as Web App if offered). Open that icon, then compare its Storage ID with Safari’s. If this app is empty there, create its synthetic records too.</p>
+<label for="other">Storage ID shown in the other app, on this same website</label><input id="other" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="Paste or type the full Storage ID">
+<button id="compare">Compare IDs</button><p id="comparison" role="status">NOT TESTED</p>
+<p>Matching IDs suggest shared or copied storage; different IDs show separate fixture identities. Neither observation proves how the real TaskPoints app stores data.</p></section>
+<section><h2>3. Capture without changing records</h2><button id="capture">Prepare synthetic export</button><button id="cancel" disabled>Cancel capture</button><p id="exportStatus" role="status">NOT TESTED</p>
+<a id="download" hidden download="taskpoints-synthetic-capture.json">Download package</a><button id="share" hidden>Share / Save to Files</button>
+<p>Save the file to Files. Preparing or downloading it alone does not prove that the saved file is complete.</p></section>
+<section><h2>4. Reopen and verify the saved file</h2><label for="file">Choose the package you saved in Files</label><input id="file" type="file" accept=".json,application/json"><p id="verifyStatus" role="status">NOT TESTED</p><pre id="details"></pre>
+<p>Verification checks the checksum, every expected synthetic record and the image bytes. It does not import anything or change this app’s source records.</p></section>
+<section><h2>Interruption check</h2><p>Start preparing an export, then cancel or switch away. Return and prepare it again. No incomplete export should be offered. Force-close and reopen this app, check that its Storage ID is unchanged, then verify the saved file again.</p>
+<p>Internet is required to reopen this test. There is no offline cache. A reload clears previous on-screen results; check again after reopening.</p></section>
+</main></body></html>
