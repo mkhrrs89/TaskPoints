@@ -123,6 +123,7 @@ test('Home localStorage fallback preserves authoritative Gold wallet before late
     normalizeHexColor: x => x,
     normalizeHabitTagColors: x => x || {},
     window: { TaskPointsCore: { normalizeScoringSettings: x => x } },
+    TaskPointsCore: { normalizeScoringSettings: x => x },
     console
   });
   vm.runInContext(home.slice(begin, end), context);
