@@ -475,14 +475,35 @@
     const batch = activeGoldReconciliationBatch?.state === state ? activeGoldReconciliationBatch : null;
     const settled = batch ? batch.settledKeys : new Set(Array.isArray(economy.settledMatchupKeys) ? economy.settledMatchupKeys : []);
     if (settled.has(identity)) return false;
+    // A completed outcome without its index key must not be replayed: its
+    // original Gold transactions may still exist. Audit before any repair.
+    if (matchup.goldOutcome?.settled === true) return false;
     const date = rowDateKey(matchup);
     if (!date || date < economy.launchDateKey) return false;
-    // The live YOUR score can still change after the opponent's score has
-    // appeared. Do not permanently settle today's provisional result:
-    // yesterday's completed result is handled normally on next load.
-    // Existing ledger entries are never rewritten by this rule.
-    if (date >= localDateKey() && (String(matchup.playerAId || '') === 'YOU'
-      || String(matchup.playerBId || '') === 'YOU')) return false;
+    // YOUR live score changes throughout the day even after the NPC score
+    // appears. Never treat a same-day or future YOU matchup as final; require
+    // an explicit game date so a timestamp fallback cannot settle it early.
+    // Already-saved historical Gold transactions remain untouched.
+    const userMatchup = String(matchup.playerAId || '') === 'YOU'
+      || String(matchup.playerBId || '') === 'YOU';
+    if (userMatchup) {
+      const explicitDay = String(matchup.dateKey || matchup.date || '').slice(0, 10);
+      if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(explicitDay)
+        || explicitDay !== date || explicitDay >= localDateKey()) return false;
+      // A saved win/loss label or winner can lag behind changing scores.
+      // Do not permanently award/steal Gold from an inconsistent snapshot.
+      const resultFromScores = goldWinner(matchup);
+      const expectedResult = resultFromScores
+        ? (resultFromScores.winnerId === 'YOU' ? 'you-win' : 'you-loss')
+        : 'you-tie';
+      const savedResult = String(matchup.result || '').trim().toLowerCase();
+      if (['you-win', 'you-loss', 'you-tie', 'tie'].includes(savedResult)
+        && (savedResult === 'tie' ? 'you-tie' : savedResult) !== expectedResult) return false;
+      const declaredWinner = String(matchup.winnerId || '').trim();
+      const declaredLoser = String(matchup.loserId || '').trim();
+      if (declaredWinner && declaredWinner !== String(resultFromScores?.winnerId || '')) return false;
+      if (declaredLoser && declaredLoser !== String(resultFromScores?.loserId || '')) return false;
+    }
     if (date === economy.launchDateKey && (Array.isArray(economy.ignoredSameDayMatchupKeys) ? economy.ignoredSameDayMatchupKeys : []).includes(identity)) return false;
 
     const scoreA = sideScore(matchup, 'A');

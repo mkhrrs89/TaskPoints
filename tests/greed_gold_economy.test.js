@@ -529,3 +529,70 @@ test('today changing YOU score never permanently settles loss theft before day e
   assert.equal(state.goldLedger.filter(row=>row.playerId==='YOU'
     && row.type==='matchup_theft' && row.amount>0).length,1);
 });
+
+
+test('settlement waits until the following local day and then uses the finished YOU score', () => {
+  const { api } = install();
+  const today = new Date();
+  const dayKey = date => [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0')].join('-');
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  const state = ledgerState([{ id:'X', name:'Opponent', greed:100, active:true }], { YOU:60, X:50 });
+  const match = { id:'unfinished-user-match', dateKey:dayKey(today), result:'you-loss',
+    playerAId:'YOU', playerBId:'X', scoreA:0, scoreB:40 };
+  state.matchups.push(match);
+  const before = JSON.stringify(state.goldLedger);
+  assert.equal(api.reconcileGoldEconomy(state).changed, false);
+  match.scoreA = 70;
+  match.result = 'you-win';
+  assert.equal(api.reconcileGoldEconomy(state).changed, false);
+  assert.equal(JSON.stringify(state.goldLedger), before);
+  assert.equal(state.goldEconomy.settledMatchupKeys.length, 0);
+
+  match.dateKey = dayKey(yesterday);
+  assert.equal(api.reconcileGoldEconomy(state).changed, true);
+  assert.equal(api.goldBalance(state,'YOU'), 65.5);
+  assert.equal(state.goldLedger.filter(row => row.playerId === 'YOU' &&
+    row.type === 'matchup_margin' && row.amount > 0).length, 1);
+  assert.equal(state.goldLedger.filter(row => row.playerId === 'YOU' &&
+    row.type === 'matchup_theft' && row.amount > 0).length, 1);
+  assert.equal(state.goldLedger.filter(row => row.playerId === 'YOU' &&
+    row.type === 'matchup_theft' && row.amount < 0).length, 0);
+  const settled = JSON.stringify(state.goldLedger);
+  assert.equal(api.reconcileGoldEconomy(state).changed, false);
+  assert.equal(JSON.stringify(state.goldLedger), settled);
+});
+
+test('contradictory YOU result or declared winner cannot steal Gold or finalize an outcome', () => {
+  const { api } = install();
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const dayKey = [yesterday.getFullYear(),String(yesterday.getMonth()+1).padStart(2,'0'),
+    String(yesterday.getDate()).padStart(2,'0')].join('-');
+  const state = ledgerState([{ id:'X',greed:80,active:true }],{YOU:60,X:50});
+  const match = {id:'disagree',dateKey:dayKey,playerAId:'YOU',playerBId:'X',
+    scoreA:30,scoreB:50,result:'you-win'};
+  state.matchups.push(match);
+  assert.equal(api.reconcileGoldEconomy(state).changed,false);
+  assert.equal(state.goldEconomy.settledMatchupKeys.length,0);
+  assert.equal(state.goldLedger.length,2);
+  match.scoreA=60;
+  match.winnerId='X';
+  assert.equal(api.reconcileGoldEconomy(state).changed,false);
+  assert.equal(state.goldLedger.length,2);
+  match.winnerId='YOU';
+  assert.equal(api.reconcileGoldEconomy(state).changed,true);
+  assert.equal(state.goldLedger.filter(row=>row.playerId==='YOU' &&
+    row.type==='matchup_theft' && row.amount < 0).length,0);
+});
+
+test('a saved settled outcome cannot be silently re-awarded if its index key is missing', () => {
+  const { api } = install();
+  const state = ledgerState([{id:'X',greed:80,active:true}],{YOU:60,X:50});
+  state.matchups.push({id:'already-settled',dateKey:'2026-09-04',
+    playerAId:'YOU',playerBId:'X',scoreA:60,scoreB:50,
+    goldOutcome:{settled:true,winnerId:'YOU',loserId:'X',marginGoldAwarded:1}});
+  const before=JSON.stringify(state.goldLedger);
+  assert.equal(api.reconcileGoldEconomy(state).changed,false);
+  assert.equal(JSON.stringify(state.goldLedger),before);
+});

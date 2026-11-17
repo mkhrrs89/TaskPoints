@@ -307,10 +307,13 @@
       [...ids].map(id => ({ id, name: nameFor(current.state, id) }))
         .sort((a, b) => a.id === 'YOU' ? -1 : b.id === 'YOU' ? 1 : a.name.localeCompare(b.name))
         .forEach(item => {
-          const option = global.document.createElement('option');
+          // The YOU wallet is a real player wallet, not an NPC roster entry.
+          // Reuse the visible HTML option rather than adding a duplicate.
+          const existing = item.id === 'YOU' ? select.querySelector?.('option[value="YOU"]') : null;
+          const option = existing || global.document.createElement('option');
           option.value = item.id;
-          option.textContent = item.name;
-          select.appendChild(option);
+          option.textContent = item.id === 'YOU' ? item.name + ' (You)' : item.name;
+          if (!existing) select.appendChild(option);
         });
       button.disabled = false;
     } catch (error) {
