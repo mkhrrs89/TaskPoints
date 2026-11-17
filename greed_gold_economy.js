@@ -488,7 +488,7 @@
       || String(matchup.playerBId || '') === 'YOU';
     if (userMatchup) {
       const explicitDay = String(matchup.dateKey || matchup.date || '').slice(0, 10);
-      if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(explicitDay)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(explicitDay)
         || explicitDay !== date || explicitDay >= localDateKey()) return false;
       // A saved win/loss label or winner can lag behind changing scores.
       // Do not permanently award/steal Gold from an inconsistent snapshot.
