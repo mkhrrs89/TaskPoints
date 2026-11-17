@@ -155,13 +155,16 @@ test('historical win margins are visible but not misrepresented as ledger entrie
   assert.equal(JSON.stringify(ctx.state),before);
 });
 
-test('official Gold ledger always wins over legacy events without double counting', () => {
+test('official Gold remains authoritative and historical wins appear as read-only context', () => {
   const ctx=setup({goldEconomy:{version:1,launchDateKey:'2026-11-15'},
     goldLedger:[{id:'official',playerId:'YOU',amount:5,type:'manual_adjustment'}],
     matchups:[{id:'older',dateKey:'2026-11-10',playerAId:'YOU',playerBId:'X',scoreA:65,scoreB:20}]});
   const rows=ctx.buildHomePersonalGoldLedgerRows(ctx.state);
-  assert.deepEqual(Array.from(rows,r=>r.id), ['official']);
-  assert.doesNotMatch(ctx.buildHomePersonalGoldLedgerHtml(rows),/Historical winning margins/);
+  assert.deepEqual(Array.from(rows,r=>r.id), ['historical:older','official']);
+  assert.equal(rows.find(row=>row.id==='official').amount,5);
+  const view=ctx.buildHomePersonalGoldLedgerHtml(rows);
+  assert.match(view,/Historical wins were already included in your opening balance/);
+  assert.match(view,/Manual adjustment/i);
 });
 
 test('authoritative Greed accessor does not reconcile or write storage', () => {
