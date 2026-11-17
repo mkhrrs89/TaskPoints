@@ -7196,7 +7196,8 @@ function buildHomePersonalGoldLedgerRows(candidateState, playerId = 'YOU') {
   // balance. Keep those historical wins visible *alongside* later transactions
   // instead of hiding them as soon as the first theft/interest entry appears.
   // Historical entries remain display-only and never affect the Gold balance.
-  const historical = buildHomePersonalHistoricalGoldRows(candidateState, playerId);
+  const historical = official.length && !candidateState?.goldEconomy?.launchDateKey
+    ? [] : buildHomePersonalHistoricalGoldRows(candidateState, playerId);
   return [...official, ...historical].sort((a, b) =>
     String(b.createdAtISO || b.dateKey || '').localeCompare(String(a.createdAtISO || a.dateKey || ''))
     || String(b.id || '').localeCompare(String(a.id || ''))
@@ -7293,7 +7294,7 @@ function buildHomePersonalGoldLedgerHtml(rows, shown = HOME_GOLD_LEDGER_PAGE_SIZ
     ? '<button type="button" class="home-gold-ledger-see-more" data-home-gold-see-more>See more</button>'
     : '';
   const historicalNote = rows.some(row => row.__homeHistoricalGold)
-    ? '<div class="home-gold-ledger-history-note">Historical wins are shown for reference. Their Gold was already included in your opening balance, not added again.</div>'
+    ? '<div class="home-gold-ledger-history-note">Historical wins were already included in your opening balance. They are not separate transactions or extra Gold.</div>'
     : '';
   return historicalNote + list + next;
 }
