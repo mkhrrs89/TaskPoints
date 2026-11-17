@@ -1,0 +1,60 @@
+{
+  "configuredOrigin": "https://tp-synthetic-capture-taskpoints.pages.dev",
+  "hostnameConfirmedByCloudflare": false,
+  "deployed": false,
+  "zip": "tp-synthetic-capture-taskpoints.zip",
+  "zipBytes": 9900,
+  "sha256": "a74b07632a78d1519afcd2c43df3ec750875dc9819deebc1dc498d70cd8d2508",
+  "files": {
+    "_headers": {
+      "bytes": 345,
+      "sha256": "cb4524a52603b5c17c20828197a1ebcf10e505d2a90f3c4d43511c4db8b76e5e"
+    },
+    "capture.js": {
+      "bytes": 10813,
+      "sha256": "cbd599cddc215d158e27119266c6113de2b131c6cca0e5cbb8136e02e96cfbe5"
+    },
+    "config.js": {
+      "bytes": 237,
+      "sha256": "e29322e62e7f7e3db12bc356f2cd07d4b40e2b93ad7ce07656dede94ba06fefd"
+    },
+    "icon.png": {
+      "bytes": 618,
+      "sha256": "facb59fa85971b6617dcd22142e8b4060fe1b8bb8877f0c60e7b6bd263ca39d3"
+    },
+    "index.html": {
+      "bytes": 3610,
+      "sha256": "1c1da14709a510bb813e384e4292d1d1beff7adea26f0c06fde7a576a0cd6916"
+    },
+    "manifest.webmanifest": {
+      "bytes": 269,
+      "sha256": "e4598416b15a7a33b7035987be8a56d86eba5526ebb8d28e138c0b0ee80a91b0"
+    },
+    "style.css": {
+      "bytes": 1086,
+      "sha256": "9e01193df60bfd45b9462bd6088d20035bc972b8ee794742af89b3a1efc7fa6d"
+    },
+    "ui.js": {
+      "bytes": 5635,
+      "sha256": "3ece2e16b4aec25e6f49a63335aed24082b7940cf5276594e9195936c9f3bd36"
+    }
+  },
+  "checks": [
+    "exact eight-file allowlist",
+    "no symlinks/directories",
+    "index.html at root",
+    "exact dedicated Pages origin",
+    "no-store and frame protections retained",
+    "ZIP CRC verification",
+    "all extracted bytes equal site assets"
+  ],
+  "browserTests": {
+    "passed": 33,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "testedFreshZipExtraction": true,
+    "browser": "Chromium 156.0.8078.79",
+    "actualCloudflareSiteContacted": false
+  }
+}

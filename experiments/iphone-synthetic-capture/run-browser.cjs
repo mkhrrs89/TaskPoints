@@ -2,7 +2,7 @@
 const {test,before,after}=require('node:test');
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),http=require('node:http');
 const {chromium}=require('playwright');
-const site=path.join(__dirname,'site');let browser,server,url;
+const site=path.resolve(process.env.SYNTHETIC_CAPTURE_SITE||path.join(__dirname,'site'));let browser,server,url;
 before(async()=>{
  server=http.createServer((req,res)=>{
   const name=new URL(req.url,'http://localhost').pathname;
@@ -219,13 +219,13 @@ test('optional share path receives only the verified synthetic file and does not
  assert.equal(await snapshot(page),before);await selectFile(page,shared);await page.waitForFunction(()=>document.querySelector('#verifyStatus').textContent.startsWith('PASS'));
 });
 
-test('a dedicated approved HTTPS origin is usable; repository config remains undeployed',async t=>{
- assert.match(fs.readFileSync(path.join(site,'config.js'),'utf8'),/SYNTHETIC_CAPTURE_ORIGIN = ''/);
+test('the exact configured HTTPS origin runs using the packaged config without overrides',async t=>{
+ assert.match(fs.readFileSync(path.join(site,'config.js'),'utf8'),/SYNTHETIC_CAPTURE_ORIGIN = 'https:\/\/tp-synthetic-capture-taskpoints\.pages\.dev'/);
  const context=await browser.newContext({serviceWorkers:'block'});t.after(()=>context.close());
- const origin='https://tp-synthetic-capture-test.invalid';
+ const origin='https://tp-synthetic-capture-taskpoints.pages.dev';
  await context.route(origin+'/**',route=>{
   const name=new URL(route.request().url()).pathname,file=path.join(site,name==='/'?'index.html':path.basename(name));
-  const body=name==='/config.js'?`window.SYNTHETIC_CAPTURE_ORIGIN = '${origin}';`:fs.existsSync(file)?fs.readFileSync(file):'';
+  const body=fs.existsSync(file)?fs.readFileSync(file):'';
   return route.fulfill({status:200,contentType:file.endsWith('.js')?'text/javascript':file.endsWith('.png')?'image/png':'text/html',body});
  });const page=await context.newPage();await page.goto(origin);await page.click('#seed');await page.waitForFunction(()=>!document.querySelector('#seed').disabled);
  assert.match(await page.locator('#health').textContent(),/^PASS/);
@@ -239,4 +239,17 @@ test('checking a now-incomplete fixture clears earlier export readiness without 
  assert.match(await page.locator('#health').textContent(),/incomplete/);assert.match(await page.locator('#exportStatus').textContent(),/NOT READY/);
  assert.equal(await page.locator('#download').isVisible(),false);
  assert.equal(await page.evaluate(()=>localStorage.getItem('tp_synthetic_capture_v1:pending')),null);
+});
+
+
+test('a different Pages hostname with the same synthetic prefix is refused before storage access',async t=>{
+ const context=await browser.newContext();t.after(()=>context.close());
+ await context.addInitScript(()=>{window.storageTouches=0;Object.defineProperty(window,'localStorage',{get(){storageTouches++;throw Error('access forbidden');}});indexedDB.databases=()=>{storageTouches++;throw Error('access forbidden');};});
+ const origin='https://tp-synthetic-capture-taskpoints-alternate.pages.dev';
+ await context.route(origin+'/**',route=>{
+  const name=new URL(route.request().url()).pathname,file=path.join(site,name==='/'?'index.html':path.basename(name));
+  return route.fulfill({status:200,contentType:file.endsWith('.js')?'text/javascript':file.endsWith('.png')?'image/png':'text/html',body:fs.existsSync(file)?fs.readFileSync(file):''});
+ });const page=await context.newPage();await page.goto(origin);
+ await page.waitForFunction(()=>document.querySelector('#health').textContent.startsWith('FAIL'));
+ assert.match(await page.locator('#health').textContent(),/not approved/);assert.equal(await page.evaluate(()=>storageTouches),0);
 });

@@ -14,8 +14,10 @@ worker or offline cache. It runs locally on localhost/127.0.0.1 for automation.
 
 For HTTPS, it refuses to access storage until `config.js` names the exact approved
 origin and that host starts with `tp-synthetic-capture-`. The checked-in setting is
-empty. Deploy only the contents of `site/` at the root of a **new, dedicated HTTPS
-origin**, never the TaskPoints project/origin or a path underneath it. Do not deploy
+now configured for the proposed `https://tp-synthetic-capture-taskpoints.pages.dev`
+hostname at the owner's request; Cloudflare has not yet confirmed it. See
+[manual upload instructions](MANUAL-UPLOAD.md) before uploading. Deploy only the contents of `site/` at the root of a **new,
+dedicated HTTPS origin**, never the TaskPoints project/origin or a path underneath it. Do not deploy
 the repository root, its worker, or any application files. The supplied `_headers`
 contains no-store and security headers for hosts supporting that format; verify
 those headers on the chosen host. There are no external scripts, analytics,
@@ -150,11 +152,11 @@ For local manual review only, serve `site/` on a dedicated localhost port, for e
 python3 -m http.server 8765 --bind 127.0.0.1 --directory experiments/iphone-synthetic-capture/site
 ```
 
-## Next specific action — deployment approval
+## Next specific action — manual upload
 
-Approve a **new dedicated static HTTPS test site** serving only `site/`, for example
-`https://tp-synthetic-capture-taskpoints.pages.dev` if available. This is a proposed
-name, not a created site. Then set its exact approved origin in `config.js`, verify
-hosting headers, and deploy only these standalone assets. No existing TaskPoints
-project/domain, main/V2 branch, or application build should be used. Deployment has
-not been performed. After deployment, run the eight device steps above.
+The owner approved only manual upload to a new dedicated Pages project. Download
+`manual-upload/tp-synthetic-capture-taskpoints.zip` and follow
+[the manual upload instructions](MANUAL-UPLOAD.md). Confirm Cloudflare's assigned
+hostname matches the package before deploying; otherwise stop and request a revised
+ZIP. No automatic deployment is authorized. After upload, verify the live test site
+before starting the eight iPhone steps above.
