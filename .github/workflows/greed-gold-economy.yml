@@ -35,6 +35,9 @@ on:
       - tests/gold_manual_adjustment_core_integration.test.js
       - tests/greed_gold_economy.test.js
       - tests/home_gold_ledger_dropdown.test.js
+      - tests/mobile_bottom_nav_streaks_tasks_swap.test.js
+      - toolbar.js
+      - game.html
       - styles.css
       - tests/greed_gold_daily_scoring_batch.test.js
       - tests/greed_rating.test.js
@@ -79,6 +82,7 @@ jobs:
           tests/player_badge_power_rankings.test.js
           tests/greed_gold_economy.test.js
           tests/home_gold_ledger_dropdown.test.js
+          tests/mobile_bottom_nav_streaks_tasks_swap.test.js
           tests/greed_gold_daily_scoring_batch.test.js
           tests/gold_manual_adjustment.test.js
           tests/gold_recalculation.test.js

@@ -161,14 +161,28 @@ function auditDuplicateHabitCompletions(daysBack = 45) {
   }
 }
 
+// Always restore the Game shortcut from the shared toolbar, rather than
+// depending on the late Gold economy runtime (which some pages do not load).
+// The Gold runtime may also add this link; the lookup prevents duplicates.
+function ensureGoldLedgerGameMenuLink(menu) {
+  if (!menu || menu.querySelector('a[href="gold_ledger.html"]')) return;
+  const ratings = menu.querySelector('a[href="game_ratings.html"]');
+  if (!ratings) return; // This isn't the Game dropdown.
+  const link = document.createElement('a');
+  link.href = 'gold_ledger.html';
+  link.className = 'btn btn-teal btn-toolbar nav-btn';
+  link.textContent = 'Gold Ledger';
+  ratings.insertAdjacentElement('afterend', link);
+}
+
 function setupDropdowns(root = document) {
   root.querySelectorAll('.dropdown').forEach((dropdown) => {
+    const menu = dropdown.querySelector('.dropdown-menu');
+    ensureGoldLedgerGameMenuLink(menu);
     if (dropdown.dataset.dropdownReady) return;
     dropdown.dataset.dropdownReady = 'true';
     const toggle = dropdown.querySelector('[data-dropdown-toggle]');
     if (!toggle) return;
-
-    const menu = dropdown.querySelector('.dropdown-menu');
 
     // Prevent taps inside menu from closing it
     if (menu) {
@@ -244,6 +258,7 @@ function buildMobileBottomNavLinks() {
   <a href="gamehub.html" class="btn btn-teal btn-toolbar nav-btn">Game Hub</a>
   <a href="game.html" class="btn btn-teal btn-toolbar nav-btn">Players</a>
   <a href="game_ratings.html" class="btn btn-teal btn-toolbar nav-btn">Ratings</a>
+  <a href="gold_ledger.html" class="btn btn-teal btn-toolbar nav-btn">Gold Ledger</a>
   <a href="matchups.html" class="btn btn-teal btn-toolbar nav-btn">Matchups</a>
   <a href="head_to_heads.html" class="btn btn-teal btn-toolbar nav-btn">Head to Heads</a>
   <a href="schedule.html" class="btn btn-teal btn-toolbar nav-btn">Schedule</a>

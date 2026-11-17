@@ -102,3 +102,20 @@ test('Task editing and adding features outside the retired toolbar are unaffecte
   assert.match(home, /id="homePanelTasks"/);
   assert.match(styles, /#mobileAddTaskFab/);
 });
+
+
+test('Gold Ledger is a permanent, nonduplicating Game dropdown shortcut on mobile and desktop', () => {
+  const home = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const game = fs.readFileSync(path.join(ROOT, 'game.html'), 'utf8');
+  const mobileMenu = section(toolbar, '<div class="dropdown-menu">', '</div>');
+  for (const [name, content] of [['mobile', mobileMenu], ['Home desktop', home], ['Players desktop', game]]) {
+    assert.match(content, /href="game_ratings\.html"[\s\S]*?href="gold_ledger\.html"[\s\S]*?href="records\.html"|href="game_ratings\.html"[\s\S]*?href="gold_ledger\.html"/,
+      name + ' menu keeps Gold Ledger after Ratings');
+  }
+  assert.equal((mobileMenu.match(/href="gold_ledger\.html"/g) || []).length, 1,
+    'mobile toolbar template includes exactly one Gold Ledger shortcut');
+  assert.match(toolbar, /function ensureGoldLedgerGameMenuLink\(menu\)/);
+  assert.match(toolbar, /menu\.querySelector\('a\[href="gold_ledger\.html"\]'\)/,
+    'shared dropdown setup must avoid a duplicate if the Gold runtime already inserted the link');
+  assert.match(toolbar, /ensureGoldLedgerGameMenuLink\(menu\)/);
+});
