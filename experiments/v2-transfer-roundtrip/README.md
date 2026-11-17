@@ -1,5 +1,10 @@
 # Synthetic isolated-origin transfer rehearsal
 
+TaskPoints-specific follow-up: [validation, startup boundaries and iPhone capture
+next step](TASKPOINTS-VALIDATION.md). The original generic rehearsal below remains
+unchanged in scope; the follow-up runs selected actual V1 modules on synthetic
+data and adds an offline preflight, without enabling the full application.
+
 Scope: engineering experiment only. Base V2 commit:
 `44b7cc1e0b5b8acab3bfd80dd7e31a5f5ed93643`.
 Branch: `experiment/v2-transfer-roundtrip`.

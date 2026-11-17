@@ -1,0 +1,162 @@
+[
+  {
+    "path": "phase2_dual_write.js",
+    "line": 78,
+    "source": "if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'key' });"
+  },
+  {
+    "path": "phase2_dual_write.js",
+    "line": 80,
+    "source": "if (!db.objectStoreNames.contains('values')) db.createObjectStore('values', { keyPath: 'field' });"
+  },
+  {
+    "path": "phase2_dual_write.js",
+    "line": 81,
+    "source": "if (!db.objectStoreNames.contains('metadata')) db.createObjectStore('metadata', { keyPath: 'id' });"
+  },
+  {
+    "path": "phase2_reset_hook.js",
+    "line": 376,
+    "source": "if (!db.objectStoreNames.contains(VAULT_STORE)) db.createObjectStore(VAULT_STORE, { keyPath: 'id' });"
+  },
+  {
+    "path": "phase4_storage_coordinator.js",
+    "line": 219,
+    "source": "if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'key' });"
+  },
+  {
+    "path": "phase4_storage_coordinator.js",
+    "line": 221,
+    "source": "if (!db.objectStoreNames.contains('values')) db.createObjectStore('values', { keyPath: 'field' });"
+  },
+  {
+    "path": "phase4_storage_coordinator.js",
+    "line": 222,
+    "source": "if (!db.objectStoreNames.contains('metadata')) db.createObjectStore('metadata', { keyPath: 'id' });"
+  },
+  {
+    "path": "phase5a_native_snapshot.js",
+    "line": 86,
+    "source": "if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'key' });"
+  },
+  {
+    "path": "phase5a_native_snapshot.js",
+    "line": 88,
+    "source": "if (!db.objectStoreNames.contains('values')) db.createObjectStore('values', { keyPath: 'field' });"
+  },
+  {
+    "path": "phase5a_native_snapshot.js",
+    "line": 89,
+    "source": "if (!db.objectStoreNames.contains(META)) db.createObjectStore(META, { keyPath: 'id' });"
+  },
+  {
+    "path": "phase5b_deferred_mirror.js",
+    "line": 131,
+    "source": "if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE, { keyPath: 'id' });"
+  },
+  {
+    "path": "scoring_core.js",
+    "line": 938,
+    "source": "db.createObjectStore(IMAGE_STORE_NAME);"
+  },
+  {
+    "path": "scoring_core.js",
+    "line": 10505,
+    "source": "[...SHADOW_ARRAY_STORES, 'collections'].forEach(name => { if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'key' }); });"
+  },
+  {
+    "path": "scoring_core.js",
+    "line": 10506,
+    "source": "if (!db.objectStoreNames.contains('values')) db.createObjectStore('values', { keyPath: 'field' });"
+  },
+  {
+    "path": "scoring_core.js",
+    "line": 10507,
+    "source": "if (!db.objectStoreNames.contains('metadata')) db.createObjectStore('metadata', { keyPath: 'id' });"
+  },
+  {
+    "path": "state_runtime_v2.js",
+    "line": 507,
+    "source": "if (!db.objectStoreNames.contains('habits')) db.createObjectStore('habits', { keyPath: 'id' });"
+  },
+  {
+    "path": "state_runtime_v2.js",
+    "line": 508,
+    "source": "if (!db.objectStoreNames.contains('completions')) db.createObjectStore('completions', { keyPath: 'id' });"
+  },
+  {
+    "path": "state_runtime_v2.js",
+    "line": 509,
+    "source": "if (!db.objectStoreNames.contains('mutations')) db.createObjectStore('mutations', { keyPath: 'id' });"
+  },
+  {
+    "path": "state_runtime_v2.js",
+    "line": 510,
+    "source": "if (!db.objectStoreNames.contains('tasks')) db.createObjectStore('tasks', { keyPath: 'id' });"
+  },
+  {
+    "path": "state_runtime_v2.js",
+    "line": 511,
+    "source": "if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects', { keyPath: 'id' });"
+  },
+  {
+    "path": "state_runtime_v2.js",
+    "line": 512,
+    "source": "if (!db.objectStoreNames.contains('todayDays')) db.createObjectStore('todayDays', { keyPath: 'id' });"
+  },
+  {
+    "path": "state_runtime_v2.js",
+    "line": 513,
+    "source": "if (!db.objectStoreNames.contains('goldLedger')) db.createObjectStore('goldLedger', { keyPath: 'id' });"
+  },
+  {
+    "path": "state_runtime_v2.js",
+    "line": 514,
+    "source": "if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'id' });"
+  },
+  {
+    "path": "state_runtime_v2.js",
+    "line": 4597,
+    "source": "db.createObjectStore(PREVIEW_RECOVERY_STORE, { keyPath: 'id' });"
+  },
+  {
+    "path": "state_runtime_v2.js",
+    "line": 5388,
+    "source": "db.createObjectStore(name, {keyPath:'id'});"
+  },
+  {
+    "path": "state_runtime_v2.js",
+    "line": 6322,
+    "source": "req.result.createObjectStore(name,{keyPath:'id'});"
+  },
+  {
+    "path": "state_runtime_v2.js",
+    "line": 6729,
+    "source": "db.createObjectStore(name,{keyPath:'id'});"
+  },
+  {
+    "path": "state_runtime_v2.js",
+    "line": 14442,
+    "source": "request.result.createObjectStore('witnesses',{keyPath:'id'});"
+  },
+  {
+    "path": "state_runtime_v2.js",
+    "line": 14798,
+    "source": "opening.result.createObjectStore(STORE,{keyPath:'id'});"
+  },
+  {
+    "path": "state_runtime_v2.js",
+    "line": 14878,
+    "source": "upgradeDb.createObjectStore(STORE, { keyPath: 'id' });"
+  },
+  {
+    "path": "storage_maintenance_idle.js",
+    "line": 431,
+    "source": "if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);"
+  },
+  {
+    "path": "toolbar.js",
+    "line": 1750,
+    "source": "db.createObjectStore(IMAGE_STORE_NAME_FALLBACK);"
+  }
+]

@@ -1,0 +1,372 @@
+TAP version 13
+# Browser: 156.0.8078.79
+# Subtest: lossless cross-origin round-trip includes all raw keys, every DB/store/record, image bytes, unknown types and recovery evidence
+ok 1 - lossless cross-origin round-trip includes all raw keys, every DB/store/record, image bytes, unknown types and recovery evidence
+  ---
+  duration_ms: 1210.943322
+  type: 'test'
+  ...
+# Subtest: close and reopen destination verifies restored bytes and exact original package
+ok 2 - close and reopen destination verifies restored bytes and exact original package
+  ---
+  duration_ms: 738.824847
+  type: 'test'
+  ...
+# Subtest: actual tab closure after staging leaves incomplete restore; restart retries same immutable package
+ok 3 - actual tab closure after staging leaves incomplete restore; restart retries same immutable package
+  ---
+  duration_ms: 759.589343
+  type: 'test'
+  ...
+# Subtest: actual tab closure after first database commit resumes exact partial contents without dropping journals
+ok 4 - actual tab closure after first database commit resumes exact partial contents without dropping journals
+  ---
+  duration_ms: 725.658265
+  type: 'test'
+  ...
+# Subtest: quota failure preserves staged original and refuses readiness; retry after restart succeeds
+ok 5 - quota failure preserves staged original and refuses readiness; retry after restart succeeds
+  ---
+  duration_ms: 665.691317
+  type: 'test'
+  ...
+# Subtest: aborted IndexedDB import transaction is never verified; schema-only partial database can be retried
+ok 6 - aborted IndexedDB import transaction is never verified; schema-only partial database can be retried
+  ---
+  duration_ms: 704.507674
+  type: 'test'
+  ...
+# Subtest: truncated or corrupted package is rejected before any destination writes
+ok 7 - truncated or corrupted package is rejected before any destination writes
+  ---
+  duration_ms: 482.564853
+  type: 'test'
+  ...
+# Subtest: missing record or changed image after import invalidates readiness on restart
+ok 8 - missing record or changed image after import invalidates readiness on restart
+  ---
+  duration_ms: 683.368568
+  type: 'test'
+  ...
+# Subtest: nonblank destinations and conflicting partial data are preserved rather than overwritten
+ok 9 - nonblank destinations and conflicting partial data are preserved rather than overwritten
+  ---
+  duration_ms: 631.047893
+  type: 'test'
+  ...
+# Subtest: original package cannot be replaced on resume; new-package rollback preserves latest edit and original archive
+ok 10 - original package cannot be replaced on resume; new-package rollback preserves latest edit and original archive
+  ---
+  duration_ms: 996.50467
+  type: 'test'
+  ...
+# Subtest: unknown auto-increment stores refuse export instead of guessing deleted-key generator state
+ok 11 - unknown auto-increment stores refuse export instead of guessing deleted-key generator state
+  ---
+  duration_ms: 511.517217
+  type: 'test'
+  ...
+# Subtest: unsupported stored object type refuses export; catalog failure cannot masquerade as empty storage
+ok 12 - unsupported stored object type refuses export; catalog failure cannot masquerade as empty storage
+  ---
+  duration_ms: 473.530321
+  type: 'test'
+  ...
+# Subtest: late old-origin writes and resets cannot change the restored isolated destination
+ok 13 - late old-origin writes and resets cannot change the restored isolated destination
+  ---
+  duration_ms: 650.405348
+  type: 'test'
+  ...
+# Subtest: disk package and destination storage survive full destination browser shutdown/restart
+ok 14 - disk package and destination storage survive full destination browser shutdown/restart
+  ---
+  duration_ms: 2269.810124
+  type: 'test'
+  ...
+# Subtest: interruption after complete data verification but before status commit remains incomplete until verified retry
+ok 15 - interruption after complete data verification but before status commit remains incomplete until verified retry
+  ---
+  duration_ms: 770.342455
+  type: 'test'
+  ...
+# Subtest: silent dropped localStorage write cannot report verified restoration
+ok 16 - silent dropped localStorage write cannot report verified restoration
+  ---
+  duration_ms: 791.212892
+  type: 'test'
+  ...
+# Subtest: observed source edit during capture refuses package creation
+ok 17 - observed source edit during capture refuses package creation
+  ---
+  duration_ms: 474.479412
+  type: 'test'
+  ...
+# Subtest: independent readback checks real Blob bytes, indexes, cycles, sharing, typed views and sparse values without the package codec
+ok 18 - independent readback checks real Blob bytes, indexes, cycles, sharing, typed views and sparse values without the package codec
+  ---
+  duration_ms: 554.182116
+  type: 'test'
+  ...
+# TaskPoints schemas: 11 databases; 34 stores; Chromium 156.0.8078.79
+# Subtest: inventory pins every current storage-creation source anchor and finds no auto-increment declarations
+ok 19 - inventory pins every current storage-creation source anchor and finds no auto-increment declarations
+  ---
+  duration_ms: 315.68554
+  type: 'test'
+  ...
+# Subtest: all eleven actual database layouts, 34 stores, real serialized snapshot and shadow migration round-trip exactly
+ok 20 - all eleven actual database layouts, 34 stores, real serialized snapshot and shadow migration round-trip exactly
+  ---
+  duration_ms: 1063.397827
+  type: 'test'
+  ...
+# Subtest: actual core and journal startup readers recover latest Task/Habit/Player/Flex/Inbox state without duplicates on repeat loads
+ok 21 - actual core and journal startup readers recover latest Task/Habit/Player/Flex/Inbox state without duplicates on repeat loads
+  ---
+  duration_ms: 880.593969
+  type: 'test'
+  ...
+# Subtest: real save/compaction and subsequent restart preserve journal effects exactly once
+ok 22 - real save/compaction and subsequent restart preserve journal effects exactly once
+  ---
+  duration_ms: 1067.392267
+  type: 'test'
+  ...
+# Subtest: snapshot quota failure preserves pending journal evidence and restart still recovers latest effective state
+ok 23 - snapshot quota failure preserves pending journal evidence and restart still recovers latest effective state
+  ---
+  duration_ms: 1077.798212
+  type: 'test'
+  ...
+# Subtest: actual Notes page startup chooses transferred dirty authoritative cache
+ok 24 - actual Notes page startup chooses transferred dirty authoritative cache
+  ---
+  duration_ms: 1135.009407
+  type: 'test'
+  ...
+# Subtest: interrupted realistic import stays incomplete, refuses fixture startup, and restarts without lost pending edits
+ok 25 - interrupted realistic import stays incomplete, refuses fixture startup, and restarts without lost pending edits
+  ---
+  duration_ms: 1092.843502
+  type: 'test'
+  ...
+# Subtest: every literal key in the checked-in storage inventory survives as raw data alongside dynamic keys
+ok 26 - every literal key in the checked-in storage inventory survives as raw data alongside dynamic keys
+  ---
+  duration_ms: 1017.33769
+  type: 'test'
+  ...
+# Subtest: restored active recovery lock still blocks real Task and Habit writers
+ok 27 - restored active recovery lock still blocks real Task and Habit writers
+  ---
+  duration_ms: 885.487608
+  type: 'test'
+  ...
+# Subtest: compatibility blocker: byte-perfect malformed journal transfer is not proof of healthy application startup
+ok 28 - compatibility blocker: byte-perfect malformed journal transfer is not proof of healthy application startup
+  ---
+  duration_ms: 946.229045
+  type: 'test'
+  ...
+# Subtest: preflight refuses player malformed without changing evidence, including after restart
+ok 29 - preflight refuses player malformed without changing evidence, including after restart
+  ---
+  duration_ms: 1432.709561
+  type: 'test'
+  ...
+# Subtest: preflight refuses player empty evidence without changing evidence, including after restart
+ok 30 - preflight refuses player empty evidence without changing evidence, including after restart
+  ---
+  duration_ms: 1310.7063
+  type: 'test'
+  ...
+# Subtest: preflight refuses player unsupported version without changing evidence, including after restart
+ok 31 - preflight refuses player unsupported version without changing evidence, including after restart
+  ---
+  duration_ms: 1314.718128
+  type: 'test'
+  ...
+# Subtest: preflight refuses player missing target without changing evidence, including after restart
+ok 32 - preflight refuses player missing target without changing evidence, including after restart
+  ---
+  duration_ms: 1331.727842
+  type: 'test'
+  ...
+# Subtest: preflight refuses player unknown patch without changing evidence, including after restart
+ok 33 - preflight refuses player unknown patch without changing evidence, including after restart
+  ---
+  duration_ms: 1322.206625
+  type: 'test'
+  ...
+# Subtest: preflight refuses habit filtered invalid row without changing evidence, including after restart
+ok 34 - preflight refuses habit filtered invalid row without changing evidence, including after restart
+  ---
+  duration_ms: 1319.460547
+  type: 'test'
+  ...
+# Subtest: preflight refuses habit null shape without changing evidence, including after restart
+ok 35 - preflight refuses habit null shape without changing evidence, including after restart
+  ---
+  duration_ms: 1368.735782
+  type: 'test'
+  ...
+# Subtest: preflight refuses sidecar empty evidence without changing evidence, including after restart
+ok 36 - preflight refuses sidecar empty evidence without changing evidence, including after restart
+  ---
+  duration_ms: 1323.048609
+  type: 'test'
+  ...
+# Subtest: preflight refuses task unsupported version without changing evidence, including after restart
+ok 37 - preflight refuses task unsupported version without changing evidence, including after restart
+  ---
+  duration_ms: 1315.989517
+  type: 'test'
+  ...
+# Subtest: preflight refuses task missing arrays without changing evidence, including after restart
+ok 38 - preflight refuses task missing arrays without changing evidence, including after restart
+  ---
+  duration_ms: 1217.13245
+  type: 'test'
+  ...
+# Subtest: preflight refuses task unknown mutation without changing evidence, including after restart
+ok 39 - preflight refuses task unknown mutation without changing evidence, including after restart
+  ---
+  duration_ms: 1304.78895
+  type: 'test'
+  ...
+# Subtest: preflight refuses flex dropped row without changing evidence, including after restart
+ok 40 - preflight refuses flex dropped row without changing evidence, including after restart
+  ---
+  duration_ms: 1364.292883
+  type: 'test'
+  ...
+# Subtest: preflight refuses flex unsupported order without changing evidence, including after restart
+ok 41 - preflight refuses flex unsupported order without changing evidence, including after restart
+  ---
+  duration_ms: 1311.524067
+  type: 'test'
+  ...
+# Subtest: preflight refuses inbox unsupported version without changing evidence, including after restart
+ok 42 - preflight refuses inbox unsupported version without changing evidence, including after restart
+  ---
+  duration_ms: 1301.809138
+  type: 'test'
+  ...
+# Subtest: preflight refuses inbox discarded field without changing evidence, including after restart
+ok 43 - preflight refuses inbox discarded field without changing evidence, including after restart
+  ---
+  duration_ms: 1321.133853
+  type: 'test'
+  ...
+# Subtest: preflight refuses phase5b pending unsupported without changing evidence, including after restart
+ok 44 - preflight refuses phase5b pending unsupported without changing evidence, including after restart
+  ---
+  duration_ms: 1346.808113
+  type: 'test'
+  ...
+# Subtest: preflight refuses write lock malformed without changing evidence, including after restart
+ok 45 - preflight refuses write lock malformed without changing evidence, including after restart
+  ---
+  duration_ms: 1263.346545
+  type: 'test'
+  ...
+# Subtest: preflight refuses write lock inactive but unreviewed without changing evidence, including after restart
+ok 46 - preflight refuses write lock inactive but unreviewed without changing evidence, including after restart
+  ---
+  duration_ms: 1293.115067
+  type: 'test'
+  ...
+# Subtest: preflight refuses recovery attempt without changing evidence, including after restart
+ok 47 - preflight refuses recovery attempt without changing evidence, including after restart
+  ---
+  duration_ms: 1463.732015
+  type: 'test'
+  ...
+# Subtest: preflight refuses emergency hold without changing evidence, including after restart
+ok 48 - preflight refuses emergency hold without changing evidence, including after restart
+  ---
+  duration_ms: 1329.724486
+  type: 'test'
+  ...
+# Subtest: preflight refuses data loss guard without changing evidence, including after restart
+ok 49 - preflight refuses data loss guard without changing evidence, including after restart
+  ---
+  duration_ms: 1289.453831
+  type: 'test'
+  ...
+# Subtest: preflight refuses unreviewed restore package without changing evidence, including after restart
+ok 50 - preflight refuses unreviewed restore package without changing evidence, including after restart
+  ---
+  duration_ms: 1400.624965
+  type: 'test'
+  ...
+# Subtest: preflight refuses future recovery protocol without changing evidence, including after restart
+ok 51 - preflight refuses future recovery protocol without changing evidence, including after restart
+  ---
+  duration_ms: 1319.57594
+  type: 'test'
+  ...
+# Subtest: preflight refuses canonical malformed without changing evidence, including after restart
+ok 52 - preflight refuses canonical malformed without changing evidence, including after restart
+  ---
+  duration_ms: 1248.47485
+  type: 'test'
+  ...
+# Subtest: preflight refuses canonical empty object without changing evidence, including after restart
+ok 53 - preflight refuses canonical empty object without changing evidence, including after restart
+  ---
+  duration_ms: 1401.26713
+  type: 'test'
+  ...
+# Subtest: preflight refuses canonical empty value without changing evidence, including after restart
+ok 54 - preflight refuses canonical empty value without changing evidence, including after restart
+  ---
+  duration_ms: 1295.314841
+  type: 'test'
+  ...
+# Subtest: preflight refuses V2 flag without changing evidence, including after restart
+ok 55 - preflight refuses V2 flag without changing evidence, including after restart
+  ---
+  duration_ms: 1333.871741
+  type: 'test'
+  ...
+# Subtest: malformed archives remain exact evidence, never become automatic recovery candidates
+ok 56 - malformed archives remain exact evidence, never become automatic recovery candidates
+  ---
+  duration_ms: 1102.263812
+  type: 'test'
+  ...
+# Subtest: competing habit sidecar edits require explicit reconciliation rather than timestamp-based loss
+ok 57 - competing habit sidecar edits require explicit reconciliation rather than timestamp-based loss
+  ---
+  duration_ms: 913.714317
+  type: 'test'
+  ...
+# Subtest: stale-generation sidecar is preserved but cannot be silently abandoned at rehearsal startup
+ok 58 - stale-generation sidecar is preserved but cannot be silently abandoned at rehearsal startup
+  ---
+  duration_ms: 896.669991
+  type: 'test'
+  ...
+# Subtest: realistic import quota failure retains original, blocks startup, and resumes after restart
+ok 59 - realistic import quota failure retains original, blocks startup, and resumes after restart
+  ---
+  duration_ms: 1048.267924
+  type: 'test'
+  ...
+# Subtest: native image readback includes referenced and orphan Blob bytes after realistic restore
+ok 60 - native image readback includes referenced and orphan Blob bytes after realistic restore
+  ---
+  duration_ms: 804.13866
+  type: 'test'
+  ...
+1..60
+# tests 60
+# suites 0
+# pass 60
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 65239.219111
