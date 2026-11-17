@@ -774,6 +774,92 @@ body {
   }
 }
 
+
+/* Home: the left player's Gold ledger shares Yesterday's pop-down animation. */
+.home-gold-ledger-trigger {
+  position: relative;
+  cursor: pointer;
+  border-radius: 8px;
+  -webkit-tap-highlight-color: transparent;
+}
+.home-gold-ledger-trigger:focus-visible {
+  outline: 2px solid rgba(94, 234, 212, 0.82);
+  outline-offset: 3px;
+}
+.home-gold-ledger-trigger.is-gold-ledger-open {
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.20);
+}
+.home-gold-ledger-trigger #matchupYourGold::after {
+  content: " ▾";
+  font-size: 0.8em;
+  color: #c5d6d7;
+  vertical-align: 0.08em;
+}
+.home-gold-ledger-trigger.is-gold-ledger-open #matchupYourGold::after {
+  content: " ▴";
+}
+.home-gold-ledger-dropdown { min-width: 0; }
+.home-gold-ledger-row {
+  display: grid;
+  grid-template-columns: 49px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  padding: 10px 12px;
+  min-height: 51px;
+  border-bottom: 1px solid rgba(71, 85, 105, 0.5);
+}
+.home-gold-ledger-date {
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.home-gold-ledger-main { min-width: 0; }
+.home-gold-ledger-description {
+  font-size: 11px;
+  font-weight: 750;
+  color: #e5e7eb;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.home-gold-ledger-balance {
+  margin-top: 2px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: #94a3b8;
+}
+.home-gold-ledger-amount {
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.home-gold-ledger-amount.is-credit { color: #5eead4; }
+.home-gold-ledger-amount.is-debit { color: #fca5a5; }
+.home-gold-ledger-see-more {
+  display: block;
+  width: 100%;
+  padding: 11px 12px;
+  min-height: 42px;
+  border: 0;
+  background: rgba(30, 75, 77, 0.36);
+  color: #8be4cf;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+  cursor: pointer;
+}
+.home-gold-ledger-see-more:hover,
+.home-gold-ledger-see-more:focus-visible {
+  background: rgba(45, 111, 113, 0.50);
+  outline: 2px solid rgba(94, 234, 212, 0.55);
+  outline-offset: -2px;
+}
+
 .yesterdayResultsPanel .yesterdayWinner,
 .yesterdayResultsPanel .yesterdayWinnerScore {
   color: #f8fafc !important;

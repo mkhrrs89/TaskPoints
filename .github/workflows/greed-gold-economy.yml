@@ -32,6 +32,8 @@ on:
       - tests/gold_circulation_total.test.js
       - tests/gold_manual_adjustment_core_integration.test.js
       - tests/greed_gold_economy.test.js
+      - tests/home_gold_ledger_dropdown.test.js
+      - styles.css
       - tests/greed_gold_daily_scoring_batch.test.js
       - tests/greed_rating.test.js
       - tests/season_champion_gold_bonus.test.js
@@ -73,6 +75,7 @@ jobs:
           tests/rankings_tournament_trophies.test.js
           tests/player_badge_power_rankings.test.js
           tests/greed_gold_economy.test.js
+          tests/home_gold_ledger_dropdown.test.js
           tests/greed_gold_daily_scoring_batch.test.js
           tests/gold_manual_adjustment.test.js
           tests/gold_season_interest.test.js

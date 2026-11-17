@@ -1034,8 +1034,17 @@ Nothing visible on the page is built here. === -->
       <div class="glass sm:col-span-2 lg:col-span-1 home-scoreboard-card">
         <div class="matchup-scoreboard">
           
-          <!-- LEFT SIDE: YOU -->
-          <div class="scoreboard-side">
+          <!-- LEFT SIDE: YOU (tap to inspect your Gold transactions) -->
+          <div
+            id="homeYourGoldLedgerTrigger"
+            class="scoreboard-side home-gold-ledger-trigger"
+            role="button"
+            tabindex="0"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-controls="homeYourGoldLedgerDropdown"
+            aria-label="Your Gold ledger. Tap to show your five most recent transactions."
+          >
             <div class="scoreboard-name-row scoreboard-name-row--you">
               <div id="matchupYourName" class="scoreboard-name">You</div>
               <div
@@ -6039,9 +6048,14 @@ state = cleanupLiveDiffHistory(state);
       renderTodaysMatchup(matchupKey, matchupPoints);
       renderYesterdaysResult(dailyTotals);
       bindYesterdayRecentResultsDropdown();
+      bindHomePersonalGoldLedgerDropdown();
       if (yesterdayRecentResultsOpen) {
         renderYesterdayRecentResultsDropdown();
         scheduleYesterdayRecentResultsPosition();
+      }
+      if (homePersonalGoldLedgerOpen) {
+        refreshHomePersonalGoldLedgerDropdown();
+        scheduleHomePersonalGoldLedgerPosition();
       }
       renderMatchupStreakPanel();
 
@@ -7105,6 +7119,7 @@ function closeYesterdayRecentResultsDropdown() {
 }
 
 function openYesterdayRecentResultsDropdown() {
+  closeHomePersonalGoldLedgerDropdown();
   const panel = $('yesterdayResultsPanel');
   const dropdown = ensureYesterdayRecentResultsDropdown();
   if (!panel || !dropdown) return;
@@ -7152,6 +7167,211 @@ function bindYesterdayRecentResultsDropdown() {
 
   yesterdayRecentResultsBound = true;
 }
+
+
+/* HOME_PERSONAL_GOLD_LEDGER_BEGIN */
+// Only read the durable Gold ledger shown by gold_ledger.html. Never create,
+// reconcile, mutate or persist transactions from the Home pop-down.
+const HOME_GOLD_LEDGER_PAGE_SIZE = 5;
+let homePersonalGoldLedgerBound = false;
+let homePersonalGoldLedgerOpen = false;
+let homePersonalGoldLedgerPositionFrame = 0;
+let homePersonalGoldLedgerRows = [];
+let homePersonalGoldLedgerShown = HOME_GOLD_LEDGER_PAGE_SIZE;
+
+function buildHomePersonalGoldLedgerRows(candidateState, playerId = 'YOU') {
+  const ledger = Array.isArray(candidateState?.goldLedger) ? candidateState.goldLedger : [];
+  return ledger.filter(row => row && String(row.playerId || '') === playerId)
+    .slice()
+    .sort((a, b) =>
+      String(b.createdAtISO || b.dateKey || '').localeCompare(String(a.createdAtISO || a.dateKey || ''))
+      || String(b.id || '').localeCompare(String(a.id || ''))
+    );
+}
+
+function homePersonalGoldTransactionLabel(row, playerName) {
+  const opponent = row?.opponentId ? playerName(row.opponentId) : '';
+  switch (row?.type) {
+    case 'opening_balance': return 'Opening balance';
+    case 'matchup_margin': return opponent ? 'Win margin vs ' + opponent : 'Matchup win margin';
+    case 'matchup_theft': return Number(row.amount) < 0
+      ? 'Stolen by ' + (opponent || 'opponent')
+      : 'Stole from ' + (opponent || 'opponent');
+    case 'champion_bonus': return 'Championship bonus';
+    case 'season_interest': return 'Season interest';
+    case 'manual_adjustment': {
+      const mode = { add: 'Gold added', subtract: 'Gold removed', set: 'Balance adjusted' }[row?.meta?.mode] || 'Manual adjustment';
+      const note = String(row?.meta?.note || '').trim();
+      return note ? mode + ': ' + note : mode;
+    }
+    default: return String(row?.type || 'Gold transaction').replace(/_/g, ' ');
+  }
+}
+
+function buildHomePersonalGoldLedgerHtml(rows, shown = HOME_GOLD_LEDGER_PAGE_SIZE, playerName = getPlayerNameById) {
+  if (!rows.length) return '<div class="yesterday-recent-result-empty">No Gold transactions recorded yet.</div>';
+  const list = rows.slice(0, shown).map(row => {
+    const rawAmount = Number(row.amount);
+    const amount = Number.isFinite(rawAmount) ? Math.round((rawAmount + Number.EPSILON) * 10) / 10 : null;
+    const color = amount === null ? '' : amount < 0 ? 'is-debit' : amount > 0 ? 'is-credit' : '';
+    const amountText = amount === null ? '—' : (amount > 0 ? '+' : '') + amount.toFixed(1);
+    const balance = row.balanceAfter != null && row.balanceAfter !== ''
+      && Number.isFinite(Number(row.balanceAfter))
+      ? 'Balance: ' + Number(row.balanceAfter).toFixed(1) : '';
+    const date = formatRecentMatchupDate(row.dateKey || row.createdAtISO);
+    const description = homePersonalGoldTransactionLabel(row, playerName);
+    return [
+      '<div class="home-gold-ledger-row" role="listitem">',
+      '<div class="home-gold-ledger-date">' + escapeHtml(date) + '</div>',
+      '<div class="home-gold-ledger-main">',
+      '<div class="home-gold-ledger-description" title="' + escapeHtml(description) + '">' + escapeHtml(description) + '</div>',
+      balance ? '<div class="home-gold-ledger-balance">' + escapeHtml(balance) + '</div>' : '',
+      '</div>',
+      '<div class="home-gold-ledger-amount ' + color + '">' + escapeHtml(amountText) + '</div>',
+      '</div>'
+    ].join('');
+  }).join('');
+  const next = shown < rows.length
+    ? '<button type="button" class="home-gold-ledger-see-more" data-home-gold-see-more>See more</button>'
+    : '';
+  return list + next;
+}
+
+function ensureHomePersonalGoldLedgerDropdown() {
+  let dropdown = $('homeYourGoldLedgerDropdown');
+  if (dropdown) return dropdown;
+  dropdown = document.createElement('div');
+  dropdown.id = 'homeYourGoldLedgerDropdown';
+  dropdown.className = 'yesterday-recent-results-dropdown home-gold-ledger-dropdown';
+  dropdown.setAttribute('role', 'region');
+  dropdown.setAttribute('aria-label', 'Your Gold transactions');
+  dropdown.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(dropdown);
+  return dropdown;
+}
+
+function renderHomePersonalGoldLedgerDropdown() {
+  const dropdown = ensureHomePersonalGoldLedgerDropdown();
+  const previousScroll = dropdown.scrollTop;
+  dropdown.innerHTML = buildHomePersonalGoldLedgerHtml(homePersonalGoldLedgerRows, homePersonalGoldLedgerShown);
+  dropdown.scrollTop = previousScroll;
+}
+
+function refreshHomePersonalGoldLedgerDropdown() {
+  if (!homePersonalGoldLedgerOpen) return;
+  homePersonalGoldLedgerRows = buildHomePersonalGoldLedgerRows(state);
+  renderHomePersonalGoldLedgerDropdown();
+}
+
+function positionHomePersonalGoldLedgerDropdown() {
+  if (!homePersonalGoldLedgerOpen) return;
+  const trigger = $('homeYourGoldLedgerTrigger');
+  const dropdown = $('homeYourGoldLedgerDropdown');
+  const card = trigger?.closest('.home-scoreboard-card');
+  if (!trigger || !dropdown || !card) return;
+  const rect = trigger.getBoundingClientRect();
+  const cardRect = card.getBoundingClientRect();
+  const toolbarHeightRaw = getComputedStyle(document.documentElement).getPropertyValue('--tp-toolbar-height');
+  const toolbarHeight = Number.parseFloat(toolbarHeightRaw) || 88;
+  const width = Math.min(340, Math.max(rect.width, window.innerWidth - 24));
+  const left = Math.min(Math.max(12, rect.left), Math.max(12, window.innerWidth - width - 12));
+  const availableHeight = Math.max(92, window.innerHeight - cardRect.bottom - toolbarHeight - 18);
+  dropdown.style.left = Math.round(left) + 'px';
+  dropdown.style.top = Math.round(cardRect.bottom) + 'px';
+  dropdown.style.width = Math.round(width) + 'px';
+  dropdown.style.maxHeight = Math.round(availableHeight) + 'px';
+}
+
+function scheduleHomePersonalGoldLedgerPosition() {
+  if (!homePersonalGoldLedgerOpen || homePersonalGoldLedgerPositionFrame) return;
+  homePersonalGoldLedgerPositionFrame = requestAnimationFrame(() => {
+    homePersonalGoldLedgerPositionFrame = 0;
+    positionHomePersonalGoldLedgerDropdown();
+  });
+}
+
+function closeHomePersonalGoldLedgerDropdown() {
+  homePersonalGoldLedgerOpen = false;
+  const trigger = $('homeYourGoldLedgerTrigger');
+  const dropdown = $('homeYourGoldLedgerDropdown');
+  if (trigger) {
+    trigger.classList.remove('is-gold-ledger-open');
+    trigger.setAttribute('aria-expanded', 'false');
+  }
+  if (dropdown) {
+    dropdown.classList.remove('is-open');
+    dropdown.setAttribute('aria-hidden', 'true');
+  }
+}
+
+function openHomePersonalGoldLedgerDropdown() {
+  const trigger = $('homeYourGoldLedgerTrigger');
+  if (!trigger) return;
+  closeYesterdayRecentResultsDropdown();
+  homePersonalGoldLedgerShown = HOME_GOLD_LEDGER_PAGE_SIZE;
+  homePersonalGoldLedgerRows = buildHomePersonalGoldLedgerRows(state);
+  const dropdown = ensureHomePersonalGoldLedgerDropdown();
+  dropdown.scrollTop = 0;
+  renderHomePersonalGoldLedgerDropdown();
+  homePersonalGoldLedgerOpen = true;
+  trigger.classList.add('is-gold-ledger-open');
+  trigger.setAttribute('aria-expanded', 'true');
+  dropdown.setAttribute('aria-hidden', 'false');
+  positionHomePersonalGoldLedgerDropdown();
+  requestAnimationFrame(() => {
+    if (homePersonalGoldLedgerOpen) dropdown.classList.add('is-open');
+  });
+}
+
+function toggleHomePersonalGoldLedgerDropdown() {
+  if (homePersonalGoldLedgerOpen) closeHomePersonalGoldLedgerDropdown();
+  else openHomePersonalGoldLedgerDropdown();
+}
+
+function bindHomePersonalGoldLedgerDropdown() {
+  if (homePersonalGoldLedgerBound) return;
+  const trigger = $('homeYourGoldLedgerTrigger');
+  if (!trigger) return;
+  const dropdown = ensureHomePersonalGoldLedgerDropdown();
+  trigger.addEventListener('click', () => toggleHomePersonalGoldLedgerDropdown());
+  trigger.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    toggleHomePersonalGoldLedgerDropdown();
+  });
+  dropdown.addEventListener('click', event => {
+    const more = event.target.closest('[data-home-gold-see-more]');
+    if (!more) {
+      closeHomePersonalGoldLedgerDropdown();
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const previousHeight = dropdown.scrollHeight;
+    homePersonalGoldLedgerShown = Math.min(
+      homePersonalGoldLedgerRows.length, homePersonalGoldLedgerShown + HOME_GOLD_LEDGER_PAGE_SIZE
+    );
+    renderHomePersonalGoldLedgerDropdown();
+    dropdown.scrollTop += Math.max(0, dropdown.scrollHeight - previousHeight);
+    dropdown.querySelector('[data-home-gold-see-more]')?.focus({ preventScroll: true });
+  });
+  document.addEventListener('click', event => {
+    if (!homePersonalGoldLedgerOpen) return;
+    if (!trigger.contains(event.target) && !dropdown.contains(event.target)) {
+      closeHomePersonalGoldLedgerDropdown();
+    }
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !homePersonalGoldLedgerOpen) return;
+    closeHomePersonalGoldLedgerDropdown();
+    trigger.focus();
+  });
+  window.addEventListener('resize', scheduleHomePersonalGoldLedgerPosition, { passive: true });
+  window.addEventListener('orientationchange', scheduleHomePersonalGoldLedgerPosition);
+  window.addEventListener('scroll', scheduleHomePersonalGoldLedgerPosition, { passive: true });
+  homePersonalGoldLedgerBound = true;
+}
+/* HOME_PERSONAL_GOLD_LEDGER_END */
 
 function computeCurrentYouStreak(){
   const rows = getCompletedYouMatchupsForStats();
