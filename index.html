@@ -7192,11 +7192,15 @@ function getHomePersonalGoldLedgerSource() {
 function buildHomePersonalGoldLedgerRows(candidateState, playerId = 'YOU') {
   const ledger = Array.isArray(candidateState?.goldLedger) ? candidateState.goldLedger : [];
   const official = ledger.filter(row => row && String(row.playerId || '') === playerId);
-  if (official.length) return official.slice().sort((a, b) =>
+  // Older winning margins were consolidated into the official opening
+  // balance. Keep those historical wins visible *alongside* later transactions
+  // instead of hiding them as soon as the first theft/interest entry appears.
+  // Historical entries remain display-only and never affect the Gold balance.
+  const historical = buildHomePersonalHistoricalGoldRows(candidateState, playerId);
+  return [...official, ...historical].sort((a, b) =>
     String(b.createdAtISO || b.dateKey || '').localeCompare(String(a.createdAtISO || a.dateKey || ''))
     || String(b.id || '').localeCompare(String(a.id || ''))
   );
-  return buildHomePersonalHistoricalGoldRows(candidateState, playerId);
 }
 
 function buildHomePersonalHistoricalGoldRows(candidateState, playerId = 'YOU') {
@@ -7288,8 +7292,8 @@ function buildHomePersonalGoldLedgerHtml(rows, shown = HOME_GOLD_LEDGER_PAGE_SIZ
   const next = shown < rows.length
     ? '<button type="button" class="home-gold-ledger-see-more" data-home-gold-see-more>See more</button>'
     : '';
-  const historicalNote = rows[0]?.__homeHistoricalGold
-    ? '<div class="home-gold-ledger-history-note">Historical winning margins from saved games before the ledger began. These are not separate transactions or extra Gold.</div>'
+  const historicalNote = rows.some(row => row.__homeHistoricalGold)
+    ? '<div class="home-gold-ledger-history-note">Historical wins are shown for reference. Their Gold was already included in your opening balance, not added again.</div>'
     : '';
   return historicalNote + list + next;
 }
