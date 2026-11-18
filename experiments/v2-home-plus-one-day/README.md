@@ -1,7 +1,7 @@
 # V2 ownership for Home +1 Day
 
 [Full Home acceptance](FULL-HOME.md) exercises the synthetic V2 date through
-startup and saving, with the [separate Inbox blocker](INBOX-STARTUP-LOSS.md) recorded.
+startup and saving, including the [Inbox startup preservation regression](INBOX-STARTUP-LOSS.md).
 
 Clicking the real Home `+1d` button moved the synthetic Task from November 18 to
 November 19, 2026. A new page and a new Chromium process both read November 19

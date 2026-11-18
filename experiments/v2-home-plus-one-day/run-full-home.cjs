@@ -8,6 +8,8 @@ const prefix='/experiments/v2-home-plus-one-day/full/';
 const marker='taskpoints_isolated_task_fixture_v1';
 const oldDate='2026-11-15',newDate='2026-11-16';
 const quietDate='2026-11-18';
+const inboxEventId='record:2026-11-17:SYN';
+const inboxKey='taskpoints_pending_inbox_state_v1';
 let browser,server,origin;
 const read=file=>fs.readFileSync(path.join(root,file),'utf8');
 
@@ -28,7 +30,7 @@ before(async()=>{
       const resolved=path.resolve(root,file);
       const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.svg':'image/svg+xml','.json':'application/json'}[path.extname(file)];
       if(!mime||!resolved.startsWith(root+path.sep)||file.startsWith('experiments/'))throw Error('Outside experiment');
-      const homeBundle=file==='scoring_core.js'&&new URL(req.headers.referer||'http://localhost').pathname===prefix+'index.html';
+      const homeBundle=file==='scoring_core.js'&&['index.html','inbox.html'].some(page=>new URL(req.headers.referer||'http://localhost').pathname===prefix+page);
       res.writeHead(200,{'Content-Type':mime,'Cache-Control':'no-store'});
       res.end(homeBundle?bundle:fs.readFileSync(resolved));
     }catch(_){res.writeHead(404);res.end();}
@@ -52,11 +54,11 @@ async function configureContext(context){
       const label=document.querySelector('.task-priority-card[data-task-id="t1"] .task-meta-line')?.textContent;
       if(label && ownedPaints.at(-1)!==label)ownedPaints.push(label);
     }).observe(document,{subtree:true,childList:true});
-    Error.stackTraceLimit=25;
+    Error.stackTraceLimit=36;
     const set=Storage.prototype.setItem,remove=Storage.prototype.removeItem;
     Storage.prototype.setItem=function(key,value){
       if(this===localStorage&&this.getItem(key)!==String(value)) {
-        const entry={key,stack:new Error().stack.split('\n').slice(2,25)};
+        const entry={key,stack:new Error().stack.split('\n').slice(2,36)};
         if(key==='taskpoints_v1'&&window.TaskPointsCore?.parseTaskPointsStorageJson){
           try {
             entry.inboxBefore=TaskPointsCore.parseTaskPointsStorageJson(this.getItem(key))?.inboxMessages?.length||0;
@@ -74,29 +76,31 @@ async function configureContext(context){
   };
   await context.addInitScript({content: `(${instrumentation})();\n${fs.readFileSync(path.join(__dirname,'full-home-owner.js'),'utf8')}`});
 }
-async function fixture(t,provided){
-  const context=provided||await browser.newContext({serviceWorkers:'block',timezoneId:'America/New_York'});
-  if(!provided)t.after(()=>context.close());
+async function fixture(t,provided,{beforeHome,coldCanonical=false}={}){
+  let context=provided||await browser.newContext({serviceWorkers:'block',timezoneId:'America/New_York'});
+  if(!provided){const seededContext=context;t.after(()=>seededContext.close());}
   await configureContext(context);
-  const page=await context.newPage(),errors=[];
+  let page=await context.newPage();
+  const errors=[];
   page.setDefaultTimeout(12000);
   page.on('pageerror',e=>errors.push(e.message));
   page.on('dialog',dialog=>dialog.dismiss());
-  await page.clock.setFixedTime(new Date(quietDate+'T17:00:00Z'));
+  await page.clock.install({time:new Date(quietDate+'T17:00:00Z')});
   await page.goto(origin+prefix+'seed.html');
   await page.addScriptTag({path:path.join(root,'scoring_core.js')});
   await page.evaluate(({oldDate,quietDate})=>{
     const snapshot={
       tasks:[{id:'t1',title:'Synthetic V2 target',status:'active',dueDateISO:oldDate,points:5,importance:'High',unknownTask:{keep:[0,null]}},
-        {id:'t2',title:'Synthetic unrelated Task',status:'active',dueDateISO:oldDate,points:3}],
-      habits:[{id:'h1',name:'Synthetic Habit',category:'habit',pointsPerDay:3,daysPerCompleteWeek:3,doneKeys:[],failedKeys:[],iceKeys:[]}],
+        {id:'t2',title:'Synthetic unrelated Task',status:'active',dueDateISO:oldDate,points:3,skills:[]}],
+      habits:[{id:'h1',name:'Synthetic Habit',category:'habit',pointsPerDay:3,daysPerCompleteWeek:3,doneKeys:[],failedKeys:[],iceKeys:[],timeOfDay:''}],
       players:[{id:'SYN',pid:'SYN',name:'Synthetic Player',imageId:'synthetic-image',baseline:50}],
-      gameHistory:[{id:'synthetic-game',dateISO:'2026-10-11',dateKey:'2026-10-11',playerId:'SYN',score:9}],
+      gameHistory:[{id:'synthetic-game',dateISO:'2026-10-11',dateKey:'2026-10-11',playerId:'SYN',score:9},
+        {id:'synthetic-inbox-score',dateISO:'2026-11-17',dateKey:'2026-11-17',playerId:'SYN',score:46}],
       goldEconomy:{version:1,launchDateKey:'2026-11-05',launchedAtISO:'2026-11-05T12:00:00Z',balances:{SYN:7}},
       goldLedger:[{id:'synthetic-gold',type:'opening_balance',playerId:'SYN',dateKey:'2026-11-05',amount:7,balanceAfter:7}],
-      inboxMessages:[{id:'synthetic-inbox',type:'record',eventDateKey:'2026-11-17',title:'Synthetic message',body:'Keep this',read:false,archived:false,createdAtISO:quietDate+'T10:00:00Z'}],
-      inboxStartedDateKey:'2026-11-01',goldTheftTop50InboxStartedDateKey:'2026-11-01',inboxProcessedEventIds:{'synthetic-inbox':true},
-      completions:[],reminders:[],matchups:[],schedule:[],opponentDripSchedules:[],
+      inboxStartedDateKey:'2026-11-01',goldTheftTop50InboxStartedDateKey:'2026-11-01',
+      completions:[],reminders:[],matchups:[{id:'synthetic-inbox-game',dateKey:'2026-11-17',dateISO:'2026-11-17',
+        playerAId:'SYN',playerBId:'YOU',scoreA:46,scoreB:0,winnerId:'SYN',matchupType:'exhibition'}],schedule:[],opponentDripSchedules:[],
       flexActions:[{id:'synthetic-flex',name:'Synthetic Flex',points:2,order:1,unknown:'keep'}],
       notes:'Synthetic Notes',scoringSettings:{},habitTagColors:{},unknownRoot:{keep:true}
     };
@@ -109,10 +113,43 @@ async function fixture(t,provided){
     sessionStorage.setItem('tpBootSeenThisSession','1');
     return TaskPointsCore.saveImageBlob('synthetic-image',new Blob([new Uint8Array([0,17,254,255])],{type:'image/png'}));
   },{oldDate,quietDate});
-  assert.equal(await page.evaluate(()=>TaskPointsCore.readTaskPointsStoredState().inboxMessages[0].id),'synthetic-inbox');
+  await page.goto(origin+prefix+'inbox.html');
+  const generated=await page.evaluate(id=>{
+    const result=TaskPointsInbox.populate({force:true});
+    const saved=TaskPointsCore.readTaskPointsStoredState();
+    return {changed:result.changed,message:saved.inboxMessages?.find(item=>item.id===id),
+      journaled:TaskPointsCore.getInboxMutationJournalStatus().pending};
+  },inboxEventId);
+  assert.equal(generated.changed,true);
+  assert.equal(generated.journaled,true);
+  assert.equal(generated.message?.title,'Top-50 score');
+  await page.clock.fastForward(9000);
+  await page.waitForFunction(({id,key})=>localStorage.getItem(key)===null
+    && TaskPointsCore.parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1')).inboxMessages?.some(item=>item.id===id),{id:inboxEventId,key:inboxKey});
+  const message=generated.message;
+  if(beforeHome)await beforeHome(page,message);
+  if(coldCanonical){
+    // The producer may already have made a verified native mirror. A fresh
+    // profile with the actual canonical bytes exercises the fallback without
+    // touching that backup or overriding any startup safety guard.
+    const source=await page.evaluate(()=>Object.entries(localStorage));
+    context=await browser.newContext({serviceWorkers:'block',timezoneId:'America/New_York'});
+    const coldContext=context;
+    t.after(()=>coldContext.close());
+    await configureContext(context);
+    page=await context.newPage();
+    page.on('pageerror',error=>errors.push(error.message));
+    page.on('dialog',dialog=>dialog.dismiss());
+    await page.clock.setFixedTime(new Date(quietDate+'T18:00:00Z'));
+    await page.goto(origin+prefix+'seed.html');
+    await page.evaluate(entries=>{
+      for(const [key,value] of entries)localStorage.setItem(key,value);
+      sessionStorage.setItem('tpBootSeenThisSession','1');
+    },source);
+  }
   await page.goto(origin+prefix+'index.html');await waitHome(page);
   assert.deepEqual(errors,[],'uncaught full Home startup errors');
-  return {page,context,errors};
+  return {page,context,errors,message};
 }
 async function waitHome(page){
   await page.waitForFunction(()=>window.TaskPointsHomeLiveState?.getState()?.tasks?.length===2
@@ -128,7 +165,7 @@ const dates=page=>page.evaluate(()=>{
   return {home:home.tasks.find(t=>t.id==='t1')?.dueDateISO,
     legacy:TaskPointsCore.readTaskPointsStoredState().tasks.find(t=>t.id==='t1').dueDateISO};
 });
-async function partOfState(page){return page.evaluate(async()=>{
+async function partOfState(page){return page.evaluate(async inboxEventId=>{
   const s=TaskPointsCore.readTaskPointsStoredState();
   const image=await TaskPointsCore.getImageBlob('synthetic-image');
   // Home adds three derived display counters during ordinary saves. Compare
@@ -136,14 +173,14 @@ async function partOfState(page){return page.evaluate(async()=>{
   const {__completion,__failedStreak,__streak,...habit}=s.habits.find(h=>h.id==='h1');
   return {task:s.tasks.find(t=>t.id==='t2'),habit,
     game:s.gameHistory.find(g=>g.id==='synthetic-game'||g.playerId==='SYN'),
-    gold:s.goldLedger?.find(g=>g.id==='synthetic-gold'),inbox:s.inboxMessages?.find(r=>r.id==='synthetic-inbox'),
+    gold:s.goldLedger?.find(g=>g.id==='synthetic-gold'),inbox:s.inboxMessages?.find(r=>r.id===inboxEventId),
     projects:localStorage.getItem('tp_projects_v1'),notes:localStorage.getItem('taskpoints_notes_v1'),
     flex:s.flexActions?.find(action=>action.id==='synthetic-flex'),
     unknownTask:s.tasks.find(t=>t.id==='t1').unknownTask,
     unknownRaw:localStorage.getItem('synthetic_unknown_key'),
     quarantine:localStorage.getItem('taskpoints_quarantined_snapshot'),
     image:[...new Uint8Array(await image.arrayBuffer())]};
-});}
+},inboxEventId);}
 async function installOwner(page){
   await page.evaluate(async marker=>{
     const api=TaskPointsStateRuntimeV2;
@@ -211,7 +248,7 @@ async function assertV2(page,expected){
 
 test('Home to Notes and back retains the acknowledged Task date while the other post-startup records survive navigation',async t=>{
   const {page}=await acknowledged(t),before=await owned(page),unrelated=await partOfState(page);
-  for(const collection of ['task','habit','game','gold','projects','notes','flex','unknownTask'])assert.ok(unrelated[collection],collection+' witness missing');
+  for(const collection of ['task','habit','game','gold','inbox','projects','notes','flex','unknownTask'])assert.ok(unrelated[collection],collection+' witness missing');
   assert.deepEqual(unrelated.image,[0,17,254,255]);
   assert.equal(unrelated.unknownRaw,'{opaque unrecognized data');
   assert.equal(unrelated.quarantine,'{opaque snapshot evidence');
@@ -368,17 +405,22 @@ test('after Chromium process restart full Home renders the acknowledged V2 date'
 });
 
 
-test('existing Home startup loses the seeded Inbox message before V2 ownership starts',async t=>{
-  const {page}=await fixture(t);
-  const evidence=await page.evaluate(()=>({
+test('ordinary Home startup preserves the notification created and compacted by the real Inbox',async t=>{
+  const {page,message}=await fixture(t,undefined,{coldCanonical:true});
+  const evidence=await page.evaluate(id=>({
     marker:localStorage.getItem('taskpoints_isolated_task_fixture_v1'),
-    messages:TaskPointsCore.readTaskPointsStoredState().inboxMessages||[],
+    boot:window.__TP_HOME_BOOT_SOURCE,
+    processed:TaskPointsCore.parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1')).inboxProcessedEventIds?.[id],
+    normalSave:legacyWrites.some(w=>w.key==='taskpoints_v1'&&w.stack.some(frame=>frame.includes(' at save '))),
+    message:TaskPointsCore.parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1')).inboxMessages?.find(m=>m.id===id),
     writes:legacyWrites.filter(e=>e.key==='taskpoints_v1'&&e.inboxBefore>e.inboxAfter)
-  }));
+  }),message.id);
   assert.equal(evidence.marker,null);
-  assert.equal(evidence.messages.some(m=>m.id==='synthetic-inbox'),false);
-  assert.ok(evidence.writes.length>0);
-  console.log('EXISTING STARTUP BLOCKER Inbox loss stack:',evidence.writes[0].stack.filter(frame=>!frame.includes(' at Storage.')).slice(0,9).join(' | ').replaceAll(origin,'local'));
+  assert.match(evidence.boot,/^localStorage:/);
+  assert.deepEqual(evidence.message,message,JSON.stringify(evidence.writes));
+  assert.equal(evidence.processed,true);
+  assert.equal(evidence.normalSave,true,'ordinary Home startup must exercise the snapshot writer');
+  assert.equal(evidence.writes.length,0);
 });
 
 
@@ -478,4 +520,90 @@ test('an unreadable V2 receipt chain withholds the owned card on startup instead
   assert.equal(await page.locator('.task-priority-card[data-task-id="t2"]').count(),1);
   assert.deepEqual(await page.evaluate(()=>ownedPaints),[]);
   assert.equal((await dates(page)).legacy,oldDate);
+});
+
+
+function inboxState(page,id=inboxEventId){
+  return page.evaluate(({id,key})=>{
+    const canonical=TaskPointsCore.parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1'));
+    const effective=TaskPointsCore.readTaskPointsStoredState();
+    return {canonical:canonical.inboxMessages?.find(m=>m.id===id),
+      effective:effective.inboxMessages?.find(m=>m.id===id),journal:localStorage.getItem(key),processed:canonical.inboxProcessedEventIds?.[id]};
+  },{id,key:inboxKey});
+}
+
+async function saveOrdinaryHome(page){
+  assert.equal(await page.evaluate(()=>{
+    TaskPointsHomeLiveState.getState().syntheticInboxSaveWitness='Synthetic regular Home save';
+    return save('inbox-preservation-home-save',{immediateWrite:true,userInitiated:true});
+  }),true);
+  assert.equal(await page.evaluate(()=>TaskPointsCore.parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1')).syntheticInboxSaveWitness),'Synthetic regular Home save');
+}
+
+test('pending Inbox edits survive startup and ordinary Home save, then compact and reopen in Inbox',async t=>{
+  let edited,pending;
+  const {page,message}=await fixture(t,undefined,{beforeHome:async(page,message)=>{
+    edited={...message,read:true,unknownInboxField:{retained:['exact',null]}};
+    pending=await page.evaluate(({edited,key})=>{
+      TaskPointsCore.mergeAndSaveState({inboxMessages:[edited]},{savePath:'inbox-auto-populate',immediateWrite:true});
+      return localStorage.getItem(key);
+    },{edited,key:inboxKey});
+  }});
+  const loaded=await inboxState(page);
+  assert.deepEqual(loaded.canonical,message);
+  assert.deepEqual(loaded.effective,edited);
+  assert.equal(loaded.journal,pending);
+  await saveOrdinaryHome(page);
+  assert.deepEqual(await inboxState(page),loaded);
+  await page.reload();await waitHome(page);
+  assert.deepEqual((await inboxState(page)).effective,edited);
+  await page.clock.fastForward(9000);
+  await page.waitForFunction(key=>localStorage.getItem(key)===null,inboxKey);
+  await page.goto(origin+prefix+'inbox.html');
+  assert.deepEqual((await inboxState(page)).canonical,edited);
+  await page.locator('#inboxMessages').getByText('Top-50 score',{exact:true}).waitFor();
+});
+
+test('an explicit empty Inbox journal compacts the deletion and stale Home state cannot resurrect it',async t=>{
+  const {page,message}=await fixture(t);
+  const stale=await page.evaluate(()=>structuredClone(TaskPointsCore.readTaskPointsStoredState()));
+  await page.evaluate(()=>TaskPointsCore.mergeAndSaveState({inboxMessages:[]},{savePath:'inbox-auto-populate',immediateWrite:true}));
+  assert.deepEqual((await inboxState(page)).canonical,message);
+  assert.equal((await inboxState(page)).effective,undefined);
+  await saveOrdinaryHome(page);
+  assert.equal((await inboxState(page)).effective,undefined);
+  await page.clock.fastForward(9000);
+  await page.waitForFunction(key=>localStorage.getItem(key)===null,inboxKey);
+  assert.equal((await inboxState(page)).canonical,undefined);
+  await page.evaluate(stale=>TaskPointsCore.saveStateSnapshot(stale,{immediateWrite:true,savePath:'stale-home-snapshot'}),stale);
+  await page.reload();await waitHome(page);
+  const persisted=await inboxState(page);
+  assert.equal(persisted.canonical,undefined);
+  assert.equal(persisted.effective,undefined);
+  assert.equal(persisted.processed,true);
+  await page.goto(origin+prefix+'inbox.html');
+  assert.equal(await page.evaluate(()=>TaskPointsInbox.populate({force:true}).changed),false);
+  assert.equal(await page.locator('#inboxMessages > *').count(),0);
+});
+
+test('malformed Inbox evidence is preserved; fallback allows addition and refuses deletion',async t=>{
+  const raw='{malformed Inbox evidence';
+  const {page,message}=await fixture(t,undefined,{beforeHome:page=>page.evaluate(({raw,key})=>localStorage.setItem(key,raw),{raw,key:inboxKey})});
+  const initial=await inboxState(page);
+  assert.deepEqual(initial.canonical,message);
+  assert.deepEqual(initial.effective,message);
+  assert.equal(initial.journal,raw);
+  await saveOrdinaryHome(page);
+  await assert.rejects(page.evaluate(()=>TaskPointsCore.mergeAndSaveState({inboxMessages:[]},
+    {savePath:'inbox-auto-populate',immediateWrite:true})),/fallback cannot replace messages/);
+  assert.deepEqual(await inboxState(page),initial);
+  const extra={...message,id:'synthetic-additive-fallback'};
+  await page.evaluate(extra=>{
+    const inboxMessages=TaskPointsCore.readTaskPointsStoredState().inboxMessages;
+    return TaskPointsCore.mergeAndSaveState({inboxMessages:[...inboxMessages,extra]},
+      {savePath:'inbox-auto-populate',immediateWrite:true});
+  },extra);
+  await page.reload();await waitHome(page);
+  assert.deepEqual(await inboxState(page),initial);
+  assert.deepEqual((await inboxState(page,extra.id)).canonical,extra);
 });

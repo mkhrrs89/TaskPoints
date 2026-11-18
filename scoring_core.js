@@ -6862,6 +6862,11 @@ function fastEnsureStateShape(s) {
   // Internal-only short-lived reuse. Never trust a prior parse unless its exact
   // localStorage bytes are still current when sticky-field safeguards run.
   const mergedSaveSourceByState = new WeakMap();
+  const INBOX_JOURNAL_KEY = 'taskpoints_pending_inbox_state_v1';
+  const INBOX_SNAPSHOT_FIELDS = ['inboxMessages', 'inboxProcessedEventIds',
+    'inboxStartedDateKey', 'goldTheftTop50InboxStartedDateKey'];
+  const INBOX_SNAPSHOT_SAVE_PATHS = new Set(['inbox-auto-populate', 'season-series-upset-inbox',
+    'gold-theft-top50-inbox', 'inbox-journal-compaction']);
 
   function mergeState(nextState, options = {}) {
     const storageKey = options.storageKey || STORAGE_KEY;
@@ -6878,6 +6883,10 @@ function fastEnsureStateShape(s) {
         // storage payload may be reused, and the bytes are checked at save time.
         if (options.captureSaveSource === true) {
           sourceForStickyCheck = { raw: raw ?? null, storageKey, parsed: existing };
+          if (storageKey === STORAGE_KEY && INBOX_SNAPSHOT_SAVE_PATHS.has(options.savePath)) {
+            sourceForStickyCheck.inboxFields = INBOX_SNAPSHOT_FIELDS.filter(key =>
+              Object.prototype.hasOwnProperty.call(nextState || {}, key) && nextState[key] !== undefined);
+          }
         }
       } catch (e) {
         console.warn('Failed to parse existing TaskPoints storage; saving fresh state.', e);
@@ -7420,11 +7429,12 @@ return { state: merged, storageKey };
     }
   }
 
-  function preserveStickyFieldsBeforeSave(candidateState, storageKey = STORAGE_KEY, options = {}, verifiedSource = null) {
+  function preserveStickyFieldsBeforeSave(candidateState, storageKey = STORAGE_KEY, options = {}, verifiedSource = null, inboxCheck = null) {
     const next = candidateState && typeof candidateState === 'object' ? { ...candidateState } : {};
     let latest = null;
+    let currentRaw;
     try {
-      const currentRaw = localStorage.getItem(storageKey);
+      currentRaw = localStorage.getItem(storageKey);
       if (verifiedSource
         && verifiedSource.storageKey === storageKey
         && verifiedSource.raw === currentRaw
@@ -7436,6 +7446,49 @@ return { state: merged, storageKey };
       }
     } catch (_) {
       latest = null;
+    }
+    if (storageKey === STORAGE_KEY && options.allowDestructiveOverwrite !== true) {
+      const edits = verifiedSource?.inboxFields || [];
+      const hasOwn = (value, key) => value != null && Object.prototype.hasOwnProperty.call(value, key);
+      if (INBOX_SNAPSHOT_FIELDS.some(key => hasOwn(latest, key) || hasOwn(next, key)) || edits.length) {
+        if (currentRaw === undefined || latest === null || (edits.length && verifiedSource.raw !== currentRaw)) {
+          throw new Error('Inbox save source changed or is unreadable');
+        }
+        if (inboxCheck) inboxCheck.raw = currentRaw;
+        if (edits.length) {
+          const journal = localStorage.getItem(INBOX_JOURNAL_KEY);
+          if (inboxCheck) inboxCheck.journal = journal;
+          if (journal !== null && options.savePath !== 'inbox-journal-compaction') {
+            if (journal !== options.inboxFallbackJournalRaw) throw new Error('Inbox save has unresolved journal evidence');
+            // The compatibility fallback can still add a notification while
+            // malformed evidence is retained. It cannot discard known data.
+            const before = latest.inboxMessages;
+            const after = next.inboxMessages;
+            if (edits.includes('inboxMessages') && Array.isArray(before)
+              && (!Array.isArray(after) || before.some(row => !after.some(candidate => deepEqual(row, candidate))))) {
+              throw new Error('Inbox fallback cannot replace messages while journal evidence is unreadable');
+            }
+            const eventEntries = value => Array.isArray(value)
+              ? value.map(id => [String(id), true]) : Object.entries(value || {});
+            const savedEvents = new Map(eventEntries(next.inboxProcessedEventIds));
+            if (edits.includes('inboxProcessedEventIds')
+              && eventEntries(latest.inboxProcessedEventIds).some(([id, value]) => !deepEqual(savedEvents.get(id), value))) {
+              throw new Error('Inbox fallback cannot replace processed-event evidence while the journal is unreadable');
+            }
+
+          }
+        }
+        // Only an Inbox merge may change canonical Inbox fields. A routine
+        // snapshot may omit them or contain stale messages or event markers.
+        // Preserve absence and empty lists exactly, so deletions stay deleted.
+        if (currentRaw !== null) {
+          for (const key of INBOX_SNAPSHOT_FIELDS) {
+            if (edits.includes(key)) continue;
+            if (hasOwn(latest, key)) next[key] = latest[key];
+            else delete next[key];
+          }
+        }
+      }
     }
     const allowGeneratedCacheClear = Boolean(options.allowGeneratedCacheClear || options.storageEmergencyCompaction);
     const stickyArrayFields = [
@@ -7680,7 +7733,8 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
     const attemptSave = (candidate, trimmed, stage = 'initial', attemptOptions = {}) => {
       const stickyOptions = { ...options, ...attemptOptions };
       const endSticky = global.TaskPointsPerf?.span?.('storage.save.stickyProtection');
-      const candidateWithSticky = preserveStickyFieldsBeforeSave(candidate, storageKey, stickyOptions, verifiedMergeSource);
+      const inboxCheck = {};
+      const candidateWithSticky = preserveStickyFieldsBeforeSave(candidate, storageKey, stickyOptions, verifiedMergeSource, inboxCheck);
       endSticky?.({ savePath, stage });
       const storedBytes = getStorageKeySizeBytes(storageKey);
       const candidateBytes = getJsonSizeBytes(candidateWithSticky);
@@ -7753,6 +7807,10 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
           chosenStorageBytes,
           snapshot: storagePlan.packedState
         });
+      }
+      if ((inboxCheck.raw !== undefined && localStorage.getItem(storageKey) !== inboxCheck.raw)
+        || (inboxCheck.journal !== undefined && localStorage.getItem(INBOX_JOURNAL_KEY) !== inboxCheck.journal)) {
+        throw new Error('Inbox save source changed before snapshot replacement');
       }
       try {
         safeReplaceTaskPointsStorage(storageKey, storagePlan.chosenRaw);
@@ -7980,11 +8038,15 @@ const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
     const warningState = appendStorageWarning(compactStateForLocalStorage(state), quotaWarning);
     if (root) root.__tpQuotaSaveBlockedUntil = Date.now() + TASKPOINTS_SAVE_BLOCK_COOLDOWN_MS;
     try {
+      const inboxCheck = {};
       const warningRaw = buildOptimizedTaskPointsStorageRaw(preserveStickyFieldsBeforeSave(warningState, storageKey, {
         ...options,
         allowGeneratedCacheClear: true,
         storageEmergencyCompaction: true
-      })).chosenRaw;
+      }, null, inboxCheck)).chosenRaw;
+      if (inboxCheck.raw !== undefined && localStorage.getItem(storageKey) !== inboxCheck.raw) {
+        throw new Error('Inbox save source changed before storage warning replacement');
+      }
       safeReplaceTaskPointsStorage(storageKey, warningRaw);
     } catch (warningErr) {
       console.warn('TaskPointsCore: unable to persist storage warning after quota failure.', warningErr);
