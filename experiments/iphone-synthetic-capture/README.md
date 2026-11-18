@@ -1,5 +1,7 @@
 # Synthetic iPhone storage-capture milestone
 
+Physical-device update: [owner-reported iPhone results and the next bounded task](DEVICE-RESULTS.md). All eleven reported checks succeeded; these are separate from automated test results.
+
 Standalone experiment on `experiment/v2-transfer-roundtrip`, for draft PR #1004.
 Nothing imports TaskPoints application code or activates V2. No deployment or real
 TaskPoints data access is authorized by this milestone. The previous transfer and
@@ -152,11 +154,11 @@ For local manual review only, serve `site/` on a dedicated localhost port, for e
 python3 -m http.server 8765 --bind 127.0.0.1 --directory experiments/iphone-synthetic-capture/site
 ```
 
-## Next specific action — manual upload
+## Next specific action — source capture entry proof
 
-The owner approved only manual upload to a new dedicated Pages project. Download
-`manual-upload/tp-synthetic-capture-taskpoints.zip` and follow
-[the manual upload instructions](MANUAL-UPLOAD.md). Confirm Cloudflare's assigned
-hostname matches the package before deploying; otherwise stop and request a revised
-ZIP. No automatic deployment is authorized. After upload, verify the live test site
-before starting the eight iPhone steps above.
+The owner reports successful physical-iPhone testing; see
+[the recorded observations](DEVICE-RESULTS.md). Manual-upload instructions remain
+available as historical packaging guidance. The next recommended implementation
+is a capture-only entry path for the existing TaskPoints Home Screen context,
+proved with synthetic TaskPoints storage before any production delivery or access.
+No new deployment, live data capture, V2 activation or safety relaxation is approved.

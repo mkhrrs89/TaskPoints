@@ -86,6 +86,8 @@ extraction of the ZIP, including the actual packaged config at a locally simulat
 HTTPS origin. It does not contact or deploy that hostname. **33 tests passed, 0 failed/cancelled/skipped.** Results are in
 `manual-upload/package-tests.tap`.
 
-No live hosting, Cloudflare-assigned hostname or actual iPhone behavior has yet been
-verified. Main, the V2 base, TaskPoints hosting, real data and existing safety
+At package preparation, live hosting, the assigned hostname and iPhone behavior
+had not been verified. The owner subsequently reported successful physical-iPhone
+testing; see [DEVICE-RESULTS.md](DEVICE-RESULTS.md). The assistant has not independently
+verified the live hostname or deployed bytes. Main, the V2 base, TaskPoints hosting, real data and existing safety
 requirements remain unchanged. Draft PR #1004 is not merged; V2 stays inactive.
