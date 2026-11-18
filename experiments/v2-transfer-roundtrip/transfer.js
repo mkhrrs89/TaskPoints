@@ -134,7 +134,7 @@
         const [keys,values]=await Promise.all([req(s.getAllKeys()),req(s.getAll())]);
         return {name,keyPath:s.keyPath,autoIncrement:s.autoIncrement,indexes,keys,values};
       });
-      const raw=await Promise.all(reads); await completion;
+      const raw=(await Promise.all([...reads,completion])).slice(0,-1);
       for(const s of raw) {
         // Deleted generated keys leave an invisible high-water mark. Guessing
         // it from current keys would not be lossless: refuse these stores.
@@ -298,5 +298,5 @@
     if(new TextEncoder().encode(body).length>LIMIT) fail('package_size_limit');
     return JSON.stringify({body,sha256:await digest(body)});
   }
-  window.TransferRehearsal={capture,exportPackage,restore,inspect,exportWorkingCopy,CONTROL};
+  window.TransferRehearsal={capture,exportPackage,verifyPackage:validate,restore,inspect,exportWorkingCopy,CONTROL};
 })();

@@ -1,5 +1,8 @@
 # Synthetic isolated-origin transfer rehearsal
 
+Capture-only entry follow-up: [synthetic proof and unresolved existing-app delivery
+blocker](../v2-capture-entry/README.md).
+
 TaskPoints-specific follow-up: [validation, startup boundaries and iPhone capture
 next step](TASKPOINTS-VALIDATION.md). The original generic rehearsal below remains
 unchanged in scope; the follow-up runs selected actual V1 modules on synthetic

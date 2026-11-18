@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TaskPoints capture-only experiment</title>
+<link rel="stylesheet" href="/experiments/v2-capture-entry/capture.css">
+<script src="/experiments/v2-capture-entry/readonly-guard.js"></script>
+<script defer src="/experiments/v2-transfer-roundtrip/transfer.js"></script>
+<script defer src="/experiments/v2-capture-entry/capture.js"></script>
+</head><body><main><h1>TaskPoints capture only</h1>
+<p>Synthetic local experiment. Ordinary startup and V2 are not running. No journal replay, repair, import or cleanup is allowed.</p>
+<p id="entry" role="status">Checking capture-only entry…</p>
+<p id="mode"></p>
+<button id="capture" disabled>Capture synthetic TaskPoints storage</button>
+<button id="cancel" disabled>Cancel capture</button>
+<p id="status" role="status">No package prepared.</p>
+<a id="download" download="taskpoints-synthetic-lossless.json" hidden>Save complete package</a>
+<h2>Reopen saved package</h2><input id="file" type="file" accept=".json,application/json" disabled>
+<p id="verification" role="status">Not verified.</p><pre id="details"></pre>
+<p>No automatic return to TaskPoints. Closing or backgrounding cancels capture readiness. This experiment cannot establish safe delivery to an already-open production Home Screen app.</p>
+</main></body></html>

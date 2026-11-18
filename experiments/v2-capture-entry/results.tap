@@ -1,0 +1,215 @@
+TAP version 13
+# Chromium 156.0.8078.79 ; synthetic localhost only; no actual iPhone delivery
+# Subtest: capture request is selected before V1 worker, HTML, preload or startup scripts are consulted
+ok 1 - capture request is selected before V1 worker, HTML, preload or startup scripts are consulted
+  ---
+  duration_ms: 2348.617604
+  type: 'test'
+  ...
+# Subtest: all actual storage layouts, every inventoried key, images and malformed recovery evidence survive capture and independent restore readback
+ok 2 - all actual storage layouts, every inventoried key, images and malformed recovery evidence survive capture and independent restore readback
+  ---
+  duration_ms: 1777.239597
+  type: 'test'
+  ...
+# Subtest: saved download reopens in capture mode after restart; original package retained outside source storage
+ok 3 - saved download reopens in capture mode after restart; original package retained outside source storage
+  ---
+  duration_ms: 1342.471989
+  type: 'test'
+  ...
+# Subtest: unselected requests return the exact existing worker response and original request/env/context identities
+ok 4 - unselected requests return the exact existing worker response and original request/env/context identities
+  ---
+  duration_ms: 5.628155
+  type: 'test'
+  ...
+# Subtest: invalid selected entry never falls back: /?tp_capture=wrong
+ok 5 - invalid selected entry never falls back: /?tp_capture=wrong
+  ---
+  duration_ms: 0.782314
+  type: 'test'
+  ...
+# Subtest: invalid selected entry never falls back: /?tp_capture=synthetic-v1&tp_capture=synthetic-v1
+ok 6 - invalid selected entry never falls back: /?tp_capture=synthetic-v1&tp_capture=synthetic-v1
+  ---
+  duration_ms: 0.581762
+  type: 'test'
+  ...
+# Subtest: invalid selected entry never falls back: /settings.html?tp_capture=synthetic-v1
+ok 7 - invalid selected entry never falls back: /settings.html?tp_capture=synthetic-v1
+  ---
+  duration_ms: 0.383276
+  type: 'test'
+  ...
+# Subtest: production hostname, disabled experiment and missing capture HTML all refuse without ordinary startup
+ok 8 - production hostname, disabled experiment and missing capture HTML all refuse without ordinary startup
+  ---
+  duration_ms: 0.921871
+  type: 'test'
+  ...
+# Subtest: a swallowed local method writer is detected and forbids a package
+ok 9 - a swallowed local method writer is detected and forbids a package
+  ---
+  duration_ms: 820.005454
+  type: 'test'
+  ...
+# Subtest: a swallowed local assignment writer is detected and forbids a package
+ok 10 - a swallowed local assignment writer is detected and forbids a package
+  ---
+  duration_ms: 791.250282
+  type: 'test'
+  ...
+# Subtest: a swallowed session delete writer is detected and forbids a package
+ok 11 - a swallowed session delete writer is detected and forbids a package
+  ---
+  duration_ms: 811.454515
+  type: 'test'
+  ...
+# Subtest: a swallowed IDB readwrite writer is detected and forbids a package
+ok 12 - a swallowed IDB readwrite writer is detected and forbids a package
+  ---
+  duration_ms: 835.811755
+  type: 'test'
+  ...
+# Subtest: a swallowed database deletion writer is detected and forbids a package
+ok 13 - a swallowed database deletion writer is detected and forbids a package
+  ---
+  duration_ms: 826.044819
+  type: 'test'
+  ...
+# Subtest: a swallowed database creation writer is detected and forbids a package
+ok 14 - a swallowed database creation writer is detected and forbids a package
+  ---
+  duration_ms: 805.351124
+  type: 'test'
+  ...
+# Subtest: a swallowed cookie writer is detected and forbids a package
+ok 15 - a swallowed cookie writer is detected and forbids a package
+  ---
+  duration_ms: 887.201277
+  type: 'test'
+  ...
+# Subtest: a swallowed cache writer is detected and forbids a package
+ok 16 - a swallowed cache writer is detected and forbids a package
+  ---
+  duration_ms: 850.05173
+  type: 'test'
+  ...
+# Subtest: a swallowed service worker writer is detected and forbids a package
+ok 17 - a swallowed service worker writer is detected and forbids a package
+  ---
+  duration_ms: 861.856804
+  type: 'test'
+  ...
+# Subtest: independent source-write detector fails even if a writer bypasses the page guard using an earlier native reference
+ok 18 - independent source-write detector fails even if a writer bypasses the page guard using an earlier native reference
+  ---
+  duration_ms: 855.671472
+  type: 'test'
+  ...
+# Subtest: refuses auto-increment without source changes
+ok 19 - refuses auto-increment without source changes
+  ---
+  duration_ms: 846.659267
+  type: 'test'
+  ...
+# Subtest: refuses unsupported value without source changes
+ok 20 - refuses unsupported value without source changes
+  ---
+  duration_ms: 882.558921
+  type: 'test'
+  ...
+# Subtest: refuses missing catalog without source changes
+ok 21 - refuses missing catalog without source changes
+  ---
+  duration_ms: 955.978735
+  type: 'test'
+  ...
+# Subtest: refuses aborted read without source changes
+ok 22 - refuses aborted read without source changes
+  ---
+  duration_ms: 939.253382
+  type: 'test'
+  ...
+# Subtest: cancel during hashing cannot release a package; restart/retry works
+ok 23 - cancel during hashing cannot release a package; restart/retry works
+  ---
+  duration_ms: 1139.033809
+  type: 'test'
+  ...
+# Subtest: background during hashing cannot release a package; restart/retry works
+ok 24 - background during hashing cannot release a package; restart/retry works
+  ---
+  duration_ms: 1301.652613
+  type: 'test'
+  ...
+# Subtest: close during hashing cannot release a package; restart/retry works
+ok 25 - close during hashing cannot release a package; restart/retry works
+  ---
+  duration_ms: 2308.155277
+  type: 'test'
+  ...
+# Subtest: observed external-tab edit during hashing refuses the package and retains that edit
+ok 26 - observed external-tab edit during hashing refuses the package and retains that edit
+  ---
+  duration_ms: 1518.127206
+  type: 'test'
+  ...
+# Subtest: reopening truncated package refuses without touching source
+ok 27 - reopening truncated package refuses without touching source
+  ---
+  duration_ms: 1237.554365
+  type: 'test'
+  ...
+# Subtest: reopening checksum package refuses without touching source
+ok 28 - reopening checksum package refuses without touching source
+  ---
+  duration_ms: 1411.72455
+  type: 'test'
+  ...
+# Subtest: reopening unsupported version package refuses without touching source
+ok 29 - reopening unsupported version package refuses without touching source
+  ---
+  duration_ms: 1194.91236
+  type: 'test'
+  ...
+# Subtest: delivery blocker: navigation retains same-tab storage but cannot preserve an unsaved form automatically
+ok 30 - delivery blocker: navigation retains same-tab storage but cannot preserve an unsaved form automatically
+  ---
+  duration_ms: 988.006345
+  type: 'test'
+  ...
+# Subtest: existing service-worker evidence disables capture before source databases can be opened
+ok 31 - existing service-worker evidence disables capture before source databases can be opened
+  ---
+  duration_ms: 909.238707
+  type: 'test'
+  ...
+# Subtest: delivery blocker: legacy HTML served instead of the new entry can run an actual legacy writer despite the capture URL
+ok 32 - delivery blocker: legacy HTML served instead of the new entry can run an actual legacy writer despite the capture URL
+  ---
+  duration_ms: 785.437112
+  type: 'test'
+  ...
+# Subtest: an empty source context cannot produce a misleading successful package
+ok 33 - an empty source context cannot produce a misleading successful package
+  ---
+  duration_ms: 387.394045
+  type: 'test'
+  ...
+# Subtest: unknown supported database and binary records are included rather than filtered by the TaskPoints inventory
+ok 34 - unknown supported database and binary records are included rather than filtered by the TaskPoints inventory
+  ---
+  duration_ms: 1189.310353
+  type: 'test'
+  ...
+1..34
+# tests 34
+# suites 0
+# pass 34
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 32666.417759
