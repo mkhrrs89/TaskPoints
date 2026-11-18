@@ -1,9 +1,9 @@
 ;(function installTaskPointsAuditRunHabitCompletion(global) {
   'use strict';
 
-  // Audit diagnostics remain read-only. Only a user-initiated, successfully
-  // finished Run Audit action calls this small, journal-backed habit update.
-  // Loading the Audit page automatically does not credit the habit.
+  // Audit diagnostics remain read-only. Successfully completed manual
+  // and page-open audits call this small, journal-backed habit update.
+  // Internal diagnostic re-runs are not credited.
   const JOURNAL_SOURCE = 'audit-run-habit-completion';
   const nameKey = value => String(value == null ? '' : value)
     .trim().replace(/\s+/g, ' ').toLowerCase();

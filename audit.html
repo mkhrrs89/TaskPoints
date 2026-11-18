@@ -3828,10 +3828,10 @@ if (!dripSchedule) {
           try {
             executeAudit();
             setAuditProgressState('complete');
-            // The page auto-runs an Audit when opened. Only a successful
-            // explicit Run Audit button press should credit the habit.
+            // Successful automatic page-open audits and manual button audits
+            // both credit the habit. Internal re-runs remain diagnostic-only.
             // Credit errors must never turn a completed Audit into ERROR.
-            if (options.userInitiated === true) {
+            if (options.userInitiated === true || options.autoOnLoad === true) {
               try {
                 const credit = window.TaskPointsAuditRunHabitCompletion?.markForToday?.();
                 if (habitStatus) {
@@ -4002,8 +4002,8 @@ if (!dripSchedule) {
       bindPress('copyReportBtn', copyReport);
       bindPress('exportJsonBtn', exportJson);
 
-      // Auto-run on load for convenience
-      runAudit();
+      // Auto-run on load for convenience; count a successful run toward today's habit.
+      runAudit({ autoOnLoad: true });
     });
   </script>
   <div id="bottomToolbarMount"></div>

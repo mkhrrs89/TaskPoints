@@ -136,10 +136,10 @@ test('invalid points and journal write failure cannot falsely mark the habit', (
   assert.equal(broken.pending.length,0);
 });
 
-test('Audit page loads helper and only user-initiated successful audit triggers habit completion', () => {
+test('Audit page credits successful manual and page-open audits, but not internal re-runs or failures', () => {
   assert.match(page, /<script src="audit_run_habit_completion\.js\?v=/);
   assert.match(page, /bindPress\('runAuditBtn', \(\) => runAudit\(\{ userInitiated: true \}\)\)/);
-  assert.match(page, /\/\/ Auto-run on load for convenience\s+runAudit\(\)/);
+  assert.match(page, /runAudit\(\{ autoOnLoad: true \}\);\s*\}\);/);
   assert.match(page, /id="auditHabitCreditStatus"/);
   const start=page.indexOf('    function runAudit(options = {}) {');
   const end=page.indexOf('    function storeLastReport(',start);
@@ -159,15 +159,27 @@ test('Audit page loads helper and only user-initiated successful audit triggers 
     console:{error(){},warn(){}},String
   };
   vm.runInNewContext(block+';this.runAudit=runAudit;',context);
-  context.runAudit();
-  assert.equal(seen.filter(x=>x==='habit').length,0,'automatic page-load audit must not mark habit');
+  context.runAudit({autoOnLoad:true});
+  assert.ok(seen.indexOf('progress:complete')>=0);
+  assert.ok(seen.indexOf('habit')>seen.indexOf('progress:complete'),
+    'automatic page-load audit must credit the habit only after finishing');
+  assert.equal(elements.auditHabitCreditStatus.textContent,'Run Audit habit marked complete for today.');
+
   seen.length=0;
   context.runAudit({userInitiated:true});
-  assert.ok(seen.indexOf('progress:complete')>=0);
-  assert.ok(seen.indexOf('habit')>seen.indexOf('progress:complete'));
-  assert.equal(elements.auditHabitCreditStatus.textContent,'Run Audit habit marked complete for today.');
-  seen.length=0;fail=true;
-  context.runAudit({userInitiated:true});
-  assert.ok(seen.includes('progress:error'));
-  assert.ok(!seen.includes('habit'),'failed audits must never credit the habit');
+  assert.ok(seen.indexOf('habit')>seen.indexOf('progress:complete'),
+    'manual Run Audit button must still credit successful audits');
+
+  seen.length=0;
+  context.runAudit();
+  assert.ok(seen.includes('progress:complete'));
+  assert.ok(!seen.includes('habit'), 'internal diagnostic re-runs must not credit the habit');
+
+  fail=true;
+  for (const options of [{autoOnLoad:true}, {userInitiated:true}]) {
+    seen.length=0;
+    context.runAudit(options);
+    assert.ok(seen.includes('progress:error'));
+    assert.ok(!seen.includes('habit'), 'failed audits must never credit the habit');
+  }
 });
