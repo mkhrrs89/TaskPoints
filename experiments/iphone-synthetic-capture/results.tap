@@ -1,0 +1,203 @@
+TAP version 13
+# Chromium 156.0.8078.79 ; mobile viewport 390x844; NOT iOS/WebKit
+# Subtest: standalone assets, manifest scope and install icon work at iPhone-sized viewport
+ok 1 - standalone assets, manifest scope and install icon work at iPhone-sized viewport
+  ---
+  duration_ms: 1245.424036
+  type: 'test'
+  ...
+# Subtest: UI download is reopened from its saved file and every record is verified without import
+ok 2 - UI download is reopened from its saved file and every record is verified without import
+  ---
+  duration_ms: 1611.212633
+  type: 'test'
+  ...
+# Subtest: capture and package validation use no source storage writes
+ok 3 - capture and package validation use no source storage writes
+  ---
+  duration_ms: 1484.829308
+  type: 'test'
+  ...
+# Subtest: page restart retains identity and source records; prior export readiness is never persisted
+ok 4 - page restart retains identity and source records; prior export readiness is never persisted
+  ---
+  duration_ms: 1645.474218
+  type: 'test'
+  ...
+# Subtest: same storage identity across tabs and different identities across isolated contexts are displayed honestly
+ok 5 - same storage identity across tabs and different identities across isolated contexts are displayed honestly
+  ---
+  duration_ms: 3767.165461
+  type: 'test'
+  ...
+# Subtest: mode label recognizes standalone flag without claiming a real iOS installation
+ok 6 - mode label recognizes standalone flag without claiming a real iOS installation
+  ---
+  duration_ms: 518.873733
+  type: 'test'
+  ...
+# Subtest: cancelled capture offers no file and retry preserves source records
+ok 7 - cancelled capture offers no file and retry preserves source records
+  ---
+  duration_ms: 2655.279289
+  type: 'test'
+  ...
+# Subtest: background event and page closure discard in-flight exports without persistent success markers
+ok 8 - background event and page closure discard in-flight exports without persistent success markers
+  ---
+  duration_ms: 2013.1762
+  type: 'test'
+  ...
+# Subtest: partial creation after quota refuses export and resumes without replacing evidence
+ok 9 - partial creation after quota refuses export and resumes without replacing evidence
+  ---
+  duration_ms: 639.524354
+  type: 'test'
+  ...
+# Subtest: partial creation after dropped write refuses export and resumes without replacing evidence
+ok 10 - partial creation after dropped write refuses export and resumes without replacing evidence
+  ---
+  duration_ms: 709.822809
+  type: 'test'
+  ...
+# Subtest: partial creation after transaction abort refuses export and resumes without replacing evidence
+ok 11 - partial creation after transaction abort refuses export and resumes without replacing evidence
+  ---
+  duration_ms: 647.433644
+  type: 'test'
+  ...
+# Subtest: refuses unrelated localStorage without exporting or deleting it
+ok 12 - refuses unrelated localStorage without exporting or deleting it
+  ---
+  duration_ms: 451.151442
+  type: 'test'
+  ...
+# Subtest: refuses unrelated database without exporting or deleting it
+ok 13 - refuses unrelated database without exporting or deleting it
+  ---
+  duration_ms: 439.438765
+  type: 'test'
+  ...
+# Subtest: refuses session storage without exporting or deleting it
+ok 14 - refuses session storage without exporting or deleting it
+  ---
+  duration_ms: 480.962398
+  type: 'test'
+  ...
+# Subtest: refuses service worker without exporting or deleting it
+ok 15 - refuses service worker without exporting or deleting it
+  ---
+  duration_ms: 456.473847
+  type: 'test'
+  ...
+# Subtest: refuses missing catalog without exporting or deleting it
+ok 16 - refuses missing catalog without exporting or deleting it
+  ---
+  duration_ms: 512.107499
+  type: 'test'
+  ...
+# Subtest: unapproved HTTPS origin is refused before any storage access
+ok 17 - unapproved HTTPS origin is refused before any storage access
+  ---
+  duration_ms: 347.488937
+  type: 'test'
+  ...
+# Subtest: damaged, missing and unexpected synthetic source data are preserved and cannot be exported
+ok 18 - damaged, missing and unexpected synthetic source data are preserved and cannot be exported
+  ---
+  duration_ms: 595.687723
+  type: 'test'
+  ...
+# Subtest: concurrent source change invalidates capture instead of offering partial data
+ok 19 - concurrent source change invalidates capture instead of offering partial data
+  ---
+  duration_ms: 1407.395101
+  type: 'test'
+  ...
+# Subtest: concurrent creation in two tabs reuses one identity under the shared lock
+ok 20 - concurrent creation in two tabs reuses one identity under the shared lock
+  ---
+  duration_ms: 536.810166
+  type: 'test'
+  ...
+# Subtest: saved-file verification refuses truncated and clears any previous PASS
+ok 21 - saved-file verification refuses truncated and clears any previous PASS
+  ---
+  duration_ms: 1449.924527
+  type: 'test'
+  ...
+# Subtest: saved-file verification refuses checksum and clears any previous PASS
+ok 22 - saved-file verification refuses checksum and clears any previous PASS
+  ---
+  duration_ms: 1556.093687
+  type: 'test'
+  ...
+# Subtest: saved-file verification refuses missing record and clears any previous PASS
+ok 23 - saved-file verification refuses missing record and clears any previous PASS
+  ---
+  duration_ms: 1537.642215
+  type: 'test'
+  ...
+# Subtest: saved-file verification refuses unknown field and clears any previous PASS
+ok 24 - saved-file verification refuses unknown field and clears any previous PASS
+  ---
+  duration_ms: 1531.739497
+  type: 'test'
+  ...
+# Subtest: saved-file verification refuses oversized and clears any previous PASS
+ok 25 - saved-file verification refuses oversized and clears any previous PASS
+  ---
+  duration_ms: 1550.064274
+  type: 'test'
+  ...
+# Subtest: saved package verifies in an empty independent context without restoring its contents
+ok 26 - saved package verifies in an empty independent context without restoring its contents
+  ---
+  duration_ms: 1829.388355
+  type: 'test'
+  ...
+# Subtest: a failed recheck revokes an earlier prepared download
+ok 27 - a failed recheck revokes an earlier prepared download
+  ---
+  duration_ms: 1528.671467
+  type: 'test'
+  ...
+# Subtest: aborted readonly database transaction cannot produce an export
+ok 28 - aborted readonly database transaction cannot produce an export
+  ---
+  duration_ms: 552.81542
+  type: 'test'
+  ...
+# Subtest: unexpected image bytes are retained and refuse capture
+ok 29 - unexpected image bytes are retained and refuse capture
+  ---
+  duration_ms: 485.55786
+  type: 'test'
+  ...
+# Subtest: optional share path receives only the verified synthetic file and does not write source records
+ok 30 - optional share path receives only the verified synthetic file and does not write source records
+  ---
+  duration_ms: 1637.022542
+  type: 'test'
+  ...
+# Subtest: a dedicated approved HTTPS origin is usable; repository config remains undeployed
+ok 31 - a dedicated approved HTTPS origin is usable; repository config remains undeployed
+  ---
+  duration_ms: 1439.221278
+  type: 'test'
+  ...
+# Subtest: checking a now-incomplete fixture clears earlier export readiness without filling missing records
+ok 32 - checking a now-incomplete fixture clears earlier export readiness without filling missing records
+  ---
+  duration_ms: 1578.361335
+  type: 'test'
+  ...
+1..32
+# tests 32
+# suites 0
+# pass 32
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 39468.170609

@@ -1,0 +1,225 @@
+Existing protection validation; Node v22.23.5
+
+node --test --test-concurrency=2 tests/storage_compression.test.js tests/shadow_migration.test.js tests/task_mutation_journal_contract.test.js tests/inbox_mutation_journal_fast_path.test.js tests/player_editor_journal_perf.test.js tests/notes_cache_authority_contract.test.js tests/phase4_journal_recovery_contract.test.js tests/phase5c_verified_secondary_contract.test.js tests/storage_data_loss_fail_closed.test.js tests/recovery_failed_write_quarantine_contract.test.js tests/recovery_lock_separation_contract.test.js
+
+Compact TAP extraction (result lines, no source-code dump):
+ok 1 - Inbox auto-populate journals only the three Inbox fields instead of running a full save
+ok 2 - pending Inbox journal overlays both stored-state reads and loadAppState
+ok 3 - unrelated mergeAndSaveState calls still use the original full save path
+ok 4 - journal compacts into canonical state only after sustained quiet and then clears itself
+ok 5 - notification Inbox save paths share the small journal and preserve processed-event object maps
+ok 6 - legacy v1 array journals cannot wipe canonical processed-event IDs during upgrade or compaction
+not ok 7 - shared storage guard protects canonical Notes cache from stale routine saves
+ok 8 - Notes page establishes cache authority for edits, sync, and intentional clearing
+ok 9 - shared export and settings paths respect an established Notes cache authority
+ok 10 - Notes audit does not warn merely because an authoritative cache and state mirror differ
+ok 11 - responsive export loader cache-busts the authority-aware export script
+ok 12 - new page resumes a durable journal and closes a persisted sequence gap
+ok 13 - gap without a remaining journal queues one recovery write
+ok 14 - a failed recovery attempt does not create a retry storm
+ok 15 - off mode performs no recovery work
+ok 16 - does not consult IndexedDB during installation or replace the app read path
+ok 17 - promotes an exact hash- and count-verified copy only after a successful localStorage save
+ok 18 - rapid successful saves drain to the newest authoritative snapshot
+ok 19 - failed secondary mirror remains pending after IDB denial and explicit retry verifies it
+ok 20 - repeated secondary storage failures do not falsely claim completion or erase V1
+ok 21 - failed secondary retry always prefers newer V1 bytes, never the failed older snapshot
+ok 22 - a rejected authoritative write cannot queue or replace the verified secondary copy
+ok 23 - pending habit journal changes pause secondary mirroring
+ok 24 - includes an iPhone-compatible Storage prototype fallback
+ok 25 - Storage Health reads the actual verified secondary record without mutations
+ok 26 - reuses an exact shared source package while still parsing the IndexedDB readback independently
+ok 27 - Player rating is durably journaled without compressing the entire canonical snapshot
+ok 28 - Rapid updates coalesce; reloading another JS context replays the same durable values
+ok 29 - Profile edit followed by ratings edit preserves both unsaved field sets across reload
+ok 30 - An unrelated full save merges the journal and clears it only after readback validation
+ok 31 - A malformed or failed journal write does not delete or corrupt the primary state
+ok 32 - Player editor fast saves preserve hot-cache coherency
+ok 33 - Other edits retain protected full-save paths and UI never stages roster or photo mutations
+ok 34 - the recovery attempt becomes durable before the authoritative write boundary
+ok 35 - page teardown and normal expiry do not remove a durable failed-write quarantine
+ok 36 - successful verification normalizes and commits the durable attempt
+ok 37 - failed post-write verification reports that quarantine remains active
+ok 38 - restore loads the lock splitter before ownership enforcement and runtime
+ok 39 - a new attempt never overwrites or removes the prior committed recovery lock
+ok 40 - only a successfully finalized attempt replaces the committed generation
+ok 41 - a retained or competing attempt cannot be replaced by a new manual restore token
+ok 42 - normal TaskPoints tabs block the save and both journals while an attempt lock exists
+ok 43 - splitter routes uncommitted and committed records to different physical keys
+ok 44 - shadow migration layout preserves all known and future top-level fields
+ok 45 - shadow migration deterministic summary detects record changes and preserves duplicate source rows
+ok 46 - image verification inputs include profile/player references and can report missing images
+ok 47 - shadow migration helpers do not mutate legacy source state on planning or verification
+ok 48 - shadow migration failure falls back without changing the supplied legacy state
+ok 49 - restart planning uses deterministic index keys, preventing duplicate retry records
+ok 50 - canonical migration summary preserves omitted known collections without mutating source
+ok 51 - IndexedDB integration migrates records, future fields, images, and remains idempotent
+ok 52 - IndexedDB integration safely reports absent image DB and retries after an interrupted migration
+ok 53 - full migration passes when legacy source omits known empty stores
+ok 54 - migration manifests preserve empty future collections without exposing them as items
+ok 55 - verification reports count mismatches with source and destination counts
+ok 56 - verification reports per-collection hash mismatches and missing collections
+ok 57 - verification distinguishes an empty missing collection from a present empty collection
+ok 58 - verification reports an overall hash mismatch even when counts match
+ok 59 - diagnostic export contains metadata only, never raw records or sensitive values
+ok 60 - diagnostic formatter identifies counts, overall hashes, and abbreviated hash mismatches
+ok 61 - successful verification reports no mismatches and includes complete hash metadata
+ok 62 - in-memory failed migration metadata is retained for diagnostic export when status rereading is not started
+ok 63 - pending habit delta journal synchronously coalesces and replays final off state
+ok 64 - shared loader replays exact normal, vice, and shower journal states
+ok 65 - malformed journal is preserved and cannot be overwritten by a new delta
+ok 66 - compaction clears only deltas applied and verified in main storage
+ok 67 - vice full legacy fraction and vice failed/off states verify canonically
+ok 68 - three same-habit journal days compact with newest timestamp and clear together
+ok 69 - optimized storage chooses and decodes compressed packed JSON without count loss
+ok 70 - stored-state reader supports compressed, packed, and plain JSON
+ok 71 - saveStateSnapshot writes compressed storage and preserves protected histories
+ok 72 - interactive save writes fast packed JSON below the safe threshold and preserves protected histories
+ok 73 - rapid interactive saves coalesce a latest-state idle recompress
+ok 74 - failed idle recompress retains the fast packed save
+ok 75 - interactive save falls back to compressed JSON above the packed safety threshold
+ok 76 - quota warning fallback is serialized through the optimized storage builder
+ok 77 - TaskPoints storage uses compression and application readers do not directly parse taskpoints_v1 localStorage
+ok 78 - habit toggles use interactive deferred compression and Storage Health distinguishes already optimized state
+ok 79 - pending habit journals recover and compact the Work On Cal App fixture through shared loading
+ok 80 - deferred habit journal compaction synchronizes a stale YOU matchup before persisting
+ok 81 - completed-week stack decorations cannot intercept habit taps
+ok 82 - habit tap rerenders defer full DOM work while preserving immediate weekly feedback
+ok 83 - canonical habit bubble visual projection clears stale classes through executable state cycles
+ok 84 - canonical completion scoring preserves detached shower, half, and vice tap deltas
+ok 85 - habit score synchronization keeps detached pre-tap snapshots and coalesced reconciliation guards
+ok 86 - failed habit save rollback restores only the exact affected completion snapshot
+ok 87 - opt-in oversized interactive save defers before synchronous compression and leaves authoritative storage untouched
+ok 88 - deferred compression cannot roll back a different newer storage snapshot
+ok 89 - deferred compression never compacts a pre-tap view while Habit journal remains pending
+ok 90 - direct optimized serializer and writer accept ordinary options instead of treating them as a prepacked plan
+ok 91 - dangerous remove-then-set replacement is rejected before the old raw is physically removed
+ok 92 - a blocked incident fail-closes a missing-primary reload instead of accepting an empty startup save
+ok 93 - a reload with the exact preserved primary automatically clears the incident latch
+ok 94 - ordinary explicit removal still completes after the microtask boundary
+ok 95 - normal populated saves and explicitly authorized imports remain available
+ok 96 - storageSafetyBypass alone is no longer an unrestricted destructive-write bypass
+ok 97 - worker boots V2 generation before Task journal and preserves hot cache order
+ok 98 - task completion mutation is durable immediately and replays without a full snapshot save
+ok 99 - a silently ignored Task journal setItem cannot acknowledge a real edit or schedule compaction
+ok 100 - a silently ignored completion batch cannot claim pre-paint durability
+ok 101 - journal write detects silent overwrite refusal without losing the preexisting durable journal
+ok 102 - reset journal clear refuses a silently ignored remove and succeeds when storage recovers
+ok 103 - reset Task-journal cleanup refuses a peer edit detected immediately before deletion
+ok 104 - reset Task-journal cleanup refuses a denied source read rather than deleting blindly
+ok 105 - reset clear continues to support intentional malformed-journal cleanup and verified absence
+ok 106 - reset clear refuses nonstandard unreadable journal values without destroying evidence
+ok 107 - preview stale tab cannot erase a newer-generation Task journal during reset cleanup
+ok 108 - verified same-page Reset All can clear only the witnessed pending Task bytes once
+ok 109 - same-page reset cleanup still succeeds after an earlier verified import rotation
+ok 110 - local Reset All witness refuses a peer Task edit added after the reset event
+ok 111 - same-page reset cleanup refuses a new V1 snapshot created during journal preflight
+ok 112 - external/reset-impostor events never authorize stale preview Task cleanup
+ok 113 - preview Task cleanup rechecks reset generation after source reads before removing
+ok 114 - successful synchronous Task journal write is verified before action acknowledgement
+ok 115 - preview Task writer refuses old-tab edits and idle compaction after reset generation rotates
+ok 116 - preview Task journal fences a rotation between read and the synchronous write
+ok 117 - preview Task compaction blocks a generation rotation during snapshot parsing
+ok 118 - verified same-page import rotation permits Habit checkpoints but never rebinds old Task journals
+ok 119 - external generation changes and mismatched local events cannot rebind an outdated preview tab
+ok 120 - preview local rotation must be durably readable before the current tab can rebind
+ok 121 - same-page reset-all cannot rebind even Habit checkpoint or Task writers
+ok 122 - verified local import does not authorize arbitrary old full-state callbacks
+ok 123 - production and explicitly disabled V2 preview keep unchanged V1 Task journal behavior
+ok 124 - unreadable preview generation blocks edits and cannot be mistaken for dark-mode disable
+ok 125 - two real Task journal tabs reject a detectable peer edit instead of overwriting it
+ok 126 - Task journal prewrite source check fails closed when peer source cannot be reread
+ok 127 - compaction cleanup does not erase an edit another tab saved after the cleanup read
+ok 128 - idle compaction keeps the journal if the verified snapshot is replaced before cleanup
+ok 129 - ordinary save keeps the journal if the verified snapshot is replaced before cleanup
+ok 130 - a missing completion history cannot verify a pending deletion
+ok 131 - partial cleanup compares full nested rows and preserves peer order and tombstones
+ok 132 - compaction cannot report success if pending journal becomes malformed during snapshot write
+ok 133 - Task compaction refuses a stale candidate if a peer clears the journal after persisting a newer snapshot
+ok 134 - Task compaction retains newer peer edits and can safely retry after a source change
+ok 135 - Task compaction fails closed on an unreadable final pre-save journal check
+ok 136 - Task compaction refuses a stale V1 snapshot when a peer saves while old bytes decode
+ok 137 - Task compaction refuses V1 snapshot removal while preparing and retains pending edit
+ok 138 - Task compaction refuses an unreadable V1 snapshot source without writing
+ok 139 - sequential same-tab Task journal updates still merge and flush without a conflict
+ok 140 - fast Task journal skips invalid single-row arrays as the previous normalizer did
+ok 141 - validated pending completion rows need no deep copy after JSON parsing
+ok 142 - multi-row completion batch uses one durable journal write and one verified compaction
+ok 143 - large multi-row batch replaces all old matching rows in order and retains unrelated pending work
+ok 144 - multi-row batch preserves single-pass pending-journal merge contract
+ok 145 - large pending completion replay exactly matches legacy order and duplicate semantics
+ok 146 - many pending completion patches do not rescan historical row IDs for each patch
+ok 147 - invalid multi-row completion batches reject all rows and preserve existing journal
+ok 148 - quota failure during a multi-row batch leaves neither row persisted or acknowledged
+ok 149 - task completion deletion replays and verified compaction clears the journal
+ok 150 - Task journal rejects non-array, incomplete and unknown-field records without loss
+ok 151 - blank but present Task journal is preserved as interrupted evidence, not replaced on an edit
+ok 152 - undefined storage readback cannot be mistaken for a missing Task journal
+ok 153 - valid older Task journal without optional timestamp remains compatible
+ok 154 - malformed journal is preserved and blocks a new journal mutation
+ok 155 - dark preview refuses a stale full save after the Task journal was already drained
+ok 156 - dark preview refuses a peer Task journal that appeared after an empty preflight
+ok 157 - dark preview refuses an unreadable snapshot recheck with no pending journal
+ok 158 - ordinary full save refuses a peer Task journal edit during snapshot parsing
+ok 159 - ordinary full save refuses a peer full V1 snapshot save while Task journal is pending
+ok 160 - ordinary full save fails closed when pending Task source cannot be rechecked
+ok 161 - stale preview tab cannot use an ordinary full-state save to overwrite a reset generation
+ok 162 - preview full save refuses a reset rotation during full-snapshot preparation and retains pending Task edits
+ok 163 - unreadable preview generation refuses ordinary full-state saves without entering a fallback
+ok 164 - production and explicitly disabled preview preserve the existing ordinary V1 full-save path
+ok 165 - full saves without pending Task journal still retain ordinary V1 save behavior
+ok 166 - Home Weight and VO2 entry dialogs never acknowledge a skipped guarded full save
+ok 167 - ordinary full save cannot bypass a denied Task journal read through Home fallback
+ok 168 - ordinary full save with missing Task journal still succeeds without source refusal
+ok 169 - Settings game reset and skills clear reject skipped guarded Task-safe snapshots
+ok 170 - full saves automatically include pending mutations before verification clears them
+ok 171 - +1 Day stays durable after journal compaction even if an older delayed full save fires later
+ok 172 - newer intentional task edits still win after stale-task protection is installed
+ok 173 - explicit destructive import can intentionally replace a newer persisted task row
+ok 174 - Home and Log use the tiny journal instead of immediate full-state saves for targeted interactions
+ok 175 - scheduled compaction waits until at least seven seconds since the latest interaction
+ok 176 - a user interaction during the extra grace period defers compaction instead of entering compression
+ok 177 - a newer journal mutation invalidates an older startup preflight countdown
+ok 178 - verification accepts the save pipeline normalized task row and clears the journal
+ok 179 - verification accepts canonical task defaults omitted by compact localStorage
+ok 180 - compact task verification still rejects substantive field corruption
+ok 181 - stale Home Season save cannot erase previously committed Sleep and Mood entries after journal clears
+ok 182 - stale Home save protects recent SCWM once but does not duplicate previously matching entries
+ok 183 - SCWM guard allows explicit import/reset and Log deletion, never resurrecting intentionally replaced same-day rows
+ok 184 - V2 Home maintenance keeps newer persisted Habit completion after its journal already compacted
+ok 185 - V2 Home background maintenance preserves an authoritative off-toggle instead of resurrecting it
+ok 186 - V2 Home background maintenance overlays an un-compacted Habit tap after rebasing
+ok 187 - V2 snapshot protection does not hijack intentional edits, delete, or import/restore
+ok 188 - V2 Home maintenance fails closed on malformed Habit journal without reaching raw snapshot fallback
+ok 189 - V2 Home maintenance refuses to rebuild without an authoritative persisted pilot
+ok 190 - fresh journal reads isolate nested rows and preserve older record normalization
+ok 191 - large pending Task replay preserves first matching ID, append order and row isolation
+ok 192 - a peer edit during foreground serialization survives the final source check
+ok 193 - an empty peer journal and a rotated preview epoch both block prepared edits
+ok 194 - a bulk Task update overlays pending edits, preserves unrelated rows and commits once
+ok 195 - Task updates refuse a missing task, a peer snapshot change or a peer journal change atomically
+ok 196 - Home postponement keeps the snapshot fallback and restores the list on a failed save
+ok 197 - bulk snapshot verification scans each history once and keeps first-match and deletion checks
+# tests 197
+# pass 196
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 17057.06059
+
+Baseline reproduction on an independent export of commit 44b7cc1e0b5b8acab3bfd80dd7e31a5f5ed93643:
+node --test tests/notes_cache_authority_contract.test.js
+not ok 1 - shared storage guard protects canonical Notes cache from stale routine saves
+ok 2 - Notes page establishes cache authority for edits, sync, and intentional clearing
+ok 3 - shared export and settings paths respect an established Notes cache authority
+ok 4 - Notes audit does not warn merely because an authoritative cache and state mirror differ
+ok 5 - responsive export loader cache-busts the authority-aware export script
+# tests 5
+# pass 4
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+
+Failure in both runs: source-text assertion expects /authority\.dirty \|\| authority\.authoritative/. No application or existing test files changed.

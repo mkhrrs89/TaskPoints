@@ -1,0 +1,119 @@
+TAP version 13
+# Browser: 156.0.8078.79
+# Subtest: lossless cross-origin round-trip includes all raw keys, every DB/store/record, image bytes, unknown types and recovery evidence
+ok 1 - lossless cross-origin round-trip includes all raw keys, every DB/store/record, image bytes, unknown types and recovery evidence
+  ---
+  duration_ms: 1372.901475
+  type: 'test'
+  ...
+# Subtest: close and reopen destination verifies restored bytes and exact original package
+ok 2 - close and reopen destination verifies restored bytes and exact original package
+  ---
+  duration_ms: 869.749767
+  type: 'test'
+  ...
+# Subtest: actual tab closure after staging leaves incomplete restore; restart retries same immutable package
+ok 3 - actual tab closure after staging leaves incomplete restore; restart retries same immutable package
+  ---
+  duration_ms: 804.439467
+  type: 'test'
+  ...
+# Subtest: actual tab closure after first database commit resumes exact partial contents without dropping journals
+ok 4 - actual tab closure after first database commit resumes exact partial contents without dropping journals
+  ---
+  duration_ms: 779.049201
+  type: 'test'
+  ...
+# Subtest: quota failure preserves staged original and refuses readiness; retry after restart succeeds
+ok 5 - quota failure preserves staged original and refuses readiness; retry after restart succeeds
+  ---
+  duration_ms: 714.60834
+  type: 'test'
+  ...
+# Subtest: aborted IndexedDB import transaction is never verified; schema-only partial database can be retried
+ok 6 - aborted IndexedDB import transaction is never verified; schema-only partial database can be retried
+  ---
+  duration_ms: 726.146365
+  type: 'test'
+  ...
+# Subtest: truncated or corrupted package is rejected before any destination writes
+ok 7 - truncated or corrupted package is rejected before any destination writes
+  ---
+  duration_ms: 527.773098
+  type: 'test'
+  ...
+# Subtest: missing record or changed image after import invalidates readiness on restart
+ok 8 - missing record or changed image after import invalidates readiness on restart
+  ---
+  duration_ms: 766.991063
+  type: 'test'
+  ...
+# Subtest: nonblank destinations and conflicting partial data are preserved rather than overwritten
+ok 9 - nonblank destinations and conflicting partial data are preserved rather than overwritten
+  ---
+  duration_ms: 700.62573
+  type: 'test'
+  ...
+# Subtest: original package cannot be replaced on resume; new-package rollback preserves latest edit and original archive
+ok 10 - original package cannot be replaced on resume; new-package rollback preserves latest edit and original archive
+  ---
+  duration_ms: 863.451914
+  type: 'test'
+  ...
+# Subtest: unknown auto-increment stores refuse export instead of guessing deleted-key generator state
+ok 11 - unknown auto-increment stores refuse export instead of guessing deleted-key generator state
+  ---
+  duration_ms: 549.335707
+  type: 'test'
+  ...
+# Subtest: unsupported stored object type refuses export; catalog failure cannot masquerade as empty storage
+ok 12 - unsupported stored object type refuses export; catalog failure cannot masquerade as empty storage
+  ---
+  duration_ms: 521.681557
+  type: 'test'
+  ...
+# Subtest: late old-origin writes and resets cannot change the restored isolated destination
+ok 13 - late old-origin writes and resets cannot change the restored isolated destination
+  ---
+  duration_ms: 596.308175
+  type: 'test'
+  ...
+# Subtest: disk package and destination storage survive full destination browser shutdown/restart
+ok 14 - disk package and destination storage survive full destination browser shutdown/restart
+  ---
+  duration_ms: 2301.928831
+  type: 'test'
+  ...
+# Subtest: interruption after complete data verification but before status commit remains incomplete until verified retry
+ok 15 - interruption after complete data verification but before status commit remains incomplete until verified retry
+  ---
+  duration_ms: 811.074151
+  type: 'test'
+  ...
+# Subtest: silent dropped localStorage write cannot report verified restoration
+ok 16 - silent dropped localStorage write cannot report verified restoration
+  ---
+  duration_ms: 818.597673
+  type: 'test'
+  ...
+# Subtest: observed source edit during capture refuses package creation
+ok 17 - observed source edit during capture refuses package creation
+  ---
+  duration_ms: 550.150341
+  type: 'test'
+  ...
+# Subtest: independent readback checks real Blob bytes, indexes, cycles, sharing, typed views and sparse values without the package codec
+ok 18 - independent readback checks real Blob bytes, indexes, cycles, sharing, typed views and sparse values without the package codec
+  ---
+  duration_ms: 582.135069
+  type: 'test'
+  ...
+1..18
+# tests 18
+# suites 0
+# pass 18
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 15546.787312
