@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths:
       - 'index.html'
+      - 'audit.html'
+      - 'audit_run_habit_completion.js'
+      - 'tests/audit_run_habit_completion.test.js'
+      - 'tests/audit_mobile_header_spacing_contract.test.js'
       - 'mobile_boot_gate.js'
       - 'tests/home_worker_route_contract.test.js'
       - 'tests/home_morning_startup_deferred.test.js'
@@ -96,6 +100,11 @@ jobs:
           node --test tests/home_morning_startup_deferred.test.js
           node --test tests/home_morning_matchup_index.test.js
           node --test tests/home_morning_matchup_repair.test.js
+
+      - name: Verify Run Audit habit automation and journal syntax
+        run: |
+          node --check audit_run_habit_completion.js
+          node --test tests/audit_run_habit_completion.test.js tests/audit_mobile_header_spacing_contract.test.js
 
       - name: Run full TaskPoints suite
         run: npm test
