@@ -20130,12 +20130,50 @@
       throw new Error('isolated_task_fixture_not_ready');
     for (const key of ['taskpoints_recovery_write_lock_v1','taskpoints_recovery_attempt_lock_v1','taskpoints_emergency_recovery_hold_v1'])
       if (global.localStorage.getItem(key) !== null) throw new Error('recovery_evidence_blocks_task_write');
+    if (fixture.homeTaskId !== undefined && (typeof fixture.homeTaskId !== 'string' || !fixture.homeTaskId
+      || global.location.pathname !== '/experiments/v2-home-plus-one-day/full/index.html'
+      || global.localStorage.getItem('taskpoints_storage_guard_incident_v1') !== null))
+      throw new Error('owned_home_task_context_or_recovery_conflict');
     return fixture;
   }
   function ownedLegacyEvidence() {
     const storage = global.localStorage;
     return Array.from({length:storage.length},(_,i)=>storage.key(i)).filter(k=>k!==OWNED_TASK_FIXTURE)
       .sort().map(k=>[k,storage.getItem(k)]);
+  }
+  function ownedHomeTaskEvidence(taskId) {
+    const storage = global.localStorage;
+    const journal = core.readPendingTaskMutations?.();
+    const raw = storage.getItem(core.STORAGE_KEY || 'taskpoints_v1');
+    if (!raw || !journal?.record || journal.malformed || storage.getItem('taskpoints_phase5b_pending_changes_v1') !== null)
+      throw new Error('owned_task_legacy_evidence_unreadable');
+    const snapshot = core.parseTaskPointsStorageJson(raw);
+    if (!Array.isArray(snapshot?.tasks) || !Array.isArray(snapshot.completions))
+      throw new Error('owned_task_legacy_evidence_unreadable');
+    const matches = snapshot.tasks.filter(task => String(task?.id) === taskId);
+    if (matches.length !== 1) throw new Error('owned_task_legacy_target_missing_or_ambiguous');
+    const task = core.normalizeTask(matches[0]);
+    // Home materializes this empty editor default during ordinary saves.
+    if (task.skills === undefined) task.skills = [];
+    const linked = rows => rows.filter(row => String(row?.taskId) === taskId);
+    const completions = linked(snapshot.completions);
+    const upserts = linked(journal.record.completionUpserts);
+    const linkedIds = new Set([...completions, ...upserts].map(row => String(row.id)));
+    return {
+      task, completions, upserts,
+      taskJournal: journal.record.tasks.filter(row => String(row?.id) === taskId),
+      deletes: journal.record.completionDeletes.filter(id => linkedIds.has(id)),
+      legacyGeneration: storage.getItem(GENERATION_KEY)
+    };
+  }
+
+  function ownedTaskSourceConflict(meta) {
+    if (!meta.homeTaskId) return stableJson(meta.source) !== stableJson(ownedLegacyEvidence());
+    try {
+      return stableJson(meta.homeTaskEvidence) !== stableJson(ownedHomeTaskEvidence(meta.homeTaskId));
+    } catch (_) {
+      return true; // Missing or unreadable evidence is never a clean source.
+    }
   }
   async function openOwnedTasks(seed = false) {
     ownedTaskContext(seed);
@@ -20161,6 +20199,11 @@
     if (!baseline || !Array.isArray(baseline.tasks) || baseline.tasks.some(t=>!t||typeof t.id!=='string'||!t.id)
       || new Set(baseline.tasks.map(t=>t.id)).size!==baseline.tasks.length)
       throw new Error('invalid_task_seed');
+    const homeTaskId = fixture.homeTaskId;
+    const homeTaskEvidence = homeTaskId ? ownedHomeTaskEvidence(homeTaskId) : null;
+    if (homeTaskEvidence && (!baseline.tasks.some(task => task.id === homeTaskId)
+      || homeTaskEvidence.taskJournal.length || homeTaskEvidence.upserts.length || homeTaskEvidence.deletes.length))
+      throw new Error('owned_home_task_seed_has_competing_evidence');
     const generation=newResetGeneration('isolated-task'),db=await openOwnedTasks(true);
     try {
       const names=Array.from(db.objectStoreNames),tx=db.transaction(names,'readwrite',{durability:'strict'}),done=transactionPromise(tx);
@@ -20174,7 +20217,8 @@
             if (ownedTaskContext(true).id!==fixture.id || stableJson(ownedLegacyEvidence())!==stableJson(source))
               throw new Error('seed_source_changed');
             baseline.tasks.forEach((value,legacyIndex)=>tx.objectStore('tasks').add({id:value.id,value,legacyIndex,ownerRevision:0,ownerGeneration:generation}));
-            tx.objectStore('meta').add({id:OWNED_TASK_META,schemaVersion:1,fixtureId:fixture.id,generation,revision:0,mode:'owned',baseline,source});
+            tx.objectStore('meta').add({id:OWNED_TASK_META,schemaVersion:1,fixtureId:fixture.id,generation,revision:0,mode:'owned',baseline,source,
+              ...(homeTaskId ? {homeTaskId,homeTaskEvidence} : {})});
           } catch(e) { failure=e; tx.abort(); }
         };
       }
@@ -20189,7 +20233,7 @@
       requestPromise(tx.objectStore('mutations').getAll()),done
     ]);
     const fixture=ownedTaskContext();
-    if (!meta || meta.fixtureId!==fixture.id || meta.schemaVersion!==1 || !['owned','rollback-frozen'].includes(meta.mode)
+    if (!meta || meta.fixtureId!==fixture.id || meta.homeTaskId!==fixture.homeTaskId || meta.schemaVersion!==1 || !['owned','rollback-frozen'].includes(meta.mode)
       || !Number.isSafeInteger(meta.revision)||meta.revision<0) throw new Error('owned_task_authority_missing');
     if (typeof meta.generation!=='string'||!Array.isArray(meta.baseline?.tasks)||!Array.isArray(meta.source)
       ||rows.length!==meta.baseline.tasks.length||rows.some(r=>r.ownerGeneration!==meta.generation
@@ -20208,7 +20252,7 @@
       expected.set(r.taskId,{value:r.after,revision:r.revision});
     }
     for(const r of rows){const e=expected.get(r.id);if(!e||r.ownerRevision!==e.revision||stableJson(r.value)!==stableJson(e.value))throw new Error('owned_task_row_receipt_mismatch');}
-    return {meta,rows,journal,sourceDrift:stableJson(meta.source)!==stableJson(ownedLegacyEvidence())};
+    return {meta,rows,journal,sourceDrift:ownedTaskSourceConflict(meta)};
   }
   async function readIsolatedOwnedTasks() {
     const db=await openOwnedTasks();
@@ -20237,7 +20281,9 @@
         try{
           const context=ownedTaskContext();
           if(!meta||meta.fixtureId!==fixture.id||context.id!==fixture.id||meta.generation!==intent.generation) return stop('owned_task_generation_conflict');
-          if(stableJson(meta.source)!==stableJson(ownedLegacyEvidence()))return stop('legacy_source_changed_preserved_reconciliation_required');
+          if (meta.homeTaskId && (meta.homeTaskId !== context.homeTaskId || intent.taskId !== meta.homeTaskId))
+            return stop('task_outside_home_ownership');
+          if(ownedTaskSourceConflict(meta))return stop('legacy_source_changed_preserved_reconciliation_required');
           if(previous){
             if(stableJson(previous.intent)!==stableJson(intent))return stop('owned_task_action_id_conflict');
             receipt=previous;replayed=true;return;
@@ -20275,25 +20321,49 @@
     try{
       const prior=await readOwnedSnapshot(db);
       if(prior.sourceDrift)throw new Error('legacy_source_changed_preserved_reconciliation_required');
+      const rollbackSource = ownedLegacyEvidence();
+      if (prior.meta.homeTaskId) {
+        // These ordinary readers can leave unreadable journal bytes unapplied.
+        // A compatible snapshot must not quietly omit such pending evidence.
+        const flex = inspectReadOnlyFlexJournalsForCutover();
+        if ([inspectReadOnlyInboxJournalForCutover(),flex.completions,flex.order].some(journal => journal.reason === 'malformed'))
+          throw new Error('rollback_unreadable_legacy_journal');
+      }
       const tx=db.transaction(['tasks','mutations','meta'],'readwrite',{durability:'strict'}),done=transactionPromise(tx);
       const store=tx.objectStore('meta'),q=store.get(OWNED_TASK_META);let failure;
       q.onsuccess=()=>{
         try {
           const meta=q.result;
           if(!meta||meta.fixtureId!==ownedTaskContext().id||meta.generation!==prior.meta.generation
-            ||meta.revision!==expectedRevision||stableJson(meta.source)!==stableJson(ownedLegacyEvidence()))
+            ||meta.revision!==expectedRevision||ownedTaskSourceConflict(meta)
+            ||stableJson(rollbackSource)!==stableJson(ownedLegacyEvidence()))
             throw new Error('rollback_revision_conflict');
           store.put({...meta,mode:'rollback-frozen'});
         } catch(e) {failure=e;tx.abort();}
       };
       try{await done;}catch(e){throw failure||e;}
-      const current=await readOwnedSnapshot(db),snapshot=clone(current.meta.baseline);
+      const current=await readOwnedSnapshot(db);
       if(current.sourceDrift||current.meta.mode!=='rollback-frozen')throw new Error('rollback_readback_unverified');
-      snapshot.tasks=current.rows.sort((a,b)=>a.legacyIndex-b.legacyIndex).map(r=>clone(r.value));
+      let snapshot;
+      if (current.meta.homeTaskId) {
+        // Keep the current V1 values for every unrelated domain and Task. The
+        // latest source and journals remain in the detached checkpoint archive.
+        const sourceIsCurrent = () => stableJson(rollbackSource) === stableJson(ownedLegacyEvidence());
+        if (!sourceIsCurrent()) throw new Error('rollback_legacy_source_changed');
+        snapshot = clone(core.readTaskPointsStoredState());
+        const row = current.rows.find(r => r.id === current.meta.homeTaskId);
+        const targets = snapshot?.tasks?.filter(task => task.id === current.meta.homeTaskId);
+        if (!row || targets?.length !== 1 || !sourceIsCurrent()) throw new Error('rollback_legacy_source_changed');
+        snapshot.tasks = snapshot.tasks.map(task => task.id === row.id ? clone(row.value) : task);
+      } else {
+        snapshot=clone(current.meta.baseline);
+        snapshot.tasks=current.rows.sort((a,b)=>a.legacyIndex-b.legacyIndex).map(r=>clone(r.value));
+      }
       // This is a detached compatible candidate, never an in-place V1 overwrite.
       // Original source strings/journals and all receipts remain archived exactly.
       return {format:'taskpoints-isolated-task-rollback-1',generation:current.meta.generation,revision:current.meta.revision,
-        snapshot,originalSource:clone(current.meta.source),receipts:clone(current.journal),sourceFrozen:true};
+        snapshot,originalSource:clone(current.meta.source),receipts:clone(current.journal),
+        ...(current.meta.homeTaskId ? {currentLegacySource:rollbackSource,v2Frozen:true} : {sourceFrozen:true})};
     }finally{db.close();}
   }
 

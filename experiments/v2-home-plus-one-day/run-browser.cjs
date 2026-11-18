@@ -219,7 +219,11 @@ test('a synthetic legacy dark-mode toggle cannot open V2 through the old mirror'
  await peer.evaluate(()=>localStorage.setItem('taskpoints_state_v2_dark_mode_v1','1'));
  await peer.addScriptTag({path:path.join(root,'scoring_core.js')});await peer.addScriptTag({path:path.join(root,'state_runtime_v2.js')});
  assert.deepEqual(await peer.evaluate(async()=>[TaskPointsStateRuntimeV2.isDarkEnabled(),await TaskPointsStateRuntimeV2.open()]),[false,null]);
- await peer.evaluate(()=>localStorage.removeItem('taskpoints_state_v2_dark_mode_v1'));assert.equal((await read(page)).tasks[0].dueDateISO,advanced);
+ await peer.evaluate(()=>localStorage.removeItem('taskpoints_state_v2_dark_mode_v1'));
+ // The other renderer can still see the old value until Chrome delivers the
+ // cross-tab storage change. The owner must refuse until that value is gone.
+ await page.waitForFunction(()=>localStorage.getItem('taskpoints_state_v2_dark_mode_v1')===null);
+ assert.equal((await read(page)).tasks[0].dueDateISO,advanced);
 });
 
 

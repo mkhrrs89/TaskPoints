@@ -42,10 +42,16 @@ after(async()=>{await browser?.close();if(server)await new Promise(r=>server.clo
 
 async function configureContext(context){
   await context.route('**/*',route=>route.request().url().startsWith(origin+'/')?route.continue():route.abort());
-  await context.addInitScript(()=>{
+  const instrumentation = () => {
     if(location.hostname!=='127.0.0.1')return;
     window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__=true;
     window.legacyWrites=[];
+    window.ownedPaints=[];
+    new MutationObserver(()=>{
+      if(!localStorage.getItem('taskpoints_isolated_task_fixture_v1'))return;
+      const label=document.querySelector('.task-priority-card[data-task-id="t1"] .task-meta-line')?.textContent;
+      if(label && ownedPaints.at(-1)!==label)ownedPaints.push(label);
+    }).observe(document,{subtree:true,childList:true});
     Error.stackTraceLimit=25;
     const set=Storage.prototype.setItem,remove=Storage.prototype.removeItem;
     Storage.prototype.setItem=function(key,value){
@@ -65,7 +71,8 @@ async function configureContext(context){
       if(this===localStorage&&this.getItem(key)!==null)legacyWrites.push({key,stack:new Error().stack.split('\n').slice(2,5)});
       return remove.call(this,key);
     };
-  });
+  };
+  await context.addInitScript({content: `(${instrumentation})();\n${fs.readFileSync(path.join(__dirname,'full-home-owner.js'),'utf8')}`});
 }
 async function fixture(t,provided){
   const context=provided||await browser.newContext({serviceWorkers:'block',timezoneId:'America/New_York'});
@@ -89,13 +96,16 @@ async function fixture(t,provided){
       goldLedger:[{id:'synthetic-gold',type:'opening_balance',playerId:'SYN',dateKey:'2026-11-05',amount:7,balanceAfter:7}],
       inboxMessages:[{id:'synthetic-inbox',type:'record',eventDateKey:'2026-11-17',title:'Synthetic message',body:'Keep this',read:false,archived:false,createdAtISO:quietDate+'T10:00:00Z'}],
       inboxStartedDateKey:'2026-11-01',goldTheftTop50InboxStartedDateKey:'2026-11-01',inboxProcessedEventIds:{'synthetic-inbox':true},
-      completions:[],reminders:[],matchups:[],schedule:[],opponentDripSchedules:[],flexActions:[],
+      completions:[],reminders:[],matchups:[],schedule:[],opponentDripSchedules:[],
+      flexActions:[{id:'synthetic-flex',name:'Synthetic Flex',points:2,order:1,unknown:'keep'}],
       notes:'Synthetic Notes',scoringSettings:{},habitTagColors:{},unknownRoot:{keep:true}
     };
     localStorage.setItem('taskpoints_v1',TaskPointsCore.serializeTaskPointsStoredState(snapshot));
     localStorage.setItem('taskpoints_notes_v1',snapshot.notes);
     localStorage.setItem('taskpoints_notes_authoritative_v1','1');
     localStorage.setItem('tp_projects_v1',JSON.stringify([{id:'synthetic-project',name:'Synthetic Project',unknown:'keep'}]));
+    localStorage.setItem('synthetic_unknown_key','{opaque unrecognized data');
+    localStorage.setItem('taskpoints_quarantined_snapshot','{opaque snapshot evidence');
     sessionStorage.setItem('tpBootSeenThisSession','1');
     return TaskPointsCore.saveImageBlob('synthetic-image',new Blob([new Uint8Array([0,17,254,255])],{type:'image/png'}));
   },{oldDate,quietDate});
@@ -111,10 +121,13 @@ async function waitHome(page){
     && (!document.getElementById('bootSplash')||getComputedStyle(document.getElementById('bootSplash')).opacity==='0'),null,{timeout:14000});
 }
 const owned=page=>page.evaluate(()=>TaskPointsStateRuntimeV2.readIsolatedOwnedTasks());
-const dates=page=>page.evaluate(()=>({
-  home:TaskPointsHomeLiveState.getState().tasks.find(t=>t.id==='t1').dueDateISO,
-  legacy:TaskPointsCore.readTaskPointsStoredState().tasks.find(t=>t.id==='t1').dueDateISO
-}));
+const dates=page=>page.evaluate(()=>{
+  const backing=TaskPointsHomeLiveState.getState();
+  const owner=window.TaskPointsOwnedTaskExperiment;
+  const home=owner?.isEnabled() ? owner.taskView(backing) : backing;
+  return {home:home.tasks.find(t=>t.id==='t1')?.dueDateISO,
+    legacy:TaskPointsCore.readTaskPointsStoredState().tasks.find(t=>t.id==='t1').dueDateISO};
+});
 async function partOfState(page){return page.evaluate(async()=>{
   const s=TaskPointsCore.readTaskPointsStoredState();
   const image=await TaskPointsCore.getImageBlob('synthetic-image');
@@ -125,37 +138,29 @@ async function partOfState(page){return page.evaluate(async()=>{
     game:s.gameHistory.find(g=>g.id==='synthetic-game'||g.playerId==='SYN'),
     gold:s.goldLedger?.find(g=>g.id==='synthetic-gold'),inbox:s.inboxMessages?.find(r=>r.id==='synthetic-inbox'),
     projects:localStorage.getItem('tp_projects_v1'),notes:localStorage.getItem('taskpoints_notes_v1'),
+    flex:s.flexActions?.find(action=>action.id==='synthetic-flex'),
+    unknownTask:s.tasks.find(t=>t.id==='t1').unknownTask,
+    unknownRaw:localStorage.getItem('synthetic_unknown_key'),
+    quarantine:localStorage.getItem('taskpoints_quarantined_snapshot'),
     image:[...new Uint8Array(await image.arrayBuffer())]};
 });}
 async function installOwner(page){
   await page.evaluate(async marker=>{
     const api=TaskPointsStateRuntimeV2;
     if(localStorage.getItem(marker)===null){
-      const fixture={id:crypto.randomUUID(),syntheticOnly:true,phase:'prepared'};
+      const fixture={id:crypto.randomUUID(),syntheticOnly:true,homeTaskId:'t1',phase:'prepared'};
       localStorage.setItem(marker,JSON.stringify(fixture));
       await api.initializeIsolatedTaskOwner(TaskPointsCore.readTaskPointsStoredState());
       localStorage.setItem(marker,JSON.stringify({...fixture,phase:'sealed'}));
     }
-    const rendered=await api.readIsolatedOwnedTasks();
-    // Hook the existing Home branch with the same durable API as the Task
-    // slice. Leave full Home loading, rendering and all legacy writers running.
-    let inFlight;
-    window.TaskPointsOwnedTaskExperiment={isEnabled:()=>true,commitPlusOneDay(id,expectedTask,mutate){
-      if(inFlight)return inFlight;
-      window.ownerOutcome=null;
-      const row=rendered.rows.find(t=>t.id===id);
-      const intent={actionId:crypto.randomUUID(),operation:'home-plus-one-day',taskId:id,
-        generation:rendered.meta.generation,expectedRevision:row.ownerRevision,expectedTask};
-      inFlight=api.commitIsolatedOwnedTask({...intent,mutate}).then(result=>{
-        window.ownerOutcome={ok:result.confirmedDurable,date:result.task.dueDateISO};return result;
-      },error=>{window.ownerOutcome={ok:false,error:error.message};throw error;});
-      return inFlight;
-    }};
+    await TaskPointsOwnedTaskExperiment.refresh(() => renderTasks());
   },marker);
 }
 async function press(page){
   const card=page.locator('.task-priority-card[data-task-id="t1"]');
-  await card.locator('[data-task-card-body="t1"]').click();
+  const body=card.locator('[data-task-card-body="t1"]');
+  if(await body.getAttribute('aria-expanded')==='false')await body.click();
+  await page.evaluate(()=>{window.ownerOutcome=null;});
   await card.locator('[data-task-action="bump"]').click();
   await page.waitForFunction(()=>window.ownerOutcome!==null&&window.ownerOutcome!==undefined);
   return page.evaluate(()=>ownerOutcome);
@@ -168,30 +173,34 @@ async function acknowledged(t,context){
   await installOwner(f.page);
   const admission=await owned(f.page);assert.equal(admission.sourceDrift,false);
   assert.deepEqual(await press(f.page),{ok:true,date:newDate});
-  assert.deepEqual(await dates(f.page),{home:newDate,legacy:oldDate});
+  await assertShown(f.page,newDate);
   return f;
 }
 
-test('full Home click commits V2 with ordinary startup running, then the cold Home loader displays the old legacy date',async t=>{
+test('full Home click commits V2 with ordinary startup running, and cold reload displays the V2 date before accepting another action',async t=>{
   const {page}=await acknowledged(t);
   const before=await owned(page);
   assert.equal(before.journal.length,1);
   const cardDate=page.locator('.task-priority-card[data-task-id="t1"] .task-meta-line');
   assert.match(await cardDate.textContent(),/Nov 16/);
   await page.reload();await waitHome(page);
-  assert.deepEqual(await dates(page),{home:oldDate,legacy:oldDate});
+  await assertShown(page,newDate);
   const after=await owned(page);
   assert.deepEqual(after.journal,before.journal);
   assert.equal(after.tasks[0].dueDateISO,newDate);
-  assert.match(await cardDate.textContent(),/Nov 15/);
-  await installOwner(page);
-  const retry=await press(page);
-  assert.equal(retry.ok,false);
-  assert.match(retry.error,/stale_edit|legacy_source_changed/);
-  await assertV2(page,before);
-  console.log('BLOCKER full Home reload: Home date',oldDate,'V2 date',newDate,'boot',await page.evaluate(()=>window.__TP_HOME_BOOT_SOURCE));
+  assert.match(await cardDate.textContent(),/Nov 16/);
+  assert.ok((await page.evaluate(()=>ownedPaints)).every(text=>!text.includes('Nov 15')),'must never paint the legacy owned date on reopen');
+  assert.equal(after.sourceDrift,false);
+  assert.deepEqual(await press(page),{ok:true,date:'2026-11-17'});
+  assert.equal((await owned(page)).journal.length,2);
+  assert.equal((await dates(page)).legacy,oldDate);
 });
 
+async function assertShown(page,expected){
+  assert.deepEqual(await dates(page),{home:expected,legacy:oldDate});
+  const label=page.locator('.task-priority-card[data-task-id="t1"] .task-meta-line');
+  assert.match(await label.textContent(),new RegExp('Nov '+Number(expected.slice(-2))));
+}
 async function assertV2(page,expected){
   const current=await owned(page);
   assert.deepEqual(current.journal,expected.journal);
@@ -200,21 +209,23 @@ async function assertV2(page,expected){
   return current;
 }
 
-test('Home to Notes and back reloads the old Task date while the other post-startup records survive navigation',async t=>{
+test('Home to Notes and back retains the acknowledged Task date while the other post-startup records survive navigation',async t=>{
   const {page}=await acknowledged(t),before=await owned(page),unrelated=await partOfState(page);
-  for(const collection of ['task','habit','game','gold','projects','notes'])assert.ok(unrelated[collection],collection+' witness missing');
+  for(const collection of ['task','habit','game','gold','projects','notes','flex','unknownTask'])assert.ok(unrelated[collection],collection+' witness missing');
   assert.deepEqual(unrelated.image,[0,17,254,255]);
+  assert.equal(unrelated.unknownRaw,'{opaque unrecognized data');
+  assert.equal(unrelated.quarantine,'{opaque snapshot evidence');
   await page.locator('a.desktop-header-notes-link').click();
   await page.waitForURL('**/notes.html');
   assert.equal(await page.locator('#notesInput').inputValue(),'Synthetic Notes');
   await page.getByRole('link',{name:'Main',exact:true}).first().click();
   await waitHome(page);
-  assert.equal((await dates(page)).home,oldDate);
-  await assertV2(page,before);
+  await assertShown(page,newDate);
+  assert.equal((await assertV2(page,before)).sourceDrift,false);
   assert.deepEqual(await partOfState(page),unrelated);
 });
 
-test('ordinary Home save leaks the acknowledged display date into V1 and changes the source seal',async t=>{
+test('ordinary Home save serializes only the V1 backing date and does not invalidate V2',async t=>{
   const {page}=await acknowledged(t),before=await owned(page),unrelated=await partOfState(page);
   const write=await page.evaluate(()=>{
     legacyWrites.length=0;
@@ -223,15 +234,14 @@ test('ordinary Home save leaks the acknowledged display date into V1 and changes
   });
   assert.equal(write.saved,true);
   assert.ok(write.writes.some(e=>e.key==='taskpoints_v1'));
-  assert.deepEqual(await dates(page),{home:newDate,legacy:newDate});
-  const current=await assertV2(page,before);
-  assert.equal(current.sourceDrift,true);
-  await assert.rejects(page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(1)),/legacy_source_changed/);
+  await assertShown(page,newDate);
+  assert.equal((await assertV2(page,before)).sourceDrift,false);
   assert.deepEqual(await partOfState(page),unrelated);
-  console.log('BLOCKER Home save → saveStateSnapshot persisted the V2 UI date to V1; sourceDrift=true');
+  await page.reload();await waitHome(page);
+  await assertShown(page,newDate);
 });
 
-test('V1 Task compaction preserves the unrelated edit and its own older target date; the V2 receipt survives',async t=>{
+test('V1 Task compaction preserves an unrelated edit and lifecycle refresh keeps the V2 date',async t=>{
   const {page}=await acknowledged(t),before=await owned(page),unrelated=await partOfState(page);
   const result=await page.evaluate(()=>{
     TaskPointsCore.journalTaskUpdates(['t2'],task=>{task.title='Synthetic unrelated journal edit';task.updatedAtISO=new Date().toISOString();return true;});
@@ -240,20 +250,19 @@ test('V1 Task compaction preserves the unrelated edit and its own older target d
   });
   assert.deepEqual(result,{flushed:true,remaining:0});
   assert.equal((await dates(page)).legacy,oldDate);
-  assert.equal((await assertV2(page,before)).sourceDrift,true);
+  assert.equal((await assertV2(page,before)).sourceDrift,false);
   const actual=await partOfState(page);
   assert.equal(actual.task.title,'Synthetic unrelated journal edit');
   assert.deepEqual({...actual,task:unrelated.task},unrelated);
   assert.equal(await page.evaluate(()=>TaskPointsCore.readTaskPointsStoredState().tasks.find(t=>t.id==='t2').title),'Synthetic unrelated journal edit');
   await page.evaluate(()=>window.TaskPointsStateRevision.bump('synthetic-cross-page-revision'));
   await page.evaluate(()=>window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true})));
-  await page.waitForFunction(date=>TaskPointsHomeLiveState.getState().tasks.find(t=>t.id==='t1').dueDateISO===date,oldDate);
-  assert.equal((await dates(page)).home,oldDate);
+  await page.waitForFunction(()=>document.querySelector('[data-task-card-body="t2"]')?.textContent.includes('Synthetic unrelated journal edit'));
+  await assertShown(page,newDate);
   await assertV2(page,before);
-  console.log('BLOCKER Task compaction and pageshow refresh read the V1 date after V2 acknowledgement');
 });
 
-test('verified-secondary maintenance retains an older native startup snapshot and changes the source seal without changing canonical bytes',async t=>{
+test('verified-secondary maintenance and native startup retain V2 display and allow the next edit',async t=>{
   const {page}=await acknowledged(t),before=await owned(page);
   const result=await page.evaluate(async()=>{
     const core=TaskPointsCore,raw=localStorage.getItem('taskpoints_v1');legacyWrites.length=0;
@@ -273,12 +282,12 @@ test('verified-secondary maintenance retains an older native startup snapshot an
   assert.equal(result.phase.homeNativeStatus,'passed_verification');
   assert.equal(result.nativeDate,oldDate);
   assert.ok(result.writes.some(w=>w.key==='taskpoints_storage_data_loss_guard_v1'));
-  assert.equal((await assertV2(page,before)).sourceDrift,true);
+  assert.equal((await assertV2(page,before)).sourceDrift,false);
   await page.reload();await waitHome(page);
-  assert.equal((await dates(page)).home,oldDate);
+  await assertShown(page,newDate);
   assert.equal(await page.evaluate(()=>window.__TP_HOME_BOOT_SOURCE),'indexeddb-native');
   await assertV2(page,before);
-  console.log('BLOCKER secondary maintenance: V1 canonical bytes unchanged, verified native date still old, legacy diagnostics changed, Home boot',await page.evaluate(()=>window.__TP_HOME_BOOT_SOURCE));
+  assert.deepEqual(await press(page),{ok:true,date:'2026-11-17'});
 });
 
 test('competing legacy Task edit in another full Home tab survives and causes V2 admission and rollback to refuse',async t=>{
@@ -295,6 +304,9 @@ test('competing legacy Task edit in another full Home tab survives and causes V2
   await assert.rejects(page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(1)),/legacy_source_changed/);
   await assertV2(page,before);
   assert.equal((await dates(peer)).legacy,'2026-11-14');
+  assert.equal(await peer.evaluate(()=>TaskPointsCore.flushPendingTaskMutations()),true);
+  assert.equal(await peer.evaluate(()=>TaskPointsCore.readPendingTaskMutations().record.tasks.length),0);
+  assert.equal((await assertV2(page,before)).sourceDrift,true,'the compacted competing canonical Task also conflicts');
 });
 
 test('full Home IndexedDB quota failure has no success and reload keeps the original V2 date',async t=>{
@@ -317,21 +329,29 @@ test('full Home IndexedDB quota failure has no success and reload keeps the orig
 
 test('rollback from the acknowledged full Home commit freezes V2 and a fresh full Home can read the detached Task checkpoint',async t=>{
   const {page}=await acknowledged(t),before=await owned(page);
+  await page.evaluate(()=>{
+    TaskPointsCore.journalTaskUpdates(['t2'],task=>{task.title='Synthetic latest second Task';return true;});
+    if(!TaskPointsCore.flushPendingTaskMutations())throw Error('Expected unrelated compaction');
+  });
   const checkpoint=await page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(1));
   const current=await assertV2(page,before);
   assert.equal(current.meta.mode,'rollback-frozen');
+  assert.equal(checkpoint.v2Frozen,true);
   assert.equal(checkpoint.snapshot.tasks.find(t=>t.id==='t1').dueDateISO,newDate);
   assert.equal((await dates(page)).legacy,oldDate);
   const fresh=await fixture(t);
   await fresh.page.evaluate(snapshot=>localStorage.setItem('taskpoints_v1',TaskPointsCore.serializeTaskPointsStoredState(snapshot)),checkpoint.snapshot);
   await fresh.page.reload();await waitHome(fresh.page);
   assert.deepEqual(await dates(fresh.page),{home:newDate,legacy:newDate});
+  assert.equal(await fresh.page.locator('[data-task-card-body="t2"] .task-title').textContent(),'Synthetic latest second Task');
+  assert.deepEqual(checkpoint.snapshot.tasks.find(t=>t.id==='t1').unknownTask,{keep:[0,null]});
+  assert.equal(new Map(checkpoint.currentLegacySource).get('synthetic_unknown_key'),'{opaque unrecognized data');
   assert.equal(await fresh.page.evaluate(async()=>!(await indexedDB.databases()).some(db=>db.name===TaskPointsStateRuntimeV2.DB_NAME)),true);
   assert.equal((await dates(page)).legacy,oldDate);
 });
 
 
-test('after Chromium process restart the owned receipt survives, but full Home still renders the legacy date',async t=>{
+test('after Chromium process restart full Home renders the acknowledged V2 date',async t=>{
   const profile=fs.mkdtempSync(path.join(os.tmpdir(),'tp-full-home-'));
   const launch=()=>chromium.launchPersistentContext(profile,{
     executablePath:process.env.BOUNDARY_CHROMIUM_PATH||'/usr/bin/chromium',serviceWorkers:'block',timezoneId:'America/New_York'
@@ -343,7 +363,7 @@ test('after Chromium process restart the owned receipt survives, but full Home s
   const reopened=await context.newPage();
   await reopened.clock.setFixedTime(new Date(quietDate+'T17:00:00Z'));
   await reopened.goto(origin+prefix+'index.html');await waitHome(reopened);
-  assert.deepEqual(await dates(reopened),{home:oldDate,legacy:oldDate});
+  await assertShown(reopened,newDate);
   await assertV2(reopened,before);
 });
 
@@ -359,4 +379,103 @@ test('existing Home startup loses the seeded Inbox message before V2 ownership s
   assert.equal(evidence.messages.some(m=>m.id==='synthetic-inbox'),false);
   assert.ok(evidence.writes.length>0);
   console.log('EXISTING STARTUP BLOCKER Inbox loss stack:',evidence.writes[0].stack.filter(frame=>!frame.includes(' at Storage.')).slice(0,9).join(' | ').replaceAll(origin,'local'));
+});
+
+
+test('malformed V1 Task journal remains byte-for-byte intact, blocks V2 edits and leaves the verified date visible',async t=>{
+  const {page}=await acknowledged(t),before=await owned(page);
+  const malformed='{damaged synthetic Task journal';
+  await page.evaluate(value=>localStorage.setItem('taskpoints_pending_task_mutations_v1',value),malformed);
+  const rejected=await press(page);
+  assert.deepEqual(rejected,{ok:false,error:'legacy_source_changed_preserved_reconciliation_required'});
+  assert.match(await page.locator('#taskList [role="status"]').textContent(),/paused/);
+  assert.equal(await page.evaluate(()=>localStorage.getItem('taskpoints_pending_task_mutations_v1')),malformed);
+  await assertShown(page,newDate);await assertV2(page,before);
+});
+
+test('a lifecycle refresh sees V2 edits from another Home tab even without a V1 revision change',async t=>{
+  const {page,context}=await acknowledged(t);
+  const peer=await context.newPage();
+  await peer.clock.setFixedTime(new Date(quietDate+'T17:00:00Z'));
+  await peer.goto(origin+prefix+'index.html');await waitHome(peer);await assertShown(peer,newDate);
+  const v1Revision=await page.evaluate(()=>localStorage.getItem('taskpoints_state_revision_v1'));
+  assert.deepEqual(await press(peer),{ok:true,date:'2026-11-17'});
+  assert.equal(await page.evaluate(()=>localStorage.getItem('taskpoints_state_revision_v1')),v1Revision);
+  // A tab that has not refreshed cannot overwrite the newer V2 edit.
+  const stale=await press(page);
+  assert.deepEqual(stale,{ok:false,error:'owned_task_stale_edit'});
+  await page.evaluate(()=>window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true})));
+  await assertShown(page,'2026-11-17');
+  assert.equal((await owned(page)).journal.length,2);
+});
+
+for(const phase of ['before commit','after commit'])test(`full Home interrupted ${phase} reopens with exactly the committed V2 state`,async t=>{
+  const {page,context}=await acknowledged(t);
+  await page.evaluate(phase=>{
+    const transaction=IDBDatabase.prototype.transaction;
+    let committed=false;
+    IDBDatabase.prototype.transaction=function(stores,mode,...options){
+      const owned=this.name==='taskpoints_state_v2'&&Array.isArray(stores)&&stores.includes('tasks');
+      if(owned&&mode==='readonly'&&committed&&phase==='after commit')throw Error('synthetic readback unavailable');
+      const tx=transaction.call(this,stores,mode,...options);
+      if(owned&&mode==='readwrite'){
+        tx.addEventListener('complete',()=>{committed=true;window.ownedInterruptionReached=true;});
+        if(phase==='before commit'){
+          const store=tx.objectStore('mutations'),add=store.add.bind(store),getStore=tx.objectStore.bind(tx);
+          store.add=(...args)=>{
+            const request=add(...args);
+            request.addEventListener('success',()=>{
+              window.ownedInterruptionReached=true;
+              const hold=()=>store.get('synthetic-hold').addEventListener('success',hold,{once:true});hold();
+            });
+            return request;
+          };
+          tx.objectStore=name=>name==='mutations'?store:getStore(name);
+        }
+      }
+      return tx;
+    };
+  },phase);
+  await page.evaluate(()=>{window.ownerOutcome=null;document.querySelector('[data-task-action="bump"][data-task-id="t1"]').click();});
+  await page.waitForFunction(()=>window.ownedInterruptionReached===true);
+  assert.notEqual(await page.evaluate(()=>window.ownerOutcome?.ok),true);
+  await page.close();
+  const reopened=await context.newPage();
+  await reopened.clock.setFixedTime(new Date(quietDate+'T17:00:00Z'));
+  await reopened.goto(origin+prefix+'index.html');await waitHome(reopened);
+  await assertShown(reopened,phase==='after commit'?'2026-11-17':newDate);
+  assert.equal((await owned(reopened)).journal.length,phase==='after commit'?2:1);
+});
+
+
+test('rollback refuses unreadable Inbox journal evidence and preserves both stores',async t=>{
+  const {page}=await acknowledged(t),before=await owned(page);
+  const raw='{unreadable synthetic Inbox evidence';
+  await page.evaluate(value=>localStorage.setItem('taskpoints_pending_inbox_state_v1',value),raw);
+  await assert.rejects(page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(1)),/rollback_unreadable_legacy_journal/);
+  assert.equal(await page.evaluate(()=>localStorage.getItem('taskpoints_pending_inbox_state_v1')),raw);
+  assert.equal((await assertV2(page,before)).meta.mode,'owned');
+  await assertShown(page,newDate);
+});
+
+test('an unreadable V2 receipt chain withholds the owned card on startup instead of displaying the legacy date',async t=>{
+  const {page}=await acknowledged(t),before=await owned(page);
+  await page.evaluate(id=>new Promise((resolve,reject)=>{
+    const open=indexedDB.open('taskpoints_state_v2');
+    open.onerror=()=>reject(open.error);
+    open.onsuccess=()=>{
+      const db=open.result,tx=db.transaction('mutations','readwrite');
+      tx.objectStore('mutations').delete(id);
+      tx.oncomplete=()=>{db.close();resolve();};
+      tx.onabort=()=>{db.close();reject(tx.error);};
+    };
+  }),before.journal[0].id);
+  await page.reload();
+  const notice=page.locator('#taskList [role="status"]');
+  await page.waitForFunction(()=>document.querySelector('#taskList [role="status"]')?.textContent.includes('V2 Task unavailable'));
+  assert.match(await notice.textContent(),/owned_task_journal_incomplete/);
+  assert.equal(await page.locator('.task-priority-card[data-task-id="t1"]').count(),0);
+  assert.equal(await page.locator('.task-priority-card[data-task-id="t2"]').count(),1);
+  assert.deepEqual(await page.evaluate(()=>ownedPaints),[]);
+  assert.equal((await dates(page)).legacy,oldDate);
 });

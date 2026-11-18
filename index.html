@@ -11127,7 +11127,21 @@ function showTrashToast(taskId){
 function renderTasks(stateInput = null){
   const container=$('taskList'), empty=$('emptyList'); container.innerHTML='';
   window.updateUndatedReminderIsland?.();
-  const active=state.tasks.filter(t=>!t.completedAtISO && !t.hidden && !isTaskTrashed(t) && getTaskStatus(t)!=='wontdo');
+  const owner = window.TaskPointsOwnedTaskExperiment;
+  const ownedDisplay = window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true && owner?.displayOnly && owner.isEnabled();
+  // Keep the legacy state and cache out of the V2 display path. Ordinary
+  // saves (including background saves) still receive only the V1 backing state.
+  const taskView = ownedDisplay ? owner.taskView(state) : state;
+  if (ownedDisplay) {
+    const message = owner.onRender(() => renderTasks(state));
+    if (message) {
+      const notice = document.createElement('p');
+      notice.setAttribute('role', 'status');
+      notice.textContent = message;
+      container.appendChild(notice);
+    }
+  }
+  const active=taskView.tasks.filter(t=>!t.completedAtISO && !t.hidden && !isTaskTrashed(t) && getTaskStatus(t)!=='wontdo');
   if(!active.length){ empty.classList.remove('hidden'); } else empty.classList.add('hidden');
 
   const sort=$('sortSelect').value;
@@ -13663,7 +13677,9 @@ function persistTaskActionMutation(task, action){
 
 function bumpTaskOneDay(id){
   const index = state.tasks.findIndex(row => row.id === id);
-  if (index < 0) return;
+  const owner = window.TaskPointsOwnedTaskExperiment;
+  const ownedAction = window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true && owner?.isEnabled?.() && (owner.owns?.(id) ?? true);
+  if (index < 0 && !ownedAction) return;
   let advanced = false;
   const advance = task => {
     if (!task.dueDateISO || task.completedAtISO || task.hidden || getTaskStatus(task) !== 'active')
@@ -13675,12 +13691,11 @@ function bumpTaskOneDay(id){
   };
   // Only the separately loaded localhost synthetic experiment installs this
   // adapter. Ordinary Home keeps the exact V1 journal path below.
-  const owner = window.TaskPointsOwnedTaskExperiment;
-  if (window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true && owner?.isEnabled?.()) {
+  if (ownedAction) {
     return owner.commitPlusOneDay(id, state.tasks[index], advance).then(result => {
       if (!result?.confirmedDurable) return;
       const currentIndex = state.tasks.findIndex(row => row.id === id);
-      if (currentIndex >= 0) state.tasks[currentIndex] = result.task;
+      if (!owner.displayOnly && currentIndex >= 0) state.tasks[currentIndex] = result.task;
       renderTasks(state);
     }).catch(error => {
       alert(error?.message || 'The new due date could not be verified.');
@@ -15467,6 +15482,11 @@ function refreshMainPageFromStorage() {
 }
 
 function refreshMainPageIfChanged(reason = 'lifecycle') {
+  const owner = window.TaskPointsOwnedTaskExperiment;
+  if (window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true && owner?.displayOnly && owner.isEnabled()) {
+    // V2 can change without a V1 revision bump, including while Home is hidden.
+    owner.refresh(() => renderTasks(state));
+  }
   const currentRevision = readHomeStateRevision();
   const currentGameDayKey = readHomeGameDayKey();
   const revisionUnchanged = Boolean(

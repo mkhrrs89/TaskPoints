@@ -3660,6 +3660,10 @@ document.addEventListener('DOMContentLoaded', () => {
         durationMs: Math.round((endedAt - resolveStartedAt) * 100) / 100
       });
     } catch (_) {}
+    const owner = window.TaskPointsOwnedTaskExperiment;
+    if (window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true && owner?.displayOnly && owner.isEnabled()) {
+      state = owner.taskView(state);
+    }
     const todayKey = todayKeyFallback();
     const tasks = Array.isArray(state.tasks) ? state.tasks : [];
     const list = [];
