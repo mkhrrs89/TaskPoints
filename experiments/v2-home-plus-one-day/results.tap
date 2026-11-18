@@ -1,0 +1,125 @@
+TAP version 13
+# Chromium 156.0.8078.79 with fresh disposable storage.
+# Subtest: real Home button commits directly to V2, preserves other fields and assets, and reloads the V2 date in a new page
+ok 1 - real Home button commits directly to V2, preserves other fields and assets, and reloads the V2 date in a new page
+  ---
+  duration_ms: 1585.840762
+  type: 'test'
+  ...
+# Subtest: closing Chromium and reopening the same disposable profile keeps the acknowledged V2 date
+ok 2 - closing Chromium and reopening the same disposable profile keeps the acknowledged V2 date
+  ---
+  duration_ms: 2223.79994
+  type: 'test'
+  ...
+# Subtest: two deliveries of the same Home click while saving commit once
+ok 3 - two deliveries of the same Home click while saving commit once
+  ---
+  duration_ms: 515.940496
+  type: 'test'
+  ...
+# Subtest: same action ID replays durably after restart and ID reuse for another intent conflicts
+ok 4 - same action ID replays durably after restart and ID reuse for another intent conflicts
+  ---
+  duration_ms: 881.268798
+  type: 'test'
+  ...
+# Subtest: two stale Home tabs cannot both bump the same revision
+ok 5 - two stale Home tabs cannot both bump the same revision
+  ---
+  duration_ms: 844.21368
+  type: 'test'
+  ...
+# Subtest: concurrent different Tasks preserve both edits and unrelated V2 records
+ok 6 - concurrent different Tasks preserve both edits and unrelated V2 records
+  ---
+  duration_ms: 728.537902
+  type: 'test'
+  ...
+# Subtest: an obsolete generation cannot commit even when Task contents still match
+ok 7 - an obsolete generation cannot commit even when Task contents still match
+  ---
+  duration_ms: 588.135451
+  type: 'test'
+  ...
+# Subtest: quota between row write and commit leaves neither row nor receipt, and same intent retries exactly once
+ok 8 - quota between row write and commit leaves neither row nor receipt, and same intent retries exactly once
+  ---
+  duration_ms: 589.24245
+  type: 'test'
+  ...
+# Subtest: abort between row write and commit leaves neither row nor receipt, and same intent retries exactly once
+ok 9 - abort between row write and commit leaves neither row nor receipt, and same intent retries exactly once
+  ---
+  duration_ms: 675.89323
+  type: 'test'
+  ...
+# Subtest: post-commit readback failure displays no success; retry verifies the same receipt without a second bump
+ok 10 - post-commit readback failure displays no success; retry verifies the same receipt without a second bump
+  ---
+  duration_ms: 686.667643
+  type: 'test'
+  ...
+# Subtest: closing after an aborted write reopens at the original V2 date; closing after commit without acknowledgement reopens advanced once
+ok 11 - closing after an aborted write reopens at the original V2 date; closing after commit without acknowledgement reopens advanced once
+  ---
+  duration_ms: 1338.091788
+  type: 'test'
+  ...
+# Subtest: stale V1 snapshot and legacy journal edits remain preserved, block writes and cannot overwrite the acknowledged date
+ok 12 - stale V1 snapshot and legacy journal edits remain preserved, block writes and cannot overwrite the acknowledged date
+  ---
+  duration_ms: 1014.828867
+  type: 'test'
+  ...
+# Subtest: missing receipt refuses reopen instead of falling back to V1 or reseeding
+ok 13 - missing receipt refuses reopen instead of falling back to V1 or reseeding
+  ---
+  duration_ms: 672.246658
+  type: 'test'
+  ...
+# Subtest: rollback refuses a stale revision and freezes fresh writes, then a fresh V1 context reads the latest date from the saved checkpoint
+ok 14 - rollback refuses a stale revision and freezes fresh writes, then a fresh V1 context reads the latest date from the saved checkpoint
+  ---
+  duration_ms: 1494.900889
+  type: 'test'
+  ...
+# Subtest: a synthetic legacy dark-mode toggle cannot open V2 through the old mirror
+ok 15 - a synthetic legacy dark-mode toggle cannot open V2 through the old mirror
+  ---
+  duration_ms: 780.133136
+  type: 'test'
+  ...
+# Subtest: closing the initiating page with journal and Task requests pending never acknowledges success
+ok 16 - closing the initiating page with journal and Task requests pending never acknowledges success
+  ---
+  duration_ms: 1017.35207
+  type: 'test'
+  ...
+# Subtest: normal Home action uses the unchanged real V1 journal when the synthetic owner is absent
+ok 17 - normal Home action uses the unchanged real V1 journal when the synthetic owner is absent
+  ---
+  duration_ms: 649.479713
+  type: 'test'
+  ...
+# Subtest: a silently dropped Task row fails verification and blocks reopening the inconsistent revision
+ok 18 - a silently dropped Task row fails verification and blocks reopening the inconsistent revision
+  ---
+  duration_ms: 689.976916
+  type: 'test'
+  ...
+# Subtest: an existing recovery hold blocks action and rollback while preserving the acknowledged V2 edit
+ok 19 - an existing recovery hold blocks action and rollback while preserving the acknowledged V2 edit
+  ---
+  duration_ms: 779.410889
+  type: 'test'
+  ...
+1..19
+# tests 19
+# suites 0
+# pass 19
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 18369.92778

@@ -13673,6 +13673,19 @@ function bumpTaskOneDay(id){
     advanced = true;
     return true;
   };
+  // Only the separately loaded localhost synthetic experiment installs this
+  // adapter. Ordinary Home keeps the exact V1 journal path below.
+  const owner = window.TaskPointsOwnedTaskExperiment;
+  if (window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true && owner?.isEnabled?.()) {
+    return owner.commitPlusOneDay(id, state.tasks[index], advance).then(result => {
+      if (!result?.confirmedDurable) return;
+      const currentIndex = state.tasks.findIndex(row => row.id === id);
+      if (currentIndex >= 0) state.tasks[currentIndex] = result.task;
+      renderTasks(state);
+    }).catch(error => {
+      alert(error?.message || 'The new due date could not be verified.');
+    });
+  }
   try {
     if (TaskPointsCore?.journalTaskUpdates) {
       const latest = TaskPointsCore.journalTaskUpdates([id], advance);

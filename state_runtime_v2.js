@@ -15,6 +15,7 @@
   const PREVIEW_RECOVERY_STORE = 'snapshots';
   const PREVIEW_RECOVERY_SCHEMA = 1;
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
+  const OWNED_TASK_FIXTURE = 'taskpoints_isolated_task_fixture_v1';
   const WAL_TEST_ACTIVE_GLOBAL = '__taskpointsStateV2WalKillHoldV1';
   const GENERATION_KEY = 'taskpoints_state_v2_generation_v1';
   const REVISION_SIGNAL_KEY = 'taskpoints_state_v2_revision_signal_v1';
@@ -130,6 +131,10 @@
   }
 
   function isDarkEnabled() {
+    // The disposable owner fixture uses the V2 schema with its own admission.
+    // A legacy dark-mode toggle cannot run a reseed over its receipts.
+    if (['localhost', '127.0.0.1'].includes(global.location?.hostname)
+      && safeGet(OWNED_TASK_FIXTURE) !== null) return false;
     return safeGet(DARK_MODE_KEY) === '1';
   }
 
@@ -20111,6 +20116,187 @@
     };
   }
 
+  // Isolated synthetic Task ownership only. The ordinary runtime/dark mirror
+  // stays V1-authoritative. These APIs are never selected by production startup.
+  const OWNED_TASK_META = 'isolated-task-owner-v1';
+  function ownedTaskContext(seed = false) {
+    if (!['localhost','127.0.0.1'].includes(global.location?.hostname)
+      || !String(global.location?.pathname || '').startsWith('/experiments/v2-home-plus-one-day/')
+      || global.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ !== true)
+      throw new Error('isolated_synthetic_task_context_required');
+    const fixture = JSON.parse(global.localStorage.getItem(OWNED_TASK_FIXTURE) || 'null');
+    if (!fixture || fixture.syntheticOnly !== true || typeof fixture.id !== 'string'
+      || fixture.phase !== (seed ? 'prepared' : 'sealed') || global.localStorage.getItem(DARK_MODE_KEY) === '1')
+      throw new Error('isolated_task_fixture_not_ready');
+    for (const key of ['taskpoints_recovery_write_lock_v1','taskpoints_recovery_attempt_lock_v1','taskpoints_emergency_recovery_hold_v1'])
+      if (global.localStorage.getItem(key) !== null) throw new Error('recovery_evidence_blocks_task_write');
+    return fixture;
+  }
+  function ownedLegacyEvidence() {
+    const storage = global.localStorage;
+    return Array.from({length:storage.length},(_,i)=>storage.key(i)).filter(k=>k!==OWNED_TASK_FIXTURE)
+      .sort().map(k=>[k,storage.getItem(k)]);
+  }
+  async function openOwnedTasks(seed = false) {
+    ownedTaskContext(seed);
+    if (typeof global.indexedDB?.databases !== 'function') throw new Error('database_catalog_required');
+    const catalog = await global.indexedDB.databases(), prior = catalog.find(d=>d.name===DB_NAME);
+    if (!seed && !prior) throw new Error('owned_task_database_missing_no_legacy_fallback');
+    if (prior && prior.version !== DB_VERSION) throw new Error('owned_task_schema_mismatch');
+    return new Promise((resolve,reject)=>{
+      let abandoned=false;
+      const q=global.indexedDB.open(DB_NAME,DB_VERSION);
+      q.onupgradeneeded=()=>{
+        if (!seed || abandoned) {q.transaction.abort();return;}
+        try {ensureStores(q.result,q.transaction);} catch (_) {q.transaction.abort();}
+      };
+      q.onblocked=()=>{abandoned=true;reject(new Error('owned_task_open_blocked'));};
+      q.onerror=()=>reject(q.error || new Error('owned_task_open_failed'));
+      q.onsuccess=()=>{if(abandoned){q.result.close();return;}q.result.onversionchange=()=>q.result.close();resolve(q.result);};
+    });
+  }
+  async function initializeIsolatedTaskOwner(snapshot) {
+    const fixture=ownedTaskContext(true), source=ownedLegacyEvidence();
+    const baseline=clone(snapshot);
+    if (!baseline || !Array.isArray(baseline.tasks) || baseline.tasks.some(t=>!t||typeof t.id!=='string'||!t.id)
+      || new Set(baseline.tasks.map(t=>t.id)).size!==baseline.tasks.length)
+      throw new Error('invalid_task_seed');
+    const generation=newResetGeneration('isolated-task'),db=await openOwnedTasks(true);
+    try {
+      const names=Array.from(db.objectStoreNames),tx=db.transaction(names,'readwrite',{durability:'strict'}),done=transactionPromise(tx);
+      let remaining=names.length, failure;
+      for (const name of names) {
+        const count=tx.objectStore(name).count();
+        count.onsuccess=()=>{
+          try {
+            if (count.result!==0) throw new Error('existing_v2_evidence_preserved');
+            if (--remaining) return;
+            if (ownedTaskContext(true).id!==fixture.id || stableJson(ownedLegacyEvidence())!==stableJson(source))
+              throw new Error('seed_source_changed');
+            baseline.tasks.forEach((value,legacyIndex)=>tx.objectStore('tasks').add({id:value.id,value,legacyIndex,ownerRevision:0,ownerGeneration:generation}));
+            tx.objectStore('meta').add({id:OWNED_TASK_META,schemaVersion:1,fixtureId:fixture.id,generation,revision:0,mode:'owned',baseline,source});
+          } catch(e) { failure=e; tx.abort(); }
+        };
+      }
+      try { await done; } catch(e) { throw failure || e; }
+      return {generation,revision:0,authority:'v2-isolated-task'};
+    }finally{db.close();}
+  }
+  async function readOwnedSnapshot(db) {
+    const tx=db.transaction(['tasks','mutations','meta'],'readonly'),done=transactionPromise(tx);
+    const [meta,rows,receipts]=await Promise.all([
+      requestPromise(tx.objectStore('meta').get(OWNED_TASK_META)),requestPromise(tx.objectStore('tasks').getAll()),
+      requestPromise(tx.objectStore('mutations').getAll()),done
+    ]);
+    const fixture=ownedTaskContext();
+    if (!meta || meta.fixtureId!==fixture.id || meta.schemaVersion!==1 || !['owned','rollback-frozen'].includes(meta.mode)
+      || !Number.isSafeInteger(meta.revision)||meta.revision<0) throw new Error('owned_task_authority_missing');
+    if (typeof meta.generation!=='string'||!Array.isArray(meta.baseline?.tasks)||!Array.isArray(meta.source)
+      ||rows.length!==meta.baseline.tasks.length||rows.some(r=>r.ownerGeneration!==meta.generation
+        ||meta.baseline.tasks[r.legacyIndex]?.id!==r.id)) throw new Error('owned_task_rows_unverified');
+    const journal=receipts.filter(r=>r.type==='isolated-task-update').sort((a,b)=>a.revision-b.revision);
+    if (journal.length!==meta.revision || journal.some((r,i)=>r.revision!==i+1||r.generation!==meta.generation)) throw new Error('owned_task_journal_incomplete');
+    // Rebuild the exact expected Task rows from the sealed baseline and committed
+    // receipts. No authority is inferred from a snapshot, revision number or flag.
+    const expected=new Map(meta.baseline.tasks.map(t=>[t.id,{value:t,revision:0}]));
+    for(const r of journal){const old=expected.get(r.taskId);
+      if(!old||r.id!=='isolated-task-action:'+r.intent?.actionId||r.intent?.taskId!==r.taskId
+        ||r.intent?.generation!==r.generation||r.intent?.operation!=='home-plus-one-day'
+        ||r.intent?.expectedRevision!==old.revision||stableJson(r.intent?.expectedTask)!==stableJson(old.value)
+        ||r.priorRevision!==old.revision||stableJson(r.before)!==stableJson(old.value)||r.after?.id!==r.taskId)
+        throw new Error('owned_task_journal_conflict');
+      expected.set(r.taskId,{value:r.after,revision:r.revision});
+    }
+    for(const r of rows){const e=expected.get(r.id);if(!e||r.ownerRevision!==e.revision||stableJson(r.value)!==stableJson(e.value))throw new Error('owned_task_row_receipt_mismatch');}
+    return {meta,rows,journal,sourceDrift:stableJson(meta.source)!==stableJson(ownedLegacyEvidence())};
+  }
+  async function readIsolatedOwnedTasks() {
+    const db=await openOwnedTasks();
+    try {const s=await readOwnedSnapshot(db);return {...s,authority:'v2-isolated-task',tasks:s.rows.sort((a,b)=>a.legacyIndex-b.legacyIndex).map(r=>clone(r.value))};}
+    finally{db.close();}
+  }
+  async function commitIsolatedOwnedTask(input) {
+    const fixture=ownedTaskContext();
+    if(!input || typeof input.actionId!=='string'||!input.actionId||input.actionId.length>128
+      ||input.operation!=='home-plus-one-day'||typeof input.taskId!=='string'||!Number.isSafeInteger(input.expectedRevision)
+      ||typeof input.mutate!=='function')throw new Error('invalid_owned_task_intent');
+    // Snapshot the compare-and-swap intent before the first await.
+    const intent={actionId:input.actionId,taskId:input.taskId,operation:input.operation,generation:input.generation,
+      expectedRevision:input.expectedRevision,expectedTask:clone(input.expectedTask)};
+    const mutate=input.mutate;
+    const db=await openOwnedTasks();let receipt,replayed=false;
+    try {
+      const before=await readOwnedSnapshot(db);
+      if(before.sourceDrift)throw new Error('legacy_source_changed_preserved_reconciliation_required');
+      const tx=db.transaction(['tasks','mutations','meta'],'readwrite',{durability:'strict'}),done=transactionPromise(tx);
+      const tasks=tx.objectStore('tasks'),mutations=tx.objectStore('mutations'),metaStore=tx.objectStore('meta');
+      let row,previous,meta,count=0,failure;
+      const stop=reason=>{failure=new Error(reason);tx.abort();};
+      const decide=()=>{
+        if(++count!==3)return;
+        try{
+          const context=ownedTaskContext();
+          if(!meta||meta.fixtureId!==fixture.id||context.id!==fixture.id||meta.generation!==intent.generation) return stop('owned_task_generation_conflict');
+          if(stableJson(meta.source)!==stableJson(ownedLegacyEvidence()))return stop('legacy_source_changed_preserved_reconciliation_required');
+          if(previous){
+            if(stableJson(previous.intent)!==stableJson(intent))return stop('owned_task_action_id_conflict');
+            receipt=previous;replayed=true;return;
+          }
+          if(meta.mode!=='owned')return stop('rollback_frozen_no_task_writes');
+          if(!row||row.ownerGeneration!==meta.generation||row.ownerRevision!==intent.expectedRevision||stableJson(row.value)!==stableJson(intent.expectedTask))return stop('owned_task_stale_edit');
+          const next=clone(row.value);
+          if(mutate(next)!==true)return stop('task_action_not_applicable');
+          const dateFields=new Set(['dueDateISO','originalDueDateISO','postponedDays','updatedAtISO']);
+          const keys=new Set([...Object.keys(row.value),...Object.keys(next)]);
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(next.dueDateISO) || next.dueDateISO<=row.value.dueDateISO
+            || [...keys].some(k=>!dateFields.has(k)&&stableJson(next[k])!==stableJson(row.value[k])))
+            return stop('invalid_owned_task_change');
+          receipt={id:'isolated-task-action:'+intent.actionId,type:'isolated-task-update',intent,
+            taskId:row.id,generation:meta.generation,revision:meta.revision+1,priorRevision:row.ownerRevision,
+            before:clone(row.value),after:clone(next),committedAtISO:nowIso()};
+          tasks.put({...row,value:next,ownerRevision:receipt.revision});
+          mutations.add(receipt);
+          metaStore.put({...meta,revision:receipt.revision});
+        }catch(e){failure=e;try{tx.abort();}catch(_){}}
+      };
+      const a=tasks.get(intent.taskId),b=mutations.get('isolated-task-action:'+intent.actionId),c=metaStore.get(OWNED_TASK_META);
+      a.onsuccess=()=>{row=a.result;decide();};b.onsuccess=()=>{previous=b.result;decide();};c.onsuccess=()=>{meta=c.result;decide();};
+      try{await done;}catch(e){throw failure||e;}
+      // Readback AFTER transaction completion, using the same journal verifier as
+      // startup. An IDB request success or a V1 mirror is never an acknowledgement.
+      const verified=await readOwnedSnapshot(db),saved=verified.journal.find(r=>r.id===receipt.id);
+      if(!saved||stableJson(saved)!==stableJson(receipt)||verified.sourceDrift)throw new Error('owned_task_commit_readback_unverified_retry_same_action');
+      const latest=verified.rows.find(r=>r.id===intent.taskId);
+      return {confirmedDurable:true,authority:'v2-isolated-task',replayed,receipt:clone(saved),task:clone(latest.value),taskRevision:latest.ownerRevision,generation:verified.meta.generation};
+    }finally{db.close();}
+  }
+  async function prepareIsolatedTaskRollback(expectedRevision) {
+    const db=await openOwnedTasks();
+    try{
+      const prior=await readOwnedSnapshot(db);
+      if(prior.sourceDrift)throw new Error('legacy_source_changed_preserved_reconciliation_required');
+      const tx=db.transaction(['tasks','mutations','meta'],'readwrite',{durability:'strict'}),done=transactionPromise(tx);
+      const store=tx.objectStore('meta'),q=store.get(OWNED_TASK_META);let failure;
+      q.onsuccess=()=>{
+        try {
+          const meta=q.result;
+          if(!meta||meta.fixtureId!==ownedTaskContext().id||meta.generation!==prior.meta.generation
+            ||meta.revision!==expectedRevision||stableJson(meta.source)!==stableJson(ownedLegacyEvidence()))
+            throw new Error('rollback_revision_conflict');
+          store.put({...meta,mode:'rollback-frozen'});
+        } catch(e) {failure=e;tx.abort();}
+      };
+      try{await done;}catch(e){throw failure||e;}
+      const current=await readOwnedSnapshot(db),snapshot=clone(current.meta.baseline);
+      if(current.sourceDrift||current.meta.mode!=='rollback-frozen')throw new Error('rollback_readback_unverified');
+      snapshot.tasks=current.rows.sort((a,b)=>a.legacyIndex-b.legacyIndex).map(r=>clone(r.value));
+      // This is a detached compatible candidate, never an in-place V1 overwrite.
+      // Original source strings/journals and all receipts remain archived exactly.
+      return {format:'taskpoints-isolated-task-rollback-1',generation:current.meta.generation,revision:current.meta.revision,
+        snapshot,originalSource:clone(current.meta.source),receipts:clone(current.journal),sourceFrozen:true};
+    }finally{db.close();}
+  }
+
   const api = {
     __installedModule: true,
     DB_NAME,
@@ -20129,6 +20315,10 @@
     startDarkMirror,
     startCoordinatedDarkMirror,
     open,
+    initializeIsolatedTaskOwner,
+    readIsolatedOwnedTasks,
+    commitIsolatedOwnedTask,
+    prepareIsolatedTaskRollback,
     inspectStartupMeta,
     seedFromLegacy,
     applyMutation(mutation) {
