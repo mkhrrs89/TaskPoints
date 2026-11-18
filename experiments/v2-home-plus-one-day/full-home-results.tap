@@ -1,0 +1,76 @@
+TAP version 13
+# Chromium 156.0.8078.79 serves the full checked-in Home document and worker-ordered bundle on loopback
+# BLOCKER full Home reload: Home date 2026-11-15 V2 date 2026-11-16 boot localStorage:native_database_missing
+# Subtest: full Home click commits V2 with ordinary startup running, then the cold Home loader displays the old legacy date
+ok 1 - full Home click commits V2 with ordinary startup running, then the cold Home loader displays the old legacy date
+  ---
+  duration_ms: 3067.644505
+  type: 'test'
+  ...
+# Subtest: Home to Notes and back reloads the old Task date while the other post-startup records survive navigation
+ok 2 - Home to Notes and back reloads the old Task date while the other post-startup records survive navigation
+  ---
+  duration_ms: 2229.126654
+  type: 'test'
+  ...
+# BLOCKER Home save → saveStateSnapshot persisted the V2 UI date to V1; sourceDrift=true
+# Subtest: ordinary Home save leaks the acknowledged display date into V1 and changes the source seal
+ok 3 - ordinary Home save leaks the acknowledged display date into V1 and changes the source seal
+  ---
+  duration_ms: 1823.338868
+  type: 'test'
+  ...
+# BLOCKER Task compaction and pageshow refresh read the V1 date after V2 acknowledgement
+# Subtest: V1 Task compaction preserves the unrelated edit and its own older target date; the V2 receipt survives
+ok 4 - V1 Task compaction preserves the unrelated edit and its own older target date; the V2 receipt survives
+  ---
+  duration_ms: 2144.76687
+  type: 'test'
+  ...
+# BLOCKER secondary maintenance: V1 canonical bytes unchanged, verified native date still old, legacy diagnostics changed, Home boot indexeddb-native
+# Subtest: verified-secondary maintenance retains an older native startup snapshot and changes the source seal without changing canonical bytes
+ok 5 - verified-secondary maintenance retains an older native startup snapshot and changes the source seal without changing canonical bytes
+  ---
+  duration_ms: 1884.111369
+  type: 'test'
+  ...
+# Subtest: competing legacy Task edit in another full Home tab survives and causes V2 admission and rollback to refuse
+ok 6 - competing legacy Task edit in another full Home tab survives and causes V2 admission and rollback to refuse
+  ---
+  duration_ms: 3557.236132
+  type: 'test'
+  ...
+# Subtest: full Home IndexedDB quota failure has no success and reload keeps the original V2 date
+ok 7 - full Home IndexedDB quota failure has no success and reload keeps the original V2 date
+  ---
+  duration_ms: 2207.909088
+  type: 'test'
+  ...
+# Subtest: rollback from the acknowledged full Home commit freezes V2 and a fresh full Home can read the detached Task checkpoint
+ok 8 - rollback from the acknowledged full Home commit freezes V2 and a fresh full Home can read the detached Task checkpoint
+  ---
+  duration_ms: 3292.649348
+  type: 'test'
+  ...
+# Subtest: after Chromium process restart the owned receipt survives, but full Home still renders the legacy date
+ok 9 - after Chromium process restart the owned receipt survives, but full Home still renders the legacy date
+  ---
+  duration_ms: 4916.588278
+  type: 'test'
+  ...
+# EXISTING STARTUP BLOCKER Inbox loss stack:     at safeReplaceTaskPointsStorage (local/scoring_core.js:903:18) |     at attemptSave (local/scoring_core.js:7828:9) |     at Object.saveStateSnapshot (local/scoring_core.js:7914:14) |     at Object.guardedDestructiveEntryPoint (local/scoring_core.js:12075:68) |     at Object.saveStateSnapshotWithPendingFlex (local/scoring_core.js:18307:22) |     at Object.saveStateSnapshotWithScoreAliasConsistency (local/scoring_core.js:19176:14) |     at Object.saveStateSnapshotWithAlignedYouAliases (local/scoring_core.js:19684:14) |     at saveAndRefreshTracker (local/scoring_core.js:19851:20) |     at Object.guardedHabitCompletionSave (local/scoring_core.js:19951:14)
+# Subtest: existing Home startup loses the seeded Inbox message before V2 ownership starts
+ok 10 - existing Home startup loses the seeded Inbox message before V2 ownership starts
+  ---
+  duration_ms: 1186.38913
+  type: 'test'
+  ...
+1..10
+# tests 10
+# suites 0
+# pass 10
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 27155.971047

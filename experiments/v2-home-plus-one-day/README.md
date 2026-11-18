@@ -1,5 +1,8 @@
 # V2 ownership for Home +1 Day
 
+[Full Home follow-up](FULL-HOME.md) reproduces the legacy startup and save paths
+that still block compatibility after V2 acknowledges the date.
+
 Clicking the real Home `+1d` button moved the synthetic Task from November 18 to
 November 19, 2026. A new page and a new Chromium process both read November 19
 from V2. The V1 snapshot still held November 18, and the test recorded zero V1
