@@ -11273,7 +11273,7 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
               <div class="task-edit-paired-row sm:col-span-2">
                 <div>
                   <label class="text-xs muted">Points</label>
-                  <input class="input mt-1" type="number" data-field="points" value="${t.points||0}">
+                  <input class="input mt-1" type="number" data-field="points" value="${escapeHtml(editor?.draft.points ?? (t.points||0))}">
                 </div>
                 <div>
                   <label class="text-xs muted">Repeat</label>
@@ -13909,6 +13909,7 @@ function ownedHomeTaskEditor(id) {
 function lockOwnedTaskEditor(card) {
   card.querySelector('[data-field="title"]').readOnly = true;
   card.querySelector('[data-field="tags"]').readOnly = true;
+  card.querySelector('[data-field="points"]').readOnly = true;
   card.querySelector('[data-field="importance"]').disabled = true;
   card.querySelectorAll('[data-task-action]').forEach(button => { button.disabled = true; });
 }
@@ -13917,7 +13918,7 @@ async function saveOwnedHomeTaskEdit(owner, id, card) {
   const edit = owner.taskEditor();
   if (!edit || edit.saving) return;
   const draft = {};
-  for (const key of ['title', 'importance', 'tags']) {
+  for (const key of ['title', 'importance', 'tags', 'points']) {
     draft[key] = card.querySelector(`[data-field="${key}"]`).value;
     owner.rememberTaskDraft(key, draft[key]);
   }
@@ -13931,6 +13932,8 @@ async function saveOwnedHomeTaskEdit(owner, id, card) {
     const tags = draft.tags.split(',').map(tag => tag.trim()).filter(Boolean);
     if (JSON.stringify(tags) !== JSON.stringify(edit.original.tags)) fields.tags = tags;
   }
+  const points = Number(draft.points) || 0;
+  if (points !== edit.original.points) fields.points = points;
   if (Object.keys(fields).length || edit.pending) {
     lockOwnedTaskEditor(card);
     try {
@@ -13950,6 +13953,12 @@ async function saveOwnedHomeTaskEdit(owner, id, card) {
 }
 
 function completeTask(id){
+  // The legacy writer would award from its stale backing row. Withhold
+  // completion while this synthetic Task is still owned by V2.
+  if (ownedHomeTaskEditor(id)) {
+    alert('This Task is owned by the V2 experiment. Use a verified V1 rollback before completing it.');
+    return;
+  }
   return tpPerfTime('completeTask total', () => {
     const liveTask = state.tasks.find(x => x.id === id);
     if (!liveTask || taskCompletionAnimations.has(id)) return;

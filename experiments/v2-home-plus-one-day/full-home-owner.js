@@ -10,6 +10,7 @@
   const bumpOperation = 'home-plus-one-day';
   const titleOperation = 'home-task-title-edit';
   const classificationOperation = 'home-task-classification-edit';
+  const pointsOperation = 'home-task-points-edit';
   let selected = false, verified = null, error = '', read = null;
   let repaint, pending = null, writing = null, editor = null;
   // Latch selection for this document. Losing the marker during an open
@@ -79,7 +80,9 @@
       pending = null;
       window.ownerOutcome = {ok: result.confirmedDurable, date: result.task.dueDateISO,
         ...(operation !== bumpOperation ? {title: result.task.title} : {}),
-        ...(operation === classificationOperation ? {importance: result.task.importance, tags: result.task.tags} : {})};
+        ...(operation === classificationOperation || operation === pointsOperation
+          ? {importance: result.task.importance, tags: result.task.tags} : {}),
+        ...(operation === pointsOperation ? {points: result.task.points} : {})};
       return result;
     } catch (cause) {
       // A stale, uncommitted intent may be abandoned by closing the editor.
@@ -122,10 +125,11 @@
       const task = basis.expectedTask;
       const original = {
         title: task.title,
+        points: Number(task.points) || 0,
         importance: ['Low','Medium','High','Critical'].includes(task.importance) ? task.importance : 'Low',
         tags: Array.isArray(task.tags) ? task.tags : []
       };
-      editor = {basis, original, draft: {...original, tags: original.tags.join(', ')}};
+      editor = {basis, original, draft: {...original, points: String(original.points), tags: original.tags.join(', ')}};
     },
     taskEditor: () => editor && {
       original: editor.original,
@@ -141,6 +145,7 @@
       if (id !== taskId || !editor) return Promise.reject(Error('Open the V2 Task editor before saving.'));
       // Use the Task and revision seen at editor open, even if a refresh has
       // since loaded a newer value underneath the draft.
+      if (Object.hasOwn(fields, 'points')) return submit(pointsOperation, () => editor.basis, {fields});
       if (Object.hasOwn(fields, 'importance') || Object.hasOwn(fields, 'tags')) {
         return submit(classificationOperation, () => editor.basis, {fields});
       }

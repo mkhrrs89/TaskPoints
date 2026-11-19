@@ -656,7 +656,8 @@ test('real Home title edit commits in V2 and survives Notes, ordinary save, comp
   await openTaskEdit(page);
   assert.equal(await titleField(page).inputValue(),originalTitle);
   assert.equal(await editCard(page).locator('[data-field="due"]').inputValue(),newDate);
-  assert.equal(await editCard(page).locator('[data-field="points"]').isDisabled(),true);
+  assert.equal(await editCard(page).locator('[data-field="due"]').isDisabled(),true);
+  assert.equal(await editCard(page).locator('[data-field="points"]').isEnabled(),true);
   await page.evaluate(()=>{legacyWrites.length=0;});
   await titleField(page).fill('  '+newerTitle+'  ');
   assert.deepEqual(await submitTaskEdit(page),{ok:true,date:newDate,title:newerTitle});
@@ -845,12 +846,12 @@ for(const phase of ['before commit','after commit'])test(`interrupted title Save
   assert.equal((await backingTask(reopened)).title,originalTitle);
 });
 
-async function openRollbackHome(t,transfer){
+async function openRollbackHome(t,transfer,time=quietDate+'T17:00:00Z'){
   const fresh=await browser.newContext({serviceWorkers:'block',timezoneId:'America/New_York'});
   t.after(()=>fresh.close());
   await configureContext(fresh);
   const destination=await fresh.newPage();
-  await destination.clock.setFixedTime(new Date(quietDate+'T17:00:00Z'));
+  await destination.clock.setFixedTime(new Date(time));
   await destination.goto(origin+prefix+'seed.html');
   await destination.addScriptTag({path:path.join(root,'scoring_core.js')});
   await destination.evaluate(async({checkpoint,image,marker})=>{
@@ -960,25 +961,27 @@ async function assertHomeClassification(page,importance,tags){
     tags.some(tag=>tag.toLowerCase()==='work'));
 }
 
-test('real Home saves Importance, Tags and title in one V2 receipt through navigation, legacy save, maintenance and reload',async t=>{
+for(const withPoints of [false,true])test(`real Home saves Importance, Tags and title${withPoints?' with Points':''} in one V2 receipt through navigation, legacy save, maintenance and reload`,async t=>{
+  const pointsPatch=withPoints?{points:12.75}:{};
+  const fields={...classificationFields,title:newerTitle,...pointsPatch};
   const {page,errors}=await acknowledged(t);
   const before=await owned(page),legacy=await backingTask(page),unrelated=await partOfState(page);
   await openTaskEdit(page);
   assert.equal(await importanceField(page).inputValue(),'High');
   assert.equal(await tagsField(page).inputValue(),'');
-  for(const field of ['points','due','repeat','repeatCustomCount','repeatCustomUnit'])
+  for(const field of ['due','repeat','repeatCustomCount','repeatCustomUnit'])
     assert.equal(await editCard(page).locator('[data-field="'+field+'"]').isDisabled(),true);
   await fillClassification(page);
   await titleField(page).fill('  '+newerTitle+'  ');
+  if(withPoints)await pointsField(page).fill('12.75');
   await page.evaluate(()=>{legacyWrites.length=0;});
-  assert.deepEqual(await submitTaskEdit(page),{ok:true,date:newDate,title:newerTitle,...classificationFields});
+  assert.deepEqual(await submitTaskEdit(page),{ok:true,date:newDate,title:newerTitle,...classificationFields,...pointsPatch});
   await assertHomeTitle(page,newerTitle);
   await assertHomeClassification(page,'Critical',classificationTags);
   const after=await owned(page),task=ownedTask(after),receipt=after.journal.at(-1);
-  const fields={...classificationFields,title:newerTitle};
   assert.deepEqual(after.journal.slice(0,-1),before.journal);
   assert.equal(after.journal.length,2);
-  assert.equal(receipt.intent.operation,classificationOperation);
+  assert.equal(receipt.intent.operation,withPoints?pointsOperation:classificationOperation);
   assert.deepEqual(receipt.intent.fields,fields);
   assert.deepEqual(task,{...ownedTask(before),...fields,updatedAtISO:task.updatedAtISO});
   assert.deepEqual(receipt.after,task);
@@ -1011,6 +1014,7 @@ test('real Home saves Importance, Tags and title in one V2 receipt through navig
   await assertHomeClassification(page,'Critical',classificationTags);
   assert.equal(await page.locator('#criticalTasksIsland').getAttribute('data-active'),'1');
   await assertHomeTitle(page,newerTitle);await assertShown(page,newDate);
+  if(withPoints)await assertHomePoints(page,12.75);
   assert.equal(await page.evaluate(()=>window.__TP_HOME_BOOT_SOURCE),'indexeddb-native');
   assert.deepEqual(await backingTask(page),{skills:[],...legacy});
   assert.equal((await assertV2(page,after)).sourceDrift,false);
@@ -1065,16 +1069,18 @@ test('with ownership disabled the real V1 editor still saves Importance and Tags
   assert.equal(await page.evaluate(async()=>!(await indexedDB.databases()).some(db=>db.name===TaskPointsStateRuntimeV2.DB_NAME)),true);
 });
 
-test('a competing V2 edit refuses a stale classification draft, and a compacted V1 edit pauses V2 and rollback',async t=>{
+for(const withPoints of [false,true])test(`a competing V2 edit refuses a stale classification draft${withPoints?' with Points':''}, and a compacted V1 edit pauses V2 and rollback`,async t=>{
   const {page,context}=await freshTaskOwner(t);
   await openTaskEdit(page);
   await fillClassification(page);
+  if(withPoints)await pointsField(page).fill('17');
   const peer=await context.newPage();
   await peer.clock.setFixedTime(new Date(quietDate+'T17:00:00Z'));
   await peer.goto(origin+prefix+'index.html');await waitHome(peer);
   await openTaskEdit(peer);
   await importanceField(peer).selectOption('Medium');
   await tagsField(peer).fill('Peer tags');
+  if(withPoints)await pointsField(peer).fill('11');
   assert.equal((await submitTaskEdit(peer)).ok,true);
   await assertHomeClassification(peer,'Medium',['Peer tags']);
   await page.evaluate(()=>TaskPointsOwnedTaskExperiment.refresh());
@@ -1087,16 +1093,18 @@ test('a competing V2 edit refuses a stale classification draft, and a compacted 
   assert.equal(saved.journal.length,1);
   await editCard(page).locator('[data-task-action="task-cancel"]').click();
   await assertHomeClassification(page,'Medium',['Peer tags']);
+  if(withPoints)await assertHomePoints(page,11);
 
   await openTaskEdit(page);
   await fillClassification(page);
-  await page.evaluate(()=>{
-    TaskPointsCore.journalTaskUpdates(['t1'],task=>{task.tags=['Competing legacy'];return true;});
+  await page.evaluate(withPoints=>{
+    TaskPointsCore.journalTaskUpdates(['t1'],task=>{task.tags=['Competing legacy'];if(withPoints)task.points=22;return true;});
     if(!TaskPointsCore.flushPendingTaskMutations())throw Error('Expected competing Task journal compaction');
-  });
+  },withPoints);
   assert.deepEqual(await submitTaskEdit(page),{ok:false,error:'legacy_source_changed_preserved_reconciliation_required'});
   assert.deepEqual(await owned(page),{...saved,sourceDrift:true});
   assert.deepEqual((await backingTask(page)).tags,['Competing legacy']);
+  if(withPoints)assert.equal((await backingTask(page)).points,22);
   await assert.rejects(page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(1)),/legacy_source_changed/);
 });
 
@@ -1149,11 +1157,12 @@ test('classification Save refuses success without readback and retries the exact
   await assert.rejects(page.evaluate(intent=>TaskPointsStateRuntimeV2.commitIsolatedOwnedTask({...intent,fields:{...intent.fields,tags:[]}}),intent),/owned_task_action_id_conflict/);
 });
 
-for(const phase of ['before commit','after commit'])test(`interrupted classification Save ${phase} reopens with both fields or neither`,async t=>{
+for(const phase of ['before commit','after commit'])for(const withPoints of [false,true])test(`interrupted classification Save${withPoints?' with Points':''} ${phase} reopens with both fields or neither`,async t=>{
   const {page,context}=await freshTaskOwner(t),before=await owned(page);
   await interruptOwnedWrite(page,phase);
   await openTaskEdit(page);
   await fillClassification(page);
+  if(withPoints)await pointsField(page).fill('9');
   await page.evaluate(()=>document.querySelector('[data-task-action="task-save"][data-task-id="t1"]').click());
   await page.waitForFunction(()=>window.ownedInterruptionReached===true);
   assert.notEqual(await page.evaluate(()=>window.ownerOutcome?.ok),true);
@@ -1164,7 +1173,8 @@ for(const phase of ['before commit','after commit'])test(`interrupted classifica
   const committed=phase==='after commit',after=await owned(reopened);
   await assertHomeClassification(reopened,committed?'Critical':'High',committed?classificationTags:[]);
   assert.equal(after.journal.length,committed?1:0);
-  if(committed)assert.deepEqual(after.journal[0].intent.fields,classificationFields);
+  if(withPoints)await assertHomePoints(reopened,committed?9:5);
+  if(committed)assert.deepEqual(after.journal[0].intent.fields,withPoints?{...classificationFields,points:9}:classificationFields);
   else assert.deepEqual(after,before);
 });
 
@@ -1231,6 +1241,169 @@ test('classification intent rejects non-editor fields, invalid Importance and ma
   const intent={operation:classificationOperation,taskId:'t1',generation:before.meta.generation,
     expectedRevision:0,expectedTask:ownedTask(before)};
   for(const fields of [{importance:'Critical',points:10},{importance:'Other'},{tags:['ok','']},{tags:['one,two']},{title:'Title only'}]){
+    await assert.rejects(page.evaluate(({intent,fields})=>TaskPointsStateRuntimeV2.commitIsolatedOwnedTask({
+      ...intent,actionId:crypto.randomUUID(),fields
+    }),{intent,fields}),/invalid_owned_task_intent/);
+  }
+  assert.deepEqual(await owned(page),before);
+});
+
+const pointsOperation='home-task-points-edit';
+const pointsField=page=>editCard(page).locator('[data-field="points"]');
+const assertHomePoints=(page,expected)=>page.waitForFunction(points=>
+  document.querySelector('[data-task-card-body="t1"] .taskPointsNumber')?.textContent===String(points),expected);
+
+function rewardEvidence(page){
+  return page.evaluate(()=>{
+    const core=TaskPointsCore,s=core.readTaskPointsStoredState();
+    return {
+      completions:s.completions,
+      earned:s.completions.map(entry=>[entry.id,core.pointsForCompletion(entry,s)]),
+      totals:core.aggregateCompletionsByDate(s.completions,s),
+      gameHistory:s.gameHistory,
+      matchups:s.matchups,
+      goldLedger:s.goldLedger,
+      goldEconomy:s.goldEconomy
+    };
+  });
+}
+
+test('Points edits keep real historical rewards and future V1 Done earns the new amount after restart and rollback',async t=>{
+  // Run before Home's daily Game simulation window on every reopen.
+  const time=quietDate+'T07:00:00Z';
+  const profile=fs.mkdtempSync(path.join(os.tmpdir(),'tp-home-points-'));
+  const launch=()=>chromium.launchPersistentContext(profile,{
+    executablePath:process.env.BOUNDARY_CHROMIUM_PATH||'/usr/bin/chromium',serviceWorkers:'block',timezoneId:'America/New_York'
+  });
+  let context=await launch();
+  t.after(async()=>{await context.close();fs.rmSync(profile,{recursive:true,force:true});});
+  const {page}=await fixture(t,context);
+  await page.clock.setFixedTime(new Date('2026-11-14T17:00:00Z'));
+  await openTaskEdit(page);
+  await editCard(page).locator('[data-field="repeat"]').selectOption('daily');
+  await titleSave(page).click();
+  await editCard(page).locator('[data-task-action="complete"]').click();
+  await page.locator('.task-priority-card[data-task-id="t2"] [data-task-action="complete"]').click();
+  await page.waitForFunction(()=>TaskPointsCore.readTaskPointsStoredState().completions.filter(c=>c.taskId==='t1'||c.taskId==='t2').length===2);
+  assert.equal(await page.evaluate(()=>TaskPointsCore.flushPendingTaskMutations()),true);
+  await page.clock.setFixedTime(new Date(time));
+  await page.reload();await waitHome(page);
+  await page.evaluate(()=>TaskPointsCore.flushPendingSaves());
+  await page.evaluate(()=>{
+    const core=TaskPointsCore;
+    const saved=core.saveValidatedSnapshot(core.readTaskPointsStoredState(),{immediateWrite:true,savePath:'synthetic-points-backup'});
+    if(saved?.blocked||saved?.skipped)throw Error('Synthetic backup save refused');
+  });
+  const history=await rewardEvidence(page),preserved=await partOfState(page);
+  assert.equal(preserved.task.status,'done');
+  assert.equal(history.completions.find(c=>c.taskId==='t1').points,5);
+  assert.equal(history.completions.find(c=>c.taskId==='t2').points,3);
+  assert.equal(history.totals.dailyTotals['2026-11-14'],8);
+  await installOwner(page);
+  assert.equal((await owned(page)).sourceDrift,false);
+  const backupKeys=['taskpoints_backup_latest','taskpoints_backup_prev1','taskpoints_backup_prev2','taskpoints_backup_prev3'];
+  const backups=await page.evaluate(keys=>keys.map(key=>localStorage.getItem(key)),backupKeys);
+  assert.ok(backups.some(value=>value!==null),'real rolling backup fixture');
+  await openTaskEdit(page);
+  await pointsField(page).fill('12.75');
+  await page.evaluate(()=>{legacyWrites.length=0;});
+  assert.equal((await submitTaskEdit(page)).points,12.75);
+  await assertHomePoints(page,12.75);
+  const committed=await owned(page);
+  assert.deepEqual(committed.journal[0].intent.fields,{points:12.75});
+  assert.deepEqual(await rewardEvidence(page),history);
+  assert.deepEqual(await partOfState(page),preserved);
+  assert.deepEqual(await page.evaluate(keys=>keys.map(key=>localStorage.getItem(key)),backupKeys),backups);
+  assert.equal((await backingTask(page)).points,5);
+  assert.equal(await page.evaluate(()=>legacyWrites.some(w=>['taskpoints_v1','taskpoints_pending_task_mutations_v1'].includes(w.key))),false);
+  await editCard(page).locator('[data-task-action="complete"]').click();
+  assert.deepEqual(await rewardEvidence(page),history);
+
+  await context.close();context=await launch();await configureContext(context);
+  const reopened=await context.newPage();
+  await reopened.clock.setFixedTime(new Date(time));
+  await reopened.goto(origin+prefix+'index.html');await waitHome(reopened);
+  await assertHomePoints(reopened,12.75);
+  assert.deepEqual((await owned(reopened)).journal,committed.journal);
+  const afterRestart=await rewardEvidence(reopened);
+  for(const key of ['completions','earned','totals'])assert.deepEqual(afterRestart[key],history[key]);
+  // Ordinary boot can append a daily Game simulation and its Gold reward.
+  // Existing rows must survive byte-for-byte, including linked matchup rewards.
+  for(const key of ['gameHistory','matchups','goldLedger']){
+    const previousIds=new Set(history[key].map(row=>row.id));
+    assert.deepEqual(afterRestart[key].filter(row=>previousIds.has(row.id)),history[key]);
+  }
+  const transfer=await reopened.evaluate(async()=>{
+    const checkpoint=await TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(1);
+    const blob=await TaskPointsCore.getImageBlob('synthetic-image');
+    return {checkpoint,image:[...new Uint8Array(await blob.arrayBuffer())]};
+  });
+  assert.deepEqual(transfer.checkpoint.snapshot.completions,history.completions);
+  assert.deepEqual(transfer.checkpoint.receipts,committed.journal);
+  const restored=await openRollbackHome(t,transfer,time);
+  await assertHomePoints(restored,12.75);
+  assert.deepEqual(await rewardEvidence(restored),afterRestart);
+  assert.deepEqual(await partOfState(restored),preserved);
+  await editCard(restored).locator('[data-task-action="complete"]').click();
+  await restored.waitForFunction(()=>TaskPointsCore.readTaskPointsStoredState().completions.filter(c=>c.taskId==='t1').length===2);
+  const future=await rewardEvidence(restored);
+  const award=future.completions.find(entry=>!history.completions.some(old=>old.id===entry.id));
+  assert.equal(award.taskId,'t1');
+  assert.equal(award.points,12.75);
+  assert.equal(future.earned.find(([id])=>id===award.id)[1],12.75);
+  assert.equal(future.totals.dailyTotals['2026-11-14'],8);
+  assert.equal(future.totals.dailyTotals[quietDate],12.75);
+  assert.deepEqual(future.completions.filter(entry=>entry.id!==award.id),history.completions);
+  assert.deepEqual(future.earned.filter(([id])=>id!==award.id),history.earned);
+  assert.equal(await restored.evaluate(()=>TaskPointsCore.flushPendingTaskMutations()),true);
+  await restored.reload();await waitHome(restored);
+  assert.deepEqual((await rewardEvidence(restored)).completions,future.completions);
+});
+
+test('real V2 Points input keeps V1 numeric behavior for decimals, negatives, blank and exponent values',async t=>{
+  const {page}=await freshTaskOwner(t);
+  for(const [value,points] of [['-1.25',-1.25],['',0],['1e2',100]]){
+    await openTaskEdit(page);
+    await pointsField(page).fill(value);
+    assert.equal((await submitTaskEdit(page)).points,points);
+    await assertHomePoints(page,points);
+  }
+  assert.deepEqual((await owned(page)).journal.map(receipt=>receipt.intent.fields.points),[-1.25,0,100]);
+  assert.equal((await backingTask(page)).points,5);
+});
+
+test('Points quota and unconfirmed readback retries preserve the original intent and award no completion',async t=>{
+  const {page}=await freshTaskOwner(t),before=await owned(page),history=await rewardEvidence(page);
+  await page.evaluate(operation=>{
+    const add=IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add=function(record,...args){
+      if(!window.ownedQuotaRecovered&&record?.intent?.operation===operation)
+        throw new DOMException('synthetic Points quota','QuotaExceededError');
+      return add.call(this,record,...args);
+    };
+  },pointsOperation);
+  await openTaskEdit(page);
+  await pointsField(page).fill('9');
+  assert.deepEqual(await submitTaskEdit(page),{ok:false,error:'synthetic Points quota'});
+  assert.deepEqual(await owned(page),before);
+  assert.equal(await pointsField(page).inputValue(),'9');
+  await page.evaluate(()=>{window.ownedQuotaRecovered=true;});
+  await interruptOwnedWrite(page,'after commit');
+  assert.deepEqual(await submitTaskEdit(page),{ok:false,error:'synthetic readback unavailable'});
+  await page.evaluate(async()=>{window.allowOwnedReadback=true;await TaskPointsOwnedTaskExperiment.refresh();});
+  const unconfirmed=await owned(page);
+  assert.equal(unconfirmed.journal.length,1);
+  assert.equal((await submitTaskEdit(page)).points,9);
+  await assertHomePoints(page,9);
+  assert.deepEqual(await owned(page),unconfirmed);
+  assert.deepEqual(await rewardEvidence(page),history);
+});
+
+test('Points receipt admission refuses strings, non-finite numbers and unrelated fields',async t=>{
+  const {page}=await freshTaskOwner(t),before=await owned(page);
+  const intent={operation:pointsOperation,taskId:'t1',generation:before.meta.generation,
+    expectedRevision:0,expectedTask:ownedTask(before)};
+  for(const fields of [{points:'9'},{points:Infinity},{points:NaN},{points:5,dueDateISO:newDate}]){
     await assert.rejects(page.evaluate(({intent,fields})=>TaskPointsStateRuntimeV2.commitIsolatedOwnedTask({
       ...intent,actionId:crypto.randomUUID(),fields
     }),{intent,fields}),/invalid_owned_task_intent/);

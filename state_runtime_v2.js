@@ -20228,8 +20228,9 @@
   }
   const OWNED_TITLE_EDIT = 'home-task-title-edit';
   const OWNED_CLASSIFICATION_EDIT = 'home-task-classification-edit';
+  const OWNED_POINTS_EDIT = 'home-task-points-edit';
   function isOwnedEditorOperation(operation) {
-    return operation === OWNED_TITLE_EDIT || operation === OWNED_CLASSIFICATION_EDIT;
+    return operation === OWNED_TITLE_EDIT || operation === OWNED_CLASSIFICATION_EDIT || operation === OWNED_POINTS_EDIT;
   }
   function supportsOwnedTaskOperation(operation, homeTaskId) {
     return operation === 'home-plus-one-day' || (Boolean(homeTaskId) && isOwnedEditorOperation(operation));
@@ -20240,9 +20241,12 @@
   function ownedEditorFields(intent) {
     if (intent.operation === OWNED_TITLE_EDIT) return validOwnedTitle(intent.title) ? {title:intent.title} : null;
     const fields = intent.fields;
+    const pointsEdit = intent.operation === OWNED_POINTS_EDIT;
+    const allowed = pointsEdit ? ['title','importance','tags','points'] : ['title','importance','tags'];
     if (!fields || typeof fields !== 'object' || Array.isArray(fields)
-      || Object.keys(fields).some(key => !['title','importance','tags'].includes(key))
-      || (!Object.hasOwn(fields,'importance') && !Object.hasOwn(fields,'tags'))) return null;
+      || Object.keys(fields).some(key => !allowed.includes(key))) return null;
+    if (pointsEdit ? !Object.hasOwn(fields,'points') || !Number.isFinite(fields.points)
+      : !Object.hasOwn(fields,'importance') && !Object.hasOwn(fields,'tags')) return null;
     if (Object.hasOwn(fields,'title') && !validOwnedTitle(fields.title)) return null;
     if (Object.hasOwn(fields,'importance') && !['Low','Medium','High','Critical'].includes(fields.importance)) return null;
     if (Object.hasOwn(fields,'tags') && (!Array.isArray(fields.tags)
@@ -20302,7 +20306,7 @@
     const intent={actionId:input.actionId,taskId:input.taskId,operation:input.operation,generation:input.generation,
       expectedRevision:input.expectedRevision,expectedTask:clone(input.expectedTask),
       ...(input.operation === OWNED_TITLE_EDIT ? {title:fields.title} : {}),
-      ...(input.operation === OWNED_CLASSIFICATION_EDIT ? {fields:clone(fields)} : {})};
+      ...(editorOperation && input.operation !== OWNED_TITLE_EDIT ? {fields:clone(fields)} : {})};
     const mutate=input.mutate;
     const db=await openOwnedTasks();let receipt,replayed=false;
     try {

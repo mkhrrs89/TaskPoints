@@ -32,8 +32,8 @@ One Save commits the changed fields and any title change in a single V2
 receipt. Startup verifies that receipt against the previous Task and
 checks that every unrelated field is unchanged. A retry after an
 unconfirmed save must use the same fields. Title-only receipts keep their
-existing format. Points, direct Due Date editing, and Repeat (including
-its custom count and unit) remain V1 fields and are read-only on the
+existing format. Direct Due Date editing and Repeat (including its
+custom count and unit) remain V1 fields and are read-only on the
 selected synthetic Task.
 
 The browser tests exercise the Home card, Work tag styling, and the
@@ -41,6 +41,28 @@ phone-width Critical Tasks indicator. They verify legacy save and
 compaction, maintenance, Chromium restart, and a fresh V1 rollback that
 keeps the latest fields, a pending unrelated Task journal, Inbox and
 other app records, unknown fields, and image bytes.
+
+## Points and earned rewards
+
+The same Home Points input keeps V1's numeric conversion. Blank input
+saves zero, and the editor accepts negative, decimal, and exponent
+values. V2 admits only finite numbers. A single receipt can commit
+Points with any changes to Title, Importance, and Tags.
+
+The legacy Done action copies the Task's points into a completion.
+Scoring totals use that stored completion value. A Points edit changes
+only the Task row and receipt, leaving completed rewards, Game and
+Gold records, and backup bytes intact. The history test uses an actual
+recurring completion and a completed one-off Task. It checks that the
+past day's total stays at 8 points and that a later completion earns
+12.75 points after restart and verified rollback into a fresh V1
+profile.
+
+Home refuses legacy Done for the selected synthetic Task while V2
+owns it. The legacy path would otherwise award from the stale V1
+Task. The existing Done flow is available in the fresh V1 profile
+after rollback. Completing a Task while V2 owns it needs a separate
+implementation.
 
 ## How the integration works
 
@@ -81,7 +103,8 @@ Habit comparisons omit three named derived display counters that ordinary Home
 adds on save. The Inbox comparisons use an actual generated notification, and the dedicated
 cold-start test requires that the ordinary startup snapshot save preserve it.
 
-The experiment covers +1 Day and edits to Title, Importance, and Tags on one synthetic Task. The
+The experiment covers +1 Day and edits to Title, Importance, Tags,
+and Points on one synthetic Task. The
 installed iPhone handoff, real-data transfer, and old-client transition
 requirements remain unresolved. Ordinary V1 storage and UI paths retain
 their existing behavior with the experiment disabled.
@@ -99,6 +122,11 @@ For the Importance and Tags milestone, all 39 full Home browser cases
 passed, including 10 new cases and the full previous suite. All 19
 component browser cases and 258 scoped regression tests also passed.
 
+For the Points milestone, 46 of 47 full Home cases passed, including
+all eight new Points cases. The sole failure was the existing intermittent
+Inbox check described below. All 19 component browser cases and all 258
+scoped regression tests passed.
+
 ### Pre-existing repository-wide failures
 
 The earlier repository-wide baseline at `144aeb09` had 96 failures,
@@ -109,7 +137,11 @@ Those checks are separate from the scoped milestone totals.
 The pending Inbox edit test intermittently failed after navigation in an
 earlier title run and an initial Importance and Tags run. It now checks the
 exact compacted message before navigation as well as after reopening Inbox.
-Both assertions passed in the final full Home run.
+Both assertions passed in the final Importance and Tags run. During the
+Points milestone, the check failed before navigation in the full suite and
+in an isolated rerun. The same missing canonical message also reproduced on
+the exact pre-Points commit, `a4ff53a8`, with the V2 owner disabled. The
+assertions are unchanged and the intermittent Inbox failure remains open.
 
 ```sh
 NODE_PATH=/tmp/taskpoints-boundary-tools/node_modules node --test --test-timeout=300000 experiments/v2-home-plus-one-day/run-full-home.cjs
