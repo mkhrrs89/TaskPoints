@@ -268,10 +268,12 @@ test('an existing recovery hold blocks action and rollback while preserving the 
  const {page,context}=await setup(t);await click(page);
  const peer=await context.newPage();await peer.goto(new URL('/legacy-peer',url).href);
  await peer.evaluate(()=>localStorage.setItem('taskpoints_emergency_recovery_hold_v1','{synthetic hold evidence'));
+ await page.waitForFunction(()=>localStorage.getItem('taskpoints_emergency_recovery_hold_v1')!==null);
  await pressBump(page);await waitStatus(page,'NOT CONFIRMED');
  assert.match(await status(page).textContent(),/recovery_evidence/);
  await assert.rejects(page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(1)),/recovery_evidence/);
  assert.equal(await peer.evaluate(()=>localStorage.getItem('taskpoints_emergency_recovery_hold_v1')),'{synthetic hold evidence');
  await peer.evaluate(()=>localStorage.removeItem('taskpoints_emergency_recovery_hold_v1'));
+ await page.waitForFunction(()=>localStorage.getItem('taskpoints_emergency_recovery_hold_v1')===null);
  assert.equal((await read(page)).tasks[0].dueDateISO,advanced);
 });

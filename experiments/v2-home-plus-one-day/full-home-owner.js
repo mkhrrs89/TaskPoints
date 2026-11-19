@@ -46,27 +46,49 @@
     return { ...legacy, tasks };
   }
 
-  async function commit(advance) {
+  let titleEdit = null;
+  function currentIntent() {
+    if (!verified) throw Error('V2 Task unavailable');
+    const row = verified.rows.find(candidate => candidate.id === taskId);
+    return {taskId, generation: verified.meta.generation,
+      expectedRevision: row.ownerRevision, expectedTask: structuredClone(row.value)};
+  }
+
+  async function commit(operation, basis, change) {
     window.ownerOutcome = null;
     try {
-      if (!verified) throw Error('V2 Task unavailable');
-      const row = verified.rows.find(candidate => candidate.id === taskId);
-      pending ||= {
-        actionId: crypto.randomUUID(), operation: 'home-plus-one-day', taskId,
-        generation: verified.meta.generation, expectedRevision: row.ownerRevision, expectedTask: row.value
-      };
-      const result = await TaskPointsStateRuntimeV2.commitIsolatedOwnedTask({ ...pending, mutate: advance });
+      if (pending && (pending.operation !== operation || pending.title !== change.title)) {
+        throw Error('Retry the unchanged pending Task action, or reopen Home to verify its outcome.');
+      }
+      pending ||= {actionId: crypto.randomUUID(), operation, ...basis(),
+        ...(operation === 'home-task-title-edit' ? {title: change.title} : {})};
+      const result = await TaskPointsStateRuntimeV2.commitIsolatedOwnedTask({ ...pending, ...change });
       if (read) await read;
       await refresh();
-      if (!verified || verified.sourceDrift || verified.meta.revision < result.receipt.revision) throw Error('V2 Task refresh could not confirm the saved revision');
+      if (!verified || verified.sourceDrift || verified.meta.revision < result.receipt.revision) {
+        throw Error('V2 Task refresh could not confirm the saved revision');
+      }
       pending = null;
-      window.ownerOutcome = {ok: result.confirmedDurable, date: result.task.dueDateISO};
+      window.ownerOutcome = {ok: result.confirmedDurable, date: result.task.dueDateISO,
+        ...(operation === 'home-task-title-edit' ? {title: result.task.title} : {})};
       return result;
     } catch (cause) {
+      // A stale, uncommitted intent may be abandoned by closing the editor.
+      // Uncertain outcomes keep their original ID and payload across retries.
+      if (cause.message === 'owned_task_stale_edit' && operation === 'home-task-title-edit') pending = null;
       await refresh();
       window.ownerOutcome = {ok: false, error: cause.message};
       throw cause;
     }
+  }
+
+  function submit(operation, basis, change) {
+    if (writing) {
+      if (pending?.operation === operation && pending.title === change.title) return writing;
+      return Promise.reject(Error('A Task save is already in progress.'));
+    }
+    writing = commit(operation, basis, change).finally(() => { writing = null; });
+    return writing;
   }
 
   window.addEventListener('storage', event => {
@@ -84,10 +106,28 @@
       if (!verified && !error) refresh();
       return error || (!verified ? 'Reading the V2 Task…' : '');
     },
+    beginTitleEdit() {
+      if (writing) throw Error('A Task save is already in progress.');
+      const basis = currentIntent();
+      titleEdit = {basis, draft: basis.expectedTask.title};
+    },
+    titleEditor: () => titleEdit && {
+      originalTitle: titleEdit.basis.expectedTask.title,
+      draft: titleEdit.draft,
+      saving: Boolean(writing),
+      pending: pending?.operation === 'home-task-title-edit'
+    },
+    rememberTitleDraft(value) { if (titleEdit) titleEdit.draft = value; },
+    endTitleEdit() { titleEdit = null; },
+    commitTitleEdit(id, title) {
+      if (id !== taskId || !titleEdit) return Promise.reject(Error('Open the V2 Task editor before saving.'));
+      // Use the Task and revision seen at editor open, even if a refresh has
+      // since loaded a newer value underneath the draft.
+      return submit('home-task-title-edit', () => titleEdit.basis, {title});
+    },
     commitPlusOneDay(id, _legacyTask, advance) {
       if (id !== taskId) return Promise.reject(Error('Task is outside Home ownership'));
-      writing ||= commit(advance).finally(() => { writing = null; });
-      return writing;
+      return submit('home-plus-one-day', currentIntent, {mutate: advance});
     }
   });
 })();

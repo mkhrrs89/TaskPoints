@@ -11241,6 +11241,7 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
       card.className = cardClasses.join(' ');
 
       if (editingTaskId === t.id) {
+        const titleEditor = ownedDisplay && owner.owns(t.id) ? owner.titleEditor?.() : null;
         const rec = t.recurrence || {};
         const recMode = rec.mode || 'none';
         const recCount = Number.isFinite(rec.customCount) && rec.customCount > 0 ? rec.customCount : 1;
@@ -11251,7 +11252,7 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
             <div class="grid gap-2">
               <div class="sm:col-span-2">
                 <label class="text-xs muted">Title</label>
-                <input class="input mt-1" data-field="title" value="${escapeHtml(t.title)}">
+                <input class="input mt-1" data-field="title" value="${escapeHtml(titleEditor?.draft ?? t.title)}">
               </div>
               <div class="task-edit-paired-row sm:col-span-2">
                 <div>
@@ -11316,6 +11317,16 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
         `;
 
         body.appendChild(card);
+
+        if (titleEditor) {
+          const titleInput = card.querySelector('input[data-field="title"]');
+          titleInput.addEventListener('input', () => owner.rememberTitleDraft(titleInput.value));
+          card.querySelectorAll('[data-field]:not([data-field="title"])').forEach(field => { field.disabled = true; });
+          if (titleEditor.saving) {
+            titleInput.readOnly = true;
+            card.querySelectorAll('[data-task-action]').forEach(button => { button.disabled = true; });
+          }
+        }
 
         const dueInput = card.querySelector('input[data-field="due"]');
         if (dueInput) {
@@ -12192,10 +12203,18 @@ function initTaskListDelegation(){
       case 'task-save': {
         if (!id) return;
         const card = btn.closest('.glass[data-task-id]');
-        if (card) saveTaskEdit(id, card);
+        if (!card) return;
+        const owner = ownedHomeTitleEditor(id);
+        if (owner) saveOwnedHomeTaskTitle(owner, id, card);
+        else saveTaskEdit(id, card);
         break;
       }
       case 'task-cancel':
+        if (id) {
+          const owner = ownedHomeTitleEditor(id);
+          if (owner?.titleEditor()?.saving) return;
+          owner?.endTitleEdit();
+        }
         editingTaskId = null;
         renderTasks();
         break;
@@ -13877,6 +13896,38 @@ function animateTaskCompletion(id, onDone){
   taskCompletionAnimations.set(id, { timeoutId, card });
 }
 
+function ownedHomeTitleEditor(id) {
+  const owner = window.TaskPointsOwnedTaskExperiment;
+  if (window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true && owner?.displayOnly
+      && owner.isEnabled() && owner.owns(id)) return owner;
+  return null;
+}
+
+async function saveOwnedHomeTaskTitle(owner, id, card) {
+  const edit = owner.titleEditor();
+  if (!edit || edit.saving) return;
+  const input = card.querySelector('input[data-field="title"]');
+  const title = input.value.trim() || edit.originalTitle;
+  owner.rememberTitleDraft(input.value);
+  if (title !== edit.originalTitle || edit.pending) {
+    input.readOnly = true;
+    card.querySelectorAll('[data-task-action]').forEach(button => { button.disabled = true; });
+    try {
+      const result = await owner.commitTitleEdit(id, title);
+      if (!result?.confirmedDurable) throw Error('The V2 Task title could not be verified.');
+    } catch (error) {
+      renderTasks(state);
+      alert(error.message === 'owned_task_stale_edit'
+        ? 'This Task changed while you were editing. Your draft is still in the editor. Review the latest title before trying again.'
+        : error.message);
+      return;
+    }
+  }
+  owner.endTitleEdit();
+  if (editingTaskId === id) editingTaskId = null;
+  renderTasks(state);
+}
+
 function completeTask(id){
   return tpPerfTime('completeTask total', () => {
     const liveTask = state.tasks.find(x => x.id === id);
@@ -13947,6 +13998,15 @@ function completeTask(id){
 
 function editTask(id){
   const startedAt = performance.now();
+  const owner = ownedHomeTitleEditor(id);
+  if (owner) {
+    try {
+      owner.beginTitleEdit();
+    } catch (error) {
+      alert(error.message);
+      return;
+    }
+  }
   editingTaskId = id;
   renderTasks();
   try {
@@ -16260,8 +16320,12 @@ const openReminderTaskEditor = () => {
         taskGroupExpandedState.nodue = true;
 
         expandedTaskId = null;
-        editingTaskId = currentTask.id;
-        renderTasks();
+        if (ownedHomeTitleEditor(currentTask.id)) {
+          editTask(currentTask.id);
+        } else {
+          editingTaskId = currentTask.id;
+          renderTasks();
+        }
 
         requestAnimationFrame(() => {
           const taskCard = Array.from(document.querySelectorAll('[data-task-id]'))

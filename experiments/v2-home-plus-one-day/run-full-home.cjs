@@ -49,10 +49,13 @@ async function configureContext(context){
     window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__=true;
     window.legacyWrites=[];
     window.ownedPaints=[];
+    window.ownedTitles=[];
     new MutationObserver(()=>{
       if(!localStorage.getItem('taskpoints_isolated_task_fixture_v1'))return;
       const label=document.querySelector('.task-priority-card[data-task-id="t1"] .task-meta-line')?.textContent;
       if(label && ownedPaints.at(-1)!==label)ownedPaints.push(label);
+      const title=document.querySelector('[data-task-card-body="t1"] .task-title')?.textContent;
+      if(title && ownedTitles.at(-1)!==title)ownedTitles.push(title);
     }).observe(document,{subtree:true,childList:true});
     Error.stackTraceLimit=36;
     const set=Storage.prototype.setItem,remove=Storage.prototype.removeItem;
@@ -451,14 +454,13 @@ test('a lifecycle refresh sees V2 edits from another Home tab even without a V1 
   assert.equal((await owned(page)).journal.length,2);
 });
 
-for(const phase of ['before commit','after commit'])test(`full Home interrupted ${phase} reopens with exactly the committed V2 state`,async t=>{
-  const {page,context}=await acknowledged(t);
+async function interruptOwnedWrite(page,phase){
   await page.evaluate(phase=>{
     const transaction=IDBDatabase.prototype.transaction;
     let committed=false;
     IDBDatabase.prototype.transaction=function(stores,mode,...options){
       const owned=this.name==='taskpoints_state_v2'&&Array.isArray(stores)&&stores.includes('tasks');
-      if(owned&&mode==='readonly'&&committed&&phase==='after commit')throw Error('synthetic readback unavailable');
+      if(owned&&mode==='readonly'&&committed&&phase==='after commit'&&!window.allowOwnedReadback)throw Error('synthetic readback unavailable');
       const tx=transaction.call(this,stores,mode,...options);
       if(owned&&mode==='readwrite'){
         tx.addEventListener('complete',()=>{committed=true;window.ownedInterruptionReached=true;});
@@ -478,6 +480,11 @@ for(const phase of ['before commit','after commit'])test(`full Home interrupted 
       return tx;
     };
   },phase);
+}
+
+for(const phase of ['before commit','after commit'])test(`full Home interrupted ${phase} reopens with exactly the committed V2 state`,async t=>{
+  const {page,context}=await acknowledged(t);
+  await interruptOwnedWrite(page,phase);
   await page.evaluate(()=>{window.ownerOutcome=null;document.querySelector('[data-task-action="bump"][data-task-id="t1"]').click();});
   await page.waitForFunction(()=>window.ownedInterruptionReached===true);
   assert.notEqual(await page.evaluate(()=>window.ownerOutcome?.ok),true);
@@ -606,4 +613,319 @@ test('malformed Inbox evidence is preserved; fallback allows addition and refuse
   await page.reload();await waitHome(page);
   assert.deepEqual(await inboxState(page),initial);
   assert.deepEqual((await inboxState(page,extra.id)).canonical,extra);
+});
+
+const originalTitle='Synthetic V2 target';
+const newerTitle='Synthetic V2 title & "quoted"';
+const editCard=page=>page.locator('.task-priority-card[data-task-id="t1"]');
+const titleField=page=>editCard(page).locator('input[data-field="title"]');
+const titleSave=page=>editCard(page).locator('[data-task-action="task-save"]');
+const backingTask=page=>page.evaluate(()=>TaskPointsCore.readTaskPointsStoredState().tasks.find(task=>task.id==='t1'));
+
+async function openTitleEdit(page){
+  const card=editCard(page),body=card.locator('[data-task-card-body="t1"]');
+  if(await body.getAttribute('aria-expanded')==='false')await body.click();
+  await card.locator('[data-task-action="edit"]').click();
+}
+
+async function submitTitle(page){
+  await page.evaluate(()=>{window.ownerOutcome=null;});
+  await titleSave(page).click();
+  await page.waitForFunction(()=>window.ownerOutcome!=null);
+  return page.evaluate(()=>window.ownerOutcome);
+}
+
+async function assertHomeTitle(page,title){
+  await page.waitForFunction(title=>document.querySelector('[data-task-card-body="t1"] .task-title')?.textContent===title,title);
+}
+
+async function freshTitleOwner(t){
+  const f=await fixture(t);
+  await f.page.evaluate(()=>TaskPointsCore.flushPendingSaves());
+  await installOwner(f.page);
+  assert.equal((await owned(f.page)).sourceDrift,false);
+  return f;
+}
+
+test('real Home title edit commits in V2 and survives Notes, ordinary save, compaction, maintenance and reload',async t=>{
+  const {page,errors}=await acknowledged(t);
+  const before=await owned(page),legacy=await backingTask(page),unrelated=await partOfState(page);
+  await openTitleEdit(page);
+  assert.equal(await titleField(page).inputValue(),originalTitle);
+  assert.equal(await editCard(page).locator('[data-field="due"]').inputValue(),newDate);
+  assert.equal(await editCard(page).locator('[data-field="points"]').isDisabled(),true);
+  await page.evaluate(()=>{legacyWrites.length=0;});
+  await titleField(page).fill('  '+newerTitle+'  ');
+  assert.deepEqual(await submitTitle(page),{ok:true,date:newDate,title:newerTitle});
+  await assertHomeTitle(page,newerTitle);
+  const after=await owned(page),row=after.tasks.find(task=>task.id==='t1'),receipt=after.journal[1];
+  assert.equal(after.journal.length,2);
+  assert.deepEqual(after.journal[0],before.journal[0]);
+  assert.equal(receipt.intent.operation,'home-task-title-edit');
+  assert.equal(receipt.intent.title,newerTitle);
+  assert.equal(receipt.priorRevision,1);
+  assert.deepEqual(row,{...before.tasks[0],title:newerTitle,updatedAtISO:row.updatedAtISO});
+  assert.deepEqual(receipt.after,row);
+  assert.deepEqual(await backingTask(page),legacy);
+  assert.equal(await page.evaluate(()=>legacyWrites.some(w=>['taskpoints_v1','taskpoints_pending_task_mutations_v1'].includes(w.key))),false);
+  assert.deepEqual(await partOfState(page),unrelated);
+
+  await page.locator('a.desktop-header-notes-link').click();
+  await page.waitForURL('**/notes.html');
+  assert.equal(await page.locator('#notesInput').inputValue(),unrelated.notes);
+  await page.getByRole('link',{name:'Main',exact:true}).first().click();
+  await waitHome(page);
+  await assertHomeTitle(page,newerTitle);
+  await saveOrdinaryHome(page);
+  await assertHomeTitle(page,newerTitle);
+  await page.evaluate(async()=>{
+    const core=TaskPointsCore;
+    core.journalTaskUpdates(['t2'],task=>{task.title='Synthetic latest unrelated Task';return true;});
+    if(!core.flushPendingTaskMutations())throw Error('Expected unrelated Task journal compaction');
+    core.queuePhase5CVerifiedSecondaryWrite();
+    await core.flushPhase5CVerifiedSecondaryWrites();
+    if(core.getPhase5CVerifiedSecondaryStatus().homeNativeStatus!=='passed_verification')
+      throw Error('Expected verification of native Home maintenance snapshot');
+    window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true}));
+  });
+  await assertHomeTitle(page,newerTitle);
+  await page.reload();await waitHome(page);
+  await assertHomeTitle(page,newerTitle);
+  assert.equal(await page.evaluate(()=>window.__TP_HOME_BOOT_SOURCE),'indexeddb-native');
+  assert.equal(await page.evaluate(()=>ownedTitles.includes('Synthetic V2 target')),false,'cold Home must never paint the legacy title');
+  // Ordinary Home save materializes the existing default skills array.
+  assert.deepEqual(await backingTask(page),{skills:[],...legacy});
+  assert.equal((await assertV2(page,after)).sourceDrift,false);
+  const preserved=await partOfState(page);
+  assert.equal(preserved.task.title,'Synthetic latest unrelated Task');
+  assert.deepEqual({...preserved,task:unrelated.task},unrelated);
+  assert.deepEqual(errors,[]);
+});
+
+test('V2 title editor keeps the existing blank-title rule, and disabled ownership uses the ordinary V1 editor',async t=>{
+  const {page}=await fixture(t);
+  await openTitleEdit(page);
+  assert.equal(await editCard(page).locator('[data-field="points"]').isEnabled(),true);
+  await titleField(page).fill('  Synthetic V1 title  ');
+  await editCard(page).locator('[data-field="points"]').fill('8');
+  await titleSave(page).click();
+  await assertHomeTitle(page,'Synthetic V1 title');
+  const legacy=await backingTask(page);
+  assert.equal(legacy.title,'Synthetic V1 title');
+  assert.equal(legacy.points,8);
+  assert.equal(await page.evaluate(async()=>!(await indexedDB.databases()).some(db=>db.name===TaskPointsStateRuntimeV2.DB_NAME)),true);
+  await page.evaluate(()=>TaskPointsCore.flushPendingTaskMutations());
+  await installOwner(page);
+  const before=await owned(page);
+  await openTitleEdit(page);
+  await titleField(page).fill('   ');
+  await titleSave(page).click();
+  await assertHomeTitle(page,legacy.title);
+  assert.deepEqual(await owned(page),before);
+  assert.deepEqual(await backingTask(page),legacy);
+});
+
+test('stale title editor keeps its draft and refuses the competing edit even after a lifecycle refresh',async t=>{
+  const {page,context}=await freshTitleOwner(t);
+  await openTitleEdit(page);
+  await titleField(page).fill('Synthetic uncommitted draft');
+  const peer=await context.newPage();
+  await peer.clock.setFixedTime(new Date(quietDate+'T17:00:00Z'));
+  await peer.goto(origin+prefix+'index.html');await waitHome(peer);
+  await openTitleEdit(peer);
+  await titleField(peer).fill(newerTitle);
+  assert.deepEqual(await submitTitle(peer),{ok:true,date:oldDate,title:newerTitle});
+  await page.evaluate(async()=>{
+    window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true}));
+    await TaskPointsOwnedTaskExperiment.refresh();
+  });
+  assert.equal(await titleField(page).inputValue(),'Synthetic uncommitted draft');
+  assert.deepEqual(await submitTitle(page),{ok:false,error:'owned_task_stale_edit'});
+  assert.equal(await titleField(page).inputValue(),'Synthetic uncommitted draft');
+  assert.equal((await owned(page)).journal.length,1);
+  await editCard(page).locator('[data-task-action="task-cancel"]').click();
+  await assertHomeTitle(page,newerTitle);
+  await openTitleEdit(page);
+  assert.equal(await titleField(page).inputValue(),newerTitle);
+  await titleField(page).fill('Synthetic reviewed title');
+  assert.deepEqual(await submitTitle(page),{ok:true,date:oldDate,title:'Synthetic reviewed title'});
+  assert.equal((await owned(page)).journal.length,2);
+  assert.equal((await backingTask(page)).title,originalTitle);
+});
+
+test('legacy competing Task title is preserved and blocks V2 edits and rollback after compaction',async t=>{
+  const {page}=await freshTitleOwner(t);
+  await openTitleEdit(page);
+  await titleField(page).fill(newerTitle);
+  assert.equal((await submitTitle(page)).ok,true);
+  await assertHomeTitle(page,newerTitle);
+  const before=await owned(page);
+  await openTitleEdit(page);
+  await titleField(page).fill('Synthetic competing V2 title');
+  await page.evaluate(()=>{
+    TaskPointsCore.journalTaskUpdates(['t1'],task=>{task.title='Synthetic competing legacy title';return true;});
+    if(!TaskPointsCore.flushPendingTaskMutations())throw Error('Expected competing Task journal compaction');
+  });
+  assert.deepEqual(await submitTitle(page),{ok:false,error:'legacy_source_changed_preserved_reconciliation_required'});
+  await editCard(page).locator('[data-task-action="task-cancel"]').click();
+  await assertHomeTitle(page,newerTitle);
+  const after=await owned(page);
+  assert.deepEqual(after.tasks,before.tasks);
+  assert.deepEqual(after.journal,before.journal);
+  assert.equal(after.sourceDrift,true);
+  assert.equal((await backingTask(page)).title,'Synthetic competing legacy title');
+  await assert.rejects(page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(1)),/legacy_source_changed/);
+});
+
+test('quota failure leaves the title uncommitted and unchanged, then an identical retry saves once',async t=>{
+  const {page}=await freshTitleOwner(t),before=await owned(page);
+  await page.evaluate(()=>{
+    const add=IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add=function(record,...args){
+      if(!window.ownedQuotaRecovered&&record?.intent?.operation==='home-task-title-edit')
+        throw new DOMException('synthetic title quota','QuotaExceededError');
+      return add.call(this,record,...args);
+    };
+  });
+  await openTitleEdit(page);
+  await titleField(page).fill(newerTitle);
+  assert.deepEqual(await submitTitle(page),{ok:false,error:'synthetic title quota'});
+  assert.deepEqual(await owned(page),before);
+  assert.equal(await titleField(page).inputValue(),newerTitle);
+  assert.equal((await backingTask(page)).title,originalTitle);
+  await page.evaluate(()=>{window.ownedQuotaRecovered=true;});
+  assert.deepEqual(await submitTitle(page),{ok:true,date:oldDate,title:newerTitle});
+  await assertHomeTitle(page,newerTitle);
+  assert.equal((await owned(page)).journal.length,1);
+});
+
+test('title Save does not report success without readback, and retries with the original receipt ID',async t=>{
+  const {page}=await freshTitleOwner(t);
+  await interruptOwnedWrite(page,'after commit');
+  await openTitleEdit(page);
+  await titleField(page).fill(newerTitle);
+  await page.evaluate(()=>{
+    const button=document.querySelector('[data-task-action="task-save"][data-task-id="t1"]');
+    button.click();
+    button.click();
+  });
+  await page.waitForFunction(()=>window.ownerOutcome!=null);
+  assert.deepEqual(await page.evaluate(()=>ownerOutcome),{ok:false,error:'synthetic readback unavailable'});
+  assert.equal(await editCard(page).locator('.task-title').count(),0,'failed readback cannot paint a success');
+  await page.evaluate(async()=>{window.allowOwnedReadback=true;await TaskPointsOwnedTaskExperiment.refresh();});
+  const before=await owned(page);
+  assert.equal(before.journal.length,1);
+  assert.equal(await titleField(page).inputValue(),newerTitle);
+  assert.deepEqual(await submitTitle(page),{ok:true,date:oldDate,title:newerTitle});
+  await assertHomeTitle(page,newerTitle);
+  assert.deepEqual(await owned(page),before);
+  const receipt=before.journal[0];
+  await assert.rejects(page.evaluate(intent=>TaskPointsStateRuntimeV2.commitIsolatedOwnedTask({...intent,title:'Synthetic different payload'}),receipt.intent),/owned_task_action_id_conflict/);
+  assert.equal((await backingTask(page)).title,originalTitle);
+});
+
+for(const phase of ['before commit','after commit'])test(`interrupted title Save ${phase} reopens with exactly the committed title`,async t=>{
+  const {page,context}=await freshTitleOwner(t);
+  await interruptOwnedWrite(page,phase);
+  await openTitleEdit(page);
+  await titleField(page).fill(newerTitle);
+  await page.evaluate(()=>document.querySelector('[data-task-action="task-save"][data-task-id="t1"]').click());
+  await page.waitForFunction(()=>window.ownedInterruptionReached===true);
+  assert.notEqual(await page.evaluate(()=>window.ownerOutcome?.ok),true);
+  await page.close();
+  const reopened=await context.newPage();
+  await reopened.clock.setFixedTime(new Date(quietDate+'T17:00:00Z'));
+  await reopened.goto(origin+prefix+'index.html');await waitHome(reopened);
+  const committed=phase==='after commit';
+  await assertHomeTitle(reopened,committed?newerTitle:originalTitle);
+  assert.equal((await owned(reopened)).journal.length,committed?1:0);
+  assert.equal((await backingTask(reopened)).title,originalTitle);
+});
+
+test('Chromium restart and detached fresh-profile rollback preserve the verified V2 title and unrelated data',async t=>{
+  const profile=fs.mkdtempSync(path.join(os.tmpdir(),'tp-home-title-edit-'));
+  const launch=()=>chromium.launchPersistentContext(profile,{
+    executablePath:process.env.BOUNDARY_CHROMIUM_PATH||'/usr/bin/chromium',serviceWorkers:'block',timezoneId:'America/New_York'
+  });
+  let context=await launch();
+  t.after(async()=>{await context.close();fs.rmSync(profile,{recursive:true,force:true});});
+  const {page}=await acknowledged(t,context);
+  await openTitleEdit(page);
+  await titleField(page).fill(newerTitle);
+  assert.deepEqual(await submitTitle(page),{ok:true,date:newDate,title:newerTitle});
+  await assertHomeTitle(page,newerTitle);
+  const before=await owned(page),preserved=await partOfState(page);
+  await context.close();context=await launch();await configureContext(context);
+  const reopened=await context.newPage();
+  reopened.on('dialog',dialog=>dialog.dismiss());
+  await reopened.clock.setFixedTime(new Date(quietDate+'T17:00:00Z'));
+  await reopened.goto(origin+prefix+'index.html');await waitHome(reopened);
+  await assertHomeTitle(reopened,newerTitle);
+  await assertShown(reopened,newDate);
+  await assertV2(reopened,before);
+  assert.deepEqual(await partOfState(reopened),preserved);
+  const transfer=await reopened.evaluate(async()=>{
+    const checkpoint=await TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(2);
+    const blob=await TaskPointsCore.getImageBlob('synthetic-image');
+    return {checkpoint,image:[...new Uint8Array(await blob.arrayBuffer())]};
+  });
+  const {checkpoint}=transfer;
+  assert.deepEqual(checkpoint.receipts,before.journal);
+  assert.equal(checkpoint.v2Frozen,true);
+  await openTitleEdit(reopened);
+  await titleField(reopened).fill('Synthetic rejected after rollback');
+  assert.deepEqual(await submitTitle(reopened),{ok:false,error:'rollback_frozen_no_task_writes'});
+
+  const fresh=await browser.newContext({serviceWorkers:'block',timezoneId:'America/New_York'});
+  t.after(()=>fresh.close());
+  await configureContext(fresh);
+  const destination=await fresh.newPage();
+  await destination.clock.setFixedTime(new Date(quietDate+'T17:00:00Z'));
+  await destination.goto(origin+prefix+'seed.html');
+  await destination.addScriptTag({path:path.join(root,'scoring_core.js')});
+  await destination.evaluate(async({checkpoint,image,marker})=>{
+    for(const [key,value] of checkpoint.currentLegacySource){
+      if(key!==marker&&value!==null)localStorage.setItem(key,value);
+    }
+    localStorage.setItem('taskpoints_v1',TaskPointsCore.serializeTaskPointsStoredState(checkpoint.snapshot));
+    sessionStorage.setItem('tpBootSeenThisSession','1');
+    await TaskPointsCore.saveImageBlob('synthetic-image',new Blob([new Uint8Array(image)],{type:'image/png'}));
+  },{...transfer,marker});
+  await destination.goto(origin+prefix+'index.html');await waitHome(destination);
+  await assertHomeTitle(destination,newerTitle);
+  assert.deepEqual(await dates(destination),{home:newDate,legacy:newDate});
+  assert.equal((await backingTask(destination)).title,newerTitle);
+  assert.deepEqual(await partOfState(destination),preserved);
+  assert.equal(await destination.evaluate(async()=>!(await indexedDB.databases()).some(db=>db.name===TaskPointsStateRuntimeV2.DB_NAME)),true);
+  assert.equal((await backingTask(reopened)).title,originalTitle);
+  await assertV2(reopened,before);
+});
+
+test('reopen refuses a title receipt that also changes an unrelated field, even if the V2 row matches',async t=>{
+  const {page}=await freshTitleOwner(t);
+  await openTitleEdit(page);
+  await titleField(page).fill(newerTitle);
+  assert.equal((await submitTitle(page)).ok,true);
+  await assertHomeTitle(page,newerTitle);
+  const {rows,journal}=await owned(page);
+  const receipt=journal[0],row=rows.find(candidate=>candidate.id==='t1');
+  row.value.points+=1;
+  receipt.after.points=row.value.points;
+  await page.evaluate(({row,receipt})=>new Promise((resolve,reject)=>{
+    const open=indexedDB.open('taskpoints_state_v2');
+    open.onerror=()=>reject(open.error);
+    open.onsuccess=()=>{
+      const db=open.result,tx=db.transaction(['tasks','mutations'],'readwrite');
+      tx.objectStore('tasks').put(row);
+      tx.objectStore('mutations').put(receipt);
+      tx.oncomplete=()=>{db.close();resolve();};
+      tx.onabort=()=>{db.close();reject(tx.error);};
+    };
+  }),{row,receipt});
+  await page.reload();
+  await page.waitForFunction(()=>document.querySelector('#taskList [role="status"]')?.textContent.includes('owned_task_journal_conflict'));
+  assert.equal(await editCard(page).count(),0);
+  assert.deepEqual(await page.evaluate(()=>ownedTitles),[]);
+  assert.equal((await backingTask(page)).title,originalTitle);
+  assert.equal(await page.locator('[data-task-card-body="t2"] .task-title').textContent(),'Synthetic unrelated Task');
 });
