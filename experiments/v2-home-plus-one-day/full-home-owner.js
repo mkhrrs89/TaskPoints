@@ -7,8 +7,11 @@
 
   const marker = 'taskpoints_isolated_task_fixture_v1';
   const taskId = 't1';
+  const bumpOperation = 'home-plus-one-day';
+  const titleOperation = 'home-task-title-edit';
+  const classificationOperation = 'home-task-classification-edit';
   let selected = false, verified = null, error = '', read = null;
-  let repaint, pending = null, writing = null;
+  let repaint, pending = null, writing = null, editor = null;
   // Latch selection for this document. Losing the marker during an open
   // session must not send the next button press back to the V1 journal.
   function isEnabled() {
@@ -46,7 +49,6 @@
     return { ...legacy, tasks };
   }
 
-  let titleEdit = null;
   function currentIntent() {
     if (!verified) throw Error('V2 Task unavailable');
     const row = verified.rows.find(candidate => candidate.id === taskId);
@@ -54,15 +56,21 @@
       expectedRevision: row.ownerRevision, expectedTask: structuredClone(row.value)};
   }
 
-  async function commit(operation, basis, change) {
+  function matchesPending(operation, payloadKey) {
+    return pending?.intent.operation === operation && pending.payloadKey === payloadKey;
+  }
+
+  async function commit(operation, basis, payload, payloadKey, mutate) {
     window.ownerOutcome = null;
     try {
-      if (pending && (pending.operation !== operation || pending.title !== change.title)) {
+      if (pending && !matchesPending(operation, payloadKey)) {
         throw Error('Retry the unchanged pending Task action, or reopen Home to verify its outcome.');
       }
-      pending ||= {actionId: crypto.randomUUID(), operation, ...basis(),
-        ...(operation === 'home-task-title-edit' ? {title: change.title} : {})};
-      const result = await TaskPointsStateRuntimeV2.commitIsolatedOwnedTask({ ...pending, ...change });
+      pending ||= {
+        intent: {actionId: crypto.randomUUID(), operation, ...basis(), ...structuredClone(payload)},
+        payloadKey
+      };
+      const result = await TaskPointsStateRuntimeV2.commitIsolatedOwnedTask({ ...pending.intent, mutate });
       if (read) await read;
       await refresh();
       if (!verified || verified.sourceDrift || verified.meta.revision < result.receipt.revision) {
@@ -70,24 +78,26 @@
       }
       pending = null;
       window.ownerOutcome = {ok: result.confirmedDurable, date: result.task.dueDateISO,
-        ...(operation === 'home-task-title-edit' ? {title: result.task.title} : {})};
+        ...(operation !== bumpOperation ? {title: result.task.title} : {}),
+        ...(operation === classificationOperation ? {importance: result.task.importance, tags: result.task.tags} : {})};
       return result;
     } catch (cause) {
       // A stale, uncommitted intent may be abandoned by closing the editor.
       // Uncertain outcomes keep their original ID and payload across retries.
-      if (cause.message === 'owned_task_stale_edit' && operation === 'home-task-title-edit') pending = null;
+      if (cause.message === 'owned_task_stale_edit' && operation !== bumpOperation) pending = null;
       await refresh();
       window.ownerOutcome = {ok: false, error: cause.message};
       throw cause;
     }
   }
 
-  function submit(operation, basis, change) {
+  function submit(operation, basis, payload, mutate) {
+    const payloadKey = JSON.stringify(payload);
     if (writing) {
-      if (pending?.operation === operation && pending.title === change.title) return writing;
+      if (matchesPending(operation, payloadKey)) return writing;
       return Promise.reject(Error('A Task save is already in progress.'));
     }
-    writing = commit(operation, basis, change).finally(() => { writing = null; });
+    writing = commit(operation, basis, payload, payloadKey, mutate).finally(() => { writing = null; });
     return writing;
   }
 
@@ -106,28 +116,39 @@
       if (!verified && !error) refresh();
       return error || (!verified ? 'Reading the V2 Task…' : '');
     },
-    beginTitleEdit() {
+    beginTaskEdit() {
       if (writing) throw Error('A Task save is already in progress.');
       const basis = currentIntent();
-      titleEdit = {basis, draft: basis.expectedTask.title};
+      const task = basis.expectedTask;
+      const original = {
+        title: task.title,
+        importance: ['Low','Medium','High','Critical'].includes(task.importance) ? task.importance : 'Low',
+        tags: Array.isArray(task.tags) ? task.tags : []
+      };
+      editor = {basis, original, draft: {...original, tags: original.tags.join(', ')}};
     },
-    titleEditor: () => titleEdit && {
-      originalTitle: titleEdit.basis.expectedTask.title,
-      draft: titleEdit.draft,
+    taskEditor: () => editor && {
+      original: editor.original,
+      draft: editor.draft,
       saving: Boolean(writing),
-      pending: pending?.operation === 'home-task-title-edit'
+      pending: Boolean(pending && pending.intent.operation !== bumpOperation)
     },
-    rememberTitleDraft(value) { if (titleEdit) titleEdit.draft = value; },
-    endTitleEdit() { titleEdit = null; },
-    commitTitleEdit(id, title) {
-      if (id !== taskId || !titleEdit) return Promise.reject(Error('Open the V2 Task editor before saving.'));
+    rememberTaskDraft(key, value) {
+      if (editor && Object.hasOwn(editor.draft, key)) editor.draft[key] = value;
+    },
+    endTaskEdit() { editor = null; },
+    commitTaskEdit(id, fields) {
+      if (id !== taskId || !editor) return Promise.reject(Error('Open the V2 Task editor before saving.'));
       // Use the Task and revision seen at editor open, even if a refresh has
       // since loaded a newer value underneath the draft.
-      return submit('home-task-title-edit', () => titleEdit.basis, {title});
+      if (Object.hasOwn(fields, 'importance') || Object.hasOwn(fields, 'tags')) {
+        return submit(classificationOperation, () => editor.basis, {fields});
+      }
+      return submit(titleOperation, () => editor.basis, {title: fields.title});
     },
     commitPlusOneDay(id, _legacyTask, advance) {
       if (id !== taskId) return Promise.reject(Error('Task is outside Home ownership'));
-      return submit('home-plus-one-day', currentIntent, {mutate: advance});
+      return submit(bumpOperation, currentIntent, {}, advance);
     }
   });
 })();

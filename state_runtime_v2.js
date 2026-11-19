@@ -20227,16 +20227,32 @@
     }finally{db.close();}
   }
   const OWNED_TITLE_EDIT = 'home-task-title-edit';
+  const OWNED_CLASSIFICATION_EDIT = 'home-task-classification-edit';
+  function isOwnedEditorOperation(operation) {
+    return operation === OWNED_TITLE_EDIT || operation === OWNED_CLASSIFICATION_EDIT;
+  }
   function supportsOwnedTaskOperation(operation, homeTaskId) {
-    return operation === 'home-plus-one-day' || (operation === OWNED_TITLE_EDIT && Boolean(homeTaskId));
+    return operation === 'home-plus-one-day' || (Boolean(homeTaskId) && isOwnedEditorOperation(operation));
   }
   function validOwnedTitle(title) {
     return typeof title === 'string' && title.length > 0 && title.trim() === title;
   }
-  function validOwnedTitleChange(before, after, title) {
-    return validOwnedTitle(title) && title !== before.title && after?.title === title
-      && typeof after.updatedAtISO === 'string' && Number.isFinite(Date.parse(after.updatedAtISO))
-      && stableJson(after) === stableJson({ ...before, title, updatedAtISO: after.updatedAtISO });
+  function ownedEditorFields(intent) {
+    if (intent.operation === OWNED_TITLE_EDIT) return validOwnedTitle(intent.title) ? {title:intent.title} : null;
+    const fields = intent.fields;
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields)
+      || Object.keys(fields).some(key => !['title','importance','tags'].includes(key))
+      || (!Object.hasOwn(fields,'importance') && !Object.hasOwn(fields,'tags'))) return null;
+    if (Object.hasOwn(fields,'title') && !validOwnedTitle(fields.title)) return null;
+    if (Object.hasOwn(fields,'importance') && !['Low','Medium','High','Critical'].includes(fields.importance)) return null;
+    if (Object.hasOwn(fields,'tags') && (!Array.isArray(fields.tags)
+      || !Array.from(fields.tags).every(tag => validOwnedTitle(tag) && !tag.includes(',')))) return null;
+    return fields;
+  }
+  function validOwnedEditorChange(before, after, fields) {
+    return fields && typeof after?.updatedAtISO === 'string' && Number.isFinite(Date.parse(after.updatedAtISO))
+      && Object.keys(fields).every(key => stableJson(fields[key]) !== stableJson(before[key]))
+      && stableJson(after) === stableJson({ ...before, ...fields, updatedAtISO: after.updatedAtISO });
   }
 
   async function readOwnedSnapshot(db) {
@@ -20259,7 +20275,8 @@
     for(const r of journal){const old=expected.get(r.taskId);
       if(!old||r.id!=='isolated-task-action:'+r.intent?.actionId||r.intent?.taskId!==r.taskId
         ||r.intent?.generation!==r.generation||!supportsOwnedTaskOperation(r.intent?.operation,meta.homeTaskId)
-        ||(r.intent.operation===OWNED_TITLE_EDIT && (r.taskId!==meta.homeTaskId||!validOwnedTitleChange(old.value,r.after,r.intent.title)))
+        ||(isOwnedEditorOperation(r.intent.operation) && (r.taskId!==meta.homeTaskId
+          ||!validOwnedEditorChange(old.value,r.after,ownedEditorFields(r.intent))))
         ||r.intent?.expectedRevision!==old.revision||stableJson(r.intent?.expectedTask)!==stableJson(old.value)
         ||r.priorRevision!==old.revision||stableJson(r.before)!==stableJson(old.value)||r.after?.id!==r.taskId)
         throw new Error('owned_task_journal_conflict');
@@ -20275,14 +20292,17 @@
   }
   async function commitIsolatedOwnedTask(input) {
     const fixture=ownedTaskContext();
-    const titleEdit = input?.operation === OWNED_TITLE_EDIT;
     if(!input || typeof input.actionId!=='string'||!input.actionId||input.actionId.length>128
       ||!supportsOwnedTaskOperation(input.operation,fixture.homeTaskId)||typeof input.taskId!=='string'
-      ||!Number.isSafeInteger(input.expectedRevision)||(titleEdit ? !validOwnedTitle(input.title) : typeof input.mutate!=='function'))throw new Error('invalid_owned_task_intent');
+      ||!Number.isSafeInteger(input.expectedRevision))throw new Error('invalid_owned_task_intent');
+    const editorOperation = isOwnedEditorOperation(input.operation);
+    const fields = editorOperation ? ownedEditorFields(input) : null;
+    if (editorOperation ? !fields : typeof input.mutate !== 'function') throw new Error('invalid_owned_task_intent');
     // Snapshot the compare-and-swap intent before the first await.
     const intent={actionId:input.actionId,taskId:input.taskId,operation:input.operation,generation:input.generation,
       expectedRevision:input.expectedRevision,expectedTask:clone(input.expectedTask),
-      ...(titleEdit ? {title:input.title} : {})};
+      ...(input.operation === OWNED_TITLE_EDIT ? {title:fields.title} : {}),
+      ...(input.operation === OWNED_CLASSIFICATION_EDIT ? {fields:clone(fields)} : {})};
     const mutate=input.mutate;
     const db=await openOwnedTasks();let receipt,replayed=false;
     try {
@@ -20307,10 +20327,11 @@
           if(meta.mode!=='owned')return stop('rollback_frozen_no_task_writes');
           if(!row||row.ownerGeneration!==meta.generation||row.ownerRevision!==intent.expectedRevision||stableJson(row.value)!==stableJson(intent.expectedTask))return stop('owned_task_stale_edit');
           const next=clone(row.value);
-          if (titleEdit) {
-            next.title = intent.title;
+          if (editorOperation) {
+            const changes = ownedEditorFields(intent);
+            Object.assign(next, changes);
             next.updatedAtISO = nowIso();
-            if (!validOwnedTitleChange(row.value,next,intent.title)) return stop('invalid_owned_task_change');
+            if (!validOwnedEditorChange(row.value,next,changes)) return stop('invalid_owned_task_change');
           } else {
             if(mutate(next)!==true)return stop('task_action_not_applicable');
             const dateFields=new Set(['dueDateISO','originalDueDateISO','postponedDays','updatedAtISO']);
