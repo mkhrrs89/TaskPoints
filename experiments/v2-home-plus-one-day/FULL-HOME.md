@@ -64,6 +64,47 @@ Task. The existing Done flow is available in the fresh V1 profile
 after rollback. Completing a Task while V2 owns it needs a separate
 implementation.
 
+## Done ownership checkpoint
+
+Home Done normally captures the Task's current Points in a completion,
+checks for a completion on the same local day, and updates the Task and
+completion together in the legacy journal. It closes one-off Tasks.
+Recurring Tasks advance from their current due date using the existing
+recurrence rules and reset their postponement count. The action also
+shows the Points toast, updates the Today list and Critical Tasks
+indicator, and animates the card. Home's live score and matchup
+calculations read completions from the legacy state.
+
+The V2 database has stores for Tasks, completions, and receipts that can
+participate in one IndexedDB transaction. The blocker is admission
+outside that transaction. The real Today page independently completes
+the same Task through `saveStateSnapshot`. It never consults the Home
+owner. The browser witness opens Today after an acknowledged V2 Points
+edit from 5 to 12.75, clicks its real checkbox, and verifies a durable
+5-point legacy completion after reload. V2 detects this legacy change
+after the award and refuses rollback. That check preserves the evidence
+but cannot prevent the award.
+
+Writing the completion solely to V2 would leave Today able to award the
+same Task and day separately. Updating just the Home display would also
+leave Game and matchup writers reading stale completion totals, and the
+Today list update lives in a separate localStorage record. The synthetic
+Home Done refusal stays in place. No partial V2 reward writer or
+completion checkpoint is enabled.
+
+The next implementation should give Home and Today a shared completion
+admission path on the synthetic origin. A selected Task must reach the
+same verified Task/day reward transaction from either control. Any
+legacy attempt must be refused before it can write an award. The browser
+witness should then be replaced with a test that checks both controls
+can produce only one reward.
+
+The Done checkpoint reran all 47 existing full Home browser cases, 19
+component browser cases, and 258 scoped regressions. All passed,
+including the Inbox test in this run. The separate Today witness passed
+by reproducing the stale award. The intermittent Inbox failure remains
+open, as recorded below.
+
 ## How the integration works
 
 - The loopback harness explicitly selects a single synthetic Task and checks the

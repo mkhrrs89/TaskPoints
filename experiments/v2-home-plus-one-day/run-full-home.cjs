@@ -30,9 +30,10 @@ before(async()=>{
       const resolved=path.resolve(root,file);
       const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.svg':'image/svg+xml','.json':'application/json'}[path.extname(file)];
       if(!mime||!resolved.startsWith(root+path.sep)||file.startsWith('experiments/'))throw Error('Outside experiment');
-      const homeBundle=file==='scoring_core.js'&&['index.html','inbox.html'].some(page=>new URL(req.headers.referer||'http://localhost').pathname===prefix+page);
+      const homeBundle=file==='scoring_core.js'&&['index.html','inbox.html','today.html'].some(page=>new URL(req.headers.referer||'http://localhost').pathname===prefix+page);
+      const content=homeBundle?bundle:fs.readFileSync(resolved);
       res.writeHead(200,{'Content-Type':mime,'Cache-Control':'no-store'});
-      res.end(homeBundle?bundle:fs.readFileSync(resolved));
+      res.end(content);
     }catch(_){res.writeHead(404);res.end();}
   });
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
@@ -1409,4 +1410,63 @@ test('Points receipt admission refuses strings, non-finite numbers and unrelated
     }),{intent,fields}),/invalid_owned_task_intent/);
   }
   assert.deepEqual(await owned(page),before);
+});
+
+
+// Negative witness until both live completion callers share admission.
+test('Done boundary witness: Today can still award stale V1 Points on the V2-owned Task',async t=>{
+  const {page,context}=await fixture(t);
+  const time=new Date(quietDate+'T17:00:00Z');
+  await page.clock.setFixedTime(time);
+  await openTaskEdit(page);
+  await editCard(page).locator('[data-field="due"]').fill(quietDate);
+  await titleSave(page).click();
+  assert.equal(await page.evaluate(()=>TaskPointsCore.flushPendingTaskMutations()),true);
+  await installOwner(page);
+  assert.equal((await owned(page)).sourceDrift,false);
+  await openTaskEdit(page);
+  await pointsField(page).fill('12.75');
+  assert.equal((await submitTaskEdit(page)).points,12.75);
+  await assertHomePoints(page,12.75);
+  const before=await owned(page);
+  assert.equal((await backingTask(page)).points,5);
+  assert.deepEqual((await rewardEvidence(page)).completions,[]);
+
+  // A newly opened Today page uses the real V1 load and save, without
+  // requiring stale binaries or timing the click against an in-flight write.
+  const today=await context.newPage();
+  today.setDefaultTimeout(12000);
+  const errors=[];
+  today.on('pageerror',error=>errors.push(error.message));
+  await today.clock.setFixedTime(time);
+  await today.goto(origin+prefix+'today.html');
+  const task=today.locator('#todayList [data-kind="task"][data-id="t1"]');
+  assert.equal(await task.locator('.today-sub').textContent(),'5 pts');
+  await task.locator('.today-check').dispatchEvent('click');
+  assert.deepEqual(errors,[]);
+  const written=await today.evaluate(()=>{
+    const core=TaskPointsCore;
+    const canonical=core.parseTaskPointsStorageJson(localStorage.getItem(core.STORAGE_KEY));
+    return {rows:canonical.completions,writes:legacyWrites.filter(write=>write.key===core.STORAGE_KEY),
+      guardKey:localStorage.getItem('taskpoints_storage_guard_incident_v1')};
+  });
+  assert.ok(written.rows.some(c=>c.taskId==='t1'),JSON.stringify(written));
+  await today.reload();
+  assert.ok((await task.getAttribute('class')).includes('is-done'));
+  const persisted=await today.evaluate(()=>{
+    const core=TaskPointsCore;
+    const stored=core.parseTaskPointsStorageJson(localStorage.getItem(core.STORAGE_KEY));
+    const rows=stored.completions.filter(row=>row.taskId==='t1');
+    return {rows,total:core.aggregateCompletionsByDate(rows,stored).dailyTotals[core.todayKey()]};
+  });
+  assert.equal(persisted.rows.length,1);
+  assert.equal(persisted.rows[0].points,5);
+  assert.equal(persisted.total,5);
+
+  const after=await owned(page);
+  assert.deepEqual(after.journal,before.journal);
+  assert.deepEqual(after.tasks,before.tasks);
+  assert.equal(after.sourceDrift,true,'drift detection happens after the V1 award is already durable');
+  await assert.rejects(page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(1)),
+    /legacy_source_changed_preserved_reconciliation_required/);
 });
