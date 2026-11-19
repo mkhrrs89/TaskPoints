@@ -281,3 +281,30 @@ test('legacy v1 array journals cannot wipe canonical processed-event IDs during 
   assert.equal(h.localStorage.dump(h.JOURNAL_KEY), null);
   assert.deepEqual(JSON.parse(JSON.stringify(h.core.readTaskPointsStoredState().inboxProcessedEventIds)), { 'old-event': true });
 });
+
+for (const raw of ['', '{malformed journal', '{"schemaVersion":99,"inboxMessages":[]}',
+  '{"schemaVersion":2,"inboxMessages":[],"futureEvidence":"keep"}']) {
+  test(`present invalid Inbox journal is preserved: ${JSON.stringify(raw)}`, () => {
+    const h = makeHarness();
+    h.localStorage.setItem(h.JOURNAL_KEY, raw);
+    assert.equal(h.core.getInboxMutationJournalStatus().malformed, true);
+    assert.equal(h.core.getInboxMutationJournalStatus().pending, false);
+    assert.equal(h.localStorage.dump(h.JOURNAL_KEY), raw);
+    assert.deepEqual(h.core.readTaskPointsStoredState().inboxMessages, [{ id: 'old' }]);
+  });
+}
+
+test('a failed journal replacement does not fall back past an existing pending deletion', () => {
+  const h = makeHarness({ pendingJournal: { inboxMessages: [] } });
+  const original = h.localStorage.dump(h.JOURNAL_KEY);
+  const setItem = h.localStorage.setItem;
+  h.localStorage.setItem = (key, value) => {
+    if (key !== h.JOURNAL_KEY) setItem.call(h.localStorage, key, value);
+  };
+  assert.throws(() => h.core.mergeAndSaveState({ inboxMessages: [{ id: 'later' }] }, {
+    savePath: 'inbox-auto-populate', immediateWrite: true
+  }), /did not verify/);
+  assert.equal(h.heavySaves, 0);
+  assert.equal(h.localStorage.dump(h.JOURNAL_KEY), original);
+  assert.deepEqual(h.core.readTaskPointsStoredState().inboxMessages, []);
+});

@@ -1,0 +1,10 @@
+Before-fix witness from a temporary export of commit 7ecd2379.
+Used the new browser regression with --test-name-pattern='notification created and compacted'.
+The test used the actual Inbox producer and verified canonical compaction, then cold-started Home in a disposable profile.
+
+not ok 1 - ordinary Home startup preserves the notification created and compacted by the real Inbox
+Expected record:2026-11-17:SYN (Top-50 score). Actual: undefined.
+The canonical write changed Inbox message count from 1 to 0.
+Observed starting call path: maybeAutoSimToday → simulateToday → save → saveStateSnapshot → safeReplaceTaskPointsStorage.
+
+1 test, 0 passed, 1 failed (expected before the fix).

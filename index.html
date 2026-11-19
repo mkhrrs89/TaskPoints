@@ -11127,7 +11127,21 @@ function showTrashToast(taskId){
 function renderTasks(stateInput = null){
   const container=$('taskList'), empty=$('emptyList'); container.innerHTML='';
   window.updateUndatedReminderIsland?.();
-  const active=state.tasks.filter(t=>!t.completedAtISO && !t.hidden && !isTaskTrashed(t) && getTaskStatus(t)!=='wontdo');
+  const owner = window.TaskPointsOwnedTaskExperiment;
+  const ownedDisplay = window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true && owner?.displayOnly && owner.isEnabled();
+  // Keep the legacy state and cache out of the V2 display path. Ordinary
+  // saves (including background saves) still receive only the V1 backing state.
+  const taskView = ownedDisplay ? owner.taskView(state) : state;
+  if (ownedDisplay) {
+    const message = owner.onRender(() => renderTasks(state));
+    if (message) {
+      const notice = document.createElement('p');
+      notice.setAttribute('role', 'status');
+      notice.textContent = message;
+      container.appendChild(notice);
+    }
+  }
+  const active=taskView.tasks.filter(t=>!t.completedAtISO && !t.hidden && !isTaskTrashed(t) && getTaskStatus(t)!=='wontdo');
   if(!active.length){ empty.classList.remove('hidden'); } else empty.classList.add('hidden');
 
   const sort=$('sortSelect').value;
@@ -11227,6 +11241,8 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
       card.className = cardClasses.join(' ');
 
       if (editingTaskId === t.id) {
+        const editor = ownedDisplay && owner.owns(t.id) ? owner.taskEditor?.() : null;
+        const importance = editor?.draft.importance ?? t.importance;
         const rec = t.recurrence || {};
         const recMode = rec.mode || 'none';
         const recCount = Number.isFinite(rec.customCount) && rec.customCount > 0 ? rec.customCount : 1;
@@ -11237,16 +11253,16 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
             <div class="grid gap-2">
               <div class="sm:col-span-2">
                 <label class="text-xs muted">Title</label>
-                <input class="input mt-1" data-field="title" value="${escapeHtml(t.title)}">
+                <input class="input mt-1" data-field="title" value="${escapeHtml(editor?.draft.title ?? t.title)}">
               </div>
               <div class="task-edit-paired-row sm:col-span-2">
                 <div>
                   <label class="text-xs muted">Importance</label>
                   <select class="input mt-1" data-field="importance">
-                    <option ${t.importance==='Low'?'selected':''}>Low</option>
-                    <option ${t.importance==='Medium'?'selected':''}>Medium</option>
-                    <option ${t.importance==='High'?'selected':''}>High</option>
-                    <option ${t.importance==='Critical'?'selected':''}>Critical</option>
+                    <option ${importance==='Low'?'selected':''}>Low</option>
+                    <option ${importance==='Medium'?'selected':''}>Medium</option>
+                    <option ${importance==='High'?'selected':''}>High</option>
+                    <option ${importance==='Critical'?'selected':''}>Critical</option>
                   </select>
                 </div>
                 <div>
@@ -11257,7 +11273,7 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
               <div class="task-edit-paired-row sm:col-span-2">
                 <div>
                   <label class="text-xs muted">Points</label>
-                  <input class="input mt-1" type="number" data-field="points" value="${t.points||0}">
+                  <input class="input mt-1" type="number" data-field="points" value="${escapeHtml(editor?.draft.points ?? (t.points||0))}">
                 </div>
                 <div>
                   <label class="text-xs muted">Repeat</label>
@@ -11289,7 +11305,7 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
               
 <div class="sm:col-span-2">
   <label class="text-xs muted">Tags</label>
-  <input class="input mt-1" data-field="tags" value="${(Array.isArray(t.tags) ? t.tags : []).join(', ')}">
+  <input class="input mt-1" data-field="tags" value="${escapeHtml(editor?.draft.tags ?? tags.join(', '))}">
 </div>
 
             </div>
@@ -11302,6 +11318,18 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
         `;
 
         body.appendChild(card);
+
+        if (editor) {
+          for (const field of card.querySelectorAll('[data-field]')) {
+            const key = field.dataset.field;
+            if (!Object.hasOwn(editor.draft, key)) {
+              field.disabled = true;
+              continue;
+            }
+            field.addEventListener('input', () => owner.rememberTaskDraft(key, field.value));
+          }
+          if (editor.saving) lockOwnedTaskEditor(card);
+        }
 
         const dueInput = card.querySelector('input[data-field="due"]');
         if (dueInput) {
@@ -12178,10 +12206,18 @@ function initTaskListDelegation(){
       case 'task-save': {
         if (!id) return;
         const card = btn.closest('.glass[data-task-id]');
-        if (card) saveTaskEdit(id, card);
+        if (!card) return;
+        const owner = ownedHomeTaskEditor(id);
+        if (owner) saveOwnedHomeTaskEdit(owner, id, card);
+        else saveTaskEdit(id, card);
         break;
       }
       case 'task-cancel':
+        if (id) {
+          const owner = ownedHomeTaskEditor(id);
+          if (owner?.taskEditor()?.saving) return;
+          owner?.endTaskEdit();
+        }
         editingTaskId = null;
         renderTasks();
         break;
@@ -13663,7 +13699,9 @@ function persistTaskActionMutation(task, action){
 
 function bumpTaskOneDay(id){
   const index = state.tasks.findIndex(row => row.id === id);
-  if (index < 0) return;
+  const owner = window.TaskPointsOwnedTaskExperiment;
+  const ownedAction = window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true && owner?.isEnabled?.() && (owner.owns?.(id) ?? true);
+  if (index < 0 && !ownedAction) return;
   let advanced = false;
   const advance = task => {
     if (!task.dueDateISO || task.completedAtISO || task.hidden || getTaskStatus(task) !== 'active')
@@ -13673,6 +13711,18 @@ function bumpTaskOneDay(id){
     advanced = true;
     return true;
   };
+  // Only the separately loaded localhost synthetic experiment installs this
+  // adapter. Ordinary Home keeps the exact V1 journal path below.
+  if (ownedAction) {
+    return owner.commitPlusOneDay(id, state.tasks[index], advance).then(result => {
+      if (!result?.confirmedDurable) return;
+      const currentIndex = state.tasks.findIndex(row => row.id === id);
+      if (!owner.displayOnly && currentIndex >= 0) state.tasks[currentIndex] = result.task;
+      renderTasks(state);
+    }).catch(error => {
+      alert(error?.message || 'The new due date could not be verified.');
+    });
+  }
   try {
     if (TaskPointsCore?.journalTaskUpdates) {
       const latest = TaskPointsCore.journalTaskUpdates([id], advance);
@@ -13849,7 +13899,66 @@ function animateTaskCompletion(id, onDone){
   taskCompletionAnimations.set(id, { timeoutId, card });
 }
 
+function ownedHomeTaskEditor(id) {
+  const owner = window.TaskPointsOwnedTaskExperiment;
+  if (window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true && owner?.displayOnly
+      && owner.isEnabled() && owner.owns(id)) return owner;
+  return null;
+}
+
+function lockOwnedTaskEditor(card) {
+  card.querySelector('[data-field="title"]').readOnly = true;
+  card.querySelector('[data-field="tags"]').readOnly = true;
+  card.querySelector('[data-field="points"]').readOnly = true;
+  card.querySelector('[data-field="importance"]').disabled = true;
+  card.querySelectorAll('[data-task-action]').forEach(button => { button.disabled = true; });
+}
+
+async function saveOwnedHomeTaskEdit(owner, id, card) {
+  const edit = owner.taskEditor();
+  if (!edit || edit.saving) return;
+  const draft = {};
+  for (const key of ['title', 'importance', 'tags', 'points']) {
+    draft[key] = card.querySelector(`[data-field="${key}"]`).value;
+    owner.rememberTaskDraft(key, draft[key]);
+  }
+  const fields = {};
+  const title = draft.title.trim() || edit.original.title;
+  if (title !== edit.original.title) fields.title = title;
+  if (draft.importance !== edit.original.importance && ['Low','Medium','High','Critical'].includes(draft.importance)) {
+    fields.importance = draft.importance;
+  }
+  if (draft.tags !== edit.original.tags.join(', ').replace(/[\r\n]/g, '')) {
+    const tags = draft.tags.split(',').map(tag => tag.trim()).filter(Boolean);
+    if (JSON.stringify(tags) !== JSON.stringify(edit.original.tags)) fields.tags = tags;
+  }
+  const points = Number(draft.points) || 0;
+  if (points !== edit.original.points) fields.points = points;
+  if (Object.keys(fields).length || edit.pending) {
+    lockOwnedTaskEditor(card);
+    try {
+      const result = await owner.commitTaskEdit(id, fields);
+      if (!result?.confirmedDurable) throw Error('The V2 Task edit could not be verified.');
+    } catch (error) {
+      renderTasks(state);
+      alert(error.message === 'owned_task_stale_edit'
+        ? 'This Task changed while you were editing. Your draft is still in the editor. Review the latest Task before trying again.'
+        : error.message);
+      return;
+    }
+  }
+  owner.endTaskEdit();
+  if (editingTaskId === id) editingTaskId = null;
+  renderTasks(state);
+}
+
 function completeTask(id){
+  // The legacy writer would award from its stale backing row. Withhold
+  // completion while this synthetic Task is still owned by V2.
+  if (ownedHomeTaskEditor(id)) {
+    alert('This Task is owned by the V2 experiment. Use a verified V1 rollback before completing it.');
+    return;
+  }
   return tpPerfTime('completeTask total', () => {
     const liveTask = state.tasks.find(x => x.id === id);
     if (!liveTask || taskCompletionAnimations.has(id)) return;
@@ -13919,6 +14028,15 @@ function completeTask(id){
 
 function editTask(id){
   const startedAt = performance.now();
+  const owner = ownedHomeTaskEditor(id);
+  if (owner) {
+    try {
+      owner.beginTaskEdit();
+    } catch (error) {
+      alert(error.message);
+      return;
+    }
+  }
   editingTaskId = id;
   renderTasks();
   try {
@@ -15454,6 +15572,11 @@ function refreshMainPageFromStorage() {
 }
 
 function refreshMainPageIfChanged(reason = 'lifecycle') {
+  const owner = window.TaskPointsOwnedTaskExperiment;
+  if (window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true && owner?.displayOnly && owner.isEnabled()) {
+    // V2 can change without a V1 revision bump, including while Home is hidden.
+    owner.refresh(() => renderTasks(state));
+  }
   const currentRevision = readHomeStateRevision();
   const currentGameDayKey = readHomeGameDayKey();
   const revisionUnchanged = Boolean(
@@ -16227,8 +16350,12 @@ const openReminderTaskEditor = () => {
         taskGroupExpandedState.nodue = true;
 
         expandedTaskId = null;
-        editingTaskId = currentTask.id;
-        renderTasks();
+        if (ownedHomeTaskEditor(currentTask.id)) {
+          editTask(currentTask.id);
+        } else {
+          editingTaskId = currentTask.id;
+          renderTasks();
+        }
 
         requestAnimationFrame(() => {
           const taskCard = Array.from(document.querySelectorAll('[data-task-id]'))
