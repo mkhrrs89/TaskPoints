@@ -74,16 +74,16 @@ test('Shared mobile drag expansion, press effects and toolbar height remain inst
 
 test('Old upper navigation is removed from mobile layout before first paint', () => {
   const toolbar = fs.readFileSync(path.join(ROOT, 'toolbar.js'), 'utf8');
-  assert.match(styles, /@media \\(max-width: 767px\\)\\s*\\{\\s*header \\.header-nav\\s*\\{\\s*display: none !important;/);
-  assert.match(toolbar, /function syncRetiredMobileHeaderNavigation\\(\\)/);
-  assert.match(toolbar, /document\\.querySelectorAll\\('header \\.header-nav'\\)/);
-  assert.match(toolbar, /replaceChild\\(placeholder, nav\\)/);
-  assert.match(toolbar, /placeholder\\.replaceWith\\(nav\\)/);
-  assert.match(toolbar, /syncRetiredMobileHeaderNavigation\\(\\);\\s*const mobileHeaderQuery/);
+  assert.match(styles, /@media \(max-width: 767px\)\s*\{\s*header \.header-nav\s*\{\s*display: none !important;/);
+  assert.match(toolbar, /function syncRetiredMobileHeaderNavigation\(\)/);
+  assert.match(toolbar, /document\.querySelectorAll\('header \.header-nav'\)/);
+  assert.match(toolbar, /replaceChild\(placeholder, nav\)/);
+  assert.match(toolbar, /placeholder\.replaceWith\(nav\)/);
+  assert.match(toolbar, /syncRetiredMobileHeaderNavigation\(\);\s*const mobileHeaderQuery/);
   assert.doesNotMatch(nav, /visibility: hidden !important|HEADER_SPACER_STYLE_ID/);
   for (const page of ['index.html', 'settings.html', 'audit.html', 'projects.html']) {
     const html = fs.readFileSync(path.join(ROOT, page), 'utf8');
-    assert.match(html, /href="styles\\.css"/, page + ' loads the pre-paint rule');
+    assert.match(html, /href="styles\.css(?:\?[^"]*)?"/, page + ' loads the pre-paint rule');
     assert.match(html, /class="[^"]*header-nav/, page + ' retains desktop navigation');
   }
 });
