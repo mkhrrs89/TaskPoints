@@ -4,7 +4,6 @@
   if (global.TaskPointsStreaksNavLink?.installed) return;
 
   const LINK_ATTR = 'data-taskpoints-streaks-nav';
-  const HEADER_SPACER_STYLE_ID = 'taskpoints-relocated-header-nav-mobile-style';
   const MOTION_STYLE_ID = 'taskpoints-mobile-bottom-nav-motion-style';
   const EXPANDED_SHORTCUT_ATTR = 'data-taskpoints-expanded-shortcut';
   const EXPANDED_SHORTCUTS = Object.freeze([
@@ -30,25 +29,6 @@
     const nav = anchor?.closest?.('#mobileBottomNav');
     const primary = findPrimaryRow(nav);
     return Boolean(primary && anchor.parentElement === primary);
-  }
-
-  function ensureHeaderNavSpacerStyle(document) {
-    if (!document?.createElement || !document.head || document.getElementById?.(HEADER_SPACER_STYLE_ID)) return;
-    const style = document.createElement('style');
-    style.id = HEADER_SPACER_STYLE_ID;
-    style.textContent = `
-      @media (max-width: 767px) {
-        .header-nav > a[href="index.html"],
-        .header-nav > a[href="daily_sources.html"],
-        .header-nav > a[href="log.html"],
-        .header-nav > a[href="week.html"],
-        .header-nav > a[href="season.html"] {
-          visibility: hidden !important;
-          pointer-events: none !important;
-        }
-      }
-    `;
-    document.head.appendChild(style);
   }
 
   function ensureMotionStyle(document) {
@@ -144,8 +124,7 @@
     const document = global.document;
     if (!document?.querySelector) return false;
 
-    // Preserve mobile header spacing while the bottom toolbar owns those links.
-    ensureHeaderNavSpacerStyle(document);
+    // Mobile top navigation is removed in toolbar.js; keep bottom-nav motion.
     ensureMotionStyle(document);
 
     const nav = document.querySelector('#mobileBottomNav');

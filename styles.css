@@ -1993,6 +1993,15 @@ body{
 
 .toolbar{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:flex-end}
 .header-nav{align-items:center;}
+
+/* The bottom pull-up toolbar is the only app navigation on mobile.
+   Hide the retired upper navigation before first paint. toolbar.js removes
+   those mobile nodes after parsing; desktop links remain available. */
+@media (max-width: 767px) {
+  header .header-nav {
+    display: none !important;
+  }
+}
 .nav-btn{display:inline-flex;align-items:center;gap:6px;}
 .nav-btn.active,
 .dropdown-toggle.active{

@@ -215,7 +215,35 @@ setExpanded(dropdown.classList.contains('open'));
   });
 }
 
+// The draggable bottom toolbar replaces the old header navigation on phones.
+// Detach those links entirely (rather than hiding them after paint), while
+// keeping their nodes intact so they can be restored when entering desktop mode.
+const detachedMobileHeaderNavs = [];
+function syncRetiredMobileHeaderNavigation() {
+  const mobile = window.matchMedia?.('(max-width: 767px)')?.matches;
+  if (mobile == null) return;
+  if (mobile) {
+    document.querySelectorAll('header .header-nav').forEach((nav) => {
+      const placeholder = document.createComment('desktop-only header navigation');
+      nav.parentNode?.replaceChild(placeholder, nav);
+      if (placeholder.isConnected) detachedMobileHeaderNavs.push({ placeholder, nav });
+    });
+  } else {
+    while (detachedMobileHeaderNavs.length) {
+      const { placeholder, nav } = detachedMobileHeaderNavs.pop();
+      if (placeholder.isConnected) placeholder.replaceWith(nav);
+    }
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  syncRetiredMobileHeaderNavigation();
+  const mobileHeaderQuery = window.matchMedia?.('(max-width: 767px)');
+  if (mobileHeaderQuery?.addEventListener) {
+    mobileHeaderQuery.addEventListener('change', syncRetiredMobileHeaderNavigation);
+  } else {
+    mobileHeaderQuery?.addListener?.(syncRetiredMobileHeaderNavigation);
+  }
   setupDropdowns();
 
   // Close when tapping/clicking outside
