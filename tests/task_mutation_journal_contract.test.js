@@ -166,6 +166,14 @@ test('bulk task journal rejects malformed/locked/wrong-shape writes without chan
   assert.throws(() => h.core.journalTaskMutations([{id:'t1',dueDateISO:'2026-11-22'}]),/malformed and was preserved/);
   assert.equal(h.storage.getItem(JOURNAL_KEY),raw);
   assert.equal(h.storage.getItem(STORAGE_KEY),before);
+
+  const locked = makeHarness();
+  locked.context.TaskPointsRecoveryJournalWriteLockGuard = {
+    readLock() { return { owner: 'another-recovery-page' }; },
+    pageMayWrite() { return false; }
+  };
+  assert.throws(() => locked.core.journalTaskMutations([{id:'t1',dueDateISO:'2026-11-22'}]), /paused task changes/);
+  assert.equal(locked.storage.getItem(JOURNAL_KEY), null, 'recovery lock must block journal batch writes');
 });
 
 test('bulk task journal throws on storage failure without a partial durable batch', () => {
