@@ -158,6 +158,26 @@
         <div class="flex flex-wrap gap-2"><button id="runShadowMigrationBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">Run Shadow Migration</button><button id="downloadShadowMigrationDiagnosticsBtn" class="btn btn-ghost btn-toolbar nav-btn hidden" type="button">Download Diagnostic JSON</button></div>
       </section>
 
+      <details class="glass space-y-3" id="hourlyWageSettingsSection">
+        <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
+          <div>
+            <div class="text-lg font-semibold">Hourly Wage</div>
+            <div class="muted text-sm">Store your current hourly pay rate.</div>
+          </div>
+        </summary>
+        <form id="hourlyWageForm" class="space-y-3 pt-4">
+          <label for="hourlyWageInput" class="block text-sm font-semibold">Hourly wage (USD per hour)</label>
+          <div class="flex flex-wrap gap-2 items-center">
+            <span aria-hidden="true" class="text-lg">$</span>
+            <input id="hourlyWageInput" type="number" inputmode="decimal" min="0" step="0.01"
+              placeholder="25.00" class="input" style="max-width:155px" aria-describedby="hourlyWageExplanation" />
+            <button id="hourlyWageSaveBtn" type="submit" class="btn btn-teal btn-toolbar nav-btn">Save Wage</button>
+          </div>
+          <p id="hourlyWageExplanation" class="muted text-xs">Saved in TaskPoints and included in standard backups. Leave blank and save to clear it. This does not change Work Hours points.</p>
+          <div id="hourlyWageStatus" class="muted text-xs" role="status" aria-live="polite"></div>
+        </form>
+      </details>
+
       <details class="glass space-y-3" id="goldInterestSettingsSection">
         <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
           <div>
@@ -5275,5 +5295,6 @@ return;
     else bind();
   })();
   </script>
+  <script src="hourly_wage_settings.js?v=20261121-1"></script>
 </body>
 </html>
