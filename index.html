@@ -14416,15 +14416,41 @@ function applyPostponeToTask(task){
 
 function postponeAllOverdueTasks(){
   const todayIso = todayKey();
-  let changed = false;
+  const currentTasks = [];
+  const postponedTasks = [];
   state.tasks.forEach(task => {
-    if (task && !task.completedAtISO && !task.hidden && !isTaskTrashed(task) && getTaskStatus(task)!=='wontdo' && task.dueDateISO && task.dueDateISO < todayIso) {
-      changed = applyPostponeToTask(task) || changed;
+    if (task && !task.completedAtISO && !task.hidden && !isTaskTrashed(task)
+      && getTaskStatus(task) !== 'wontdo' && task.dueDateISO && task.dueDateISO < todayIso) {
+      // Prepare the same date/postponement updates without touching live state
+      // until the single atomic journal write has succeeded.
+      const nextTask = { ...task };
+      if (applyPostponeToTask(nextTask)) {
+        currentTasks.push(task);
+        postponedTasks.push(nextTask);
+      }
     }
   });
-  if (!changed) return;
-  save();
-  renderTasks();
+  if (!postponedTasks.length) return;
+
+  if (TaskPointsCore?.journalTaskMutations) {
+    if (!assertTaskActionMutationWritable()) return;
+    try {
+      TaskPointsCore.journalTaskMutations(postponedTasks);
+    } catch (error) {
+      console.warn('Postpone All was not saved; no tasks were changed.', error);
+      alert('Could not postpone tasks safely. Please try again.');
+      return;
+    }
+    // The whole batch is durable before anything changes on screen.
+    postponedTasks.forEach((task, index) => Object.assign(currentTasks[index], task));
+    try { window.TaskPointsPerf?.mark?.('taskAction.postponeAllDurable', { count: postponedTasks.length }); } catch (_) {}
+  } else {
+    // Keep the original full-save path for environments without the journal.
+    postponedTasks.forEach((task, index) => Object.assign(currentTasks[index], task));
+    save();
+  }
+
+  renderTasks(state);
   window.updateCriticalTasksIsland?.();
 }
 function wontDoMain(id){

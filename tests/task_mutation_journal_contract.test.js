@@ -115,6 +115,74 @@ test('task completion mutation is durable immediately and replays without a full
   assert.equal(loaded.completions[0].id, 'c1');
 });
 
+test('bulk postpone writes all tasks once, preserves other pending changes, and replays on load', () => {
+  const baseline = {
+    tasks: [
+      {id:'t1',title:'Overdue A',dueDateISO:'2026-11-18',postponedDays:0},
+      {id:'t2',title:'Overdue B',dueDateISO:'2026-11-20',postponedDays:2},
+      {id:'t3',title:'Future',dueDateISO:'2026-11-26'}
+    ],
+    completions: []
+  };
+  const h = makeHarness({[STORAGE_KEY]:JSON.stringify(baseline)});
+  h.core.journalTaskMutation({completionUpsert:{id:'new',taskId:'t3',points:3,completedAtISO:'2026-11-22T12:00:00Z'}});
+  let journalWrites = 0;
+  const originalSet = h.storage.setItem.bind(h.storage);
+  h.storage.setItem = (key,value) => {
+    if (key === JOURNAL_KEY) journalWrites++;
+    return originalSet(key,value);
+  };
+  const patches = [
+    {...baseline.tasks[0],dueDateISO:'2026-11-22',postponedDays:4,updatedAtISO:'2026-11-22T14:00:00Z'},
+    {...baseline.tasks[1],dueDateISO:'2026-11-22',postponedDays:4,updatedAtISO:'2026-11-22T14:00:00Z'}
+  ];
+  h.core.assertTaskMutationJournalWritable();
+  h.core.journalTaskMutations(patches);
+  assert.equal(journalWrites,1,'batch must use exactly one durable storage write');
+  assert.equal(h.getSaveCalls(),0,'no full-state compression on tap');
+  const journal = JSON.parse(h.storage.getItem(JOURNAL_KEY));
+  assert.equal(journal.tasks.length,2);
+  assert.equal(journal.completionUpserts.length,1,'must preserve pending completion changes');
+  const replayed = h.core.loadAppState().state;
+  assert.equal(replayed.tasks[0].dueDateISO,'2026-11-22');
+  assert.equal(replayed.tasks[1].postponedDays,4);
+  assert.equal(replayed.tasks[2].dueDateISO,'2026-11-26');
+  assert.equal(replayed.completions[0].id,'new');
+  assert.equal(h.core.flushPendingTaskMutations(),true,'existing verified compaction must support batches');
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+  const persisted = JSON.parse(h.storage.getItem(STORAGE_KEY));
+  assert.equal(persisted.tasks[0].dueDateISO,'2026-11-22');
+  assert.equal(persisted.tasks[1].postponedDays,4);
+  assert.equal(persisted.completions[0].id,'new');
+});
+
+test('bulk task journal rejects malformed/locked/wrong-shape writes without changing storage', () => {
+  const h = makeHarness();
+  assert.throws(() => h.core.journalTaskMutations([]),/non-empty/);
+  assert.throws(() => h.core.journalTaskMutations([{id:'t1'},null]),/invalid task/);
+  const before = h.storage.getItem(STORAGE_KEY);
+  const raw = '{bad-json';
+  h.storage.setItem(JOURNAL_KEY,raw);
+  assert.throws(() => h.core.journalTaskMutations([{id:'t1',dueDateISO:'2026-11-22'}]),/malformed and was preserved/);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),raw);
+  assert.equal(h.storage.getItem(STORAGE_KEY),before);
+});
+
+test('bulk task journal throws on storage failure without a partial durable batch', () => {
+  const h = makeHarness();
+  const set = h.storage.setItem.bind(h.storage);
+  h.storage.setItem = (key,value) => {
+    if(key === JOURNAL_KEY) throw Error('QuotaExceededError');
+    return set(key,value);
+  };
+  assert.throws(() => h.core.journalTaskMutations([
+    {id:'t1',dueDateISO:'2026-11-22'},
+    {id:'t2',dueDateISO:'2026-11-22'}
+  ]),/QuotaExceededError/);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+  assert.equal(h.getSaveCalls(),0);
+});
+
 test('task completion deletion replays and verified compaction clears the journal', () => {
   const h = makeHarness();
   const task = { id: 't1', title: 'Task', status: 'trashed', counts: 0 };

@@ -156,6 +156,38 @@
     return saved;
   }
 
+  // Atomically journal many task edits in a single small storage write.
+  // Postpone All must not compress the entire saved app (or write once per task).
+  function journalTaskMutations(tasks) {
+    if (!Array.isArray(tasks) || !tasks.length) {
+      throw new TypeError('Task mutation batch requires a non-empty tasks array.');
+    }
+    if (tasks.some(task => !task || typeof task !== 'object'
+      || Array.isArray(task) || !task.id)) {
+      throw new TypeError('Task mutation batch contains an invalid task.');
+    }
+
+    // Keep all existing pending task/completion mutations and recovery checks.
+    const current = assertJournalWritable();
+    const record = current.record;
+    const byId = new Map(record.tasks.map(task => [String(task.id), task]));
+    for (const task of tasks) byId.set(String(task.id), clone(task));
+    record.tasks = [...byId.values()];
+    record.updatedAtISO = new Date().toISOString();
+
+    // If this write fails (quota, lock, malformed journal), NONE of the
+    // batch is committed. The caller has not yet mutated its visible tasks.
+    const saved = writeRecord(record);
+    mutationGeneration += 1;
+    try { core.noteStorageUserInteraction?.(); } catch (_) {}
+    try { scheduleCompaction('mutation-batch'); }
+    catch (error) {
+      // The batch is already durable; a delayed compaction may retry later.
+      console.warn('Task mutation batch saved; idle compaction was not scheduled.', error);
+    }
+    return saved;
+  }
+
   function applyRecord(sourceState, suppliedRecord = null) {
     const state = sourceState && typeof sourceState === 'object' && !Array.isArray(sourceState)
       ? { ...sourceState }
@@ -593,6 +625,7 @@
   core.applyPendingTaskMutations = applyRecord;
   core.assertTaskMutationJournalWritable = assertJournalWritable;
   core.journalTaskMutation = journalMutation;
+  core.journalTaskMutations = journalTaskMutations;
   core.schedulePendingTaskMutationCompaction = scheduleCompaction;
   core.flushPendingTaskMutations = () => persistPending('explicit-flush');
   core.clearPendingTaskMutations = () => {
