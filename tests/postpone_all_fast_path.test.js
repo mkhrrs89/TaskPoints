@@ -71,7 +71,13 @@ test('Postpone All journals just eligible overdue tasks in one write before UI u
   assert.equal(h.state.tasks[0].originalDueDateISO,'2026-11-22');
   assert.equal(h.state.tasks[0].postponedDays,6);
   assert.equal(h.state.tasks[1].postponedDays,2);
-  for(const task of h.state.tasks.slice(2))assert.notEqual(task.dueDateISO,'2026-11-22',task.id);
+  const unchanged = {
+    today:'2026-11-22', future:'2026-11-25', hidden:'2026-11-10',
+    done:'2026-11-10', trashed:'2026-11-10', wontdo:'2026-11-10'
+  };
+  for(const task of h.state.tasks.slice(2)) {
+    assert.equal(task.dueDateISO,unchanged[task.id],task.id+' must keep its existing date');
+  }
 });
 
 test('Failed preflight or journal write never leaves a partially postponed task',()=>{
