@@ -75,35 +75,69 @@ shows the Points toast, updates the Today list and Critical Tasks
 indicator, and animates the card. Home's live score and matchup
 calculations read completions from the legacy state.
 
-The V2 database has stores for Tasks, completions, and receipts that can
-participate in one IndexedDB transaction. The blocker is admission
-outside that transaction. The real Today page independently completes
-the same Task through `saveStateSnapshot`. It never consults the Home
-owner. The browser witness opens Today after an acknowledged V2 Points
-edit from 5 to 12.75, clicks its real checkbox, and verifies a durable
-5-point legacy completion after reload. V2 detects this legacy change
-after the award and refuses rollback. That check preserves the evidence
-but cannot prevent the award.
+Commit `31bc2d20` preserves the browser witness for the original bug.
+After Home changed Points from 5 to 12.75, a newly opened Today page
+awarded 5 through its own `saveStateSnapshot` path.
 
-Writing the completion solely to V2 would leave Today able to award the
-same Task and day separately. Updating just the Home display would also
-leave Game and matchup writers reading stale completion totals, and the
-Today list update lives in a separate localStorage record. The synthetic
-Home Done refusal stays in place. No partial V2 reward writer or
-completion checkpoint is enabled.
+Home and Today now call the same check in the shipped scoring core before
+either completion handler can mutate state, award Points, save a
+snapshot, journal a completion, or update the Today list. This check
+reserves only synthetic Task `t1` on a loopback origin with the ownership
+marker. It reads the marker at the point of use, treats malformed bytes
+as a hold, and retains a hold for the lifetime of a document that saw
+the marker. The old Home owner check remains as a fallback.
 
-The next implementation should give Home and Today a shared completion
-admission path on the synthetic origin. A selected Task must reach the
-same verified Task/day reward transaction from either control. Any
-legacy attempt must be refused before it can write an award. The browser
-witness should then be replaced with a test that checks both controls
-can produce only one reward.
+The browser tests exercise both controls with an already-open Today tab
+and a fresh Today tab. The app loads the shared scoring core in both,
+including the root Today URL with the bare core. Neither tab needs the
+injected Home owner or synthetic runtime flag to refuse. Repeated
+concurrent attempts preserve the stored Tasks, completions, scores,
+journals, backups, and Today list. The test also checks a Chromium restart
+with malformed marker bytes, marker loss in a loaded document, an
+unrelated Task completion, and a fresh detached V1 rollback that awards
+12.75 once through the normal Today control. That last award is V1.
+
+The shared check covers the current Home and Today code. An older build
+without the check can still write. A new document after loss of the
+marker cannot distinguish marker loss from a fresh V1 profile. Keep the
+old-client and controlled handoff requirements open.
+
+V2 Done remains paused. Home's `computeTodayPoints` and the canonical
+`syncYouMatchups` pipeline still consume V1 completion totals. Before a
+V2 award can be enabled, the score display and persisted matchup
+calculations must use the same verified completion set and defer writes
+when verification fails. Showing only the correct Home total could leave
+a persisted Game result calculated from stale rewards. An eventual V2
+transaction must commit the Task, completion, and receipt together and
+enforce one award per Task and local day inside that transaction.
+
+Today-list state lives in a separate localStorage record. The completion
+receipt can supply the Task ID, local day, and initiating control for
+reconciliation after commit or restart. The Today checkbox should be
+derived from the verified completion. Any persisted list cleanup should
+use the latest day map and remove only the affected Task ID and its
+order entry, leaving other order entries, notes, and habits intact.
+Removing the same entry again is harmless. An unreadable day map should
+be preserved. This reconciliation has its own verification and cannot
+be part of the IndexedDB commit.
+
+The next prerequisite is a verified completion read path for Home,
+Today, and persisted Game/matchup scoring, exercised with seeded
+synthetic completion records before enabling either Done writer.
 
 The Done checkpoint reran all 47 existing full Home browser cases, 19
 component browser cases, and 258 scoped regressions. All passed,
 including the Inbox test in this run. The separate Today witness passed
 by reproducing the stale award. The intermittent Inbox failure remains
 open, as recorded below.
+
+The shared admission run passed 49 of 50 full Home browser cases,
+including all three admission cases. All 19 component cases and 258
+scoped regressions passed. In the full run, the Inbox test verified the
+compacted message in storage before and after navigation, then timed
+out waiting for the rendered message. The same test passed in the
+isolated rerun. Three isolated checks on `31bc2d20` also passed, so
+this run's display timeout was not reproduced on that baseline.
 
 ## How the integration works
 

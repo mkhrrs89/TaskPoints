@@ -466,6 +466,11 @@ function saveTodayStore(store = todayStore) {
       }
 
       function completeTask(taskId) {
+        const hold = window.TaskPointsCore?.getLegacyTaskCompletionHold?.(taskId);
+        if (hold) {
+          alert(hold);
+          return false;
+        }
         const tasks = Array.isArray(appState.tasks) ? appState.tasks.slice() : [];
         const idx = tasks.findIndex(t => t && t.id === taskId);
         if (idx === -1) return false;

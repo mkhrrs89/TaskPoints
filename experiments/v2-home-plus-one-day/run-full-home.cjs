@@ -1413,60 +1413,167 @@ test('Points receipt admission refuses strings, non-finite numbers and unrelated
 });
 
 
-// Negative witness until both live completion callers share admission.
-test('Done boundary witness: Today can still award stale V1 Points on the V2-owned Task',async t=>{
-  const {page,context}=await fixture(t);
-  const time=new Date(quietDate+'T17:00:00Z');
-  await page.clock.setFixedTime(time);
+// History of the stale 5-point award is preserved in commit 31bc2d20.
+async function todayCompletionPage(context,alias=false){
+  const page=await context.newPage();
+  const alerts=[];
+  page.setDefaultTimeout(12000);
+  page.on('dialog',async dialog=>{alerts.push(dialog.message());await dialog.dismiss();});
+  await page.clock.setFixedTime(new Date(quietDate+'T17:00:00Z'));
+  await page.goto(origin+(alias?'/':prefix)+'today.html');
+  return {page,alerts};
+}
+const todayTask=(page,id='t1')=>page.locator(`#todayList [data-kind="task"][data-id="${id}"]`);
+const todayDone=(page,id)=>todayTask(page,id).locator('.today-check').dispatchEvent('click');
+const homeDone=page=>editCard(page).locator('[data-task-action="complete"]').dispatchEvent('click');
+
+function completionWriteEvidence(page){
+  return page.evaluate(()=>{
+    const keys=['taskpoints_v1','taskpoints_pending_task_mutations_v1','taskpoints_today_view_v1',
+      'tpTodayScore','taskpoints_backup_latest','taskpoints_backup_prev1','taskpoints_backup_prev2',
+      'taskpoints_backup_prev3','taskpoints_quarantined_snapshot'];
+    return keys.map(k=>[k,localStorage.getItem(k)]);
+  });
+}
+
+async function prepareCompletionBoundary(t,context){
+  const f=await fixture(t,context),{page}=f;
+  await page.clock.setFixedTime(new Date(quietDate+'T17:00:00Z'));
   await openTaskEdit(page);
   await editCard(page).locator('[data-field="due"]').fill(quietDate);
   await titleSave(page).click();
-  assert.equal(await page.evaluate(()=>TaskPointsCore.flushPendingTaskMutations()),true);
+  await page.evaluate(day=>{
+    TaskPointsCore.journalTaskUpdates(['t2'],task=>{task.dueDateISO=day;return true;});
+    if(!TaskPointsCore.flushPendingTaskMutations())throw Error('Expected Task compaction');
+  },quietDate);
+  return f;
+}
+
+async function setOwnedCompletionPoints(page){
   await installOwner(page);
   assert.equal((await owned(page)).sourceDrift,false);
   await openTaskEdit(page);
   await pointsField(page).fill('12.75');
   assert.equal((await submitTaskEdit(page)).points,12.75);
   await assertHomePoints(page,12.75);
-  const before=await owned(page);
   assert.equal((await backingTask(page)).points,5);
-  assert.deepEqual((await rewardEvidence(page)).completions,[]);
+  return owned(page);
+}
 
-  // A newly opened Today page uses the real V1 load and save, without
-  // requiring stale binaries or timing the click against an in-flight write.
-  const today=await context.newPage();
-  today.setDefaultTimeout(12000);
-  const errors=[];
-  today.on('pageerror',error=>errors.push(error.message));
-  await today.clock.setFixedTime(time);
-  await today.goto(origin+prefix+'today.html');
-  const task=today.locator('#todayList [data-kind="task"][data-id="t1"]');
-  assert.equal(await task.locator('.today-sub').textContent(),'5 pts');
-  await task.locator('.today-check').dispatchEvent('click');
-  assert.deepEqual(errors,[]);
-  const written=await today.evaluate(()=>{
-    const core=TaskPointsCore;
-    const canonical=core.parseTaskPointsStorageJson(localStorage.getItem(core.STORAGE_KEY));
-    return {rows:canonical.completions,writes:legacyWrites.filter(write=>write.key===core.STORAGE_KEY),
-      guardKey:localStorage.getItem('taskpoints_storage_guard_incident_v1')};
-  });
-  assert.ok(written.rows.some(c=>c.taskId==='t1'),JSON.stringify(written));
-  await today.reload();
-  assert.ok((await task.getAttribute('class')).includes('is-done'));
-  const persisted=await today.evaluate(()=>{
-    const core=TaskPointsCore;
-    const stored=core.parseTaskPointsStorageJson(localStorage.getItem(core.STORAGE_KEY));
-    const rows=stored.completions.filter(row=>row.taskId==='t1');
-    return {rows,total:core.aggregateCompletionsByDate(rows,stored).dailyTotals[core.todayKey()]};
-  });
-  assert.equal(persisted.rows.length,1);
-  assert.equal(persisted.rows[0].points,5);
-  assert.equal(persisted.total,5);
+test('shared Done admission stops the stale 5-point award in fresh and already open Today tabs before any legacy write',async t=>{
+  const {page,context}=await prepareCompletionBoundary(t);
+  const stale=await todayCompletionPage(context);
+  assert.equal(await todayTask(stale.page).locator('.today-sub').textContent(),'5 pts');
+  const verified=await setOwnedCompletionPoints(page);
+  const fresh=await todayCompletionPage(context,true);
+  const homeAlerts=[];
+  page.on('dialog',dialog=>homeAlerts.push(dialog.message()));
+  for(const peer of [stale,fresh]){
+    assert.equal(await todayTask(peer.page).locator('.today-sub').textContent(),'5 pts');
+    // Use the checked-in shared core even when the Today tab has no V2 adapter or injection flag.
+    assert.equal(await peer.page.evaluate(()=>{
+      delete window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__;
+      return typeof window.TaskPointsOwnedTaskExperiment;
+    }),'undefined');
+  }
+  const history=await rewardEvidence(page),before=await completionWriteEvidence(page);
+  assert.deepEqual(history.completions,[]);
+  const participants=[page,stale.page,fresh.page];
+  await Promise.all(participants.map(p=>p.evaluate(()=>{legacyWrites.length=0;})));
+  await Promise.all([homeDone(page),todayDone(stale.page),todayDone(fresh.page)]);
+  await Promise.all([homeDone(page),todayDone(stale.page),todayDone(fresh.page)]);
+  for(const peer of [{alerts:homeAlerts},stale,fresh]){
+    assert.equal(peer.alerts.length,2);
+    assert.ok(peer.alerts.every(text=>text.includes('owned by the V2 experiment')));
+  }
+  assert.deepEqual(await completionWriteEvidence(page),before);
+  assert.deepEqual(await rewardEvidence(page),history);
+  assert.deepEqual(await page.evaluate(()=>TaskPointsHomeLiveState.getState().completions),[]);
+  for(const participant of participants){
+    assert.deepEqual(await participant.evaluate(()=>legacyWrites.filter(write=>
+      write.stack.some(frame=>/completeTask|onListClick/.test(frame)))),[]);
+  }
+  await assertHomePoints(page,12.75);
+  for(const peer of [stale,fresh]){
+    assert.doesNotMatch(await todayTask(peer.page).getAttribute('class'),/is-done/);
+  }
+  assert.deepEqual(await owned(page),verified);
 
-  const after=await owned(page);
-  assert.deepEqual(after.journal,before.journal);
-  assert.deepEqual(after.tasks,before.tasks);
-  assert.equal(after.sourceDrift,true,'drift detection happens after the V1 award is already durable');
-  await assert.rejects(page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(1)),
-    /legacy_source_changed_preserved_reconciliation_required/);
+  await fresh.page.reload();
+  await todayTask(fresh.page).waitFor();
+  const reloadedBefore=await completionWriteEvidence(fresh.page);
+  await todayDone(fresh.page);
+  assert.equal(fresh.alerts.length,3);
+  assert.deepEqual(await completionWriteEvidence(fresh.page),reloadedBefore);
+  assert.equal(await fresh.page.evaluate(()=>TaskPointsCore.readTaskPointsStoredState().completions.length),0);
+  assert.deepEqual(await owned(page),verified);
+});
+
+test('shared Done admission holds after restart with malformed evidence and after marker loss in an open tab',async t=>{
+  const profile=fs.mkdtempSync(path.join(os.tmpdir(),'tp-done-admission-'));
+  const launch=()=>chromium.launchPersistentContext(profile,{
+    executablePath:process.env.BOUNDARY_CHROMIUM_PATH||'/usr/bin/chromium',serviceWorkers:'block',timezoneId:'America/New_York'
+  });
+  let context=await launch();
+  t.after(async()=>{await context.close();fs.rmSync(profile,{recursive:true,force:true});});
+  const {page}=await prepareCompletionBoundary(t,context);
+  await setOwnedCompletionPoints(page);
+  const malformed='{truncated synthetic owner marker';
+  await page.evaluate(({key,value})=>localStorage.setItem(key,value),{key:marker,value:malformed});
+  await context.close();
+  context=await launch();
+  await configureContext(context);
+  const today=await todayCompletionPage(context);
+  await todayTask(today.page).waitFor();
+  const before=await completionWriteEvidence(today.page);
+  await todayDone(today.page);
+  assert.equal(today.alerts.length,1);
+  assert.equal(await today.page.evaluate(key=>localStorage.getItem(key),marker),malformed);
+  // Same-document loss does not dispatch a storage event. The startup/point-of-use
+  // latch still prevents falling back to the legacy writer.
+  await today.page.evaluate(key=>localStorage.removeItem(key),marker);
+  await todayDone(today.page);
+  assert.equal(today.alerts.length,2);
+  assert.deepEqual(await completionWriteEvidence(today.page),before);
+  assert.deepEqual(await today.page.evaluate(()=>TaskPointsCore.readTaskPointsStoredState().completions),[]);
+});
+
+test('Today can still complete an unrelated Task and a fresh V1 rollback awards the restored 12.75 Points once',async t=>{
+  const {page,context}=await prepareCompletionBoundary(t);
+  const verified=await setOwnedCompletionPoints(page);
+  const today=await todayCompletionPage(context);
+  await todayDone(today.page,'t2');
+  await todayTask(today.page,'t2').and(today.page.locator('.is-done')).waitFor();
+  assert.equal(today.alerts.length,0);
+  const canonicalCompletions=page=>page.evaluate(()=>{
+    const core=TaskPointsCore;
+    return core.parseTaskPointsStorageJson(localStorage.getItem(core.STORAGE_KEY)).completions;
+  });
+  const unrelatedAward=await canonicalCompletions(today.page);
+  assert.equal(unrelatedAward.length,1);
+  assert.equal(unrelatedAward[0].taskId,'t2');
+  assert.equal(unrelatedAward[0].points,3);
+  await page.waitForFunction(()=>TaskPointsCore.parseTaskPointsStorageJson(
+    localStorage.getItem(TaskPointsCore.STORAGE_KEY)).completions.some(row=>row.taskId==='t2'));
+  assert.deepEqual(await owned(page),verified);
+
+  const transfer=await page.evaluate(async()=>{
+    const checkpoint=await TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(1);
+    const blob=await TaskPointsCore.getImageBlob('synthetic-image');
+    return {checkpoint,image:[...new Uint8Array(await blob.arrayBuffer())]};
+  });
+  assert.deepEqual(transfer.checkpoint.snapshot.completions,unrelatedAward);
+  const restored=await openRollbackHome(t,transfer);
+  const rollbackToday=await todayCompletionPage(restored.context());
+  assert.equal(await todayTask(rollbackToday.page).locator('.today-sub').textContent(),'12.75 pts');
+  await todayDone(rollbackToday.page);
+  await todayTask(rollbackToday.page).and(rollbackToday.page.locator('.is-done')).waitFor();
+  await todayDone(rollbackToday.page);
+  assert.equal(rollbackToday.alerts.length,0);
+  const rewards=await canonicalCompletions(rollbackToday.page);
+  assert.equal(rewards.length,2);
+  assert.equal(rewards.find(row=>row.taskId==='t1')?.points,12.75);
+  assert.deepEqual(rewards.filter(row=>row.taskId!=='t1'),unrelatedAward);
+  await rollbackToday.page.reload();
+  assert.deepEqual(await canonicalCompletions(rollbackToday.page),rewards);
 });

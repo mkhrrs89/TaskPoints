@@ -3,6 +3,36 @@
   const NOTES_STORAGE_KEY = "taskpoints_notes_v1";
   const NOTES_DIRTY_KEY = "taskpoints_notes_dirty_v1";
   const NOTES_AUTHORITY_KEY = "taskpoints_notes_authoritative_v1";
+  // The disposable Home experiment selects t1 on a dedicated loopback origin.
+  // Check the durable marker at the point of use, even in a Today tab that
+  // loaded before selection or has no V2 adapter. Invalid bytes still reserve t1.
+  const ISOLATED_TASK_FIXTURE_KEY = 'taskpoints_isolated_task_fixture_v1';
+  const isolatedCompletionOrigin = ['localhost', '127.0.0.1'].includes(global.location?.hostname);
+  const isolatedCompletionPage = isolatedCompletionOrigin &&
+    global.location.pathname?.startsWith('/experiments/v2-home-plus-one-day/full/');
+  let isolatedCompletionSelected = false;
+  if (isolatedCompletionOrigin) {
+    try { isolatedCompletionSelected = global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY) !== null; }
+    catch (_) { /* The point-of-use check reports an unreadable marker. */ }
+    global.addEventListener?.('storage', event => {
+      if (event.key === ISOLATED_TASK_FIXTURE_KEY && event.storageArea === global.localStorage) {
+        isolatedCompletionSelected = true;
+      }
+    });
+  }
+
+  function getLegacyTaskCompletionHold(taskId) {
+    if (!isolatedCompletionOrigin || taskId !== 't1') return null;
+    try {
+      isolatedCompletionSelected ||= global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY) !== null;
+    } catch (_) {
+      if (!isolatedCompletionSelected && !isolatedCompletionPage) return null;
+      return 'Task completion is paused because its ownership could not be checked.';
+    }
+    return isolatedCompletionSelected
+      ? 'This Task is owned by the V2 experiment. Use a verified V1 rollback before completing it.'
+      : null;
+  }
   const PENDING_HABIT_DELTAS_KEY = "taskpoints_pending_habit_deltas_v1";
   const PROJECTS_STORAGE_KEY = "tp_projects_v1";
   const IMAGE_DB_NAME = "taskpoints";
@@ -10840,6 +10870,7 @@ return Number(cappedScore.toFixed(1));
     isCompressedTaskPointsStorageRaw,
     assertTaskPointsParserAvailableForRaw,
     readTaskPointsStoredState,
+    getLegacyTaskCompletionHold,
     serializeTaskPointsStoredState,
     writeTaskPointsStoredState,
     parseTaskPointsStorageJson,
