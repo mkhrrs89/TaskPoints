@@ -453,8 +453,7 @@ function saveTodayStore(store = todayStore) {
         return comps.some(c => c && c.taskId === taskId && dateKeyFromISO(c.completedAtISO) === dayKey);
       }
 
-      function ensureAutoTasks(dayKey) {
-        const tasks = Array.isArray(appState.tasks) ? appState.tasks : [];
+      function ensureAutoTasks(dayKey, tasks = Array.isArray(appState.tasks) ? appState.tasks : []) {
         const dueToday = tasks
           .filter(t => t && !t.completedAtISO && !t.hidden && t.status !== 'trashed' && t.status !== 'wontdo' && !t.deletedAtISO && (String(t.dueDateISO || '').slice(0, 10) === dayKey))
           .map(t => t.id)
@@ -539,6 +538,16 @@ function saveTodayStore(store = todayStore) {
       function completeTask(taskId) {
         const hold = window.TaskPointsCore?.getLegacyTaskCompletionHold?.(taskId);
         if (hold) {
+          if (TaskPointsCore.usesIsolatedTaskDone?.(taskId)) {
+            const row = $('#todayList [data-kind="task"][data-id="t1"]');
+            if (row?.getAttribute('aria-busy') === 'true') return false;
+            row?.setAttribute('aria-busy','true');
+            TaskPointsCore.runIsolatedTaskDone(taskId,'today',receipt=>{
+              if (receipt.intent.day === dayKeyNow()) window.showPointsToast?.(receipt.completion.points);
+            }).catch(error=>alert(TaskPointsCore.isolatedTaskDoneError(error)))
+              .finally(()=>row?.removeAttribute('aria-busy'));
+            return false;
+          }
           alert(hold);
           return false;
         }
@@ -685,15 +694,28 @@ const habits = getActiveHabits().filter(h => {
             todayStore = loadTodayStore(dayKey,source);
             dismissed = source[VERIFIED_COMPLETION_DISMISSALS]?.[dayKey];
           }
-          ensureAutoTasks(dayKey);
+          const writeFixture = window.TaskPointsCore?.usesIsolatedTaskDone?.();
+          const selected = writeFixture ? TaskPointsCore.isolatedTaskDoneView('t1') : null;
+          const legacyTasks = Array.isArray(appState.tasks) ? appState.tasks : [];
+          const tasks = selected ? legacyTasks.map(task=>task?.id === selected.task.id ? selected.task : task)
+            : legacyTasks;
+          ensureAutoTasks(dayKey,tasks);
+          if (writeFixture) {
+            const score = $('#todayScoreIslandValue');
+            if (score) {
+              try {
+                score.textContent = TaskPointsCore.computeDayTotals(TaskPointsCore.buildDaySnapshot(dayKey,appState)).total.toFixed(1);
+              } catch (_) { score.textContent = '—'; }
+            }
+          }
 
         const el = $('#todayList');
         const empty = $('#todayEmpty');
 
         const items = [];
 
-        // Project the checked item for display only. Today-list persistence
-        // still uses its existing V1 membership until reconciliation exists.
+        // The checked item comes from verified rewards. The reconciler owns
+        // persisted list cleanup, including when another page completes it.
         const ownedScoring = window.TaskPointsCore?.usesIsolatedTaskScoring?.();
         let earned = null;
         let verified = true;
@@ -713,14 +735,15 @@ const habits = getActiveHabits().filter(h => {
 
         // Tasks (kept visible even if recurring + moved due date after completion)
         for (const taskId of visibleTaskIds) {
-          const t = (Array.isArray(appState.tasks) ? appState.tasks : []).find(x => x && x.id === taskId);
+          const t = tasks.find(x => x && x.id === taskId);
           if (!t) continue;
 
           let done = hasTaskCompletionToday(taskId, dayKey) || (t.completedAtISO && dateKeyFromISO(t.completedAtISO) === dayKey);
           let sub = (t.points != null) ? `${Number(t.points || 0)} pts` : '';
           if (taskId === 't1' && ownedScoring) {
             done = Boolean(earned);
-            sub = verified ? (earned ? `${TaskPointsCore.pointsForCompletion(earned, appState)} pts` : '')
+            sub = verified ? (earned ? `${TaskPointsCore.pointsForCompletion(earned, appState)} pts`
+              : selected ? `${selected.task.points} pts` : '')
               : 'Verified completion unavailable';
           }
           items.push({ kind: 'task', id: taskId, title: t.title || 'Untitled Task', sub, done });
@@ -950,6 +973,10 @@ async function init() {
   renderDatePill();
   scheduleRender(renderTodayList);
   replayTodayCleanup();
+  window.TaskPointsCore?.watchIsolatedTaskDone?.(ready=>{
+    scheduleRender(renderTodayList);
+    if (ready) replayTodayCleanup();
+  });
   window.addEventListener('pageshow',event=>{
     if (!event.persisted || !usesVerifiedToday()) return;
     TaskPointsCore.refreshIsolatedTaskScoring().then(()=>{
@@ -1122,6 +1149,10 @@ async function init() {
       function onDragStart(e) {
         const row = e.target.closest('.today-item');
         if (!row || dragState.active) return;
+        // A mouse press on the owned Task checkbox is an activation. The
+        // rest of its row still supports the existing reorder gesture.
+        if (row.dataset.kind === 'task' && e.target.closest('.today-check')
+          && window.TaskPointsCore?.usesIsolatedTaskDone?.(row.dataset.id)) return;
 
         dragState.item = row;
         dragState.pointerId = e.pointerId;

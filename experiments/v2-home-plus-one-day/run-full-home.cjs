@@ -1424,8 +1424,9 @@ test('Points receipt admission refuses strings, non-finite numbers and unrelated
 
 
 // History of the stale 5-point award is preserved in commit 31bc2d20.
-async function todayCompletionPage(context,alias=false){
+async function todayCompletionPage(context,alias=false,viewport){
   const page=await context.newPage();
+  if(viewport)await page.setViewportSize(viewport);
   const alerts=[];
   page.setDefaultTimeout(12000);
   page.on('dialog',async dialog=>{alerts.push(dialog.message());await dialog.dismiss();});
@@ -1598,11 +1599,11 @@ const unrelatedRewardRows=[
   {id:'synthetic-unrelated-current',taskId:'t2',title:'Synthetic unrelated reward',points:3,completedAtISO:quietDate+'T16:00:00Z'}
 ];
 
-async function seedScoringReads(t,context,{oneOff=false,write=false,recurrence,dueDateISO}={}){
+async function seedScoringReads(t,context,{oneOff=false,write=false,controls=false,recurrence,dueDateISO}={}){
   const f=await prepareCompletionBoundary(t,context);
   const legacyRewards=write?[...unrelatedRewardRows]:[{...ownedRewards[0],points:5},...unrelatedRewardRows];
   const completionSeed=write?(oneOff?[]:ownedRewards.slice(1)):(oneOff?ownedRewards.slice(0,1):ownedRewards);
-  await f.page.evaluate(async({marker,completionSeed,legacyRewards,day,oneOff,write,recurrence,dueDateISO})=>{
+  await f.page.evaluate(async({marker,completionSeed,legacyRewards,day,oneOff,write,controls,recurrence,dueDateISO})=>{
     const core=TaskPointsCore,snapshot=core.readTaskPointsStoredState();
     snapshot.completions=legacyRewards;
     const task=snapshot.tasks.find(row=>row.id==='t1');
@@ -1616,12 +1617,12 @@ async function seedScoringReads(t,context,{oneOff=false,write=false,recurrence,d
       scoreA:8,scoreB:46,matchupType:'exhibition'});
     core.writeTaskPointsStoredState(snapshot);
     const fixture={id:crypto.randomUUID(),syntheticOnly:true,homeTaskId:'t1',completionRead:true,
-      ...(write?{completionWrite:true}:{}),phase:'prepared'};
+      ...(write?{completionWrite:true}:{}),...(controls?{completionControls:true}:{}),phase:'prepared'};
     localStorage.setItem('taskpoints_isolated_task_scoring_read_v1',fixture.id);
     localStorage.setItem(marker,JSON.stringify(fixture));
     await TaskPointsStateRuntimeV2.initializeIsolatedTaskOwner(snapshot,{completionSeed});
     localStorage.setItem(marker,JSON.stringify({...fixture,phase:'sealed'}));
-  },{marker,completionSeed,legacyRewards,day:quietDate,oneOff,write,recurrence,dueDateISO});
+  },{marker,completionSeed,legacyRewards,day:quietDate,oneOff,write,controls,recurrence,dueDateISO});
   await f.page.reload();
   if(oneOff&&!write)await f.page.waitForFunction(()=>TaskPointsHomeLiveState?.getState()?.tasks?.find(row=>row.id==='t1')?.status==='done');
   else await waitHome(f.page);
@@ -2525,4 +2526,309 @@ test('V2 completion transaction is held for ordinary seeded reads and metric-der
   await assert.rejects(commitCompletion(writer,await prepareCompletion(writer,'home')),/owned_completion_requires_metric_scoring/);
   assert.deepEqual(await owned(writer),before);
   assert.deepEqual(await verifiedRewards(writer),ownedRewards.slice(1));
+});
+
+const homeDoneButton=page=>editCard(page).locator('[data-task-action="complete"]');
+const todayCheck=page=>todayTask(page).locator('.today-check');
+const pointsFeedback=page=>page.locator('#pointsToastContainer .points-toast');
+const realDoneToday=context=>todayCompletionPage(context,false,{width:390,height:844});
+
+async function completionReceipts(page){
+  return (await owned(page)).journal.filter(row=>row.type==='isolated-task-completion');
+}
+
+async function waitOwnedReward(home, today, points, total, {oneOff=false}={}){
+  const row=todayTask(today).and(today.locator('.is-done'));
+  await row.waitFor();
+  assert.equal(await row.locator('.today-sub').textContent(),points+' pts');
+  await home.waitForFunction(total=>document.getElementById('todayScoreIslandValue')?.textContent===total,total);
+  await today.waitForFunction(total=>document.getElementById('todayScoreIslandValue')?.textContent===total,total);
+  if(oneOff)await editCard(home).waitFor({state:'detached'});
+  else await home.locator('[data-task-id="t1"][aria-label="Done today"]:disabled').waitFor({state:'attached'});
+}
+
+async function delayDoneCommit(page){
+  await page.evaluate(()=>{
+    const commit=TaskPointsStateRuntimeV2.commitIsolatedTaskCompletion;
+    TaskPointsStateRuntimeV2.commitIsolatedTaskCompletion=async intent=>{
+      window.realDoneIntent=intent;
+      await new Promise(resolve=>{window.releaseRealDone=resolve;});
+      return commit(intent);
+    };
+    window.restoreDoneCommit=()=>{TaskPointsStateRuntimeV2.commitIsolatedTaskCompletion=commit;};
+  });
+}
+
+test('real V2 Done control on Home awards the latest Points and refreshes open Today, Game, and Matchups views',async t=>{
+  const {page,context,legacyRewards}=await seedScoringReads(t,undefined,{write:true,controls:true});
+  const today=(await realDoneToday(context)).page;
+  const game=await openScoringPage(context,'game.html');
+  const matchups=await openScoringPage(context,'matchups.html');
+  await game.locator('#playersList .playerCard').first().waitFor();
+  await matchups.locator('#matchupsChronological .matchup-collapsible-header').first().waitFor();
+  await todayCheck(today).waitFor();
+  assert.equal(await todayTask(today).locator('.today-sub').textContent(),'5 pts');
+  const unrelated=await partOfState(page);
+  await openTaskEdit(page);await pointsField(page).fill('12.75');
+  assert.equal((await submitTaskEdit(page)).points,12.75);
+  await today.waitForFunction(()=>document.querySelector('#todayList [data-id="t1"] .today-sub')?.textContent==='12.75 pts');
+  await page.evaluate(()=>{
+    const animate=animateTaskCompletion;
+    window.doneAnimations=[];
+    animateTaskCompletion=(id,onDone)=>{
+      animate(id,onDone);
+      doneAnimations.push({id,dusting:document.querySelector('[data-task-id="t1"]')?.classList.contains('task-dusting')});
+    };
+  });
+  await delayDoneCommit(page);
+  await homeDoneButton(page).click();
+  await page.waitForFunction(()=>Boolean(window.realDoneIntent));
+  assert.equal(await homeDoneButton(page).getAttribute('aria-busy'),'true');
+  assert.deepEqual(await completionReceipts(page),[]);
+  assert.equal(await pointsFeedback(page).count(),0);
+  await page.evaluate(()=>releaseRealDone());
+  await pointsFeedback(page).filter({hasText:/^\+12\.75 pts$/}).waitFor();
+  await waitOwnedReward(page,today,12.75,'15.8');
+  assert.deepEqual(await page.evaluate(()=>doneAnimations),[{id:'t1',dusting:true}]);
+  assert.deepEqual(await dates(page),{home:'2026-11-19',legacy:quietDate});
+  const [receipt]=await completionReceipts(page);
+  assert.equal(receipt.intent.source,'home');
+  assert.equal(receipt.completion.points,12.75);
+  assert.equal(receipt.after.postponedDays,0);
+  assert.deepEqual(await verifiedRewards(page),[...ownedRewards.slice(1),receipt.completion]);
+  await game.waitForFunction(()=>computeTodayPoints()===15.8);
+  await matchups.waitForFunction(()=>state.matchups.find(row=>row.id==='synthetic-owned-matchup')?.scoreA===15.75);
+  assert.deepEqual(await canonicalCompletions(page),legacyRewards);
+  assert.deepEqual(await partOfState(page),unrelated);
+  const persist=matchups.locator('#matchupsChronological').getByRole('button',{name:'Generate retro matchups'}).first();
+  const header=persist.locator('xpath=ancestor::section[1]').locator('.matchup-collapsible-header').first();
+  if(await header.getAttribute('aria-expanded')==='false')await header.click();
+  await persist.click();
+  await matchups.waitForFunction(()=>{
+    const raw=localStorage.getItem(TaskPointsCore.STORAGE_KEY);
+    return TaskPointsCore.parseTaskPointsStorageJson(raw).matchups.find(row=>row.id==='synthetic-owned-matchup')?.scoreA===15.75;
+  });
+  await today.close();await game.close();await matchups.close();
+
+  const checkpoint=await page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(2));
+  assert.deepEqual(checkpoint.receipts.find(row=>row.id===receipt.id),receipt);
+  const fresh=await browser.newContext({serviceWorkers:'block',timezoneId:'America/New_York'});
+  t.after(()=>fresh.close());await configureContext(fresh);
+  const loader=await rollbackLoader(fresh);
+  assert.deepEqual(await restoreCompletionCheckpoint(loader,checkpoint),{verified:true,checksum:checkpoint.checksum});
+  const restored=await openScoringPage(fresh,'index.html');
+  await waitHome(restored);
+  assert.equal(await restored.evaluate(()=>computeTodayPoints()),15.8);
+  assert.equal((await backingTask(restored)).dueDateISO,'2026-11-19');
+  assert.deepEqual(await canonicalCompletions(restored),[...legacyRewards,...ownedRewards.slice(1),receipt.completion]);
+  assert.equal(await restored.evaluate(()=>save('real-done-v1-rollback',{userInitiated:true})),true);
+  assert.deepEqual(await canonicalCompletions(restored),[...legacyRewards,...ownedRewards.slice(1),receipt.completion]);
+});
+
+test('real V2 Done control on Today closes a one-off Task and refreshes Home without reload',async t=>{
+  const {page,context,legacyRewards}=await seedScoringReads(t,undefined,{write:true,controls:true,oneOff:true});
+  await openTaskEdit(page);await pointsField(page).fill('-2.25');
+  assert.equal((await submitTaskEdit(page)).points,-2.25);
+  const today=(await realDoneToday(context)).page;
+  await todayCheck(today).click();
+  await waitOwnedReward(page,today,-2.25,'0.8',{oneOff:true});
+  await pointsFeedback(today).filter({hasText:/^-2\.25 pts$/}).waitFor();
+  const [receipt]=await completionReceipts(page);
+  assert.equal(receipt.intent.source,'today');
+  assert.equal(receipt.after.status,'done');
+  assert.equal(receipt.after.completedAtISO,receipt.completion.completedAtISO);
+  assert.equal(receipt.after.dueDateISO,quietDate);
+  assert.equal((await backingTask(page)).status,'active');
+  assert.deepEqual(await canonicalCompletions(today),legacyRewards);
+  await todayCheck(today).dispatchEvent('click');
+  assert.deepEqual(await completionReceipts(page),[receipt]);
+});
+
+test('real V2 Done controls clicked simultaneously award once with only the verified winner showing feedback',async t=>{
+  const {page,context,legacyRewards}=await seedScoringReads(t,undefined,{write:true,controls:true});
+  await openTaskEdit(page);await pointsField(page).fill('12.75');
+  assert.equal((await submitTaskEdit(page)).points,12.75);
+  const {page:today,alerts}=await realDoneToday(context);
+  await Promise.all([delayDoneCommit(page),delayDoneCommit(today)]);
+  await Promise.all([homeDoneButton(page).click(),todayCheck(today).click()]);
+  await Promise.all([page,today].map(peer=>peer.waitForFunction(()=>Boolean(window.realDoneIntent))));
+  await Promise.all([homeDone(page),todayDone(today),homeDone(page),todayDone(today)]);
+  assert.deepEqual(await completionReceipts(page),[]);
+  assert.equal(await pointsFeedback(page).count()+await pointsFeedback(today).count(),0);
+  const intents=await Promise.all([page,today].map(peer=>peer.evaluate(()=>realDoneIntent)));
+  assert.deepEqual(intents.map(row=>row.source),['home','today']);
+  assert.ok(intents.every(row=>row.expectedRevision===1));
+  await Promise.all([page,today].map(peer=>peer.evaluate(()=>releaseRealDone())));
+  await waitOwnedReward(page,today,12.75,'15.8');
+  const receipts=await completionReceipts(page);
+  assert.equal(receipts.length,1);
+  const winner=receipts[0].intent.source==='home'?page:today;
+  const loser=winner===page?today:page;
+  assert.equal(await pointsFeedback(winner).filter({hasText:/^\+12\.75 pts$/}).count(),1);
+  assert.equal(await pointsFeedback(loser).count(),0);
+  assert.deepEqual(alerts,[]);
+  assert.deepEqual(await canonicalCompletions(page),legacyRewards);
+});
+
+for(const phase of ['before commit','after commit'])test(`real V2 Done control restart recovers an interruption ${phase}`,async t=>{
+  const profile=await completionProfile(t);
+  if(phase==='after commit')await profile.context.addInitScript(key=>{
+    const set=Storage.prototype.setItem;
+    Storage.prototype.setItem=function(name,value){
+      if(this===localStorage&&name===key&&window.blockTodayCleanup){
+        window.cleanupInterrupted=true;
+        throw new DOMException('synthetic cleanup interruption','AbortError');
+      }
+      return set.call(this,name,value);
+    };
+  },todayKey);
+  const {page,context,legacyRewards}=await seedScoringReads(t,profile.context,{write:true,controls:true});
+  const peer=(await realDoneToday(context)).page;
+  const original=structuredClone(cleanedTodayList);
+  original.tasksByDay[quietDate]=['t2','t1'];
+  original.orderByDay[quietDate].push('task:t1');
+  await writeTodayFixture(page,JSON.stringify(original));
+  if(phase==='after commit')for(const tab of [page,peer])await tab.evaluate(()=>{window.blockTodayCleanup=true;});
+
+  const intent=await prepareCompletion(page,'home');
+  await interruptOwnedWrite(page,phase);
+  await homeDoneButton(page).click();
+  await page.waitForFunction(()=>window.ownedInterruptionReached===true);
+  assert.equal(await pointsFeedback(page).count(),0);
+  await page.close();
+  if(phase==='after commit'){
+    await todayTask(peer).and(peer.locator('.is-done')).waitFor();
+    await peer.waitForFunction(()=>window.cleanupInterrupted===true);
+    assert.equal(await todayBytes(peer),JSON.stringify(original));
+  }
+
+  const reopened=await profile.restart();
+  const home=await openScoringPage(reopened,'index.html');
+  await waitHome(home);
+  const today=(await realDoneToday(reopened)).page;
+  assert.deepEqual(await prepareCompletion(home,'home'),intent);
+  if(phase==='before commit'){
+    assert.deepEqual(await completionReceipts(home),[]);
+    await homeDoneButton(home).click();
+  }
+  await waitOwnedReward(home,today,5,'8.0');
+  await waitTodayBytes(home,JSON.stringify(cleanedTodayList));
+  const receipts=await completionReceipts(home);
+  assert.equal(receipts.length,1);
+  assert.deepEqual(receipts[0].intent,intent);
+  assert.deepEqual(await canonicalCompletions(home),legacyRewards);
+  if(phase==='after commit')assert.equal(await pointsFeedback(home).count()+await pointsFeedback(today).count(),0);
+});
+
+test('real V2 Done control refuses a stale prepared revision and retries from the latest Points',async t=>{
+  const {page,context}=await seedScoringReads(t,undefined,{write:true,controls:true});
+  const peer=await openScoringPage(context,'index.html');
+  await waitHome(peer);
+  const alerts=[];
+  page.on('dialog',dialog=>alerts.push(dialog.message()));
+  await delayDoneCommit(page);
+  await homeDoneButton(page).click();
+  await page.waitForFunction(()=>Boolean(window.realDoneIntent));
+  await openTaskEdit(peer);await pointsField(peer).fill('12.75');
+  assert.equal((await submitTaskEdit(peer)).points,12.75);
+  await page.evaluate(()=>{releaseRealDone();restoreDoneCommit();});
+  await page.waitForFunction(()=>document.querySelector('[data-task-id="t1"][data-task-action="complete"]')?.getAttribute('aria-busy')===null);
+  assert.match(alerts.at(-1) || '',/Task changed/);
+  assert.deepEqual(await completionReceipts(page),[]);
+  assert.equal(await pointsFeedback(page).count(),0);
+  await homeDoneButton(page).click();
+  await pointsFeedback(page).filter({hasText:/^\+12\.75 pts$/}).waitFor();
+  const receipts=await completionReceipts(page);
+  assert.equal(receipts.length,1);
+  assert.equal(receipts[0].completion.points,12.75);
+});
+
+test('real V2 Done control recovers the exact receipt after a lost response with Today open alone',async t=>{
+  const {page,context,legacyRewards}=await seedScoringReads(t,undefined,{write:true,controls:true});
+  await page.close();
+  const {page:today,alerts}=await realDoneToday(context);
+  await todayCheck(today).waitFor();
+  await today.evaluate(()=>{
+    const runtime=TaskPointsStateRuntimeV2, commit=runtime.commitIsolatedTaskCompletion, read=runtime.readIsolatedTaskScoring;
+    runtime.commitIsolatedTaskCompletion=async intent=>{
+      window.lostDoneResponse=(await commit(intent)).receipt.id;
+      throw Error('synthetic response lost after commit');
+    };
+    runtime.readIsolatedTaskScoring=useProof=>useProof ? read(proof=>useProof({...proof,findReceipt(intent){
+      const receipt=proof.findReceipt(intent);
+      window.recoveredDoneReceipt=receipt?.id;
+      return receipt;
+    }})) : read();
+  });
+  await todayCheck(today).click();
+  await today.waitForFunction(()=>window.recoveredDoneReceipt && recoveredDoneReceipt===window.lostDoneResponse);
+  await todayTask(today).and(today.locator('.is-done')).waitFor();
+  await today.waitForFunction(()=>document.getElementById('todayScoreIslandValue')?.textContent==='8.0');
+  assert.equal(await pointsFeedback(today).count(),0);
+  assert.deepEqual(alerts,[]);
+  const rewards=await verifiedRewards(today);
+  assert.equal(rewards.length,3);
+  assert.equal(rewards.at(-1).points,5);
+  assert.deepEqual(await canonicalCompletions(today),legacyRewards);
+});
+
+test('real V2 Done control in a stale Today tab keeps the legacy hold when its opt-in is revoked',async t=>{
+  const {page,context,legacyRewards}=await seedScoringReads(t,undefined,{write:true,controls:true});
+  const {page:today,alerts}=await realDoneToday(context);
+  await todayCheck(today).waitFor();
+  await today.evaluate(()=>{
+    const runtime=TaskPointsStateRuntimeV2, prepare=runtime.prepareIsolatedTaskCompletion;
+    runtime.prepareIsolatedTaskCompletion=async source=>{
+      const intent=await prepare(source);
+      await new Promise(resolve=>{window.resumeDoneAdmission=resolve;});
+      return intent;
+    };
+  });
+  await todayCheck(today).click();
+  await today.waitForFunction(()=>Boolean(window.resumeDoneAdmission));
+  await page.evaluate(marker=>{
+    const fixture=JSON.parse(localStorage.getItem(marker));
+    localStorage.setItem(marker,JSON.stringify({...fixture,completionControls:false}));
+  },marker);
+  await Promise.all([today.waitForEvent('dialog'),today.evaluate(()=>resumeDoneAdmission())]);
+  assert.match(alerts.at(-1) || '',/could not be confirmed/);
+  await todayDone(today);
+  assert.match(alerts.at(-1) || '',/owned by the V2 experiment/);
+  assert.deepEqual(await completionReceipts(page),[]);
+  assert.deepEqual(await canonicalCompletions(page),legacyRewards);
+  assert.equal(await pointsFeedback(today).count(),0);
+});
+
+for(const fault of ['metric reward','time zone','quota'])test(`real V2 Done control refuses ${fault} without an award or legacy fallback`,async t=>{
+  const {page,context,legacyRewards}=await seedScoringReads(t,undefined,{write:true,controls:true});
+  if(fault==='metric reward'){
+    await openTaskEdit(page);await titleField(page).fill('Mood Score (50)');
+    assert.equal((await submitTaskEdit(page)).ok,true);
+  }
+  const {page:today,alerts}=await realDoneToday(context);
+  await todayCheck(today).waitFor();
+  await today.evaluate(fault=>{
+    const {add}=IDBObjectStore.prototype;
+    if(fault==='quota')IDBObjectStore.prototype.add=function(row,...args){
+      if(row?.type==='isolated-task-completion')throw new DOMException('synthetic quota','QuotaExceededError');
+      return add.call(this,row,...args);
+    };
+    if(fault==='time zone'){
+      const DateTimeFormat=Intl.DateTimeFormat;
+      Intl.DateTimeFormat=(...args)=>{
+        const formatter=DateTimeFormat(...args);
+        const options=formatter.resolvedOptions();
+        formatter.resolvedOptions=()=>({...options,timeZone:'America/Chicago'});
+        return formatter;
+      };
+    }
+  },fault);
+  await todayCheck(today).click();
+  await today.waitForFunction(()=>document.querySelector('#todayList [data-id="t1"]')?.getAttribute('aria-busy')===null);
+  const message=fault==='metric reward'?/separate scoring rule/:fault==='time zone'?/time zone/:/could not be confirmed/;
+  assert.match(alerts.at(-1) || '',message);
+  assert.deepEqual(await completionReceipts(page),[]);
+  assert.deepEqual(await canonicalCompletions(page),legacyRewards);
+  assert.equal(await pointsFeedback(today).count()+await pointsFeedback(page).count(),0);
+  assert.doesNotMatch(await todayTask(today).getAttribute('class'),/is-done/);
 });

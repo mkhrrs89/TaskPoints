@@ -4159,6 +4159,7 @@ if (playerSortSelect) {
 
 // Auto-sim once per day after 8am, then render
 renderPlayers(); // always render even if auto-sim dies
+window.TaskPointsCore?.watchIsolatedTaskDone?.(renderPlayers);
 
 
 // ----- View mode toggle (Card vs Gallery) -----

@@ -51,19 +51,124 @@
     return isolatedScoringSelected;
   }
 
-  async function refreshIsolatedTaskScoring() {
+  async function refreshIsolatedTaskScoring(keepPrevious = false) {
     if (!usesIsolatedTaskScoring()) return true;
     pendingCompletionRead ||= Promise.resolve().then(async () => {
-      verifiedCompletionRead = null;
+      if (!keepPrevious) verifiedCompletionRead = null;
       try {
         verifiedCompletionRead = await global.TaskPointsStateRuntimeV2.readIsolatedTaskScoring();
         return true;
       } catch (error) {
+        verifiedCompletionRead = null;
         console.warn('Verified Task scoring is paused:', error.message);
         return false;
       }
     }).finally(() => { pendingCompletionRead = null; });
     return pendingCompletionRead;
+  }
+
+  function isolatedTaskDonePage() {
+    return isolatedCompletionPage && global.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true
+      && /^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups)\.html$/.test(global.location.pathname);
+  }
+
+  function usesIsolatedTaskDone(taskId = 't1') {
+    if (taskId !== 't1' || !isolatedTaskDonePage()) return false;
+    try {
+      const fixture = JSON.parse(global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY));
+      return fixture?.syntheticOnly === true && fixture.phase === 'sealed' && fixture.homeTaskId === taskId
+        && fixture.completionRead === true && fixture.completionWrite === true && fixture.completionControls === true
+        && global.localStorage.getItem(ISOLATED_SCORING_KEY) === fixture.id;
+    } catch (_) { return false; }
+  }
+
+  let isolatedDonePending = false;
+  let checkIsolatedDoneView;
+  function watchIsolatedTaskDone(onChange) {
+    if (!isolatedTaskDonePage() || checkIsolatedDoneView) return;
+    let checking = false, started = false, shown;
+    checkIsolatedDoneView = async () => {
+      if (checking || isolatedDonePending) return;
+      checking = true;
+      try {
+        const ready = usesIsolatedTaskDone() && await refreshIsolatedTaskScoring(true);
+        const proof = ready && verifiedCompletionRead;
+        const identity = proof
+          ? JSON.stringify([proof.generation, proof.revision, todayKey()])
+          : null;
+        if (!isolatedDonePending && identity !== shown) {
+          await onChange(Boolean(proof));
+          shown = identity;
+        }
+      } catch (error) {
+        console.warn('Verified completion refresh paused:', error.message);
+      } finally { checking = false; }
+    };
+    // Read the receipt-backed snapshot even when another tab closed just
+    // after commit and never had a chance to notify its peers.
+    const start = () => {
+      if (!started && usesIsolatedTaskDone()) {
+        started = true;
+        global.setInterval(checkIsolatedDoneView, 750);
+      }
+      if (started) checkIsolatedDoneView();
+    };
+    global.addEventListener('storage',event=>{
+      if (event.key === ISOLATED_TASK_FIXTURE_KEY || event.key === ISOLATED_SCORING_KEY) start();
+    });
+    global.addEventListener('pageshow',start);
+    global.document.addEventListener('visibilitychange',start);
+    start();
+  }
+
+  function isolatedTaskDoneView(taskId) {
+    if (!usesIsolatedTaskDone(taskId) || !verifiedCompletionRead) return null;
+    try {
+      verifiedLegacyCompletions(verifiedCompletionRead);
+      return structuredClone({task:verifiedCompletionRead.task,
+        reward:verifiedCompletionRead.completions.find(row=>dateKey(row.completedAtISO)===todayKey())});
+    } catch (_) { return null; }
+  }
+
+  async function runIsolatedTaskDone(taskId, source, onVerified) {
+    if (!usesIsolatedTaskDone(taskId)) throw new Error('Verified Task completion is paused.');
+    if (isolatedDonePending) return;
+    isolatedDonePending = true;
+    try {
+      const runtime = global.TaskPointsStateRuntimeV2;
+      const intent = await runtime.prepareIsolatedTaskCompletion(source);
+      if (!usesIsolatedTaskDone(taskId)) throw new Error('Verified Task completion is paused.');
+      let result;
+      try {
+        result = await runtime.commitIsolatedTaskCompletion(intent);
+      } catch (error) {
+        if (error.message === 'owned_completion_already_awarded') return;
+        // Recover a lost response by reading the exact receipt. This check
+        // never submits another write or restarts the action on a new day.
+        const receipt = await runtime.readIsolatedTaskScoring(proof=>proof.findReceipt(intent)).catch(()=>null);
+        if (!receipt) throw error;
+        result = {confirmedDurable:true,replayed:true,receipt};
+      }
+      if (!result?.confirmedDurable || !result.receipt?.completion)
+        throw new Error('The saved completion could not be verified. Check the Task and retry if needed.');
+      if (!result.replayed) {
+        try { onVerified?.(result.receipt); }
+        catch (error) { console.warn('Verified completion feedback paused:', error.message); }
+      }
+    } finally {
+      isolatedDonePending = false;
+      checkIsolatedDoneView?.();
+    }
+  }
+
+  function isolatedTaskDoneError(error) {
+    const messages = {
+      isolated_completion_time_zone_or_selection_changed:'Verified completion is paused because the time zone or Task ownership changed.',
+      owned_completion_requires_metric_scoring:'This Task uses a separate scoring rule and cannot be completed in the V2 experiment.',
+      owned_task_stale_edit:'The Task changed before it could be completed. Review it and tap Done again.',
+      owned_completion_day_changed:'The day changed before completion. Check the Task before trying again.'
+    };
+    return messages[error.message] || 'Task completion could not be confirmed. Check the Task before retrying.';
   }
 
   const TODAY_LIST_KEY = 'taskpoints_today_view_v1';
@@ -11029,6 +11134,11 @@ return Number(cappedScore.toFixed(1));
     assertTaskPointsParserAvailableForRaw,
     readTaskPointsStoredState,
     getLegacyTaskCompletionHold,
+    usesIsolatedTaskDone,
+    watchIsolatedTaskDone,
+    isolatedTaskDoneView,
+    runIsolatedTaskDone,
+    isolatedTaskDoneError,
     usesIsolatedTaskScoring,
     refreshIsolatedTaskScoring,
     readScoringCompletions,

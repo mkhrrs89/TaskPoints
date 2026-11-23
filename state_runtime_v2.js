@@ -20486,7 +20486,15 @@
         const rewards = snapshot.completionRewards || verifyOwnedScoringRows(snapshot);
         const assertCurrent = () => ownedScoringSource(fixture, marker, meta, rewards);
         assertCurrent();
-        const proof = {taskId:meta.homeTaskId,completions:clone(rewards),assertCurrent};
+        const task = rows.find(row=>row.id===meta.homeTaskId).value;
+        const proof = {taskId:meta.homeTaskId,task:clone(task),generation:meta.generation,
+          revision:meta.revision,completions:clone(rewards),assertCurrent,
+          findReceipt(input) {
+            const intent = completionIntent(input);
+            const receipt = snapshot.journal.find(row=>row.type===OWNED_TASK_DONE
+              && row.intent.actionId===intent.actionId);
+            return receipt && stableJson(receipt.intent)===stableJson(intent) ? clone(receipt) : null;
+          }};
         // Score changes and Today cleanup synchronously consume the proof
         // while a competing V2 write is excluded by this IDB transaction.
         return useProof ? useProof(proof) : proof;
@@ -20515,7 +20523,9 @@
       if (retry) return clone(retry.intent);
       if (meta.mode !== 'owned') throw new Error('rollback_frozen_no_task_writes');
       const row = rows.find(row=>row.id===fixture.homeTaskId);
-      return completionIntent({actionId:global.crypto.randomUUID(),taskId:row.id,generation:meta.generation,
+      // The same uncommitted Task version and day keep their identity across
+      // a tab close. A committed attempt above retains its original identity.
+      return completionIntent({actionId:`done-${source}-${day}-${row.ownerRevision}`,taskId:row.id,generation:meta.generation,
         expectedRevision:row.ownerRevision,source,day});
     } finally { db.close(); }
   }

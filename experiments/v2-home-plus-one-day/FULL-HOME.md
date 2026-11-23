@@ -266,9 +266,8 @@ remain in place.
 ## Atomic synthetic Task completion
 
 Only the explicitly write-enabled loopback fixture can run the
-transaction, and it owns only Task `t1`. The existing Home and Today
-Done controls still refuse that Task. The harness calls the transaction
-directly from both pages.
+transaction, and it owns only Task `t1`. The transaction-only fixture
+keeps both controls held and exercises the transaction directly.
 
 One strict IndexedDB transaction verifies the Task and its history,
 checks the expected Task revision, and writes the updated Task, earned
@@ -304,11 +303,43 @@ and the Inbox display check passed on the focused rerun. The Inbox
 display check also passed in the full run. The assertions are intact.
 The final 20-case run includes the corrected timezone fault injection.
 
-The next milestone can connect both existing controls to this
-transaction for the disposable fixture. That work still needs to
-handle pending attempts, verified feedback, and refresh of already
-open views. The controlled iPhone handoff and old-client requirements
-continue to apply before real data transfer.
+## Real Home and Today Done
+
+The same loopback fixture can separately opt in to the real Done
+controls for Task `t1`. The legacy guard remains active. Both controls
+prepare from the latest verified Task and use the same completion
+transaction. Home plays its existing dust animation and points toast
+after verification. Today checks its existing row and shows the earned
+points. On mobile it also uses the existing points toast.
+
+The initiating page suppresses repeated taps while the save is pending.
+The same source, Task revision, and local day keep their action ID.
+A lost response is checked against the durable receipt. Open pages
+refresh the verified Task and scoring view without relying on the
+initiating tab to announce its success. Peers and recovered receipts
+update the display without replaying award feedback.
+
+Recurring Tasks advance and clear postponement. A completed one-off
+Task leaves Home's active list. Both pages show the verified score,
+and Game and Matchups use the same earned reward. The existing Today
+reconciler separately cleans up list membership and ordering. That
+cleanup can finish after restart. A detached checkpoint carries the
+reward created by a real click into ordinary V1 exactly once.
+
+Time-zone changes and metric-derived rewards still pause the
+experimental write. The controlled iPhone handoff and old-client
+requirements continue to apply before real data transfer.
+
+All 11 real-control tests, 19 component tests, and 319 scoped tests
+passed. The broad run passed 94 of the 96 existing browser cases,
+including all 20 transaction cases. The Inbox compaction assertion
+and the title test's native IndexedDB startup assertion failed in
+that run and passed on focused reruns. The starting commit
+`deba38f6` also reproduced the Inbox display timeout. The previously
+reproduced Today setup race passed in both runs. All assertions stayed
+in place. The broad run also had an earlier version of the new cleanup
+test. Its storage fault needed to be installed before startup wrapped
+the writer. The final 11-case run used the corrected fault and passed.
 
 ## How the integration works
 

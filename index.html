@@ -11143,6 +11143,7 @@ function showTrashToast(taskId){
 }
 
 function renderTasks(stateInput = null){
+  if (window.TaskPointsCore?.usesIsolatedTaskDone?.() && taskCompletionAnimations.has('t1')) return;
   const container=$('taskList'), empty=$('emptyList'); container.innerHTML='';
   window.updateUndatedReminderIsland?.();
   const owner = window.TaskPointsOwnedTaskExperiment;
@@ -11368,6 +11369,7 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
         
         
       } else {
+        const doneToday = window.TaskPointsCore?.isolatedTaskDoneView?.(t.id)?.reward;
         card.innerHTML = `
           <div class="task-card-shell" data-task-card-body="${t.id}" tabindex="0" role="button" aria-expanded="${isTaskExpanded ? 'true' : 'false'}" aria-label="${isTaskExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(t.title)}">
             <div class="task-card-header">
@@ -11380,7 +11382,7 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
                 <div class="task-meta-line muted text-xs">${taskDueMeta(t, today)}</div>
               </div>
               <div class="task-card-header-actions">
-                <button class="btn btn-success btn-task btn-check" data-task-action="complete" data-task-id="${t.id}" aria-label="Done">✓</button>
+                <button class="btn btn-success btn-task btn-check" data-task-action="complete" data-task-id="${t.id}" aria-label="${doneToday ? 'Done today' : 'Done'}"${doneToday ? ' disabled' : ''}>✓</button>
                 ${isOverdue ? `<button class="btn btn-ghost btn-task" data-task-action="postpone" data-task-id="${t.id}">Postpone</button>` : ''}
               </div>
             </div>
@@ -13974,6 +13976,17 @@ function completeTask(id){
   const hold = window.TaskPointsCore?.getLegacyTaskCompletionHold?.(id);
   // Retain the existing owner check if Home loaded a prior core bundle.
   if (hold || ownedHomeTaskEditor(id)) {
+    if (window.TaskPointsCore?.usesIsolatedTaskDone?.(id) && ownedHomeTaskEditor(id)) {
+      const button = document.querySelector('[data-task-action="complete"][data-task-id="t1"]');
+      if (button?.getAttribute('aria-busy') === 'true' || taskCompletionAnimations.has(id)) return;
+      button?.setAttribute('aria-busy','true');
+      TaskPointsCore.runIsolatedTaskDone(id,'home',receipt=>{
+        if (receipt.intent.day === todayKey()) showPointsToast(receipt.completion.points);
+        animateTaskCompletion(id, () => scheduleRender(renderAll));
+      }).catch(error=>alert(TaskPointsCore.isolatedTaskDoneError(error)))
+        .finally(()=>button?.removeAttribute('aria-busy'));
+      return;
+    }
     alert(hold || 'This Task is owned by the V2 experiment. Use a verified V1 rollback before completing it.');
     return;
   }
@@ -15656,6 +15669,16 @@ document.addEventListener('visibilitychange', () => {
   
   startOpponentDripTicker();
   initTaskListDelegation();
+  window.TaskPointsCore?.watchIsolatedTaskDone?.(async ready=>{
+    await ownedHomeTaskEditor('t1')?.refresh();
+    markCompletionsDirty();
+    if (ready) {
+      replayHomeTodayCleanup();
+    } else {
+      for (const id of ['todayPoints','todayScoreIslandValue']) if ($(id)) $(id).textContent = '—';
+    }
+    scheduleRender(renderAll);
+  });
 
   if (window.TP_DEBUG_PERF) {
     requestAnimationFrame(() => {

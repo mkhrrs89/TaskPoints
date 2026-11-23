@@ -1574,7 +1574,10 @@ function save(nextState, savePath = 'matchups-save') {
 }
 
       
-    document.addEventListener("DOMContentLoaded", renderMatchups);
+    document.addEventListener("DOMContentLoaded", () => {
+      renderMatchups();
+      window.TaskPointsCore?.watchIsolatedTaskDone?.(renderMatchups);
+    });
     document.addEventListener("DOMContentLoaded", () => {
       const tabs = document.querySelectorAll("#matchupTabs [data-tab]");
       const chrono = $("matchupsChronological");
