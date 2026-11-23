@@ -3009,12 +3009,19 @@ header,
 }
 .habitDay.off{background:transparent}
 
-/* A genuinely spent streak freeze: a missed, scoreless day stays visually distinct. */
+/* Spent Streak Freeze: match the completed-week brushed metal, with a
+   distinct silver border even when the tile sits inside a steel week. */
 .habitDay.off.streak-freeze-used{
-  background: #ffffff !important;
-  color: #000000 !important;
+  background:
+    var(--tp-brushed-overlay),
+    var(--tp-brushed-base) !important;
+  color: #f8fafc !important;
   font-weight: 800 !important;
-  border-color: #ffffff !important;
+  border: 2px solid rgba(222, 235, 242, 0.96) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25),
+    0 0 0 1px rgba(21, 31, 37, 0.70) !important;
 }
 
 /* Make sure the bubble can hold overlays */
