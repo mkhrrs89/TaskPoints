@@ -288,11 +288,25 @@
     (function () {
       const STORAGE_KEY = window.TaskPointsCore?.STORAGE_KEY || 'taskpoints_v1';
       const TODAY_STORE_KEY = 'taskpoints_today_view_v1';
+      const VERIFIED_COMPLETION_DISMISSALS = 'verifiedCompletionDismissalsByDay';
       const $ = (sel) => document.querySelector(sel);
       const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
       let appState = null;
       let todayStore = null;
+      let renderedTodayRaw;
+      const usesVerifiedToday = () => Boolean(window.TaskPointsCore?.usesIsolatedTaskScoring?.());
+
+      function reportTodayWriteFailure(error) {
+        console.warn('Today list update refused:', error.message);
+      }
+
+      function replayTodayCleanup() {
+        if (!usesVerifiedToday()) return;
+        TaskPointsCore.reconcileIsolatedTodayList().then(changed=>{
+          if (changed) scheduleRender(renderTodayList);
+        }).catch(reportTodayWriteFailure);
+      }
 
       function safeParse(json, fallback) { try { return JSON.parse(json); } catch { return fallback; } }
 
@@ -336,6 +350,10 @@
 
 function loadTodayDb() {
   const raw = localStorage.getItem(TODAY_STORE_KEY);
+  if (usesVerifiedToday()) {
+    try { return TaskPointsCore.parseIsolatedTodayList(raw); }
+    catch (_) { return {}; } // Display can still use verified completions.
+  }
   if (!raw) return { version: 1, tasksByDay: {}, notesByDay: {}, selectedHabitIdsByDay: {}, orderByDay: {} };
   try {
     const parsed = JSON.parse(raw);
@@ -352,14 +370,13 @@ function loadTodayDb() {
   }
 }
 
-function loadTodayStore(dayKey) {
-  const db = loadTodayDb();
+function loadTodayStore(dayKey, db = loadTodayDb()) {
   return {
     dayKey,
-    taskIds: Array.isArray(db.tasksByDay[dayKey]) ? db.tasksByDay[dayKey] : [],
-    selectedHabitIds: Array.isArray(db.selectedHabitIdsByDay[dayKey]) ? db.selectedHabitIdsByDay[dayKey] : [],
-    notes: Array.isArray(db.notesByDay[dayKey]) ? db.notesByDay[dayKey] : [],
-    order: Array.isArray(db.orderByDay[dayKey]) ? db.orderByDay[dayKey] : []
+    taskIds: Array.isArray(db.tasksByDay?.[dayKey]) ? db.tasksByDay[dayKey] : [],
+    selectedHabitIds: Array.isArray(db.selectedHabitIdsByDay?.[dayKey]) ? db.selectedHabitIdsByDay[dayKey] : [],
+    notes: Array.isArray(db.notesByDay?.[dayKey]) ? db.notesByDay[dayKey] : [],
+    order: Array.isArray(db.orderByDay?.[dayKey]) ? db.orderByDay[dayKey] : []
   };
 }
 
@@ -372,6 +389,55 @@ function saveTodayStore(store = todayStore) {
   db.orderByDay[dayKey] = Array.isArray(store.order) ? store.order : [];
   localStorage.setItem(TODAY_STORE_KEY, JSON.stringify(db));
 }
+
+      function editTodayStore(edit, {after, expectedRaw, dismissOwned = false} = {}) {
+        if (!usesVerifiedToday()) {
+          edit(todayStore);
+          saveTodayStore();
+          after?.();
+          scheduleRender(renderTodayList);
+          return;
+        }
+        const day = todayStore.dayKey;
+        return TaskPointsCore.reconcileIsolatedTodayList((db,completions) => {
+          const store = loadTodayStore(day,db);
+          const fields = {taskIds:'tasksByDay', selectedHabitIds:'selectedHabitIdsByDay',
+            notes:'notesByDay', order:'orderByDay'};
+          const before = Object.fromEntries(Object.keys(fields).map(key => [key,JSON.stringify(store[key])]));
+          edit(store);
+          for (const [key,map] of Object.entries(fields)) {
+            if (before[key] === JSON.stringify(store[key])) continue;
+            db[map] ||= {};
+            db[map][day] = store[key];
+          }
+          if (dismissOwned) {
+            const completed = completions.find(row=>dateKeyFromISO(row.completedAtISO)===day);
+            if (completed) {
+              const dismissed = Object.hasOwn(db,VERIFIED_COMPLETION_DISMISSALS)
+                ? db[VERIFIED_COMPLETION_DISMISSALS] : {};
+              if (!dismissed || typeof dismissed !== 'object' || Array.isArray(dismissed))
+                throw new Error('Today dismissal evidence is unreadable.');
+              db[VERIFIED_COMPLETION_DISMISSALS] = {...dismissed,[day]:completed.id};
+            }
+          }
+        },expectedRaw).then(() => {
+          after?.();
+          scheduleRender(renderTodayList);
+        },error => {
+          reportTodayWriteFailure(error);
+          alert('The Today list could not be saved. Reopen it and try again.');
+          scheduleRender(renderTodayList);
+        });
+      }
+
+      function setTodayOrderItem(store, kind, id, include) {
+        const key = makeItemKey(kind,id);
+        if (include) {
+          if (!store.order.includes(key)) store.order.push(key);
+        } else {
+          store.order = store.order.filter(entry=>entry!==key);
+        }
+      }
 
       function escapeHtml(str) {
         return String(str)
@@ -403,8 +469,10 @@ function saveTodayStore(store = todayStore) {
           if (!existingIds.has(id)) return false;
           return dueToday.includes(id) || hasTaskCompletionToday(id, dayKey);
         });
-        syncTodayOrder();
-        saveTodayStore();
+        if (!usesVerifiedToday()) {
+          syncTodayOrder();
+          saveTodayStore();
+        }
       }
 
       function getActiveHabits() {
@@ -582,12 +650,14 @@ const habits = getActiveHabits().filter(h => {
         $$('#habitPickerList [data-habit-pick]').forEach(input => {
           input.addEventListener('change', () => {
             const id = input.getAttribute('data-habit-pick');
-            const set = new Set(todayStore.selectedHabitIds);
-            if (input.checked) set.add(id); else set.delete(id);
-            todayStore.selectedHabitIds = Array.from(set);
-            syncTodayOrder();
-            saveTodayStore();
-            scheduleRender(renderTodayList);
+            const checked = input.checked;
+            editTodayStore(store=>{
+              const set = new Set(store.selectedHabitIds);
+              if (checked) set.add(id); else set.delete(id);
+              store.selectedHabitIds = Array.from(set);
+              if (usesVerifiedToday()) setTodayOrderItem(store,'habit',id,checked);
+              else syncTodayOrder();
+            });
           });
         });
       }
@@ -606,6 +676,15 @@ const habits = getActiveHabits().filter(h => {
         try {
           // Use the already loaded state; a full reload on every interaction blocks the UI.
           const dayKey = dayKeyNow();
+          let dismissed;
+          if (usesVerifiedToday()) {
+            renderedTodayRaw = localStorage.getItem(TODAY_STORE_KEY);
+            let source = {};
+            try { source = TaskPointsCore.parseIsolatedTodayList(renderedTodayRaw); }
+            catch (_) { /* Keep the original bytes. */ }
+            todayStore = loadTodayStore(dayKey,source);
+            dismissed = source[VERIFIED_COMPLETION_DISMISSALS]?.[dayKey];
+          }
           ensureAutoTasks(dayKey);
 
         const el = $('#todayList');
@@ -627,7 +706,10 @@ const habits = getActiveHabits().filter(h => {
           }
         }
         const visibleTaskIds = new Set(todayStore.taskIds);
-        if (earned) visibleTaskIds.add(earned.taskId);
+        if (earned) {
+          if (dismissed === earned.id) visibleTaskIds.delete(earned.taskId);
+          else visibleTaskIds.add(earned.taskId);
+        }
 
         // Tasks (kept visible even if recurring + moved due date after completion)
         for (const taskId of visibleTaskIds) {
@@ -724,22 +806,33 @@ const habits = getActiveHabits().filter(h => {
       }
 
       function orderItems(items) {
-        const changed = syncTodayOrder();
-        if (changed) saveTodayStore();
+        if (!usesVerifiedToday()) {
+          const changed = syncTodayOrder();
+          if (changed) saveTodayStore();
+        }
         const order = Array.isArray(todayStore.order) ? todayStore.order : [];
         const map = new Map(items.map(item => [makeItemKey(item.kind, item.id), item]));
-        const ordered = order.map(key => map.get(key)).filter(Boolean);
-
-        return ordered;
+        if (usesVerifiedToday()) return [...new Set([...order,...map.keys()])].map(key=>map.get(key)).filter(Boolean);
+        return order.map(key => map.get(key)).filter(Boolean);
       }
 
       function updateOrderFromDom() {
         const list = $('#todayList');
-        const keys = Array.from(list.querySelectorAll('.today-item')).map(item => item.getAttribute('data-key')).filter(Boolean);
-        if (keys.length) {
+        const scoped = usesVerifiedToday();
+        const keys = Array.from(list.querySelectorAll('.today-item')).filter(item=>
+          !scoped || !item.matches('[data-key="task:t1"].is-done'))
+          .map(item => item.getAttribute('data-key')).filter(Boolean);
+        if (!keys.length) return;
+        if (!scoped) {
           todayStore.order = keys;
           saveTodayStore();
+          return;
         }
+        editTodayStore(store=>{
+          const ordered = keys.slice();
+          const visible = new Set(ordered);
+          store.order = store.order.map(key=>visible.has(key) && ordered.length ? ordered.shift() : key).concat(ordered);
+        },{expectedRaw:renderedTodayRaw});
       }
 
       function onListClick(e) {
@@ -766,10 +859,10 @@ const habits = getActiveHabits().filter(h => {
           if (row.classList.contains('is-done')) return; // one-way here (like main app)
           const ok = completeTask(id);
           if (ok) {
-            if (!todayStore.taskIds.includes(id)) todayStore.taskIds.push(id);
-            saveTodayStore();
-            // loadApp(); <-- OPTIMIZATION: removed redundant load
-            scheduleRender(renderTodayList);
+            editTodayStore(store=>{
+              if (!store.taskIds.includes(id)) store.taskIds.push(id);
+              if (usesVerifiedToday()) setTodayOrderItem(store,'task',id,true);
+            });
           }
           return;
         }
@@ -783,14 +876,10 @@ const habits = getActiveHabits().filter(h => {
         }
 
         if (kind === 'note') {
-          const notes = Array.isArray(todayStore.notes) ? todayStore.notes.slice() : [];
-          const idx = notes.findIndex(n => n && n.id === id);
-          if (idx !== -1) {
-            notes[idx] = { ...notes[idx], done: !notes[idx].done };
-            todayStore.notes = notes;
-            saveTodayStore();
-            scheduleRender(renderTodayList);
-          }
+          editTodayStore(store=>{
+            const idx = store.notes.findIndex(n => n && n.id === id);
+            if (idx !== -1) store.notes[idx] = { ...store.notes[idx], done: !store.notes[idx].done };
+          });
         }
       }
 
@@ -799,53 +888,45 @@ const habits = getActiveHabits().filter(h => {
         const text = (input.value || '').trim();
         if (!text) return;
 
-        todayStore.notes = Array.isArray(todayStore.notes) ? todayStore.notes : [];
         const note = { id: makeId(), text, done: false };
-        todayStore.notes.push(note);
-        todayStore.order = Array.isArray(todayStore.order) ? todayStore.order : [];
-        todayStore.order.push(makeItemKey('note', note.id));
-        saveTodayStore();
-
-        input.value = '';
-        scheduleRender(renderTodayList);
+        editTodayStore(store=>{
+          store.notes.push(note);
+          setTodayOrderItem(store,'note',note.id,true);
+        },{after:()=>{
+          if (input.value.trim() === text) input.value = '';
+        }});
       }
 
       function clearDone() {
         const dayKey = dayKeyNow();
-
-        // remove completed notes
-        todayStore.notes = (Array.isArray(todayStore.notes) ? todayStore.notes : []).filter(n => !(n && n.done));
-
-        // remove tasks completed today from the list (keeps habits selected)
-        todayStore.taskIds = (Array.isArray(todayStore.taskIds) ? todayStore.taskIds : []).filter(taskId => !hasTaskCompletionToday(taskId, dayKey));
-
-        // remove habits completed today from the list
         const habits = Array.isArray(appState.habits) ? appState.habits : [];
         const habitsById = new Map(habits.filter(h => h && h.id).map(h => [h.id, h]));
-        todayStore.selectedHabitIds = (Array.isArray(todayStore.selectedHabitIds) ? todayStore.selectedHabitIds : []).filter(habitId => {
-          const h = habitsById.get(habitId);
-          if (!h) return true;
-          const done = Array.isArray(h.doneKeys) ? h.doneKeys.includes(dayKey) : false;
-          return !done;
-        });
-
-        syncTodayOrder();
-        saveTodayStore();
-        scheduleRender(renderTodayList);
+        editTodayStore(store=>{
+          const removed = new Set();
+          const keep = (kind,id,done) => {
+            if (done) removed.add(makeItemKey(kind,id));
+            return !done;
+          };
+          store.notes = store.notes.filter(note=>note ? keep('note',note.id,note.done) : usesVerifiedToday());
+          store.taskIds = store.taskIds.filter(id=>keep('task',id,hasTaskCompletionToday(id,dayKey)));
+          store.selectedHabitIds = store.selectedHabitIds.filter(id=>{
+            const habit = habitsById.get(id);
+            return keep('habit',id,!habit || (Array.isArray(habit.doneKeys) && habit.doneKeys.includes(dayKey)));
+          });
+          if (usesVerifiedToday()) store.order = store.order.filter(key=>!removed.has(key));
+          else syncTodayOrder();
+        },{dismissOwned:true});
       }
 
       function removeTodayItem(kind, id) {
         if (!kind || !id) return;
-        if (kind === 'task') {
-          todayStore.taskIds = (Array.isArray(todayStore.taskIds) ? todayStore.taskIds : []).filter(taskId => taskId !== id);
-        } else if (kind === 'habit') {
-          todayStore.selectedHabitIds = (Array.isArray(todayStore.selectedHabitIds) ? todayStore.selectedHabitIds : []).filter(habitId => habitId !== id);
-        } else if (kind === 'note') {
-          todayStore.notes = (Array.isArray(todayStore.notes) ? todayStore.notes : []).filter(note => !(note && note.id === id));
-        }
-        syncTodayOrder();
-        saveTodayStore();
-        scheduleRender(renderTodayList);
+        editTodayStore(store=>{
+          if (kind === 'task') store.taskIds = store.taskIds.filter(taskId=>taskId!==id);
+          else if (kind === 'habit') store.selectedHabitIds = store.selectedHabitIds.filter(habitId=>habitId!==id);
+          else if (kind === 'note') store.notes = store.notes.filter(note=>!(note && note.id===id));
+          if (usesVerifiedToday()) setTodayOrderItem(store,kind,id,false);
+          else syncTodayOrder();
+        },{dismissOwned:kind==='task' && id==='t1'});
       }
 
       function toggleHabitPicker(forceOpen) {
@@ -864,10 +945,23 @@ async function init() {
   todayStore = loadTodayStore(dayKey);
 
   ensureAutoTasks(dayKey);   // this mutates todayStore.taskIds
-  saveTodayStore();          // persist after auto-add
+  if (!usesVerifiedToday()) saveTodayStore();          // persist after auto-add
 
   renderDatePill();
   scheduleRender(renderTodayList);
+  replayTodayCleanup();
+  window.addEventListener('pageshow',event=>{
+    if (!event.persisted || !usesVerifiedToday()) return;
+    TaskPointsCore.refreshIsolatedTaskScoring().then(()=>{
+      scheduleRender(renderTodayList);
+      replayTodayCleanup();
+    });
+  });
+  window.addEventListener('storage',event=>{
+    if (!usesVerifiedToday() || event.key !== TODAY_STORE_KEY) return;
+    scheduleRender(renderTodayList);
+    replayTodayCleanup();
+  });
 
         $('#todayList').addEventListener('click', onListClick);
         $('#todayList').addEventListener('pointerdown', onDragStart, { passive: false });
@@ -884,7 +978,8 @@ async function init() {
           if (window.TaskPointsCore?.usesIsolatedTaskScoring?.()) await TaskPointsCore.refreshIsolatedTaskScoring();
           loadApp();
           todayStore = loadTodayStore(dayKeyNow());
-          saveTodayStore();
+          if (!usesVerifiedToday()) saveTodayStore();
+          replayTodayCleanup();
           renderDatePill();
           renderHabitPicker();
           scheduleRender(renderTodayList);

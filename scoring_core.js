@@ -66,15 +66,77 @@
     return pendingCompletionRead;
   }
 
+  const TODAY_LIST_KEY = 'taskpoints_today_view_v1';
+  const TODAY_DAY_MAPS = ['tasksByDay','notesByDay','selectedHabitIdsByDay','orderByDay'];
+
+  function parseIsolatedTodayList(raw) {
+    if (raw === null) return {};
+    const value = JSON.parse(raw);
+    const isObject = data => data && typeof data === 'object' && !Array.isArray(data);
+    const isDay = day => /^\d{4}-\d{2}-\d{2}$/.test(day);
+    if (!isObject(value) || (Object.hasOwn(value,'version') && value.version !== 1))
+      throw new Error('Today list format is unreadable.');
+    for (const key of TODAY_DAY_MAPS) {
+      if (!Object.hasOwn(value,key)) continue;
+      if (!isObject(value[key]) || Object.entries(value[key]).some(([day,rows])=>!isDay(day)||!Array.isArray(rows)))
+        throw new Error('Today list day map is unreadable.');
+    }
+    if (Object.hasOwn(value,'dayKey') && (!isDay(value.dayKey)
+      || ['taskIds','order'].some(key=>Object.hasOwn(value,key)&&!Array.isArray(value[key]))))
+      throw new Error('Legacy Today list is unreadable.');
+    return value;
+  }
+
+  async function reconcileIsolatedTodayList(edit, expectedRaw) {
+    if (!usesIsolatedTaskScoring()) throw new Error('Isolated Today reconciliation is inactive.');
+    const locks = global.navigator?.locks;
+    if (typeof locks?.request !== 'function') throw new Error('Today list lock is unavailable.');
+    return locks.request(TODAY_LIST_KEY, async () => {
+      // Start a new verification inside the lock. The already verified reward
+      // rows are the replay source, so this needs no separately written cursor.
+      const proof = await global.TaskPointsStateRuntimeV2.readIsolatedTaskScoring();
+      const raw = localStorage.getItem(TODAY_LIST_KEY);
+      if (expectedRaw !== undefined && expectedRaw !== raw) throw new Error('Today list changed while editing.');
+      const list = parseIsolatedTodayList(raw);
+      const original = JSON.stringify(list);
+      if (edit) edit(list, structuredClone(proof.completions));
+
+      const taskId = proof.taskId;
+      const orderKey = 'task:'+taskId;
+      const days = new Set(proof.completions.map(row=>dateKey(row.completedAtISO)));
+      for (const day of days) {
+        if (list.tasksByDay?.[day]) list.tasksByDay[day] = list.tasksByDay[day].filter(id=>id!==taskId);
+        if (list.orderByDay?.[day]) list.orderByDay[day] = list.orderByDay[day].filter(key=>key!==orderKey);
+      }
+      if (days.has(list.dayKey)) {
+        if (list.taskIds) list.taskIds = list.taskIds.filter(id=>id!==taskId);
+        if (list.order) list.order = list.order.filter(key=>key!==orderKey);
+      }
+
+      const candidate = JSON.stringify(list);
+      parseIsolatedTodayList(candidate);
+      verifiedLegacyCompletions(proof);
+      if (localStorage.getItem(TODAY_LIST_KEY) !== raw) throw new Error('Today list changed before writing.');
+      if (candidate === original) return false;
+      localStorage.setItem(TODAY_LIST_KEY,candidate);
+      if (localStorage.getItem(TODAY_LIST_KEY) !== candidate)
+        throw new Error('Today list write could not be verified.');
+      return true;
+    });
+  }
+
   function readScoringCompletions(completions) {
     if (!usesIsolatedTaskScoring()) return completions;
     if (!verifiedCompletionRead) throw new Error('Verified Task completions are unavailable.');
-    const current = verifiedCompletionRead.assertCurrent();
-    const {taskId, completions: owned} = verifiedCompletionRead;
-    const legacy = current.filter(row => row?.taskId !== taskId);
-    const ids = new Set(owned.map(row => row.id));
+    const legacy = verifiedLegacyCompletions(verifiedCompletionRead);
+    return [...legacy, ...verifiedCompletionRead.completions.map(row => structuredClone(row))];
+  }
+
+  function verifiedLegacyCompletions(proof) {
+    const legacy = proof.assertCurrent().filter(row => row?.taskId !== proof.taskId);
+    const ids = new Set(proof.completions.map(row => row.id));
     if (legacy.some(row => ids.has(row?.id))) throw new Error('Conflicting completion identity.');
-    return [...legacy, ...owned.map(row => structuredClone(row))];
+    return legacy;
   }
 
   async function runWithVerifiedTaskScoring(operation) {
@@ -10967,6 +11029,8 @@ return Number(cappedScore.toFixed(1));
     usesIsolatedTaskScoring,
     refreshIsolatedTaskScoring,
     readScoringCompletions,
+    parseIsolatedTodayList,
+    reconcileIsolatedTodayList,
     runWithVerifiedTaskScoring,
     verifiedScoringSaveOptions,
     serializeTaskPointsStoredState,

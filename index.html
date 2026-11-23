@@ -3453,6 +3453,16 @@ function addCompletion(entry){
 
 function removeTaskFromTodayView(taskId, dayKey) {
   if (!taskId || !dayKey) return;
+  if (window.TaskPointsCore?.usesIsolatedTaskScoring?.()) {
+    // Preserve the legacy flat-list behavior for an unrelated Home completion
+    // while sharing the lock used by the current Today writers.
+    TaskPointsCore.reconcileIsolatedTodayList(list => {
+      if (list.dayKey !== dayKey) return;
+      if (list.taskIds) list.taskIds = list.taskIds.filter(id=>id!==taskId);
+      if (list.order) list.order = list.order.filter(key=>key!=='task:'+taskId);
+    }).catch(error=>console.warn('Today list update refused:',error.message));
+    return;
+  }
   const raw = localStorage.getItem(TODAY_STORE_KEY);
   if (!raw) return;
   let parsed = null;
@@ -3476,6 +3486,11 @@ function removeTaskFromTodayView(taskId, dayKey) {
     taskIds: nextTaskIds,
     order: nextOrder
   }));
+}
+
+function replayHomeTodayCleanup() {
+  TaskPointsCore.reconcileIsolatedTodayList()
+    .catch(error=>console.warn('Today list reconciliation paused:',error.message));
 }
 
 function loadProjectsFromStorage(){
@@ -15522,6 +15537,7 @@ if (window.TaskPointsCore?.usesIsolatedTaskScoring?.()) {
     maybeAutoSimToday();
     state = syncStateWithMatchups(state);
   });
+  replayHomeTodayCleanup();
 } else {
   maybeAutoSimToday();
   state = syncStateWithMatchups(state);
@@ -15588,6 +15604,7 @@ function refreshMainPageIfChanged(reason = 'lifecycle') {
     owner.refresh(() => renderTasks(state));
   }
   if (window.TaskPointsCore?.usesIsolatedTaskScoring?.()) {
+    replayHomeTodayCleanup();
     return TaskPointsCore.runWithVerifiedTaskScoring(refreshMainPageFromStorage);
   }
   const currentRevision = readHomeStateRevision();

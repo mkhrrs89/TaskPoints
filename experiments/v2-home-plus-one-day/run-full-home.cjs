@@ -1808,3 +1808,163 @@ for(const fault of ['missing completion','corrupt completion','missing receipt',
     assert.deepEqual(await completionWriteEvidence(matchups),before);
   });
 }
+
+const todayKey='taskpoints_today_view_v1';
+const seededTodayList={
+  version:1,unknownRoot:{bytes:[0,255],label:'Synthetic Today metadata'},
+  tasksByDay:{
+    [quietDate]:['t2','t1','t1'],
+    '2026-11-17':['t1','historical-other'],
+    '2026-11-16':['t1'],
+    '2026-11-15':['t1','unaffected']
+  },
+  orderByDay:{
+    [quietDate]:['note:n1','future:opaque','task:t1','habit:h1','task:t2','task:t1'],
+    '2026-11-17':['task:t1','task:historical-other'],
+    '2026-11-16':['task:t1'],
+    '2026-11-15':['task:t1','task:unaffected']
+  },
+  notesByDay:{[quietDate]:[{id:'n1',text:'Synthetic preserved note',done:false,unknown:{keep:true}}]},
+  selectedHabitIdsByDay:{[quietDate]:['h1']},
+  dayKey:'2026-11-17',taskIds:['t1','historical-other'],order:['task:t1','note:older']
+};
+const cleanedTodayList=structuredClone(seededTodayList);
+for(const day of [quietDate,'2026-11-17','2026-11-16']){
+  cleanedTodayList.tasksByDay[day]=cleanedTodayList.tasksByDay[day].filter(id=>id!=='t1');
+  cleanedTodayList.orderByDay[day]=cleanedTodayList.orderByDay[day].filter(key=>key!=='task:t1');
+}
+cleanedTodayList.taskIds=['historical-other'];
+cleanedTodayList.order=['note:older'];
+
+const todayBytes=page=>page.evaluate(key=>localStorage.getItem(key),todayKey);
+const writeTodayFixture=(page,raw)=>page.evaluate(({key,raw})=>localStorage.setItem(key,raw),{key:todayKey,raw});
+
+async function waitTodayBytes(page,expected){
+  await page.waitForFunction(({key,expected})=>localStorage.getItem(key)===expected,
+    {key:todayKey,expected});
+}
+
+async function assertCheckedOwnedTask(page){
+  const item=todayTask(page).and(page.locator('.is-done'));
+  await item.waitFor();
+  assert.equal(await item.locator('.today-sub').textContent(),'12.75 pts');
+}
+
+test('verified Today cleanup preserves current and historical days, ordering and unrelated data across navigation and legacy replay',async t=>{
+  const {page,context}=await seedScoringReads(t);
+  const v2=await owned(page);
+  const original=JSON.stringify(seededTodayList),cleaned=JSON.stringify(cleanedTodayList);
+  await page.evaluate(key=>new Promise(resolve=>{
+    navigator.locks.request(key,()=>new Promise(release=>{window.releaseTodayLock=release;resolve();}));
+  }),todayKey);
+  await writeTodayFixture(page,original);
+  const today=await todayCompletionPage(context);
+  await assertCheckedOwnedTask(today.page);
+  assert.equal(await todayBytes(today.page),original,'checked before cleanup can acquire the lock');
+  await page.evaluate(()=>window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true})));
+  await page.evaluate(()=>window.releaseTodayLock());
+  await waitTodayBytes(today.page,cleaned);
+  assert.equal(await today.page.evaluate(()=>TaskPointsCore.reconcileIsolatedTodayList()),false,'replay is a no-op');
+  assert.deepEqual(await owned(page),v2);
+
+  await today.page.reload();
+  await assertCheckedOwnedTask(today.page);
+  assert.equal(await todayBytes(today.page),cleaned);
+  // Simulate an old list snapshot restoring membership. The current Today
+  // reader keeps the authoritative check and replays the targeted cleanup.
+  await writeTodayFixture(page,original);
+  await waitTodayBytes(today.page,cleaned);
+  await assertCheckedOwnedTask(today.page);
+  await today.page.getByRole('link',{name:'Main',exact:true}).first().click();
+  await waitHome(today.page);
+  assert.equal(await todayBytes(today.page),cleaned);
+});
+
+test('competing Today tabs rebase real note additions and refuse an obsolete order edit',async t=>{
+  const {page,context}=await seedScoringReads(t);
+  await writeTodayFixture(page,JSON.stringify(seededTodayList));
+  const left=await todayCompletionPage(context),right=await todayCompletionPage(context);
+  const clean=JSON.stringify(cleanedTodayList);
+  await waitTodayBytes(left.page,clean);
+  await waitTodayBytes(right.page,clean);
+  await left.page.locator('#noteInput').fill('Synthetic note from left');
+  await right.page.locator('#noteInput').fill('Synthetic note from right');
+  await Promise.all([left.page.locator('#addNoteBtn').click(),right.page.locator('#addNoteBtn').click()]);
+  await right.page.waitForFunction(({day,key})=>JSON.parse(localStorage.getItem(key)).notesByDay[day].length===3,
+    {day:quietDate,key:todayKey});
+  const raw=await todayBytes(right.page),actual=JSON.parse(raw);
+  const newNotes=actual.notesByDay[quietDate].slice(1);
+  assert.deepEqual(newNotes.map(note=>note.text).sort(),['Synthetic note from left','Synthetic note from right']);
+  for(const note of newNotes)assert.ok(actual.orderByDay[quietDate].includes('note:'+note.id));
+  actual.notesByDay[quietDate]=actual.notesByDay[quietDate].slice(0,1);
+  actual.orderByDay[quietDate]=actual.orderByDay[quietDate].filter(key=>!newNotes.some(note=>key==='note:'+note.id));
+  assert.deepEqual(actual,cleanedTodayList);
+  await assert.rejects(left.page.evaluate(expected=>TaskPointsCore.reconcileIsolatedTodayList(db=>{
+    db.orderByDay[TaskPointsCore.todayKey()]=[];
+  },expected),clean),/Today list changed while editing/);
+  assert.equal(await todayBytes(right.page),raw);
+  await assertCheckedOwnedTask(right.page);
+  await right.page.locator('#clearDoneBtn').click();
+  await todayTask(right.page).waitFor({state:'hidden'});
+  const dismissed=JSON.parse(await todayBytes(right.page));
+  assert.equal(dismissed.verifiedCompletionDismissalsByDay[quietDate],'synthetic-owned-current');
+  assert.deepEqual(dismissed.tasksByDay,{...cleanedTodayList.tasksByDay,[quietDate]:[]});
+  assert.deepEqual(dismissed.orderByDay[quietDate],
+    JSON.parse(raw).orderByDay[quietDate].filter(key=>key!=='task:t2'));
+  assert.deepEqual(dismissed.notesByDay[quietDate].slice(1),newNotes);
+  await right.page.reload();
+  await right.page.locator('#todayList').getByText('Synthetic preserved note').waitFor();
+  assert.equal(await todayTask(right.page).count(),0);
+  assert.equal((await scoresFromCore(right.page)).totals[quietDate],15.75);
+});
+
+for(const phase of ['before','after'])test(`verified Today cleanup resumes after Chromium restart ${phase} the localStorage update`,async t=>{
+  const profile=fs.mkdtempSync(path.join(os.tmpdir(),'tp-today-reconcile-'));
+  const launch=()=>chromium.launchPersistentContext(profile,{
+    executablePath:process.env.BOUNDARY_CHROMIUM_PATH||'/usr/bin/chromium',serviceWorkers:'block',timezoneId:'America/New_York'
+  });
+  let context=await launch();
+  t.after(async()=>{await context.close();fs.rmSync(profile,{recursive:true,force:true});});
+  const {page}=await seedScoringReads(t,context);
+  const original=JSON.stringify(seededTodayList),cleaned=JSON.stringify(cleanedTodayList);
+  await writeTodayFixture(page,original);
+  await context.addInitScript(({key,phase})=>{
+    if(!location.pathname.endsWith('/today.html'))return;
+    const set=Storage.prototype.setItem;
+    Storage.prototype.setItem=function(name,value){
+      if(this===localStorage&&name===key&&!window.todayInterrupted){
+        if(phase==='after')set.call(this,name,value);
+        window.todayInterrupted=true;
+        throw new DOMException('Synthetic interruption around Today write','AbortError');
+      }
+      return set.call(this,name,value);
+    };
+  },{key:todayKey,phase});
+  const interrupted=await todayCompletionPage(context);
+  await interrupted.page.waitForFunction(()=>window.todayInterrupted===true);
+  await assertCheckedOwnedTask(interrupted.page);
+  assert.equal(await todayBytes(interrupted.page),phase==='before'?original:cleaned);
+  await context.close();
+  context=await launch();
+  await configureContext(context);
+  const restored=await todayCompletionPage(context);
+  await waitTodayBytes(restored.page,cleaned);
+  await assertCheckedOwnedTask(restored.page);
+  assert.equal(await restored.page.evaluate(()=>TaskPointsCore.reconcileIsolatedTodayList()),false);
+});
+
+test('verified Today cleanup preserves malformed bytes while rendering the verified completion',async t=>{
+  const {page,context}=await seedScoringReads(t);
+  for(const malformed of ['{truncated Today list','{"version":1,"tasksByDay":{"2026-11-18":{"invalid":true}}}']){
+    await writeTodayFixture(page,malformed);
+    const today=await todayCompletionPage(context);
+    await assertCheckedOwnedTask(today.page);
+    await today.page.locator('#noteInput').fill('Keep this unsaved text');
+    await today.page.locator('#addNoteBtn').click();
+    await today.page.waitForFunction(()=>document.getElementById('noteInput')?.value==='Keep this unsaved text');
+    await assert.rejects(today.page.evaluate(()=>TaskPointsCore.reconcileIsolatedTodayList()));
+    assert.equal(await todayBytes(today.page),malformed);
+    assert.equal(await today.page.locator('#noteInput').inputValue(),'Keep this unsaved text');
+    await today.page.close();
+  }
+});

@@ -170,16 +170,54 @@ is lost, a read is interrupted, a recovery hold exists, or a legacy
 Task edit or malformed journal makes the source untrustworthy.
 
 Done remains paused. This is a seeded read path, with no live V2 reward
-writer. Today marks the item checked from verified data for display.
-Restart-safe Today-list persistence still needs reconciliation. The
-ordinary Task-only rollback checkpoint refuses seeded scoring fixtures
-until it can transfer and verify their V2 completions as well.
+writer. The ordinary Task-only rollback checkpoint refuses seeded
+scoring fixtures until it can transfer and verify their V2 completions
+as well.
 
 The full run passed 59 of 60 browser cases. All 10 new scoring cases,
 19 component browser cases, and 264 scoped regressions passed. The
 one full-run failure was the existing intermittent Inbox assertion
 that the compacted edit must be durable before navigation. The
 isolated Inbox rerun passed. The assertion remains unchanged.
+
+## Restart-safe Today-list cleanup
+
+The current Today list stores Tasks, order, notes, and Habit selections
+in separate maps keyed by local day. Home also recognizes an older
+flat format. In the isolated scoring fixture, Home and Today acquire
+the same browser lock. They freshly verify the seeded rewards and
+the V2 Task receipt chain, then read the latest Today list. Cleanup
+removes only `t1` and `task:t1` from days with a verified completion,
+including the matching flat list if present. Unrelated rows, dates and
+opaque fields stay in the original record.
+
+The verified completion is the replay instruction. If Chromium
+interrupts before the write, the original entries still need cleanup.
+If the write already happened, replay finds them absent and skips the
+write. The code checks the source bytes immediately before replacement
+and verifies the saved bytes afterward. Unreadable data or a missing
+lock pauses the operation and preserves the source.
+
+Today shows the verified checked row independently of its active list,
+including while the lock is busy. The scoped render computes automatic
+due-Task visibility in memory so it cannot re-add an active entry during
+render. Explicit Today edits use the same lock and apply to the latest
+record. An obsolete drag order is refused. Clear Done and removing a
+checked row can dismiss the verified display by completion ID with no
+effect on its reward or active membership.
+
+The lock coordinates the current synthetic writers. It cannot fence
+older clients, and the IndexedDB verification and localStorage update
+remain separate operations. Live V2 Done stays paused. The next
+prerequisite is verified rollback of both the Task and its completion
+history into a fresh synthetic V1 profile.
+
+The full run passed 64 of 65 browser cases, including all five
+Today-list cases. All 19 component cases and 319 scoped regressions
+passed. The full run's only failure was the intermittent Inbox display
+timeout after its storage checks had passed. All nine cases in the
+focused rerun passed, including Inbox, scoring, and the Today-list
+restart and competing-edit checks.
 
 ## How the integration works
 
