@@ -12,6 +12,7 @@
   const classificationOperation = 'home-task-classification-edit';
   const pointsOperation = 'home-task-points-edit';
   const dueOperation = 'home-task-due-date-edit';
+  const repeatOperation = 'home-task-repeat-edit';
   let selected = false, verified = null, error = '', read = null;
   let repaint, pending = null, writing = null, editor = null;
   // Latch selection for this document. Losing the marker during an open
@@ -81,15 +82,16 @@
       pending = null;
       window.ownerOutcome = {ok: result.confirmedDurable, date: result.task.dueDateISO,
         ...(operation !== bumpOperation ? {title: result.task.title} : {}),
-        ...(operation === classificationOperation || operation === pointsOperation || operation === dueOperation
+        ...(operation === classificationOperation || operation === pointsOperation || operation === dueOperation || operation === repeatOperation
           ? {importance: result.task.importance, tags: result.task.tags} : {}),
-        ...(operation === pointsOperation || operation === dueOperation ? {points: result.task.points} : {})};
+        ...(operation === pointsOperation || operation === dueOperation || operation === repeatOperation ? {points: result.task.points} : {}),
+        ...(operation === repeatOperation ? {recurrence: result.task.recurrence} : {})};
       return result;
     } catch (cause) {
       // A stale, uncommitted intent may be abandoned by closing the editor.
       // Uncertain outcomes keep their original ID and payload across retries.
       if ((cause.message === 'owned_task_stale_edit' && operation !== bumpOperation)
-        || (operation === dueOperation && cause.message === 'invalid_owned_task_intent')) pending = null;
+        || ([dueOperation,repeatOperation].includes(operation) && cause.message === 'invalid_owned_task_intent')) pending = null;
       await refresh();
       window.ownerOutcome = {ok: false, error: cause.message};
       throw cause;
@@ -125,9 +127,13 @@
       if (writing) throw Error('A Task save is already in progress.');
       const basis = currentIntent();
       const task = basis.expectedTask;
+      const recurrence = task.recurrence || {};
       const original = {
         title: task.title,
         due: task.dueDateISO || '',
+        repeat: ['daily','everyWeekday','weekly','monthly','yearly','custom'].includes(recurrence.mode) ? recurrence.mode : 'none',
+        repeatCustomCount: String(Number.isFinite(recurrence.customCount) && recurrence.customCount > 0 ? recurrence.customCount : 1),
+        repeatCustomUnit: ['week','month','year'].includes(recurrence.customUnit) ? recurrence.customUnit : 'day',
         points: Number(task.points) || 0,
         importance: ['Low','Medium','High','Critical'].includes(task.importance) ? task.importance : 'Low',
         tags: Array.isArray(task.tags) ? task.tags : []
@@ -156,6 +162,7 @@
       if (id !== taskId || !editor) return Promise.reject(Error('Open the V2 Task editor before saving.'));
       // Use the Task and revision seen at editor open, even if a refresh has
       // since loaded a newer value underneath the draft.
+      if (Object.hasOwn(fields, 'recurrence')) return submit(repeatOperation, () => editor.basis, {fields});
       if (Object.hasOwn(fields, 'dueDateISO')) return submit(dueOperation, () => editor.basis, {fields});
       if (Object.hasOwn(fields, 'points')) return submit(pointsOperation, () => editor.basis, {fields});
       if (Object.hasOwn(fields, 'importance') || Object.hasOwn(fields, 'tags')) {

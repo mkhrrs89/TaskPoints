@@ -40,7 +40,7 @@ before(async()=>{
       const resolved=path.resolve(root,file);
       const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.svg':'image/svg+xml','.json':'application/json'}[path.extname(file)];
       if(!mime||!resolved.startsWith(root+path.sep)||file.startsWith('experiments/'))throw Error('Outside experiment');
-      const homeBundle=file==='scoring_core.js'&&['index.html','inbox.html','today.html','game.html','matchups.html'].some(page=>new URL(req.headers.referer||'http://localhost').pathname===prefix+page);
+      const homeBundle=file==='scoring_core.js'&&['index.html','inbox.html','today.html','game.html','matchups.html','week.html'].some(page=>new URL(req.headers.referer||'http://localhost').pathname===prefix+page);
       const content=homeBundle?bundle:fs.readFileSync(resolved);
       res.writeHead(200,{'Content-Type':mime,'Cache-Control':'no-store'});
       res.end(content);
@@ -668,7 +668,7 @@ test('real Home title edit commits in V2 and survives Notes, ordinary save, comp
   assert.equal(await titleField(page).inputValue(),originalTitle);
   assert.equal(await editCard(page).locator('[data-field="due"]').inputValue(),newDate);
   assert.equal(await editCard(page).locator('[data-field="due"]').isEnabled(),true);
-  assert.equal(await editCard(page).locator('[data-field="repeat"]').isDisabled(),true);
+  assert.equal(await editCard(page).locator('[data-field="repeat"]').isEnabled(),true);
   assert.equal(await editCard(page).locator('[data-field="points"]').isEnabled(),true);
   await page.evaluate(()=>{legacyWrites.length=0;});
   await titleField(page).fill('  '+newerTitle+'  ');
@@ -984,7 +984,7 @@ for(const withPoints of [false,true])test(`real Home saves Importance, Tags and 
   assert.equal(await editCard(page).locator('[data-field="due"]').isEnabled(),true);
   assert.equal(await editCard(page).locator('[data-field="due"]').inputValue(),newDate);
   for(const field of ['repeat','repeatCustomCount','repeatCustomUnit'])
-    assert.equal(await editCard(page).locator('[data-field="'+field+'"]').isDisabled(),true);
+    assert.equal(await editCard(page).locator('[data-field="'+field+'"]').isEnabled(),true);
   await fillClassification(page);
   await titleField(page).fill('  '+newerTitle+'  ');
   if(withPoints)await pointsField(page).fill('12.75');
@@ -2877,7 +2877,7 @@ test('V2 direct Due Date Save combines all editor fields, refreshes Today and Cr
   assert.equal(await dueField(page).inputValue(),legacyDue);
   assert.equal(await dueField(page).isEnabled(),true);
   for(const key of ['repeat','repeatCustomCount','repeatCustomUnit'])
-    assert.equal(await editCard(page).locator(`[data-field="${key}"]`).isDisabled(),true);
+    assert.equal(await editCard(page).locator(`[data-field="${key}"]`).isEnabled(),true);
   await dueField(page).fill(quietDate);
   await titleField(page).fill('Synthetic dated Task');
   await editCard(page).locator('[data-field="importance"]').selectOption('Critical');
@@ -3011,7 +3011,7 @@ for(const oneOff of [false,true])test(`V2 direct Due Date Save clears a ${oneOff
   assert.deepEqual(await canonicalCompletions(page),legacyRewards);
 });
 
-test('V2 direct Due Date Save refuses incomplete or impossible dates and Repeat changes',async t=>{
+test('V2 direct Due Date Save refuses incomplete or impossible dates and Repeat changes in date-only receipts',async t=>{
   const {page}=await freshTaskOwner(t);
   const before=await owned(page),alerts=[];
   page.on('dialog',dialog=>alerts.push(dialog.message()));
@@ -3161,4 +3161,389 @@ test('V2 direct Due Date Save records the first date on an undated Task and refu
   await assert.rejects(owned(page),/owned_task_journal_conflict/);
   await assert.rejects(page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(1)),/owned_task_journal_conflict/);
   assert.equal((await backingTask(page)).dueDateISO,null);
+});
+
+const repeatOperation='home-task-repeat-edit';
+const repeatField=(page,key='repeat')=>editCard(page).locator(`[data-field="${key}"]`);
+const weekTask=page=>page.locator('#weekGrid [data-task-id="t1"]');
+
+async function openRepeatEditor(page){
+  const group=editCard(page).locator('xpath=ancestor::section[contains(@class,"task-date-group")][1]');
+  const header=group.locator('.task-date-group-header');
+  if(await header.getAttribute('aria-expanded')==='false')await header.click();
+  await openTaskEdit(page);
+}
+
+async function setRepeatControls(page,mode,count,unit){
+  await repeatField(page).selectOption(mode);
+  const custom=editCard(page).locator('.repeat-custom-row');
+  assert.equal(await custom.isVisible(),mode==='custom');
+  if(mode==='custom'){
+    if(count!==undefined)await repeatField(page,'repeatCustomCount').fill(String(count));
+    if(unit!==undefined)await repeatField(page,'repeatCustomUnit').selectOption(unit);
+  }
+}
+
+async function saveRepeat(page,settings){
+  await openRepeatEditor(page);
+  await setRepeatControls(page,settings.mode,settings.customCount,settings.customUnit);
+  const result=await submitTaskEdit(page);
+  assert.equal(result.ok,true,JSON.stringify(result));
+  return result;
+}
+
+for(const [mode,unit,count,source,base,next] of [
+  ['none',null,null,'today',quietDate,quietDate],
+  ['daily',null,null,'home',null,'2026-11-19'],
+  ['everyWeekday',null,null,'home','2026-11-13','2026-11-16'],
+  ['weekly',null,null,'today',quietDate,'2026-11-25'],
+  ['monthly',null,null,'home','2026-01-31','2026-03-03'],
+  ['yearly',null,null,'home','2024-02-29','2025-03-01'],
+  ['custom','day',3,'today',quietDate,'2026-11-21'],
+  ['custom','week',2,'today',quietDate,'2026-12-02'],
+  ['custom','month',2,'home','2026-10-31','2026-12-31'],
+  ['custom','year',2,'home','2024-02-29','2026-03-01']
+])test(`V2 Repeat editor saves ${unit || mode} and real ${source} Done applies it once`,async t=>{
+  const metadata={opaque:{preserve:[0,false,null]}};
+  const starting={mode:mode==='none'?'daily':'none',...metadata};
+  const {page,context,legacyRewards}=await seedScoringReads(t,undefined,
+    {write:true,controls:true,recurrence:starting,dueDateISO:base ?? quietDate});
+  const expectedSettings=mode==='custom'?{mode,customCount:count,customUnit:unit}:{mode};
+  const rewardBefore=await verifiedRewards(page);
+  const persisted=await backingTask(page);
+  const before=ownedTask(await owned(page));
+  await openRepeatEditor(page);
+  assert.equal(await repeatField(page).inputValue(),starting.mode);
+  await setRepeatControls(page,mode,count,unit);
+  if(base===null)await dueField(page).fill('');
+  const result=await submitTaskEdit(page),expected={...expectedSettings,...metadata};
+  assert.equal(result.ok,true,JSON.stringify(result));
+  assert.deepEqual(result.recurrence,expected);
+  const committed=await owned(page),edited=ownedTask(committed);
+  assert.deepEqual(edited,{...before,...(base===null?{dueDateISO:null}:{}),recurrence:expected,updatedAtISO:edited.updatedAtISO});
+  assert.equal(committed.journal.length,1);
+  assert.equal(committed.journal[0].intent.operation,repeatOperation);
+  assert.deepEqual(committed.journal[0].intent.fields.recurrence,expectedSettings);
+  assert.deepEqual(await verifiedRewards(page),rewardBefore);
+  assert.deepEqual(await backingTask(page),persisted);
+  const {page:today}=await realDoneToday(context);
+  if(source==='home')await homeDoneButton(page).click();
+  else await todayCheck(today).click();
+  await waitOwnedReward(page,today,5,'8.0',{oneOff:mode==='none'});
+  const [receipt]=await completionReceipts(page);
+  assert.equal(receipt.intent.source,source);
+  assert.equal(receipt.before.dueDateISO,base);
+  assert.equal(receipt.after.dueDateISO,next);
+  assert.equal(receipt.after.status,mode==='none'?'done':'active');
+  assert.equal(receipt.after.completedAtISO,mode==='none'?receipt.completion.completedAtISO:null);
+  assert.equal(receipt.after.postponedDays,mode==='none'?before.postponedDays:0);
+  assert.deepEqual(receipt.after.recurrence,expected);
+  await todayDone(today);
+  assert.deepEqual(await completionReceipts(page),[receipt]);
+  assert.deepEqual(await verifiedRewards(page),[...rewardBefore,receipt.completion]);
+  assert.deepEqual(await canonicalCompletions(page),legacyRewards);
+});
+
+test('V2 Repeat editor saves the whole editor atomically and survives Week, Today, maintenance, restart, and V1 rollback',async t=>{
+  const profile=await completionProfile(t);
+  const baselineDue='2026-11-20';
+  const metadata={opaque:{mustKeep:true}};
+  const {page,context,legacyRewards}=await seedScoringReads(t,profile.context,{
+    write:true,controls:true,recurrence:{mode:'weekly',...metadata},dueDateISO:baselineDue
+  });
+  assert.equal(await page.evaluate(()=>TaskPointsCore.runWithVerifiedTaskScoring(
+    ()=>save('repeat-fixture-score-baseline',{userInitiated:true}))),true);
+  const week=await openScoringPage(context,'week.html');
+  await week.locator(`#weekGrid [data-day-key="${baselineDue}"] [data-task-id="t1"]`).waitFor();
+  const weekAlerts=[];
+  week.on('dialog',dialog=>weekAlerts.push(dialog.message()));
+  const {page:today}=await realDoneToday(context);
+  const unrelated=await partOfState(page),rewards=await rewardEvidence(page),before=await owned(page);
+  assert.equal(await todayTask(today).count(),0);
+  await openRepeatEditor(page);
+  await setRepeatControls(page,'custom',2,'week');
+  await titleField(page).fill('Synthetic repeating Task');
+  await dueField(page).fill(quietDate);
+  await editCard(page).locator('[data-field="importance"]').selectOption('Critical');
+  await tagsField(page).fill('repeat, migration');
+  await pointsField(page).fill('12.75');
+  await page.evaluate(()=>{legacyWrites.length=0;});
+  const outcome=await submitTaskEdit(page);
+  const settings={mode:'custom',customCount:2,customUnit:'week'};
+  assert.deepEqual(outcome,{ok:true,date:quietDate,title:'Synthetic repeating Task',points:12.75,
+    importance:'Critical',tags:['repeat','migration'],recurrence:{...settings,...metadata}});
+  const ownedAfter=await owned(page),repeatReceipt=ownedAfter.journal[0];
+  assert.equal(ownedAfter.journal.length,1);
+  assert.equal(repeatReceipt.intent.operation,repeatOperation);
+  const fields={recurrence:settings,dueDateISO:quietDate,title:outcome.title,points:outcome.points,importance:outcome.importance,tags:outcome.tags};
+  assert.deepEqual(repeatReceipt.intent.fields,fields);
+  assert.deepEqual(ownedTask(ownedAfter),{...ownedTask(before),...fields,recurrence:outcome.recurrence,updatedAtISO:repeatReceipt.after.updatedAtISO});
+  assert.equal(await page.evaluate(()=>legacyWrites.some(row=>['taskpoints_v1','taskpoints_pending_task_mutations_v1'].includes(row.key))),false);
+  await todayCheck(today).waitFor();
+  assert.equal(await todayTask(today).locator('.today-sub').textContent(),'12.75 pts');
+  await today.locator('#criticalTasksIsland[data-active="1"]').waitFor({state:'attached'});
+  const shifted=week.locator(`#weekGrid [data-day-key="${quietDate}"] [data-task-id="t1"]`);
+  await shifted.waitFor();
+  assert.equal(await shifted.locator('.task-title').textContent(),outcome.title);
+  await shifted.locator('button[title="Done"]').click();
+  assert.match(weekAlerts.at(-1) || '',/paused for the V2-owned Task/);
+  assert.deepEqual(await completionReceipts(page),[]);
+  assert.deepEqual(await rewardEvidence(page),rewards);
+  assert.deepEqual(await partOfState(page),unrelated);
+
+  await page.locator('a.desktop-header-notes-link').click();await page.waitForURL('**/notes.html');
+  await page.getByRole('link',{name:'Main',exact:true}).first().click();await waitHome(page);
+  await saveOrdinaryHome(page);
+  await page.evaluate(async()=> {
+    const core=TaskPointsCore;
+    core.journalTaskUpdates(['t2'],task=>{task.title='Repeat test unrelated journal';return true;});
+    if(!core.flushPendingTaskMutations())throw Error('Expected journal compaction');
+    core.queuePhase5CVerifiedSecondaryWrite();
+    await core.flushPhase5CVerifiedSecondaryWrites();
+  });
+  assert.deepEqual(await dates(page),{home:quietDate,legacy:baselineDue});
+  assert.deepEqual((await owned(page)).journal,[repeatReceipt]);
+
+  const reopened=await profile.restart();
+  const home=await openScoringPage(reopened,'index.html');await waitHome(home);
+  const weekAgain=await openScoringPage(reopened,'week.html');
+  await weekAgain.locator(`#weekGrid [data-day-key="${quietDate}"] [data-task-id="t1"]`).waitFor();
+  const {page:todayAgain}=await realDoneToday(reopened);
+  await openRepeatEditor(home);
+  assert.equal(await repeatField(home).inputValue(),'custom');
+  assert.equal(await repeatField(home,'repeatCustomCount').inputValue(),'2');
+  assert.equal(await repeatField(home,'repeatCustomUnit').inputValue(),'week');
+  await editCard(home).locator('[data-task-action="task-cancel"]').click();
+  await todayCheck(todayAgain).click();
+  await waitOwnedReward(home,todayAgain,12.75,'15.8');
+  const [completion]=await completionReceipts(home);
+  assert.equal(completion.after.dueDateISO,'2026-12-02');
+  assert.equal(completion.after.postponedDays,0);
+  await weekTask(weekAgain).waitFor({state:'detached'});
+  const nextWeek=weekAgain.locator('#weekTasksSection [data-week-nav="next"]');
+  await nextWeek.click();await nextWeek.click();
+  await weekAgain.locator('#weekGrid [data-day-key="2026-12-02"] [data-task-id="t1"]').waitFor();
+  const previouslyEarned=await verifiedRewards(home);
+  await openRepeatEditor(home);
+  await setRepeatControls(home,'monthly');
+  await dueField(home).fill('2026-11-23');
+  const latest=await submitTaskEdit(home);
+  assert.equal(latest.ok,true,JSON.stringify(latest));
+  assert.deepEqual(latest.recurrence,{mode:'monthly',...metadata});
+  assert.deepEqual(await verifiedRewards(home),previouslyEarned);
+  assert.deepEqual(await canonicalCompletions(home),legacyRewards);
+  await weekAgain.locator('#weekTasksSection [data-week-nav="prev"]').click();
+  await weekAgain.locator('#weekGrid [data-day-key="2026-11-23"] [data-task-id="t1"]').waitFor();
+  await weekAgain.close();
+  await todayAgain.close();
+
+  const checkpoint=await home.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(3));
+  assert.deepEqual(checkpoint.receipts.slice(0,2),[repeatReceipt,completion]);
+  assert.deepEqual(checkpoint.completions,previouslyEarned);
+  const fresh=await browser.newContext({serviceWorkers:'block',timezoneId:'America/New_York'});
+  t.after(()=>fresh.close());await configureContext(fresh);
+  assert.deepEqual(await restoreCompletionCheckpoint(await rollbackLoader(fresh),checkpoint),{verified:true,checksum:checkpoint.checksum});
+  const restored=await openScoringPage(fresh,'index.html');await waitHome(restored);
+  const restoredTask=await backingTask(restored),current=checkpoint.snapshot.tasks.find(task=>task.id==='t1');
+  assert.deepEqual(restoredTask,current);
+  assert.deepEqual(restoredTask.recurrence,{mode:'monthly',...metadata});
+  assert.equal(restoredTask.dueDateISO,'2026-11-23');
+  assert.deepEqual(await canonicalCompletions(restored),[...legacyRewards,...previouslyEarned]);
+  assert.equal(await restored.evaluate(()=>computeTodayPoints()),15.8);
+  assert.equal((await partOfState(restored)).task.title,'Repeat test unrelated journal');
+  assert.equal(await restored.evaluate(()=>save('repeat-rollback',{userInitiated:true})),true);
+  assert.deepEqual(await canonicalCompletions(restored),[...legacyRewards,...previouslyEarned]);
+  await openRepeatEditor(restored);
+  assert.equal(await repeatField(restored).inputValue(),'monthly');
+  assert.equal(await editCard(restored).locator('.repeat-custom-row').isVisible(),false);
+});
+
+test('V2 Repeat editor keeps the V1 defaults and parsing, and clears custom settings when recurrence is disabled',async t=>{
+  const {page}=await freshTaskOwner(t);
+  const {page:legacy}=await fixture(t);
+  const examples=[
+    ['',undefined,{mode:'custom',customCount:1,customUnit:'day'}],
+    ['0','week',{mode:'custom',customCount:1,customUnit:'week'}],
+    ['-3','month',{mode:'custom',customCount:1,customUnit:'month'}],
+    ['2.9','year',{mode:'custom',customCount:2,customUnit:'year'}],
+    ['1e2','invalidUnit',{mode:'custom',customCount:1,customUnit:'day'}]
+  ];
+  for(const [count,unit,expected] of examples){
+    for(const tab of [page,legacy]){
+      await openRepeatEditor(tab);
+      await setRepeatControls(tab,'custom',count,unit==='invalidUnit'?undefined:unit);
+      if(unit==='invalidUnit')await repeatField(tab,'repeatCustomUnit').evaluate(select=>{
+        select.value='invalidUnit';
+        select.dispatchEvent(new Event('change',{bubbles:true}));
+      });
+      if(tab===page){
+        assert.deepEqual((await submitTaskEdit(tab)).recurrence,expected);
+      }else{
+        await titleSave(tab).click();
+        await tab.waitForFunction(expected=>{
+          const task=TaskPointsCore.readTaskPointsStoredState().tasks.find(row=>row.id==='t1');
+          return JSON.stringify(task.recurrence)===JSON.stringify(expected);
+        },expected);
+      }
+    }
+  }
+  assert.deepEqual((await saveRepeat(page,{mode:'none'})).recurrence,{mode:'none'});
+  assert.deepEqual(ownedTask(await owned(page)).recurrence,{mode:'none'});
+  await openRepeatEditor(page);
+  assert.equal(await repeatField(page).inputValue(),'none');
+  assert.equal(await editCard(page).locator('.repeat-custom-row').isVisible(),false);
+  assert.equal(await repeatField(page,'repeatCustomCount').inputValue(),'1');
+  assert.equal(await repeatField(page,'repeatCustomUnit').inputValue(),'day');
+  const before=await owned(page);
+  await titleSave(page).click(); // Unchanged fields have no receipt.
+  await editCard(page).locator('[data-task-card-body="t1"]').waitFor();
+  assert.deepEqual(await owned(page),before);
+  assert.deepEqual(before.journal.map(entry=>entry.intent.fields.recurrence),
+    [...examples.map(entry=>entry[2]),{mode:'none'}]);
+  assert.deepEqual(await press(page),{ok:true,date:newDate});
+  assert.deepEqual(ownedTask(await owned(page)).recurrence,{mode:'none'});
+});
+
+test('V2 Repeat editor refuses malformed settings and changes to opaque metadata through the transaction',async t=>{
+  const {page}=await freshTaskOwner(t),before=await owned(page);
+  const basis={operation:repeatOperation,taskId:'t1',generation:before.meta.generation,
+    expectedRevision:0,expectedTask:ownedTask(before)};
+  const invalid=[
+    null, {mode:'unknown'}, {mode:'daily',customCount:5}, {mode:'custom'}, {mode:'custom',customCount:'2',customUnit:'year'},
+    {mode:'custom',customCount:0,customUnit:'day'}, {mode:'custom',customCount:1.5,customUnit:'day'},
+    {mode:'custom',customCount:Infinity,customUnit:'month'}, {mode:'custom',customCount:2,customUnit:'fortnight'},
+    {mode:'custom',customCount:2,customUnit:'day',opaque:{overwrite:true}}
+  ].map(recurrence=>({recurrence}));
+  for(const fields of [...invalid,{recurrence:{mode:'daily'},completedAtISO:'2026-11-18T16:00:00Z'},
+    {recurrence:{mode:'daily'},dueDateISO:'2026-02-31'},{recurrence:{mode:'daily'},points:Infinity}]){
+    await assert.rejects(page.evaluate(({basis,fields})=>TaskPointsStateRuntimeV2.commitIsolatedOwnedTask({
+      ...basis,actionId:crypto.randomUUID(),fields
+    }),{basis,fields}),/invalid_owned_task_intent/);
+  }
+  assert.deepEqual(await owned(page),before);
+});
+
+test('V2 Repeat editor preserves a stale draft and refuses a competing tab’s newer Task revision',async t=>{
+  const {page,context}=await freshTaskOwner(t);
+  const peer=await openScoringPage(context,'index.html');await waitHome(peer);
+  await openRepeatEditor(page);
+  await setRepeatControls(page,'custom',4,'month');
+  await dueField(page).fill(newDate);
+  assert.equal((await saveRepeat(peer,{mode:'weekly'})).ok,true);
+  await page.evaluate(()=>window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true})));
+  await page.waitForFunction(()=>TaskPointsOwnedTaskExperiment.taskView(TaskPointsHomeLiveState.getState())
+    .tasks.find(row=>row.id==='t1')?.recurrence?.mode==='weekly');
+  assert.equal(await repeatField(page).inputValue(),'custom');
+  assert.equal(await repeatField(page,'repeatCustomCount').inputValue(),'4');
+  assert.equal(await repeatField(page,'repeatCustomUnit').inputValue(),'month');
+  assert.equal(await dueField(page).inputValue(),newDate);
+  assert.deepEqual(await submitTaskEdit(page),{ok:false,error:'owned_task_stale_edit'});
+  const stored=await owned(peer);
+  assert.equal(stored.journal.length,1);
+  assert.deepEqual(ownedTask(stored).recurrence,{mode:'weekly'});
+  assert.equal(ownedTask(stored).dueDateISO,oldDate);
+  await editCard(page).locator('[data-task-action="task-cancel"]').click();
+  await openRepeatEditor(page);
+  assert.equal(await repeatField(page).inputValue(),'weekly');
+});
+
+test('V2 Repeat editor retries a quota failure and a lost response with one receipt despite repeated Save',async t=>{
+  const {page}=await freshTaskOwner(t),before=await owned(page),legacy=await backingTask(page);
+  await page.evaluate(operation=>{
+    const add=IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add=function(record,...args){
+      if(!window.repeatQuotaRecovered&&record?.intent?.operation===operation)
+        throw new DOMException('synthetic repeat quota','QuotaExceededError');
+      return add.call(this,record,...args);
+    };
+  },repeatOperation);
+  await openRepeatEditor(page);await setRepeatControls(page,'custom',3,'week');await dueField(page).fill(newDate);
+  assert.deepEqual(await submitTaskEdit(page),{ok:false,error:'synthetic repeat quota'});
+  assert.deepEqual(await owned(page),before);
+  assert.equal(await repeatField(page,'repeatCustomCount').inputValue(),'3');
+  await page.evaluate(()=>{window.repeatQuotaRecovered=true;});
+  await interruptOwnedWrite(page,'after commit');
+  await page.evaluate(()=>{
+    window.ownerOutcome=null;
+    const save=document.querySelector('[data-task-action="task-save"][data-task-id="t1"]');
+    save.click();save.click();
+  });
+  await page.waitForFunction(()=>window.ownerOutcome!==null);
+  assert.deepEqual(await page.evaluate(()=>ownerOutcome),{ok:false,error:'synthetic readback unavailable'});
+  await page.evaluate(async()=>{window.allowOwnedReadback=true;await TaskPointsOwnedTaskExperiment.refresh();});
+  assert.equal(await repeatField(page).inputValue(),'custom');
+  assert.equal(await repeatField(page,'repeatCustomUnit').inputValue(),'week');
+  assert.equal(await dueField(page).inputValue(),newDate);
+  const committed=await owned(page);
+  assert.equal(committed.journal.length,1);
+  assert.deepEqual((await submitTaskEdit(page)).recurrence,{mode:'custom',customCount:3,customUnit:'week'});
+  assert.deepEqual(await owned(page),committed);
+  assert.deepEqual(await backingTask(page),legacy);
+});
+
+for(const phase of ['before commit','after commit'])test(`V2 Repeat editor interruption ${phase} reopens with the whole Task revision or none`,async t=>{
+  const profile=await completionProfile(t);
+  const {page}=await fixture(t,profile.context);
+  await installOwner(page);
+  const before=await owned(page);
+  const recurrence={mode:'custom',customCount:2,customUnit:'year'};
+  await openRepeatEditor(page);await setRepeatControls(page,'custom',2,'year');
+  await dueField(page).fill(newDate);await titleField(page).fill('Repeat restart Task');
+  await interruptOwnedWrite(page,phase);
+  await titleSave(page).click();
+  await page.waitForFunction(()=>window.ownedInterruptionReached===true);
+  assert.notEqual(await page.evaluate(()=>window.ownerOutcome?.ok),true);
+  await page.close();
+  const reopened=await profile.restart();
+  const home=await openScoringPage(reopened,'index.html');await waitHome(home);
+  const recovered=await owned(home);
+  if(phase==='before commit'){
+    assert.deepEqual(recovered,before);
+    assert.equal((await saveRepeat(home,recurrence)).ok,true);
+  } else {
+    assert.equal(recovered.journal.length,1);
+    assert.deepEqual(ownedTask(recovered),{...ownedTask(before),title:'Repeat restart Task',
+      recurrence,dueDateISO:newDate,postponedDays:1,updatedAtISO:recovered.journal[0].after.updatedAtISO});
+    await openRepeatEditor(home);
+    assert.equal(await repeatField(home).inputValue(),'custom');
+    assert.equal(await repeatField(home,'repeatCustomUnit').inputValue(),'year');
+    await titleSave(home).click();
+    await editCard(home).locator('[data-task-card-body="t1"]').waitFor();
+    assert.deepEqual(await owned(home),recovered);
+  }
+  assert.equal((await owned(home)).journal.length,1);
+  assert.equal((await backingTask(home)).dueDateISO,oldDate);
+});
+
+test('V2 Repeat editor missing receipt stops owned scheduling views, Done and rollback',async t=>{
+  const {page,context,legacyRewards}=await seedScoringReads(t,undefined,{write:true,controls:true});
+  const before=await backingTask(page);
+  await saveRepeat(page,{mode:'weekly'});
+  const receipt=(await owned(page)).journal[0];
+  await page.evaluate(id=>new Promise((resolve,reject)=>{
+    const open=indexedDB.open(TaskPointsStateRuntimeV2.DB_NAME);
+    open.onerror=()=>reject(open.error);
+    open.onsuccess=()=>{
+      const db=open.result,tx=db.transaction('mutations','readwrite');
+      tx.oncomplete=()=>{db.close();resolve();};
+      tx.onabort=()=>{db.close();reject(tx.error);};
+      tx.objectStore('mutations').delete(id);
+    };
+  }),receipt.id);
+  const invalid=/owned_task_journal_incomplete/;
+  await assert.rejects(owned(page),invalid);
+  await assert.rejects(prepareCompletion(page,'home'),invalid);
+  await assert.rejects(page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(1)),invalid);
+  await page.reload();
+  await page.getByRole('status').getByText(/V2 Task unavailable.*owned_task_journal_incomplete/).waitFor();
+  assert.equal(await editCard(page).count(),0);
+  const week=await openScoringPage(context,'week.html');
+  await week.locator('#weekGrid [data-day-key]').first().waitFor();
+  assert.equal(await weekTask(week).count(),0);
+  const {page:today,alerts}=await realDoneToday(context);
+  await todayTask(today).getByText('Verified completion unavailable').waitFor();
+  await Promise.all([today.waitForEvent('dialog'),todayCheck(today).click()]);
+  assert.match(alerts.at(-1) || '',/could not be confirmed/);
+  assert.deepEqual(await canonicalCompletions(page),legacyRewards);
+  assert.deepEqual(await backingTask(page),before);
 });

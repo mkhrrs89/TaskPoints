@@ -32,8 +32,7 @@ One Save commits the changed fields and any title change in a single V2
 receipt. Startup verifies that receipt against the previous Task and
 checks that every unrelated field is unchanged. A retry after an
 unconfirmed save must use the same fields. Title-only receipts keep their
-existing format. Repeat, including its custom count and unit, remains
-in V1 and is read-only on the selected synthetic Task.
+existing format.
 
 The browser tests exercise the Home card, Work tag styling, and the
 phone-width Critical Tasks indicator. They verify legacy save and
@@ -344,9 +343,8 @@ the writer. The final 11-case run used the corrected fault and passed.
 
 The existing Home date field and Save button can commit a due date
 with Title, Importance, Tags, and Points in one V2 receipt for the
-selected synthetic Task. Repeat and its custom settings stay disabled
-in that editor. The original save path still handles those fields for
-ordinary V1 Tasks.
+selected synthetic Task. The original save path still handles those
+fields for ordinary V1 Tasks.
 
 Clearing the field stores `null`. The first date sets the original
 date. Moving an existing date later adds calendar days to postponement.
@@ -379,6 +377,43 @@ passed after updating that expectation and keeping the Repeat,
 receipt, storage, and lifecycle assertions. The known Today setup
 race reproduced and passed on focused rerun. The Inbox and native
 startup checks from the previous milestone passed in this run.
+
+## Repeat and custom intervals
+
+The existing Home editor saves every field through V2 for the
+selected synthetic Task. A single receipt can include Repeat,
+Due Date, Title, Importance, Tags, and Points. Repeat supports Does
+not repeat, Daily, Every Weekday, Weekly, Monthly, Yearly, and custom
+intervals in days, weeks, months, or years.
+
+The editor uses the same count parsing and defaults as V1. Blank or
+nonpositive counts default to one, and a missing unit defaults to
+days. Switching away from custom removes its count and unit while
+preserving other recurrence metadata. Invalid direct transaction
+settings are refused. Retries use the original receipt, and an old
+editor revision cannot overwrite a newer Task.
+
+Both Done controls use the newly saved setting. The tests cover
+overdue dates, cleared dates, skipping weekends, month-end and
+leap-year rollover, resetting postponement, and closing a one-off
+Task. Already-earned dates, IDs, and points stay fixed. Home, Today,
+Critical Tasks, and the Week schedule show the verified Task. The
+Week view holds legacy actions for the owned Task so they cannot
+write against its projected row.
+
+The Chromium profile restarts with the verified recurrence and
+date. A detached rollback restores the latest editor fields and
+the full reward history to fresh V1. The existing refusals for
+metric-derived awards and timezone changes stay in force. Real
+data still requires the controlled iPhone handoff and old-client
+safeguards.
+
+All 18 Repeat cases, 19 component cases, and 319 scoped cases passed.
+The separate Week lifecycle check also passed with the schedule
+following the verified date after restart and subsequent edits.
+The broad run passed 116 of 117 existing browser cases. The known
+Inbox display timeout failed there and passed on focused rerun. The
+previously tracked Today setup and native-startup checks passed.
 
 ## How the integration works
 

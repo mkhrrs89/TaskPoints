@@ -69,7 +69,7 @@
 
   function isolatedTaskDonePage() {
     return isolatedCompletionPage && global.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true
-      && /^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups)\.html$/.test(global.location.pathname);
+      && /^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups|week)\.html$/.test(global.location.pathname);
   }
 
   function usesIsolatedTaskDone(taskId = 't1') {

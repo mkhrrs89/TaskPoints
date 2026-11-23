@@ -1172,6 +1172,13 @@ function toggleHabitRetired(habitId, baseDate){
 /* -------- Tasks for arbitrary week -------- */
 function renderWeekTasks(baseDate){
   state=load();
+  let tasks = state.tasks;
+  if (window.TaskPointsCore?.usesIsolatedTaskDone?.()) {
+    // Keep the verified row in the schedule view, outside the V1 save state.
+    const owned = TaskPointsCore.isolatedTaskDoneView('t1');
+    tasks = owned ? tasks.map(task=>task?.id === 't1' ? owned.task : task)
+      : tasks.filter(task=>task?.id !== 't1');
+  }
   const days=weekDays(baseDate);
   const grid=$('weekGrid'); grid.innerHTML='';
   const todayK = todayKey();
@@ -1179,7 +1186,7 @@ function renderWeekTasks(baseDate){
     const col=document.createElement('div'); col.className='slot';
     col.dataset.dayKey = d.key;
     col.innerHTML=`<div class="text-xs text-zinc-400 mb-2 font-semibold">${d.label}</div>`;
-    const list = state.tasks.filter(t=>!t.completedAtISO && t.status!=='trashed' && t.status!=='wontdo' && !t.deletedAtISO && t.dueDateISO===d.key);
+    const list = tasks.filter(t=>!t.completedAtISO && t.status!=='trashed' && t.status!=='wontdo' && !t.deletedAtISO && t.dueDateISO===d.key);
     list.forEach(t=>{
       const overdue = t.dueDateISO && t.dueDateISO < todayK;
       const postponeDays = Number(t.postponedDays) || 0;
@@ -1246,7 +1253,13 @@ function renderWeekTasks(baseDate){
     }
   });
 }
+function holdOwnedWeekTask(id) {
+  if (!window.TaskPointsCore?.getLegacyTaskCompletionHold?.(id)) return false;
+  alert('This Week action is paused for the V2-owned Task.');
+  return true;
+}
 function postponeTask(id){
+  if (holdOwnedWeekTask(id)) return;
   let st=load(); const t=st.tasks.find(x=>x.id===id); if(!t || !t.dueDateISO) return;
   const oldDue = t.dueDateISO;
   t.dueDateISO = todayKey();
@@ -1256,6 +1269,7 @@ function postponeTask(id){
   state=st; renderAll(currentBaseDate);
 }
 function wontDo(id, dayKey){
+  if (holdOwnedWeekTask(id)) return;
   let st=load(); const t=st.tasks.find(x=>x.id===id); if(!t) return;
   const mode=(t.recurrence && t.recurrence.mode)||'none';
   if(mode==='none'){
@@ -1279,6 +1293,7 @@ renderAll(currentBaseDate);
 }
 
 function addOneDay(id){
+  if (holdOwnedWeekTask(id)) return;
   let st = load();
   const t = st.tasks.find(x => x.id === id);
   if(!t) return;
@@ -1296,6 +1311,7 @@ function addOneDay(id){
 }
 
 function deleteTask(id){
+  if (holdOwnedWeekTask(id)) return;
   let st = load();
   const t = st.tasks.find(x => x.id === id);
   if(!t) return;
@@ -1313,6 +1329,7 @@ function deleteTask(id){
 }
 
 function completeTask(id){
+  if (holdOwnedWeekTask(id)) return;
   let st = load();
   const t = st.tasks.find(x => x.id === id);
   if(!t) return;
@@ -1690,6 +1707,10 @@ document.querySelectorAll('[data-week-nav]').forEach(btn => {
 });
 
 document.addEventListener('DOMContentLoaded', () => {
+  window.TaskPointsCore?.watchIsolatedTaskDone?.(()=>{
+    renderWeekTasks(currentBaseDate);
+    window.updateCriticalTasksIsland?.();
+  });
   $('openAddTaskBtn')?.addEventListener('click', openAddTaskModal);
   $('addBtn')?.addEventListener('click', addTask);
   window.addEventListener('resize', updateWeekGridScrollbar, { passive: true });

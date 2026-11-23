@@ -20135,7 +20135,7 @@
     for (const key of ['taskpoints_recovery_write_lock_v1','taskpoints_recovery_attempt_lock_v1','taskpoints_emergency_recovery_hold_v1'])
       if (global.localStorage.getItem(key) !== null) throw new Error('recovery_evidence_blocks_task_write');
     if (fixture.homeTaskId !== undefined && (typeof fixture.homeTaskId !== 'string' || !fixture.homeTaskId
-      || (scoringRead ? !/^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups)\.html$/.test(global.location.pathname)
+      || (scoringRead ? !/^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups|week)\.html$/.test(global.location.pathname)
         : global.location.pathname !== '/experiments/v2-home-plus-one-day/full/index.html')
       || global.localStorage.getItem('taskpoints_storage_guard_incident_v1') !== null))
       throw new Error('owned_home_task_context_or_recovery_conflict');
@@ -20264,8 +20264,9 @@
   const OWNED_CLASSIFICATION_EDIT = 'home-task-classification-edit';
   const OWNED_POINTS_EDIT = 'home-task-points-edit';
   const OWNED_DUE_EDIT = 'home-task-due-date-edit';
+  const OWNED_REPEAT_EDIT = 'home-task-repeat-edit';
   function isOwnedEditorOperation(operation) {
-    return [OWNED_TITLE_EDIT, OWNED_CLASSIFICATION_EDIT, OWNED_POINTS_EDIT, OWNED_DUE_EDIT].includes(operation);
+    return [OWNED_TITLE_EDIT, OWNED_CLASSIFICATION_EDIT, OWNED_POINTS_EDIT, OWNED_DUE_EDIT, OWNED_REPEAT_EDIT].includes(operation);
   }
   function supportsOwnedTaskOperation(operation, homeTaskId) {
     return operation === 'home-plus-one-day' || (Boolean(homeTaskId) && isOwnedEditorOperation(operation));
@@ -20278,21 +20279,34 @@
     const date = new Date(key + 'T00:00:00Z');
     return Number.isFinite(date.getTime()) && date.toISOString().slice(0,10) === key ? date.getTime() : NaN;
   }
+  function validOwnedRepeatSettings(settings) {
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)
+      || !['none','daily','everyWeekday','weekly','monthly','yearly','custom'].includes(settings.mode)) return false;
+    const keys = Object.keys(settings);
+    if (settings.mode !== 'custom') return keys.length === 1 && keys[0] === 'mode';
+    return keys.length === 3 && keys.every(key=>['mode','customCount','customUnit'].includes(key))
+      && Number.isInteger(settings.customCount) && settings.customCount > 0
+      && ['day','week','month','year'].includes(settings.customUnit);
+  }
   function ownedEditorFields(intent) {
     if (intent.operation === OWNED_TITLE_EDIT) return validOwnedTitle(intent.title) ? {title:intent.title} : null;
     const fields = intent.fields;
     const pointsEdit = intent.operation === OWNED_POINTS_EDIT;
     const dueEdit = intent.operation === OWNED_DUE_EDIT;
+    const repeatEdit = intent.operation === OWNED_REPEAT_EDIT;
     const allowed = ['title','importance','tags'];
-    if (pointsEdit || dueEdit) allowed.push('points');
-    if (dueEdit) allowed.push('dueDateISO');
+    if (pointsEdit || dueEdit || repeatEdit) allowed.push('points');
+    if (dueEdit || repeatEdit) allowed.push('dueDateISO');
+    if (repeatEdit) allowed.push('recurrence');
     if (!fields || typeof fields !== 'object' || Array.isArray(fields)
       || Object.keys(fields).some(key => !allowed.includes(key))) return null;
-    if (dueEdit ? !Object.hasOwn(fields,'dueDateISO')
+    if (repeatEdit ? !Object.hasOwn(fields,'recurrence') || !validOwnedRepeatSettings(fields.recurrence)
+      : dueEdit ? !Object.hasOwn(fields,'dueDateISO')
       : pointsEdit ? !Object.hasOwn(fields,'points')
         : !Object.hasOwn(fields,'importance') && !Object.hasOwn(fields,'tags')) return null;
     if (Object.hasOwn(fields,'points') && !Number.isFinite(fields.points)) return null;
-    if (dueEdit && fields.dueDateISO !== null && !Number.isFinite(taskDueDateMillis(fields.dueDateISO))) return null;
+    if (Object.hasOwn(fields,'dueDateISO') && fields.dueDateISO !== null
+      && !Number.isFinite(taskDueDateMillis(fields.dueDateISO))) return null;
     if (Object.hasOwn(fields,'title') && !validOwnedTitle(fields.title)) return null;
     if (Object.hasOwn(fields,'importance') && !['Low','Medium','High','Critical'].includes(fields.importance)) return null;
     if (Object.hasOwn(fields,'tags') && (!Array.isArray(fields.tags)
@@ -20301,6 +20315,13 @@
   }
   function ownedEditorResult(before, fields, updatedAtISO) {
     const after = {...before,...fields,updatedAtISO};
+    if (Object.hasOwn(fields,'recurrence')) {
+      after.recurrence = {...before.recurrence,...fields.recurrence};
+      if (after.recurrence.mode !== 'custom') {
+        delete after.recurrence.customCount;
+        delete after.recurrence.customUnit;
+      }
+    }
     if (Object.hasOwn(fields,'dueDateISO')) {
       const previous = before.dueDateISO;
       const next = fields.dueDateISO;
@@ -20314,7 +20335,7 @@
   }
   function validOwnedEditorChange(before, after, fields) {
     return fields && typeof after?.updatedAtISO === 'string' && Number.isFinite(Date.parse(after.updatedAtISO))
-      && Object.keys(fields).every(key => stableJson(fields[key]) !== stableJson(before[key]))
+      && Object.keys(fields).every(key => stableJson(after[key]) !== stableJson(before[key]))
       && stableJson(after) === stableJson(ownedEditorResult(before,fields,after.updatedAtISO));
   }
 

@@ -11264,9 +11264,9 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
         const editor = ownedDisplay && owner.owns(t.id) ? owner.taskEditor?.() : null;
         const importance = editor?.draft.importance ?? t.importance;
         const rec = t.recurrence || {};
-        const recMode = rec.mode || 'none';
-        const recCount = Number.isFinite(rec.customCount) && rec.customCount > 0 ? rec.customCount : 1;
-        const recUnit  = rec.customUnit || 'day';
+        const recMode = editor?.draft.repeat ?? (rec.mode || 'none');
+        const recCount = editor?.draft.repeatCustomCount ?? (Number.isFinite(rec.customCount) && rec.customCount > 0 ? rec.customCount : 1);
+        const recUnit = editor?.draft.repeatCustomUnit ?? (rec.customUnit || 'day');
         
         card.innerHTML = `
           <div class="flex flex-col gap-3">
@@ -11312,7 +11312,7 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
                 <label class="text-xs muted">Custom Repeat</label>
                 <div class="mt-1 flex items-center gap-2">
                   <span class="text-xs muted">Every</span>
-                  <input class="input" style="max-width:90px" type="number" min="1" data-field="repeatCustomCount" value="${recCount}">
+                  <input class="input" style="max-width:90px" type="number" min="1" data-field="repeatCustomCount" value="${escapeHtml(recCount)}">
                   <select class="input" data-field="repeatCustomUnit">
                     <option value="day" ${recUnit==='day'?'selected':''}>day(s)</option>
                     <option value="week" ${recUnit==='week'?'selected':''}>week(s)</option>
@@ -11348,7 +11348,7 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
             }
             const remember = () => owner.rememberTaskDraft(key, field.value, key === 'due' && !field.validity.valid);
             field.addEventListener('input', remember);
-            if (key === 'due') field.addEventListener('change', remember);
+            if (key === 'due' || key.startsWith('repeat')) field.addEventListener('change', remember);
           }
           if (editor.saving) lockOwnedTaskEditor(card);
         }
@@ -13934,7 +13934,10 @@ function lockOwnedTaskEditor(card) {
   card.querySelector('[data-field="tags"]').readOnly = true;
   card.querySelector('[data-field="points"]').readOnly = true;
   card.querySelector('[data-field="due"]').readOnly = true;
+  card.querySelector('[data-field="repeatCustomCount"]').readOnly = true;
   card.querySelector('[data-field="importance"]').disabled = true;
+  card.querySelector('[data-field="repeat"]').disabled = true;
+  card.querySelector('[data-field="repeatCustomUnit"]').disabled = true;
   card.querySelectorAll('[data-task-action]').forEach(button => { button.disabled = true; });
 }
 
@@ -13947,7 +13950,7 @@ async function saveOwnedHomeTaskEdit(owner, id, card) {
     return;
   }
   const draft = {};
-  for (const key of ['title', 'importance', 'tags', 'points', 'due']) {
+  for (const key of ['title', 'importance', 'tags', 'points', 'due', 'repeat', 'repeatCustomCount', 'repeatCustomUnit']) {
     draft[key] = card.querySelector(`[data-field="${key}"]`).value;
     if (key !== 'due' || edit.dueTouched || draft.due) owner.rememberTaskDraft(key, draft[key]);
   }
@@ -13965,6 +13968,11 @@ async function saveOwnedHomeTaskEdit(owner, id, card) {
   }
   const points = Number(draft.points) || 0;
   if (points !== edit.original.points) fields.points = points;
+  const repeat = readTaskRepeatSettings(card);
+  if (repeat.mode !== edit.original.repeat || (repeat.mode === 'custom'
+    && (repeat.customUnit !== edit.original.repeatCustomUnit
+      || (draft.repeatCustomCount !== edit.original.repeatCustomCount
+        && repeat.customCount !== Number(edit.original.repeatCustomCount))))) fields.recurrence = repeat;
   if (Object.keys(fields).length || edit.pending) {
     lockOwnedTaskEditor(card);
     try {
@@ -14121,21 +14129,9 @@ function saveTaskEdit(id,card){
 
   
 if (repSel) {
-  const mode = repSel.value || 'none';
   t.recurrence = t.recurrence || {};
-  t.recurrence.mode = mode;
-
-  if (mode === 'custom') {
-    const countInput = card.querySelector('input[data-field="repeatCustomCount"]');
-    const unitSel    = card.querySelector('select[data-field="repeatCustomUnit"]');
-    let count = parseInt(countInput && countInput.value, 10);
-    if (!Number.isFinite(count) || count <= 0) count = 1;
-    const unit = (unitSel && (unitSel.value === 'week' || unitSel.value === 'month' || unitSel.value === 'year'))
-      ? unitSel.value
-      : 'day';
-    t.recurrence.customCount = count;
-    t.recurrence.customUnit  = unit;
-  } else {
+  Object.assign(t.recurrence, readTaskRepeatSettings(card));
+  if (t.recurrence.mode !== 'custom') {
     // if you switch away from custom, clean it up
     delete t.recurrence.customCount;
     delete t.recurrence.customUnit;
@@ -14146,6 +14142,15 @@ if (repSel) {
   editingTaskId=null;
   persistTaskActionMutation(t, 'edit-save');
   renderTasks(state);
+}
+
+function readTaskRepeatSettings(card) {
+  const mode = card.querySelector('select[data-field="repeat"]')?.value || 'none';
+  if (mode !== 'custom') return {mode};
+  const count = parseInt(card.querySelector('input[data-field="repeatCustomCount"]')?.value, 10);
+  const unit = card.querySelector('select[data-field="repeatCustomUnit"]')?.value;
+  return {mode, customCount: Number.isFinite(count) && count > 0 ? count : 1,
+    customUnit: ['week','month','year'].includes(unit) ? unit : 'day'};
 }
 
 function hideTask(id){
