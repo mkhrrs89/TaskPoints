@@ -169,10 +169,8 @@ if a receipt or completion is missing or corrupt, the owner evidence
 is lost, a read is interrupted, a recovery hold exists, or a legacy
 Task edit or malformed journal makes the source untrustworthy.
 
-Done remains paused. This is a seeded read path, with no live V2 reward
-writer. The ordinary Task-only rollback checkpoint refuses seeded
-scoring fixtures until it can transfer and verify their V2 completions
-as well.
+Done remains paused. This milestone established seeded completion
+reads. The later rollback milestone below adds completion transfer.
 
 The full run passed 59 of 60 browser cases. All 10 new scoring cases,
 19 component browser cases, and 264 scoped regressions passed. The
@@ -219,6 +217,52 @@ timeout after its storage checks had passed. All nine cases in the
 focused rerun passed, including Inbox, scoring, and the Today-list
 restart and competing-edit checks.
 
+## Verified Task and completion rollback
+
+The detached checkpoint checks the selected Task against its V2
+receipts and checks every seeded completion against its sealed record.
+It replaces the selected Task and its rewards in a copy of the current
+V1 snapshot. It preserves each completion ID, timestamp, earned value,
+and metadata. The original and current V1 strings, including backup
+slots and pending journal bytes, stay in the checkpoint. V1 replays
+those journals when it opens the copy. A pending deletion of an
+unrelated completion still takes effect. A tombstone or competing
+record for a V2 completion ID stops the checkpoint.
+
+The checkpoint carries V1 IndexedDB backups and image bytes, including
+orphan images. Unreadable data, unsupported database layouts, and
+changing source evidence cause a refusal. The final V2 transaction
+checks the Task, receipts, completions, and current V1 bytes before
+recording the checkpoint checksum and freezing V2. The legacy
+databases are read twice as separate operations.
+
+The loopback importer accepts only an empty disposable profile. It
+checks the reopened package's checksum, restores its records, and
+compares all restored data and the effective V1 reader output. An
+interrupted import keeps a recovery hold and requires a fresh
+disposable profile for retry. The source can reproduce the same frozen
+checkpoint as long as the source evidence still matches. Source V1
+bytes and V2 Task and reward records stay intact.
+
+The browser checks use ordinary V1 Home, Today, Game, and Matchups,
+including a normal Home save and a Chromium restart. The recurring
+fixture preserves 12.75, -2.25, and 0 earned points even after the Task
+is edited to 19 points. The one-off fixture preserves its completed
+state and original reward. The saved matchups use the same totals as
+Game and Home. Both Home and Today still hold V2 Done in the source
+experiment. The next step is to prove that the V2 write transaction can
+enforce one reward per Task per local day across both controls and
+return the original receipt on retry.
+
+Chromium passed 75 of 76 full Home cases, including all 11 new
+rollback cases. All 19 component cases and 319 scoped regressions
+passed. The only full-run failure was `seed_source_changed` while
+setting up the existing shared Done admission test. The same test
+failed with the same error on the starting commit, `61c84013`, and
+passed in the focused rerun of this change. The intermittent Inbox
+display check passed in both runs on this change. Both assertions
+remain in place.
+
 ## How the integration works
 
 - The loopback harness explicitly selects a single synthetic Task and checks the
@@ -234,8 +278,8 @@ restart and competing-edit checks.
   read and transaction checks refuse genuine conflicts and unreadable evidence.
   Unrelated Task compaction and verified-secondary diagnostics can change without
   disabling V2 edits. The component experiment retains its original full-source check.
-- Rollback freezes V2 at the verified revision, reads the current legacy snapshot,
-  and inserts only the verified owned Task into a detached candidate. A fresh
+- The Task-only rollback freezes V2 at the verified revision, reads the current legacy
+  snapshot, and inserts only the verified owned Task into a detached candidate. A fresh
   synthetic V1 profile opens at the latest V2 date and keeps the latest unrelated
   Task edit. Original/current legacy strings and receipts remain archived. The
   source images and journals are left in place. This checkpoint exercises Task
@@ -299,5 +343,5 @@ the exact pre-Points commit, `a4ff53a8`, with the V2 owner disabled. The
 assertions are unchanged and the intermittent Inbox failure remains open.
 
 ```sh
-NODE_PATH=/tmp/taskpoints-boundary-tools/node_modules node --test --test-timeout=300000 experiments/v2-home-plus-one-day/run-full-home.cjs
+NODE_PATH=/tmp/taskpoints-boundary-tools/node_modules node --test --test-timeout=420000 experiments/v2-home-plus-one-day/run-full-home.cjs
 ```

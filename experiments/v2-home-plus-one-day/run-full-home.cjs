@@ -24,6 +24,16 @@ before(async()=>{
       if(file==='seed.html') {
         res.writeHead(200,{'Content-Type':'text/html'});res.end('<!doctype html><title>Synthetic seed</title>');return;
       }
+      if(request.pathname===prefix+'rollback.html'){
+        res.writeHead(200,{'Content-Type':'text/html'});
+        const scripts=['scoring_core.js','flex_action_fast_path.js','state_runtime_v2.js','task_mutation_journal.js','task_create_fast_path.js'];
+        res.end('<!doctype html><title>Synthetic detached rollback</title>'
+          // Install the actual legacy readers without their scheduled startup
+          // jobs. The disposable loader must not compact a partial import.
+          +'<script>window.setTimeout = () => 0;</script>'
+          +scripts.map(file=>`<script src="/${file}"></script>`).join(''));
+        return;
+      }
       if(file==='index.html'&&!request.pathname.startsWith(prefix)) {
         res.writeHead(302,{Location:prefix+'index.html'+request.search});res.end();return;
       }
@@ -1426,6 +1436,10 @@ async function todayCompletionPage(context,alias=false){
 const todayTask=(page,id='t1')=>page.locator(`#todayList [data-kind="task"][data-id="${id}"]`);
 const todayDone=(page,id)=>todayTask(page,id).locator('.today-check').dispatchEvent('click');
 const homeDone=page=>editCard(page).locator('[data-task-action="complete"]').dispatchEvent('click');
+const canonicalCompletions=page=>page.evaluate(()=>{
+  const core=TaskPointsCore;
+  return core.parseTaskPointsStorageJson(localStorage.getItem(core.STORAGE_KEY)).completions;
+});
 
 function completionWriteEvidence(page){
   return page.evaluate(()=>{
@@ -1545,10 +1559,6 @@ test('Today can still complete an unrelated Task and a fresh V1 rollback awards 
   await todayDone(today.page,'t2');
   await todayTask(today.page,'t2').and(today.page.locator('.is-done')).waitFor();
   assert.equal(today.alerts.length,0);
-  const canonicalCompletions=page=>page.evaluate(()=>{
-    const core=TaskPointsCore;
-    return core.parseTaskPointsStorageJson(localStorage.getItem(core.STORAGE_KEY)).completions;
-  });
   const unrelatedAward=await canonicalCompletions(today.page);
   assert.equal(unrelatedAward.length,1);
   assert.equal(unrelatedAward[0].taskId,'t2');
@@ -1588,13 +1598,15 @@ const unrelatedRewardRows=[
   {id:'synthetic-unrelated-current',taskId:'t2',title:'Synthetic unrelated reward',points:3,completedAtISO:quietDate+'T16:00:00Z'}
 ];
 
-async function seedScoringReads(t,context){
+async function seedScoringReads(t,context,{oneOff=false}={}){
   const f=await prepareCompletionBoundary(t,context);
   const legacyRewards=[{...ownedRewards[0],points:5},...unrelatedRewardRows];
-  await f.page.evaluate(async({marker,ownedRewards,legacyRewards,day})=>{
+  await f.page.evaluate(async({marker,ownedRewards,legacyRewards,day,oneOff})=>{
     const core=TaskPointsCore,snapshot=core.readTaskPointsStoredState();
     snapshot.completions=legacyRewards;
-    snapshot.tasks.find(row=>row.id==='t1').recurrence={mode:'daily'};
+    const task=snapshot.tasks.find(row=>row.id==='t1');
+    task.recurrence={mode:oneOff?'none':'daily'};
+    if(oneOff)Object.assign(task,{status:'done',completedAtISO:ownedRewards[0].completedAtISO});
     snapshot.scoringSettings={...snapshot.scoringSettings,inertia:{windowDays:7,multiplier:0}};
     snapshot.players.push({id:'SYN2',name:'Synthetic second player',baseline:50},{id:'SYN3',name:'Synthetic third player',baseline:50});
     snapshot.matchups.push({id:'synthetic-owned-matchup',date:day,dateKey:day,playerAId:'YOU',playerBId:'SYN',
@@ -1605,8 +1617,10 @@ async function seedScoringReads(t,context){
     localStorage.setItem(marker,JSON.stringify(fixture));
     await TaskPointsStateRuntimeV2.initializeIsolatedTaskOwner(snapshot,{completionSeed:ownedRewards});
     localStorage.setItem(marker,JSON.stringify({...fixture,phase:'sealed'}));
-  },{marker,ownedRewards,legacyRewards,day:quietDate});
-  await f.page.reload();await waitHome(f.page);
+  },{marker,ownedRewards:oneOff?ownedRewards.slice(0,1):ownedRewards,legacyRewards,day:quietDate,oneOff});
+  await f.page.reload();
+  if(oneOff)await f.page.waitForFunction(()=>TaskPointsHomeLiveState?.getState()?.tasks?.find(row=>row.id==='t1')?.status==='done');
+  else await waitHome(f.page);
   return {...f,legacyRewards};
 }
 
@@ -1628,6 +1642,227 @@ async function scoresFromCore(page){
       selectedLegacy:source.completions.find(row=>row.taskId==='t1')?.points};
   });
 }
+
+async function rollbackLoader(context){
+  const page=await context.newPage();
+  await page.clock.setFixedTime(new Date(quietDate+'T17:00:00Z'));
+  await page.goto(origin+prefix+'rollback.html');
+  return page;
+}
+
+function restoreCompletionCheckpoint(page,checkpoint){
+  return page.evaluate(serialized=>TaskPointsStateRuntimeV2.restoreIsolatedTaskCompletionRollback(JSON.parse(serialized)),
+    JSON.stringify(checkpoint));
+}
+
+const deletedReward={id:'synthetic-deleted-reward',taskId:'t2',title:'Synthetic deleted reward',points:100,
+  completedAtISO:quietDate+'T14:00:00Z'};
+
+for(const oneOff of [false,true])test(`completion rollback restores a ${oneOff?'one-off':'recurring'} Task and all rewards through ordinary V1 startup, saving, and Chromium restart`,async t=>{
+  const {page}=await seedScoringReads(t,undefined,{oneOff});
+  const rewards=oneOff?ownedRewards.slice(0,1):ownedRewards;
+  if(!oneOff){
+    await openTaskEdit(page);await pointsField(page).fill('19');
+    assert.equal((await submitTaskEdit(page)).points,19);
+  }
+  await page.evaluate(async deleted=>{
+    const core=TaskPointsCore;
+    const state=core.parseTaskPointsStorageJson(localStorage.getItem(core.STORAGE_KEY));
+    state.completions.push(deleted);
+    core.writeTaskPointsStoredState(state);
+    localStorage.setItem('taskpoints_backup_prev3',core.serializeTaskPointsStoredState(state));
+    core.queuePhase5CVerifiedSecondaryWrite();
+    await core.flushPhase5CVerifiedSecondaryWrites();
+    core.journalTaskMutation({completionDeleteId:deleted.id});
+    core.journalTaskUpdates(['t2'],row=>{row.title='Synthetic pending Task title';return true;});
+    if(core.readTaskPointsStoredState().completions.some(row=>row.id===deleted.id))throw Error('Expected pending deletion');
+    await core.saveImageBlob('synthetic-orphan-image',new Blob([new Uint8Array([12,0,255])],{type:'image/webp'}));
+  },deletedReward);
+  const transferable=await page.evaluate(revision=>{
+    const before=Object.entries(localStorage).sort();
+    return TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(revision).then(checkpoint=>({
+      checkpoint,before,after:Object.entries(localStorage).sort()
+    }));
+  },oneOff?0:1);
+  const {checkpoint}=transferable;
+  assert.deepEqual(transferable.after,transferable.before,'Preparing a checkpoint does not change source V1 bytes');
+  assert.deepEqual(checkpoint.completions,rewards);
+  assert.equal((await owned(page)).meta.mode,'rollback-frozen');
+  assert.equal((await backingTask(page)).points,5);
+  assert.deepEqual(checkpoint.snapshot.completions,[rewards[0],...unrelatedRewardRows,deletedReward,...rewards.slice(1)]);
+  assert.deepEqual(checkpoint.expected.completions,[rewards[0],...unrelatedRewardRows,...rewards.slice(1)]);
+  assert.ok(checkpoint.databases.find(db=>db.name==='taskpoints_verified_secondary_v1')?.stores.some(store=>store.rows.length));
+
+  const profile=fs.mkdtempSync(path.join(os.tmpdir(),'tp-completion-rollback-'));
+  const launch=()=>chromium.launchPersistentContext(profile,{
+    executablePath:process.env.BOUNDARY_CHROMIUM_PATH||'/usr/bin/chromium',serviceWorkers:'block',timezoneId:'America/New_York'
+  });
+  let fresh=await launch();
+  t.after(async()=>{await fresh.close();fs.rmSync(profile,{recursive:true,force:true});});
+  await configureContext(fresh);
+  const destination=await rollbackLoader(fresh);
+  assert.deepEqual(await restoreCompletionCheckpoint(destination,checkpoint),{verified:true,checksum:checkpoint.checksum});
+  assert.deepEqual(await destination.evaluate(()=>Object.entries(localStorage).sort()),checkpoint.currentLegacySource
+    .filter(([key])=>key!=='taskpoints_isolated_task_scoring_read_v1')
+    .map(([key,value])=>[key,key==='taskpoints_v1'?checkpoint.raw:value]).sort());
+  assert.deepEqual(await destination.evaluate(()=>TaskPointsCore.readTaskPointsStoredState()),checkpoint.expected);
+  assert.deepEqual(await destination.evaluate(async()=>{
+    const blob=await TaskPointsCore.getImageBlob('synthetic-orphan-image');
+    return [blob.type,[...new Uint8Array(await blob.arrayBuffer())]];
+  }),['image/webp',[12,0,255]]);
+  assert.equal(await destination.evaluate(()=>TaskPointsCore.getTaskMutationJournalStatus().completionDeletes),1);
+  await destination.evaluate(()=>sessionStorage.setItem('tpBootSeenThisSession','1'));
+  await destination.goto(origin+prefix+'index.html');
+  await destination.waitForFunction(()=>window.TaskPointsHomeLiveState?.getState()?.tasks?.length===2);
+  assert.equal(await destination.evaluate(()=>computeTodayPoints()),15.8);
+  assert.equal(await destination.evaluate(()=>TaskPointsCore.usesIsolatedTaskScoring()),false);
+  assert.equal((await backingTask(destination)).points,oneOff?5:19);
+  assert.equal((await backingTask(destination)).status,oneOff?'done':'active');
+  if(oneOff)assert.equal((await backingTask(destination)).completedAtISO,ownedRewards[0].completedAtISO);
+  const readV1Rewards=page=>page.evaluate(()=>TaskPointsCore.readTaskPointsStoredState().completions);
+  assert.deepEqual(await readV1Rewards(destination),checkpoint.expected.completions);
+  const today=await todayCompletionPage(fresh);
+  await todayTask(today.page,'t2').and(today.page.locator('.is-done')).waitFor();
+  if(oneOff)assert.equal(await todayTask(today.page).count(),0);
+  else {
+    await todayTask(today.page).and(today.page.locator('.is-done')).waitFor();
+    await todayDone(today.page);
+  }
+  assert.deepEqual(await readV1Rewards(today.page),checkpoint.expected.completions);
+  const game=await openScoringPage(fresh,'game.html');
+  await game.locator('#playersList .playerCard').first().waitFor();
+  assert.equal(await game.evaluate(()=>computeTodayPoints()),15.8);
+  const scores=await scoresFromCore(game);
+  assert.equal(scores.totals[quietDate],15.75);
+  if(!oneOff){
+    assert.equal(scores.totals['2026-11-17'],-2.25);
+    assert.equal(scores.totals['2026-11-16'],0);
+  }
+  const matchups=await openScoringPage(fresh,'matchups.html');
+  const action=matchups.locator('#matchupsChronological').getByRole('button',{name:'Generate retro matchups'}).first();
+  const header=action.locator('xpath=ancestor::section[1]').locator('.matchup-collapsible-header').first();
+  if(await header.getAttribute('aria-expanded')==='false')await header.click();
+  await action.click();
+  await matchups.waitForFunction(oneOff=>{
+    const state=TaskPointsCore.parseTaskPointsStorageJson(localStorage.getItem(TaskPointsCore.STORAGE_KEY));
+    return state.matchups.find(row=>row.id==='synthetic-owned-matchup')?.scoreA===15.75
+      && (oneOff || state.matchups.find(row=>row.id==='synthetic-inbox-game')?.scoreB===-2.25);
+  },oneOff);
+  await destination.reload();
+  await destination.waitForFunction(()=>window.TaskPointsHomeLiveState?.getState()?.tasks?.length===2);
+  assert.equal(await destination.evaluate(()=>save('home-detached-rollback-roundtrip',{userInitiated:true})),true);
+  assert.deepEqual(await readV1Rewards(destination),checkpoint.expected.completions);
+  assert.deepEqual(await canonicalCompletions(destination),checkpoint.expected.completions);
+  await fresh.close();fresh=await launch();await configureContext(fresh);
+  const reopened=await openScoringPage(fresh,'index.html');
+  await reopened.waitForFunction(()=>window.TaskPointsHomeLiveState?.getState()?.tasks?.length===2);
+  assert.equal(await reopened.evaluate(()=>computeTodayPoints()),15.8);
+  assert.deepEqual(await readV1Rewards(reopened),checkpoint.expected.completions);
+  assert.equal(await reopened.evaluate(()=>TaskPointsCore.readTaskPointsStoredState().tasks.find(row=>row.id==='t2').title),
+    'Synthetic pending Task title');
+});
+
+for(const [fault,refusal] of [
+  ['duplicate sealed ID',/isolated_completion_seed_unverified/],
+  ['missing V2 completion',/isolated_completion_rows_unverified/],
+  ['competing V1 completion ID',/rollback_completion_evidence_conflict/],
+  ['owned completion tombstone',/rollback_completion_evidence_conflict/],
+  ['malformed Inbox journal',/rollback_unreadable_legacy_journal/],
+  ['malformed Task journal',/legacy_source_changed_preserved_reconciliation_required/],
+  ['interrupted freeze',/indexeddb_transaction_aborted/]
+])test(`completion rollback refuses ${fault} without changing the source or freezing V2`,async t=>{
+  const {page}=await seedScoringReads(t);
+  const evidence=await page.evaluate(async({fault,ownedRewards})=>{
+    const core=TaskPointsCore,runtime=TaskPointsStateRuntimeV2;
+    const db=await new Promise((resolve,reject)=>{
+      const request=indexedDB.open(runtime.DB_NAME);
+      request.onsuccess=()=>resolve(request.result);
+      request.onerror=()=>reject(request.error);
+    });
+    if(fault==='duplicate sealed ID'||fault==='missing V2 completion'){
+      await new Promise((resolve,reject)=>{
+        const tx=db.transaction(['meta','completions'],'readwrite');
+        tx.oncomplete=resolve;tx.onabort=reject;
+        if(fault==='missing V2 completion')tx.objectStore('completions').delete('isolated-score:'+ownedRewards[1].id);
+        else {
+          const store=tx.objectStore('meta'),request=store.get('isolated-task-owner-v1');
+          request.onsuccess=()=>{const row=request.result;row.scoringSeed.push(row.scoringSeed[0]);store.put(row);};
+        }
+      });
+    }
+    if(fault==='owned completion tombstone')core.journalTaskMutation({completionDeleteId:ownedRewards[1].id});
+    if(fault==='malformed Inbox journal')localStorage.setItem('taskpoints_pending_inbox_state_v1','{synthetic Inbox bytes');
+    if(fault==='malformed Task journal')localStorage.setItem('taskpoints_pending_task_mutations_v1','{synthetic Task bytes');
+    if(fault==='competing V1 completion ID'){
+      const state=core.parseTaskPointsStorageJson(localStorage.getItem(core.STORAGE_KEY));
+      state.completions.push({...ownedRewards[1],taskId:'t2'});
+      core.writeTaskPointsStoredState(state);
+    }
+    const inspect=async()=>({
+      storage:Object.entries(localStorage).sort(),
+      v2:await Promise.all(['tasks','mutations','meta','completions'].map(name=>new Promise((resolve,reject)=>{
+        const request=db.transaction(name).objectStore(name).getAll();
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error);
+      })))
+    });
+    const before=await inspect(),put=IDBObjectStore.prototype.put;
+    if(fault==='interrupted freeze')IDBObjectStore.prototype.put=function(row,...args){
+      const request=put.call(this,row,...args);
+      if(this.name==='meta'&&row.mode==='rollback-frozen')this.transaction.abort();
+      return request;
+    };
+    const result=await runtime.prepareIsolatedTaskRollback(0).then(()=>null,error=>error.message);
+    IDBObjectStore.prototype.put=put;
+    const after=await inspect();
+    db.close();
+    return {before,after,result};
+  },{fault,ownedRewards});
+  assert.match(evidence.result,refusal);
+  assert.deepEqual(evidence.after,evidence.before);
+});
+
+for(const phase of ['before','after'])test(`detached import interruption ${phase} the canonical write is quarantined and never changes the source`,async t=>{
+  const {page}=await seedScoringReads(t);
+  const checkpoint=await page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(0));
+  const source=await completionWriteEvidence(page);
+  const profile=fs.mkdtempSync(path.join(os.tmpdir(),'tp-interrupted-rollback-'));
+  const launch=()=>chromium.launchPersistentContext(profile,{
+    executablePath:process.env.BOUNDARY_CHROMIUM_PATH||'/usr/bin/chromium',serviceWorkers:'block',timezoneId:'America/New_York'
+  });
+  let fresh=await launch();
+  t.after(async()=>{await fresh.close();fs.rmSync(profile,{recursive:true,force:true});});
+  await configureContext(fresh);
+  const importer=await rollbackLoader(fresh);
+  const corrupt=structuredClone(checkpoint);
+  corrupt.snapshot.completions[0].points=999;
+  await assert.rejects(restoreCompletionCheckpoint(importer,corrupt),/rollback_detached_checkpoint_unverified/);
+  assert.deepEqual(await importer.evaluate(async()=>[localStorage.length,(await indexedDB.databases()).length]),[0,0]);
+  await importer.evaluate(phase=>{
+    const set=Storage.prototype.setItem;
+    Storage.prototype.setItem=function(key,value){
+      if(this===localStorage&&key==='taskpoints_v1'){
+        if(phase==='after')set.call(this,key,value);
+        throw new DOMException('Synthetic interruption with images and journals staged','AbortError');
+      }
+      return set.call(this,key,value);
+    };
+  },phase);
+  await assert.rejects(restoreCompletionCheckpoint(importer,checkpoint),/Synthetic interruption/);
+  await fresh.close();fresh=await launch();await configureContext(fresh);
+  const restarted=await rollbackLoader(fresh);
+  assert.deepEqual(await restarted.evaluate(()=>legacyWrites),[]);
+  assert.deepEqual(await restarted.evaluate(()=>[
+    localStorage.getItem('taskpoints_v1'),JSON.parse(localStorage.getItem('taskpoints_recovery_write_lock_v1')).active
+  ]),[phase==='after'?checkpoint.raw:null,true]);
+  await assert.rejects(restoreCompletionCheckpoint(restarted,checkpoint),/rollback_fresh_profile_required/);
+  assert.deepEqual(await completionWriteEvidence(page),source);
+  assert.deepEqual(await page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(0)),checkpoint);
+  const retry=await browser.newContext({serviceWorkers:'block',timezoneId:'America/New_York'});
+  t.after(()=>retry.close());
+  await configureContext(retry);
+  assert.deepEqual(await restoreCompletionCheckpoint(await rollbackLoader(retry),checkpoint),{verified:true,checksum:checkpoint.checksum});
+});
 
 test('verified completion reads agree across real Home, Today, Game, and persisted matchups after Chromium restart',async t=>{
   const profile=fs.mkdtempSync(path.join(os.tmpdir(),'tp-verified-scores-'));
@@ -1712,8 +1947,8 @@ test('verified completion reads agree across real Home, Today, Game, and persist
   assert.equal(await reopened.evaluate(()=>computeTodayPoints()),15.8);
   assert.deepEqual(await scoresFromCore(reopened),before);
   assert.deepEqual((await backingTask(reopened)).recurrence,{mode:'daily'});
-  await assert.rejects(reopened.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(0)),
-    /isolated_completion_checkpoint_requires_verified_transfer/);
+  const checkpoint=await reopened.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(0));
+  assert.deepEqual(checkpoint.completions,ownedRewards);
 });
 
 test('verified scoring reads preserve unrelated journal edits through compaction and maintenance',async t=>{

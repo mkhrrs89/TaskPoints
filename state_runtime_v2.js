@@ -20120,11 +20120,14 @@
   // Isolated synthetic Task ownership only. The ordinary runtime/dark mirror
   // stays V1-authoritative. These APIs are never selected by production startup.
   const OWNED_TASK_META = 'isolated-task-owner-v1';
-  function ownedTaskContext(seed = false, scoringRead = false) {
+  function requireIsolatedTaskExperiment() {
     if (!['localhost','127.0.0.1'].includes(global.location?.hostname)
       || !String(global.location?.pathname || '').startsWith('/experiments/v2-home-plus-one-day/')
       || global.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ !== true)
       throw new Error('isolated_synthetic_task_context_required');
+  }
+  function ownedTaskContext(seed = false, scoringRead = false) {
+    requireIsolatedTaskExperiment();
     const fixture = JSON.parse(global.localStorage.getItem(OWNED_TASK_FIXTURE) || 'null');
     if (!fixture || fixture.syntheticOnly !== true || typeof fixture.id !== 'string'
       || fixture.phase !== (seed ? 'prepared' : 'sealed') || global.localStorage.getItem(DARK_MODE_KEY) === '1')
@@ -20324,6 +20327,15 @@
     try {const {completionRows: _unused,...s}=await readOwnedSnapshot(db);return {...s,authority:'v2-isolated-task',tasks:s.rows.sort((a,b)=>a.legacyIndex-b.legacyIndex).map(r=>clone(r.value))};}
     finally{db.close();}
   }
+  function verifyOwnedScoringRows(meta, completionRows) {
+    const seed = validateOwnedScoringSeed(meta.scoringSeed, meta.homeTaskEvidence, meta.homeTaskId);
+    const expected = new Map(seed.map(value=>['isolated-score:'+value.id,value]));
+    if (completionRows.length !== expected.size || completionRows.some(row=>row.ownerGeneration!==meta.generation
+      || !expected.has(row.id) || stableJson(row.value)!==stableJson(expected.get(row.id)))) {
+      throw new Error('isolated_completion_rows_unverified');
+    }
+    return seed;
+  }
   async function readIsolatedTaskScoring() {
     const fixture = ownedTaskContext(false, true);
     const marker = global.localStorage.getItem(OWNED_TASK_FIXTURE);
@@ -20333,12 +20345,7 @@
     try {
       const {meta,completionRows,sourceDrift} = await readOwnedSnapshot(db, true);
       if (sourceDrift || meta.mode !== 'owned') throw new Error('isolated_completion_source_conflict');
-      const seed = validateOwnedScoringSeed(meta.scoringSeed, meta.homeTaskEvidence, meta.homeTaskId);
-      const expected = new Map(seed.map(value=>['isolated-score:'+value.id,value]));
-      if (completionRows.length !== expected.size || completionRows.some(row=>row.ownerGeneration!==meta.generation
-        || !expected.has(row.id) || stableJson(row.value)!==stableJson(expected.get(row.id)))) {
-        throw new Error('isolated_completion_rows_unverified');
-      }
+      const seed = verifyOwnedScoringRows(meta, completionRows);
       const assertCurrent = () => {
         ownedTaskContext(false, true);
         const flex = inspectReadOnlyFlexJournalsForCutover();
@@ -20427,12 +20434,224 @@
       return {confirmedDurable:true,authority:'v2-isolated-task',replayed,receipt:clone(saved),task:clone(latest.value),taskRevision:latest.ownerRevision,generation:verified.meta.generation};
     }finally{db.close();}
   }
+  const OWNED_COMPLETION_ROLLBACK = 'taskpoints-isolated-task-completion-rollback-1';
+  const ROLLBACK_HOLD = 'taskpoints_recovery_write_lock_v1';
+
+  function rollbackLegacyState() {
+    const task = core.readPendingTaskMutations();
+    const flex = inspectReadOnlyFlexJournalsForCutover();
+    if (task.malformed || [inspectReadOnlyInboxJournalForCutover(), flex.completions, flex.order]
+      .some(journal => journal.reason === 'malformed')) throw new Error('rollback_unreadable_legacy_journal');
+    const habitKeys = ownedLegacyEvidence().filter(([key]) => key === core.PENDING_HABIT_DELTAS_KEY
+      || key.startsWith('taskpoints_v2_habit_journal_event_v1:'));
+    for (const [,raw] of habitKeys) {
+      const document = JSON.parse(raw);
+      if (!document || typeof document !== 'object'
+        || Object.values(document).some(row => !row?.habitId || !row.dayKey || !['habit','vice'].includes(row.source)))
+        throw new Error('rollback_unreadable_legacy_journal');
+    }
+    core.readPendingHabitDeltas();
+    core.readPendingPlayerEdits();
+    return core.readTaskPointsStoredState();
+  }
+
+  function replaceOwnedRollbackRows(state, task, rewards, journal) {
+    if (state?.tasks?.filter(row => String(row?.id) === task.id).length !== 1
+      || !Array.isArray(state.completions)) throw new Error('rollback_legacy_state_unverified');
+    const ids = new Set(state.completions.map(row => String(row?.id || '')));
+    const owned = new Map(rewards.map(row => [row.id, row]));
+    if (ids.has('') || ids.size !== state.completions.length
+      || state.completions.some(row => (String(row.taskId) === task.id || owned.has(String(row.id)))
+        && (String(row.taskId) !== task.id || !owned.has(row.id) || owned.get(row.id).completedAtISO !== row.completedAtISO))
+      || journal.completionDeletes.some(id => owned.has(id))
+      || journal.completionUpserts.some(row => owned.has(String(row.id)) || String(row.taskId) === task.id)
+      || journal.tasks.some(row => String(row.id) === task.id)) throw new Error('rollback_completion_evidence_conflict');
+    return {...state, tasks:state.tasks.map(row => String(row.id) === task.id ? task : row),
+      completions:[...state.completions.map(row => owned.get(row.id) || row),
+        ...rewards.filter(row => !ids.has(row.id))]};
+  }
+
+  function openRollbackDatabase({name, version}, stores) {
+    return new Promise((resolve, reject) => {
+      const request = global.indexedDB.open(name, version);
+      let abandoned = false;
+      request.onupgradeneeded = event => {
+        if (!stores || abandoned || event.oldVersion !== 0) {
+          request.transaction.abort();
+          return;
+        }
+        for (const {name, keyPath} of stores) request.result.createObjectStore(name, {keyPath});
+      };
+      request.onblocked = () => { abandoned = true; reject(new Error('rollback_database_open_blocked')); };
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        if (abandoned) { request.result.close(); return; }
+        request.result.onversionchange = () => request.result.close();
+        resolve(request.result);
+      };
+    });
+  }
+
+  function rollbackJsonValue(value) {
+    // Round-trip the JSON values used by the legacy stores. Reject values
+    // that JSON can silently coerce, including nested non-JSON IDB types.
+    const json = JSON.stringify(value, function(key, serialized) {
+      const original = this[key];
+      if (original === null || Array.isArray(original) || typeof original === 'string'
+        || typeof original === 'boolean' || (Number.isFinite(original) && !Object.is(original, -0))
+        || (typeof original === 'object' && Object.getPrototypeOf(original) === Object.prototype)) return serialized;
+      throw new Error('rollback_unsupported_database_value');
+    });
+    return JSON.parse(json);
+  }
+
+  async function captureRollbackDatabases() {
+    const catalog = (await global.indexedDB.databases()).filter(db => db.name !== DB_NAME)
+      .sort((a,b) => a.name.localeCompare(b.name));
+    const databases = [];
+    for (const entry of catalog) {
+      const db = await openRollbackDatabase(entry);
+      try {
+        const names = Array.from(db.objectStoreNames);
+        if (!names.length || db.version !== entry.version) throw new Error('rollback_database_schema_unverified');
+        const tx = db.transaction(names, 'readonly'), done = transactionPromise(tx);
+        const [stores] = await Promise.all([Promise.all(names.map(async name => {
+          const store = tx.objectStore(name);
+          if (store.indexNames.length || store.autoIncrement
+            || (store.keyPath !== null && typeof store.keyPath !== 'string'))
+            throw new Error('rollback_unsupported_database_schema');
+          const [keys, values] = await Promise.all([requestPromise(store.getAllKeys()), requestPromise(store.getAll())]);
+          const rows = await Promise.all(values.map(async (value, index) => {
+            const key = keys[index];
+            if (typeof key !== 'string' && !Number.isFinite(key)) throw new Error('rollback_unsupported_database_key');
+            if (value instanceof global.Blob) {
+              // Legacy images use out-of-line string keys and plain Blobs.
+              if (value.constructor !== global.Blob || store.keyPath !== null)
+                throw new Error('rollback_unsupported_database_blob');
+              return {key, blob:{type:value.type, bytes:Array.from(new Uint8Array(await value.arrayBuffer()))}};
+            }
+            return {key, value:rollbackJsonValue(value)};
+          }));
+          return {name, keyPath:store.keyPath, rows};
+        })), done]);
+        databases.push({name:entry.name, version:entry.version, stores});
+      } finally { db.close(); }
+    }
+    return databases;
+  }
+
+  async function prepareCompletionRollback(db, prior, expectedRevision) {
+    const {meta, rows, journal, completionRows} = prior;
+    const fixture = ownedTaskContext();
+    const marker = global.localStorage.getItem(OWNED_TASK_FIXTURE);
+    const currentLegacySource = ownedLegacyEvidence();
+    if (fixture.completionRead !== true || fixture.homeTaskId !== 't1'
+      || global.localStorage.getItem(OWNED_TASK_SCORING) !== fixture.id || meta.revision !== expectedRevision)
+      throw new Error('rollback_completion_selection_conflict');
+    const rewards = verifyOwnedScoringRows(meta, completionRows);
+    const task = rows.find(row => row.id === meta.homeTaskId).value;
+    const effective = rollbackLegacyState();
+    const pending = core.readPendingTaskMutations().record;
+    const canonical = core.parseTaskPointsStorageJson(new Map(currentLegacySource).get(core.STORAGE_KEY));
+    const snapshot = replaceOwnedRollbackRows(canonical, task, rewards, pending);
+    const expected = replaceOwnedRollbackRows(effective, task, rewards, pending);
+    const raw = core.serializeTaskPointsStoredState(snapshot);
+    if (stableJson(core.parseTaskPointsStorageJson(raw)) !== stableJson(snapshot))
+      throw new Error('rollback_snapshot_roundtrip_unverified');
+    const databases = await captureRollbackDatabases();
+    const payload = rollbackJsonValue({format:OWNED_COMPLETION_ROLLBACK, generation:meta.generation, revision:meta.revision,
+      snapshot, raw, expected, databases, currentLegacySource, originalSource:meta.source,
+      receipts:journal, completions:rewards, v2Frozen:true});
+    const checksum = await previewRecoveryFingerprint(payload);
+    if (stableJson(databases) !== stableJson(await captureRollbackDatabases()))
+      throw new Error('rollback_legacy_database_changed');
+
+    // Seal only after verifying the detached candidate. Recheck all authority
+    // records in the transaction that freezes V2, and check localStorage at
+    // that boundary. Legacy databases and localStorage are separate stores.
+    const tx = db.transaction(['tasks','mutations','meta','completions'], 'readwrite', {durability:'strict'});
+    const done = transactionPromise(tx);
+    const store = tx.objectStore('meta');
+    const reads = [store.get(OWNED_TASK_META), tx.objectStore('tasks').getAll(),
+      tx.objectStore('mutations').getAll(), tx.objectStore('completions').getAll()];
+    let remaining = reads.length, failure;
+    for (const request of reads) request.onsuccess = () => {
+      if (--remaining) return;
+      try {
+        const [current, tasks, mutations, completions] = reads.map(read => read.result);
+        const receipts = mutations.filter(row => row.type === 'isolated-task-update').sort((a,b) => a.revision-b.revision);
+        if (ownedTaskContext().id !== fixture.id || global.localStorage.getItem(OWNED_TASK_FIXTURE) !== marker
+          || stableJson(currentLegacySource) !== stableJson(ownedLegacyEvidence())
+          || stableJson([meta, rows, journal, completionRows]) !== stableJson([current, tasks, receipts, completions])
+          || (meta.mode === 'rollback-frozen' && meta.rollbackChecksum !== checksum))
+          throw new Error('rollback_revision_conflict');
+        if (meta.mode === 'owned') store.put({...meta, mode:'rollback-frozen', rollbackChecksum:checksum});
+      } catch (error) { failure = error; tx.abort(); }
+    };
+    try { await done; } catch (error) { throw failure || error; }
+    return {...payload, checksum};
+  }
+
+  async function restoreIsolatedTaskCompletionRollback(checkpoint) {
+    requireIsolatedTaskExperiment();
+    if (global.location.pathname !== '/experiments/v2-home-plus-one-day/full/rollback.html'
+      || typeof global.navigator?.locks?.request !== 'function'
+      || typeof global.indexedDB?.databases !== 'function') throw new Error('rollback_disposable_context_required');
+    return global.navigator.locks.request(OWNED_COMPLETION_ROLLBACK, async () => {
+      const storage = global.localStorage;
+      if (storage.length || (await global.indexedDB.databases()).length)
+        throw new Error('rollback_fresh_profile_required');
+      const {checksum, ...payload} = clone(checkpoint);
+      if (payload.format !== OWNED_COMPLETION_ROLLBACK || payload.v2Frozen !== true
+        || checksum !== await previewRecoveryFingerprint(payload)
+        || stableJson(core.parseTaskPointsStorageJson(payload.raw)) !== stableJson(payload.snapshot))
+        throw new Error('rollback_detached_checkpoint_unverified');
+      const entries = payload.currentLegacySource.filter(([key]) => key !== OWNED_TASK_SCORING)
+        .map(([key, value]) => [key, key === core.STORAGE_KEY ? payload.raw : value]);
+      const hold = JSON.stringify({active:true, retainUntilManualRecovery:true, token:checksum});
+      if (storage.length) throw new Error('rollback_fresh_profile_required');
+      storage.setItem(ROLLBACK_HOLD, hold);
+      if (storage.getItem(ROLLBACK_HOLD) !== hold) throw new Error('rollback_hold_unverified');
+      // A partial destination is disposable. Retain the hold on any error
+      // or interruption; only a completely verified import may open V1.
+      for (const database of payload.databases) {
+        const db = await openRollbackDatabase(database, database.stores);
+        try {
+          const tx = db.transaction(database.stores.map(store => store.name), 'readwrite', {durability:'strict'});
+          const done = transactionPromise(tx);
+          try {
+            for (const {name, keyPath, rows} of database.stores) for (const row of rows) {
+              const store = tx.objectStore(name);
+              const value = row.blob ? new global.Blob([Uint8Array.from(row.blob.bytes)], {type:row.blob.type}) : row.value;
+              if (keyPath === null) store.add(value, row.key);
+              else store.add(value);
+            }
+          } catch (error) { tx.abort(); await done.catch(() => {}); throw error; }
+          await done;
+        } finally { db.close(); }
+      }
+      if (stableJson(await captureRollbackDatabases()) !== stableJson(payload.databases))
+        throw new Error('rollback_database_readback_unverified');
+      for (const [key, value] of entries) if (key !== core.STORAGE_KEY) storage.setItem(key, value);
+      storage.setItem(core.STORAGE_KEY, payload.raw);
+      if (stableJson(ownedLegacyEvidence().filter(([key]) => key !== ROLLBACK_HOLD)) !== stableJson(entries)
+        || storage.getItem(ROLLBACK_HOLD) !== hold || storage.getItem(OWNED_TASK_FIXTURE) !== null
+        || stableJson(rollbackLegacyState()) !== stableJson(payload.expected))
+        throw new Error('rollback_v1_readback_unverified');
+      storage.removeItem(ROLLBACK_HOLD);
+      if (storage.getItem(ROLLBACK_HOLD) !== null) throw new Error('rollback_release_unverified');
+      return {verified:true, checksum};
+    });
+  }
+
   async function prepareIsolatedTaskRollback(expectedRevision) {
     const db=await openOwnedTasks();
     try{
-      const prior=await readOwnedSnapshot(db);
+      const prior=await readOwnedSnapshot(db, true);
       if(prior.sourceDrift)throw new Error('legacy_source_changed_preserved_reconciliation_required');
-      if(prior.meta.scoringSeed)throw new Error('isolated_completion_checkpoint_requires_verified_transfer');
+      if(prior.meta.scoringSeed !== undefined || prior.completionRows.length
+        || ownedTaskContext().completionRead === true || global.localStorage.getItem(OWNED_TASK_SCORING) !== null)
+        return await prepareCompletionRollback(db, prior, expectedRevision);
       const rollbackSource = ownedLegacyEvidence();
       if (prior.meta.homeTaskId) {
         // These ordinary readers can leave unreadable journal bytes unapplied.
@@ -20502,6 +20721,7 @@
     readIsolatedTaskScoring,
     commitIsolatedOwnedTask,
     prepareIsolatedTaskRollback,
+    restoreIsolatedTaskCompletionRollback,
     inspectStartupMeta,
     seedFromLegacy,
     applyMutation(mutation) {
