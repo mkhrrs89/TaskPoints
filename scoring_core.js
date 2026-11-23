@@ -91,10 +91,9 @@
     if (!usesIsolatedTaskScoring()) throw new Error('Isolated Today reconciliation is inactive.');
     const locks = global.navigator?.locks;
     if (typeof locks?.request !== 'function') throw new Error('Today list lock is unavailable.');
-    return locks.request(TODAY_LIST_KEY, async () => {
+    return locks.request(TODAY_LIST_KEY, () => global.TaskPointsStateRuntimeV2.readIsolatedTaskScoring(proof => {
       // Start a new verification inside the lock. The already verified reward
       // rows are the replay source, so this needs no separately written cursor.
-      const proof = await global.TaskPointsStateRuntimeV2.readIsolatedTaskScoring();
       const raw = localStorage.getItem(TODAY_LIST_KEY);
       if (expectedRaw !== undefined && expectedRaw !== raw) throw new Error('Today list changed while editing.');
       const list = parseIsolatedTodayList(raw);
@@ -122,7 +121,7 @@
       if (localStorage.getItem(TODAY_LIST_KEY) !== candidate)
         throw new Error('Today list write could not be verified.');
       return true;
-    });
+    }));
   }
 
   function readScoringCompletions(completions) {
@@ -140,16 +139,20 @@
   }
 
   async function runWithVerifiedTaskScoring(operation) {
-    if (!await refreshIsolatedTaskScoring()) return;
-    const read = verifiedCompletionRead;
+    verifiedCompletionRead = null;
+    let ran = false;
     try {
-      verifiedScoringWrite = {read,source:JSON.stringify(read.assertCurrent())};
+      return await global.TaskPointsStateRuntimeV2.readIsolatedTaskScoring(read => {
+        verifiedScoringWrite = {read,source:JSON.stringify(read.assertCurrent())};
+        verifiedCompletionRead = read;
+        ran = true;
+        try { return operation(); }
+        finally { verifiedScoringWrite = null; }
+      });
     } catch (error) {
+      if (ran) throw error;
       console.warn('Verified Task scoring is paused:', error.message);
-      return;
     }
-    try { return operation(); }
-    finally { verifiedScoringWrite = null; }
   }
 
   function verifiedScoringSaveOptions() {

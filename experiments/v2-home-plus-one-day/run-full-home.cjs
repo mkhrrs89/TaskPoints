@@ -3,7 +3,7 @@ const {test,before,after}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),os=require('node:os');
 const {chromium}=require('playwright');
-const {root}=require('./home-source.cjs');
+const {root,extract}=require('./home-source.cjs');
 const prefix='/experiments/v2-home-plus-one-day/full/';
 const marker='taskpoints_isolated_task_fixture_v1';
 const oldDate='2026-11-15',newDate='2026-11-16';
@@ -1598,28 +1598,32 @@ const unrelatedRewardRows=[
   {id:'synthetic-unrelated-current',taskId:'t2',title:'Synthetic unrelated reward',points:3,completedAtISO:quietDate+'T16:00:00Z'}
 ];
 
-async function seedScoringReads(t,context,{oneOff=false}={}){
+async function seedScoringReads(t,context,{oneOff=false,write=false,recurrence,dueDateISO}={}){
   const f=await prepareCompletionBoundary(t,context);
-  const legacyRewards=[{...ownedRewards[0],points:5},...unrelatedRewardRows];
-  await f.page.evaluate(async({marker,ownedRewards,legacyRewards,day,oneOff})=>{
+  const legacyRewards=write?[...unrelatedRewardRows]:[{...ownedRewards[0],points:5},...unrelatedRewardRows];
+  const completionSeed=write?(oneOff?[]:ownedRewards.slice(1)):(oneOff?ownedRewards.slice(0,1):ownedRewards);
+  await f.page.evaluate(async({marker,completionSeed,legacyRewards,day,oneOff,write,recurrence,dueDateISO})=>{
     const core=TaskPointsCore,snapshot=core.readTaskPointsStoredState();
     snapshot.completions=legacyRewards;
     const task=snapshot.tasks.find(row=>row.id==='t1');
-    task.recurrence={mode:oneOff?'none':'daily'};
-    if(oneOff)Object.assign(task,{status:'done',completedAtISO:ownedRewards[0].completedAtISO});
+    task.recurrence=recurrence || {mode:oneOff?'none':'daily'};
+    if(write)task.postponedDays=3;
+    if(dueDateISO!==undefined)task.dueDateISO=dueDateISO;
+    if(oneOff&&!write)Object.assign(task,{status:'done',completedAtISO:completionSeed[0].completedAtISO});
     snapshot.scoringSettings={...snapshot.scoringSettings,inertia:{windowDays:7,multiplier:0}};
     snapshot.players.push({id:'SYN2',name:'Synthetic second player',baseline:50},{id:'SYN3',name:'Synthetic third player',baseline:50});
     snapshot.matchups.push({id:'synthetic-owned-matchup',date:day,dateKey:day,playerAId:'YOU',playerBId:'SYN',
       scoreA:8,scoreB:46,matchupType:'exhibition'});
     core.writeTaskPointsStoredState(snapshot);
-    const fixture={id:crypto.randomUUID(),syntheticOnly:true,homeTaskId:'t1',completionRead:true,phase:'prepared'};
+    const fixture={id:crypto.randomUUID(),syntheticOnly:true,homeTaskId:'t1',completionRead:true,
+      ...(write?{completionWrite:true}:{}),phase:'prepared'};
     localStorage.setItem('taskpoints_isolated_task_scoring_read_v1',fixture.id);
     localStorage.setItem(marker,JSON.stringify(fixture));
-    await TaskPointsStateRuntimeV2.initializeIsolatedTaskOwner(snapshot,{completionSeed:ownedRewards});
+    await TaskPointsStateRuntimeV2.initializeIsolatedTaskOwner(snapshot,{completionSeed});
     localStorage.setItem(marker,JSON.stringify({...fixture,phase:'sealed'}));
-  },{marker,ownedRewards:oneOff?ownedRewards.slice(0,1):ownedRewards,legacyRewards,day:quietDate,oneOff});
+  },{marker,completionSeed,legacyRewards,day:quietDate,oneOff,write,recurrence,dueDateISO});
   await f.page.reload();
-  if(oneOff)await f.page.waitForFunction(()=>TaskPointsHomeLiveState?.getState()?.tasks?.find(row=>row.id==='t1')?.status==='done');
+  if(oneOff&&!write)await f.page.waitForFunction(()=>TaskPointsHomeLiveState?.getState()?.tasks?.find(row=>row.id==='t1')?.status==='done');
   else await waitHome(f.page);
   return {...f,legacyRewards};
 }
@@ -2202,4 +2206,323 @@ test('verified Today cleanup preserves malformed bytes while rendering the verif
     assert.equal(await today.page.locator('#noteInput').inputValue(),'Keep this unsaved text');
     await today.page.close();
   }
+});
+
+const prepareCompletion=(page,source)=>page.evaluate(source=>TaskPointsStateRuntimeV2.prepareIsolatedTaskCompletion(source),source);
+const commitCompletion=(page,intent)=>page.evaluate(intent=>TaskPointsStateRuntimeV2.commitIsolatedTaskCompletion(intent),intent);
+const verifiedRewards=page=>page.evaluate(async()=> (await TaskPointsStateRuntimeV2.readIsolatedTaskScoring()).completions);
+
+async function completionProfile(t){
+  const profile=fs.mkdtempSync(path.join(os.tmpdir(),'tp-completion-transaction-'));
+  const launch=()=>chromium.launchPersistentContext(profile,{
+    executablePath:process.env.BOUNDARY_CHROMIUM_PATH||'/usr/bin/chromium',serviceWorkers:'block',timezoneId:'America/New_York'
+  });
+  let context=await launch();
+  t.after(async()=>{await context.close();fs.rmSync(profile,{recursive:true,force:true});});
+  return {context,async restart(){
+    await context.close();context=await launch();await configureContext(context);
+    return context;
+  }};
+}
+
+test('V2 completion transaction serializes Home and Today tabs, verifies scores and rolls back one fractional reward',async t=>{
+  const profile=await completionProfile(t);
+  const {page,context,legacyRewards}=await seedScoringReads(t,profile.context,{write:true});
+  await openTaskEdit(page);await pointsField(page).fill('12.75');
+  assert.equal((await submitTaskEdit(page)).points,12.75);
+  const peer=await todayCompletionPage(context);
+  await todayDone(peer.page);
+  assert.match(peer.alerts.at(-1) || '',/owned by the V2 experiment/);
+  const homeIntent=await prepareCompletion(page,'home');
+  const todayIntent=await prepareCompletion(peer.page,'today');
+  assert.equal(homeIntent.expectedRevision,1);
+  assert.equal(todayIntent.expectedRevision,1);
+  assert.notEqual(homeIntent.actionId,todayIntent.actionId);
+
+  // Disable Web Locks on these two test pages only. Exactly-once admission
+  // has to survive on the shared IndexedDB transaction alone.
+  for(const p of [page,peer.page])await p.evaluate(()=>{
+    window.requestLock=LockManager.prototype.request;
+    LockManager.prototype.request=()=>Promise.reject(Error('No Web Locks in this test'));
+  });
+  const attempts=[{page,intent:homeIntent},{page:peer.page,intent:todayIntent}];
+  const results=await Promise.allSettled(attempts.map(({page,intent})=>commitCompletion(page,intent)));
+  for(const p of [page,peer.page])await p.evaluate(()=>{LockManager.prototype.request=window.requestLock;});
+  assert.equal(results.filter(row=>row.status==='fulfilled').length,1,
+    results.map(row=>row.status==='fulfilled'?row.status:row.reason.message).join('\n'));
+  const winner=results.findIndex(row=>row.status==='fulfilled');
+  assert.match(results[1-winner].reason.message,/owned_completion_already_awarded/);
+  const {receipt,confirmedDurable,replayed}=results[winner].value;
+  assert.equal(confirmedDurable,true);
+  assert.equal(replayed,false);
+  assert.deepEqual(receipt.intent,attempts[winner].intent);
+  assert.equal(receipt.priorRevision,1);
+  assert.equal(receipt.revision,2);
+  assert.equal(receipt.completion.points,12.75);
+  assert.equal(receipt.completion.completedAtISO,quietDate+'T17:00:00.000Z');
+  assert.equal(receipt.after.dueDateISO,'2026-11-19');
+  assert.equal(receipt.after.originalDueDateISO,receipt.before.originalDueDateISO);
+  assert.equal(receipt.after.postponedDays,0);
+  assert.equal(receipt.after.completedAtISO,null);
+  assert.deepEqual(receipt.after.unknownTask,receipt.before.unknownTask);
+  const previouslyEarned=[...ownedRewards.slice(1),receipt.completion];
+  for(const row of await Promise.all(attempts.flatMap(({page})=>[1,2,3].map(()=>commitCompletion(page,receipt.intent)))))
+    assert.deepEqual(row,{confirmedDurable:true,replayed:true,receipt});
+  assert.deepEqual(await verifiedRewards(page),previouslyEarned);
+  await assert.rejects(commitCompletion(page,{...receipt.intent,source:attempts[1-winner].intent.source}),/owned_task_action_id_conflict/);
+  assert.deepEqual(await canonicalCompletions(page),legacyRewards);
+
+  await peer.page.close();
+  await writeTodayFixture(page,JSON.stringify(seededTodayList));
+  assert.equal(await todayBytes(page),JSON.stringify(seededTodayList));
+  const reopenedContext=await profile.restart();
+  const reopened=await openScoringPage(reopenedContext,'index.html');
+  await waitHome(reopened);
+  assert.deepEqual(await prepareCompletion(reopened,receipt.intent.source),receipt.intent,'same-day retry recovers the durable intent');
+  assert.deepEqual(await commitCompletion(reopened,receipt.intent),{confirmedDurable:true,replayed:true,receipt});
+  await waitTodayBytes(reopened,JSON.stringify(cleanedTodayList));
+  const today=await todayCompletionPage(reopenedContext);
+  await assertCheckedOwnedTask(today.page);
+  assert.equal(await today.page.evaluate(()=>TaskPointsCore.reconcileIsolatedTodayList()),false);
+  await todayDone(today.page);
+  assert.deepEqual(await canonicalCompletions(reopened),legacyRewards);
+  await reopened.waitForFunction(()=>document.getElementById('todayScoreIslandValue')?.textContent==='15.8');
+  const game=await openScoringPage(reopenedContext,'game.html');
+  await game.locator('#playersList .playerCard').first().waitFor();
+  assert.equal(await game.evaluate(()=>computeTodayPoints()),15.8);
+  const totals=(await scoresFromCore(game)).totals;
+  assert.equal(totals[quietDate],15.75);
+  assert.equal(totals['2026-11-17'],-2.25);
+  assert.equal(totals['2026-11-16'],0);
+  const matchups=await openScoringPage(reopenedContext,'matchups.html');
+  const action=matchups.locator('#matchupsChronological').getByRole('button',{name:'Generate retro matchups'}).first();
+  const header=action.locator('xpath=ancestor::section[1]').locator('.matchup-collapsible-header').first();
+  if(await header.getAttribute('aria-expanded')==='false')await header.click();
+  await action.click();
+  await matchups.waitForFunction(()=>{
+    const s=TaskPointsCore.parseTaskPointsStorageJson(localStorage.getItem(TaskPointsCore.STORAGE_KEY));
+    return s.matchups.find(row=>row.id==='synthetic-owned-matchup')?.scoreA===15.75
+      && s.matchups.find(row=>row.id==='synthetic-inbox-game')?.scoreB===-2.25;
+  });
+  await openTaskEdit(reopened);await pointsField(reopened).fill('19');
+  assert.equal((await submitTaskEdit(reopened)).points,19);
+  assert.deepEqual(await verifiedRewards(reopened),previouslyEarned);
+  assert.deepEqual(await commitCompletion(reopened,receipt.intent),{confirmedDurable:true,replayed:true,receipt});
+  assert.deepEqual(await canonicalCompletions(reopened),legacyRewards);
+
+  // Store new evidence without changing the unrelated recorded source.
+  await today.page.close();await game.close();await matchups.close();
+  const checkpoint=await reopened.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(3));
+  assert.deepEqual(checkpoint.receipts.filter(row=>row.type==='isolated-task-completion'),[receipt]);
+  const fresh=await browser.newContext({serviceWorkers:'block',timezoneId:'America/New_York'});
+  t.after(()=>fresh.close());await configureContext(fresh);
+  const loader=await rollbackLoader(fresh);
+  assert.deepEqual(await restoreCompletionCheckpoint(loader,checkpoint),{verified:true,checksum:checkpoint.checksum});
+  const home=await openScoringPage(fresh,'index.html');
+  await waitHome(home);
+  assert.equal(await home.evaluate(()=>computeTodayPoints()),15.8);
+  assert.equal((await backingTask(home)).points,19);
+  assert.equal((await backingTask(home)).dueDateISO,'2026-11-19');
+  assert.deepEqual(await canonicalCompletions(home),[...legacyRewards,...previouslyEarned]);
+  assert.equal(await home.evaluate(()=>save('home-completion-transaction-rollback',{userInitiated:true})),true);
+  assert.deepEqual(await canonicalCompletions(home),[...legacyRewards,...previouslyEarned]);
+});
+
+test('V2 completion transaction closes a one-off Task and refuses another award on a later day',async t=>{
+  const {page}=await seedScoringReads(t,undefined,{write:true,oneOff:true});
+  await openTaskEdit(page);await pointsField(page).fill('-3.25');
+  assert.equal((await submitTaskEdit(page)).points,-3.25);
+  const intent=await prepareCompletion(page,'home');
+  const {receipt}=await commitCompletion(page,intent);
+  assert.equal(receipt.completion.points,-3.25);
+  assert.equal(receipt.after.status,'done');
+  assert.equal(receipt.after.completedAtISO,receipt.completion.completedAtISO);
+  assert.equal(receipt.after.dueDateISO,receipt.before.dueDateISO);
+  assert.equal(receipt.after.postponedDays,receipt.before.postponedDays);
+  await page.clock.setFixedTime(new Date('2026-11-19T17:00:00Z'));
+  assert.deepEqual(await commitCompletion(page,intent),{confirmedDurable:true,replayed:true,receipt});
+  await assert.rejects(commitCompletion(page,await prepareCompletion(page,'home')),/invalid_owned_completion_task_or_day/);
+  assert.deepEqual(await verifiedRewards(page),[receipt.completion]);
+});
+
+test('V2 completion transaction refuses stale Points and midnight rollover, then records a zero reward on the new local day',async t=>{
+  const {page}=await seedScoringReads(t,undefined,{write:true});
+  const stale=await prepareCompletion(page,'home');
+  await openTaskEdit(page);await pointsField(page).fill('0');
+  assert.equal((await submitTaskEdit(page)).points,0);
+  await assert.rejects(commitCompletion(page,stale),/owned_task_stale_edit/);
+  await page.clock.setFixedTime(new Date('2026-11-19T04:59:59Z'));
+  const old=await prepareCompletion(page,'home');
+  assert.equal(old.day,quietDate);
+  await page.clock.setFixedTime(new Date('2026-11-19T05:00:00Z'));
+  await assert.rejects(commitCompletion(page,old),/owned_completion_day_changed/);
+  const current=await prepareCompletion(page,'home');
+  assert.equal(current.day,'2026-11-19');
+  const {receipt}=await commitCompletion(page,current);
+  assert.equal(receipt.completion.points,0);
+  assert.equal(receipt.completion.completedAtISO,'2026-11-19T05:00:00.000Z');
+  assert.deepEqual(await verifiedRewards(page),[...ownedRewards.slice(1),receipt.completion]);
+  // The seeded rewards occupy their original local days as well.
+  await page.clock.setFixedTime(new Date('2026-11-18T02:00:00Z'));
+  const seededDay=await prepareCompletion(page,'home');
+  assert.equal(seededDay.day,'2026-11-17');
+  await assert.rejects(commitCompletion(page,seededDay),/owned_completion_already_awarded/);
+});
+
+for(const fault of ['quota','abort'])test(`V2 completion transaction rolls back every store on ${fault} and allows the identical retry`,async t=>{
+  const {page}=await seedScoringReads(t,undefined,{write:true});
+  const intent=await prepareCompletion(page,'home');
+  const before=await owned(page);
+  const history=await verifiedRewards(page);
+  await page.evaluate(fault=>{
+    const {add,put}=IDBObjectStore.prototype;
+    window.restoreStoreMethods=()=>Object.assign(IDBObjectStore.prototype,{add,put});
+    if(fault==='quota')IDBObjectStore.prototype.add=function(row,...args){
+      if(row?.type==='isolated-task-completion')throw new DOMException('Synthetic completion quota','QuotaExceededError');
+      return add.call(this,row,...args);
+    };
+    else IDBObjectStore.prototype.put=function(row,...args){
+      const request=put.call(this,row,...args);
+      if(this.name==='meta'&&row?.id==='isolated-task-owner-v1'&&row.revision===1)
+        request.addEventListener('success',()=>this.transaction.abort(),{once:true});
+      return request;
+    };
+  },fault);
+  await assert.rejects(commitCompletion(page,intent),fault==='quota'?/QuotaExceededError/:/indexeddb_transaction_aborted/);
+  await page.evaluate(()=>restoreStoreMethods());
+  assert.deepEqual(await owned(page),before);
+  assert.deepEqual(await verifiedRewards(page),history);
+  assert.equal((await commitCompletion(page,intent)).receipt.revision,1);
+});
+
+for(const phase of ['before commit','after commit'])test(`V2 completion transaction survives a tab closing ${phase} and retries after Chromium restart`,async t=>{
+  const profile=await completionProfile(t);
+  const {page}=await seedScoringReads(t,profile.context,{write:true});
+  const intent=await prepareCompletion(page,'home');
+  await interruptOwnedWrite(page,phase);
+  await page.evaluate(intent=>{
+    window.completionOutcome=null;
+    TaskPointsStateRuntimeV2.commitIsolatedTaskCompletion(intent).then(
+      value=>{window.completionOutcome=value;},error=>{window.completionOutcome={error:error.message};}
+    );
+  },intent);
+  await page.waitForFunction(()=>window.ownedInterruptionReached===true);
+  assert.notEqual(await page.evaluate(()=>window.completionOutcome?.confirmedDurable),true);
+  await page.close();
+  const context=await profile.restart();
+  const home=await openScoringPage(context,'index.html');
+  await waitHome(home);
+  const committed=phase==='after commit';
+  const before=await verifiedRewards(home);
+  assert.equal(before.length,committed?3:2);
+  const persisted=(await owned(home)).journal[0];
+  if(committed)assert.deepEqual(await prepareCompletion(home,'home'),intent);
+  const first=await commitCompletion(home,intent);
+  assert.equal(first.replayed,committed);
+  if(committed)assert.deepEqual(first.receipt,persisted);
+  assert.deepEqual(await commitCompletion(home,intent),{...first,replayed:true});
+  assert.deepEqual(await verifiedRewards(home),[...ownedRewards.slice(1),first.receipt.completion]);
+});
+
+for(const fault of ['missing receipt','missing reward','contradictory reward'])test(`V2 completion transaction refuses ${fault} for retry, scoring and rollback`,async t=>{
+  const {page}=await seedScoringReads(t,undefined,{write:true});
+  const intent=await prepareCompletion(page,'home');
+  const result=await commitCompletion(page,intent);
+  await page.evaluate(async({fault,receipt})=>{
+    const db=await new Promise((resolve,reject)=>{
+      const request=indexedDB.open(TaskPointsStateRuntimeV2.DB_NAME);
+      request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);
+    });
+    try {
+      await new Promise((resolve,reject)=>{
+        const tx=db.transaction(['completions','mutations'],'readwrite');
+        tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);
+        const rewards=tx.objectStore('completions'),receipts=tx.objectStore('mutations');
+        const key='isolated-done-day:t1:'+receipt.intent.day;
+        if(fault==='missing receipt')receipts.delete(receipt.id);
+        else if(fault==='missing reward')rewards.delete(key);
+        else {
+          const read=rewards.get(key);
+          read.onsuccess=()=>{
+            const row=read.result;
+            row.value.points=999;
+            rewards.put(row);
+            receipts.put({...receipt,completion:row.value});
+          };
+        }
+      });
+    }finally{db.close();}
+  },{fault,receipt:result.receipt});
+  const refusal=/owned_task_journal_incomplete|isolated_completion_rows_unverified|owned_completion_receipt_conflict/;
+  await assert.rejects(commitCompletion(page,intent),refusal);
+  await assert.rejects(verifiedRewards(page),refusal);
+  await assert.rejects(page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(1)),refusal);
+});
+
+for(const [recurrence,dueDateISO,expected] of [
+  [{mode:'everyWeekday'},'2026-11-13','2026-11-16'],
+  [{mode:'weekly'},null,'2026-11-25'],
+  [{mode:'monthly'},'2026-01-31','2026-03-03'],
+  [{mode:'yearly'},'2024-02-29','2025-03-01'],
+  [{mode:'custom',customUnit:'day',customCount:3},quietDate,'2026-11-21'],
+  [{mode:'custom',customUnit:'week',customCount:2},quietDate,'2026-12-02'],
+  [{mode:'custom',customUnit:'month',customCount:2},'2026-12-31','2027-03-03'],
+  [{mode:'custom',customUnit:'year',customCount:2},'2024-02-29','2026-03-01']
+])test(`V2 completion transaction keeps Home and Today recurrence for ${recurrence.customUnit || recurrence.mode}`,async t=>{
+  const {page}=await seedScoringReads(t,undefined,{write:true,recurrence,dueDateISO});
+  const todaySource=read('today.html');
+  const todayRule=extract(todaySource,'addDays')+'\n'+extract(todaySource,'computeNextDueDate');
+  const intent=await prepareCompletion(page,'home');
+  const before=(await owned(page)).tasks.find(row=>row.id==='t1');
+  const expectedDates=await page.evaluate(({task,todayRule})=>[
+    computeNextDueDate(task),
+    new Function('task','dayKeyNow',todayRule+'\nreturn computeNextDueDate(task);')(task,TaskPointsCore.todayKey)
+  ],{task:before,todayRule});
+  assert.deepEqual(expectedDates,[expected,expected]);
+  const {receipt}=await commitCompletion(page,intent);
+  assert.equal(receipt.after.dueDateISO,expected);
+  assert.equal(receipt.after.postponedDays,0);
+});
+
+test('V2 completion transaction refuses a changed local time zone and a competing legacy Task edit',async t=>{
+  const {page}=await seedScoringReads(t,undefined,{write:true});
+  const intent=await prepareCompletion(page,'home');
+  const before=await owned(page);
+  const zone=await page.evaluate(()=>{
+    const DateTimeFormat=Intl.DateTimeFormat;
+    window.restoreTimeZone=()=>{Intl.DateTimeFormat=DateTimeFormat;};
+    Intl.DateTimeFormat=(...args)=>{
+      const formatter=DateTimeFormat(...args);
+      const options=formatter.resolvedOptions();
+      formatter.resolvedOptions=()=>({...options,timeZone:'America/Chicago'});
+      return formatter;
+    };
+    return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  });
+  assert.equal(zone,'America/Chicago');
+  await assert.rejects(commitCompletion(page,intent),/isolated_completion_time_zone_or_selection_changed/);
+  await page.evaluate(()=>{
+    restoreTimeZone();
+    if(!TaskPointsCore.journalTaskUpdates(['t1'],task=>{task.points=42;return true;}))
+      throw Error('Expected competing legacy edit to be journaled');
+  });
+  await assert.rejects(commitCompletion(page,intent),/isolated_completion_source_conflict/);
+  const current=await owned(page);
+  assert.equal(current.sourceDrift,true);
+  assert.deepEqual(current.rows,before.rows);
+  assert.deepEqual(current.journal,before.journal);
+});
+
+test('V2 completion transaction is held for ordinary seeded reads and metric-derived rewards',async t=>{
+  const {page}=await seedScoringReads(t);
+  await assert.rejects(prepareCompletion(page,'home'),/isolated_completion_write_not_selected/);
+  await assert.rejects(commitCompletion(page,{}),/isolated_completion_write_not_selected/);
+
+  const {page:writer}=await seedScoringReads(t,undefined,{write:true});
+  await openTaskEdit(writer);await titleField(writer).fill('Mood Score (50)');
+  assert.equal((await submitTaskEdit(writer)).ok,true);
+  const before=await owned(writer);
+  await assert.rejects(commitCompletion(writer,await prepareCompletion(writer,'home')),/owned_completion_requires_metric_scoring/);
+  assert.deepEqual(await owned(writer),before);
+  assert.deepEqual(await verifiedRewards(writer),ownedRewards.slice(1));
 });

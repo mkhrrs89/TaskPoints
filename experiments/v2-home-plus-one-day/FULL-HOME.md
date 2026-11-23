@@ -263,6 +263,53 @@ passed in the focused rerun of this change. The intermittent Inbox
 display check passed in both runs on this change. Both assertions
 remain in place.
 
+## Atomic synthetic Task completion
+
+Only the explicitly write-enabled loopback fixture can run the
+transaction, and it owns only Task `t1`. The existing Home and Today
+Done controls still refuse that Task. The harness calls the transaction
+directly from both pages.
+
+One strict IndexedDB transaction verifies the Task and its history,
+checks the expected Task revision, and writes the updated Task, earned
+reward, receipt, and revision. The completion store has a unique key
+for the Task and local day. Seeded historical rewards also reserve
+their days. Home and Today requests with different action IDs compete
+for one reward, even with browser locks unavailable. A retry with the
+original intent retrieves the original receipt after verifying the
+committed data. On the same day, the initiating surface can recover its
+committed intent from IndexedDB after losing its response.
+
+The reward records the points from the verified Task revision and
+keeps that value when the Task is edited later. One-off Tasks close
+with a completion timestamp. Recurring Tasks advance from the due
+date, clear postponement, and remain active. The fixture uses the
+same local midnight as Home and Today. A timezone change pauses the
+fixture, and metric-derived rewards are refused because they follow
+a separate scoring formula.
+
+Home, Today, Game, and Matchups read the same checked rewards. The
+receipt verifier replays the original Task revision and checks that
+its completion and revision match the persisted records. Scoring
+writes and Today-list cleanup use fresh proof while a competing V2
+write is excluded. Today-list persistence still runs separately in
+localStorage and can replay after restart. The detached rollback
+checkpoint carries the new Task and reward to ordinary V1 once.
+
+All 20 transaction tests, 19 component tests, and 319 scoped
+regressions passed. The full browser run passed 75 of the 76 existing
+cases. The one failure was the previously reproduced Today setup
+race, `seed_source_changed`, during fixture creation. Both that test
+and the Inbox display check passed on the focused rerun. The Inbox
+display check also passed in the full run. The assertions are intact.
+The final 20-case run includes the corrected timezone fault injection.
+
+The next milestone can connect both existing controls to this
+transaction for the disposable fixture. That work still needs to
+handle pending attempts, verified feedback, and refresh of already
+open views. The controlled iPhone handoff and old-client requirements
+continue to apply before real data transfer.
+
 ## How the integration works
 
 - The loopback harness explicitly selects a single synthetic Task and checks the
