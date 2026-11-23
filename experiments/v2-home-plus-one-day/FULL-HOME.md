@@ -32,9 +32,8 @@ One Save commits the changed fields and any title change in a single V2
 receipt. Startup verifies that receipt against the previous Task and
 checks that every unrelated field is unchanged. A retry after an
 unconfirmed save must use the same fields. Title-only receipts keep their
-existing format. Direct Due Date editing and Repeat (including its
-custom count and unit) remain V1 fields and are read-only on the
-selected synthetic Task.
+existing format. Repeat, including its custom count and unit, remains
+in V1 and is read-only on the selected synthetic Task.
 
 The browser tests exercise the Home card, Work tag styling, and the
 phone-width Critical Tasks indicator. They verify legacy save and
@@ -340,6 +339,46 @@ reproduced Today setup race passed in both runs. All assertions stayed
 in place. The broad run also had an earlier version of the new cleanup
 test. Its storage fault needed to be installed before startup wrapped
 the writer. The final 11-case run used the corrected fault and passed.
+
+## Direct Due Date editing
+
+The existing Home date field and Save button can commit a due date
+with Title, Importance, Tags, and Points in one V2 receipt for the
+selected synthetic Task. Repeat and its custom settings stay disabled
+in that editor. The original save path still handles those fields for
+ordinary V1 Tasks.
+
+Clearing the field stores `null`. The first date sets the original
+date. Moving an existing date later adds calendar days to postponement.
+Moving it earlier, clearing it, or setting it again leaves the existing
+count intact. Replaying the receipt recalculates those derived fields
+and checks them against the stored Task. Partial entries and invalid
+calendar dates are refused. The browser can accept years wider than
+four digits, but this write uses the four-digit date format supported
+by the app's scheduling paths.
+
+Home and its Critical Tasks view read the owned Task. The opted-in
+Today and Critical Tasks views update from the same verified V2 data.
+The dated Save and +1 Day use the same Task revision, so a stale
+attempt cannot replace the other. A quota failure preserves the draft.
+If the write commits and confirmation fails, retry uses the original
+receipt.
+
+Real Today Done advances from the edited date using the Task's
+existing custom recurrence. A cleared recurring Task completed on
+Home advances from the completion day. A one-off Task closes without
+adding a date. Date edits preserve earned rewards, their IDs, and
+historical scores. The detached checkpoint restores the latest
+direct date edit, the other editor fields, and the completed reward
+into fresh V1.
+
+All 10 Due Date cases, 19 component cases, and 319 scoped cases
+passed. In the broader run, 104 of 107 existing browser cases passed.
+Two editor cases still expected the due field to be disabled. Both
+passed after updating that expectation and keeping the Repeat,
+receipt, storage, and lifecycle assertions. The known Today setup
+race reproduced and passed on focused rerun. The Inbox and native
+startup checks from the previous milestone passed in this run.
 
 ## How the integration works
 

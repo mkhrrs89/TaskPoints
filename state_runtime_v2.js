@@ -20263,8 +20263,9 @@
   const OWNED_TITLE_EDIT = 'home-task-title-edit';
   const OWNED_CLASSIFICATION_EDIT = 'home-task-classification-edit';
   const OWNED_POINTS_EDIT = 'home-task-points-edit';
+  const OWNED_DUE_EDIT = 'home-task-due-date-edit';
   function isOwnedEditorOperation(operation) {
-    return operation === OWNED_TITLE_EDIT || operation === OWNED_CLASSIFICATION_EDIT || operation === OWNED_POINTS_EDIT;
+    return [OWNED_TITLE_EDIT, OWNED_CLASSIFICATION_EDIT, OWNED_POINTS_EDIT, OWNED_DUE_EDIT].includes(operation);
   }
   function supportsOwnedTaskOperation(operation, homeTaskId) {
     return operation === 'home-plus-one-day' || (Boolean(homeTaskId) && isOwnedEditorOperation(operation));
@@ -20272,25 +20273,49 @@
   function validOwnedTitle(title) {
     return typeof title === 'string' && title.length > 0 && title.trim() === title;
   }
+  function taskDueDateMillis(key) {
+    if (typeof key !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(key) || key.startsWith('0000-')) return NaN;
+    const date = new Date(key + 'T00:00:00Z');
+    return Number.isFinite(date.getTime()) && date.toISOString().slice(0,10) === key ? date.getTime() : NaN;
+  }
   function ownedEditorFields(intent) {
     if (intent.operation === OWNED_TITLE_EDIT) return validOwnedTitle(intent.title) ? {title:intent.title} : null;
     const fields = intent.fields;
     const pointsEdit = intent.operation === OWNED_POINTS_EDIT;
-    const allowed = pointsEdit ? ['title','importance','tags','points'] : ['title','importance','tags'];
+    const dueEdit = intent.operation === OWNED_DUE_EDIT;
+    const allowed = ['title','importance','tags'];
+    if (pointsEdit || dueEdit) allowed.push('points');
+    if (dueEdit) allowed.push('dueDateISO');
     if (!fields || typeof fields !== 'object' || Array.isArray(fields)
       || Object.keys(fields).some(key => !allowed.includes(key))) return null;
-    if (pointsEdit ? !Object.hasOwn(fields,'points') || !Number.isFinite(fields.points)
-      : !Object.hasOwn(fields,'importance') && !Object.hasOwn(fields,'tags')) return null;
+    if (dueEdit ? !Object.hasOwn(fields,'dueDateISO')
+      : pointsEdit ? !Object.hasOwn(fields,'points')
+        : !Object.hasOwn(fields,'importance') && !Object.hasOwn(fields,'tags')) return null;
+    if (Object.hasOwn(fields,'points') && !Number.isFinite(fields.points)) return null;
+    if (dueEdit && fields.dueDateISO !== null && !Number.isFinite(taskDueDateMillis(fields.dueDateISO))) return null;
     if (Object.hasOwn(fields,'title') && !validOwnedTitle(fields.title)) return null;
     if (Object.hasOwn(fields,'importance') && !['Low','Medium','High','Critical'].includes(fields.importance)) return null;
     if (Object.hasOwn(fields,'tags') && (!Array.isArray(fields.tags)
       || !Array.from(fields.tags).every(tag => validOwnedTitle(tag) && !tag.includes(',')))) return null;
     return fields;
   }
+  function ownedEditorResult(before, fields, updatedAtISO) {
+    const after = {...before,...fields,updatedAtISO};
+    if (Object.hasOwn(fields,'dueDateISO')) {
+      const previous = before.dueDateISO;
+      const next = fields.dueDateISO;
+      if (!after.originalDueDateISO && (next || previous)) after.originalDueDateISO = next || previous;
+      // These are calendar keys. Count days without advancing an instant
+      // across a daylight-saving boundary or tying receipt replay to a zone.
+      const delta = (taskDueDateMillis(next) - taskDueDateMillis(previous)) / 86400000;
+      if (delta > 0) after.postponedDays = (Number(before.postponedDays) || 0) + delta;
+    }
+    return after;
+  }
   function validOwnedEditorChange(before, after, fields) {
     return fields && typeof after?.updatedAtISO === 'string' && Number.isFinite(Date.parse(after.updatedAtISO))
       && Object.keys(fields).every(key => stableJson(fields[key]) !== stableJson(before[key]))
-      && stableJson(after) === stableJson({ ...before, ...fields, updatedAtISO: after.updatedAtISO });
+      && stableJson(after) === stableJson(ownedEditorResult(before,fields,after.updatedAtISO));
   }
 
   const OWNED_TASK_DONE = 'isolated-task-completion';
@@ -20330,9 +20355,9 @@
       // Home and Today both advance from the existing due date, including
       // overdue dates and JavaScript's calendar rollover at month-end.
       const base = task.dueDateISO || intent.day;
-      if (typeof base !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(base) || core.dateKey(base) !== base)
+      if (!Number.isFinite(taskDueDateMillis(base)))
         throw new Error('invalid_owned_completion_due_date');
-      const next = core.fromKey(base);
+      const next = new Date(base + 'T00:00:00');
       const count = Number.isFinite(customCount) && customCount > 0 ? customCount : 1;
       if (mode === 'monthly' || (mode === 'custom' && customUnit === 'month')) {
         next.setMonth(next.getMonth() + (mode === 'monthly' ? 1 : count));
@@ -20348,8 +20373,9 @@
           else if (next.getDay() === 0) next.setDate(next.getDate() + 1);
         }
       }
-      after.dueDateISO = core.dateKey(next);
-      if (after.dueDateISO === 'invalid') throw new Error('invalid_owned_completion_due_date');
+      const nextKey = core.dateKey(next);
+      if (nextKey === 'invalid') throw new Error('invalid_owned_completion_due_date');
+      after.dueDateISO = nextKey.padStart(10,'0');
       after.postponedDays = 0;
       after.completedAtISO = null;
     }
@@ -20619,13 +20645,13 @@
           }
           if(meta.mode!=='owned')return stop('rollback_frozen_no_task_writes');
           if(!row||row.ownerGeneration!==meta.generation||row.ownerRevision!==intent.expectedRevision||stableJson(row.value)!==stableJson(intent.expectedTask))return stop('owned_task_stale_edit');
-          const next=clone(row.value);
+          let next;
           if (editorOperation) {
             const changes = ownedEditorFields(intent);
-            Object.assign(next, changes);
-            next.updatedAtISO = nowIso();
+            next = ownedEditorResult(row.value,changes,nowIso());
             if (!validOwnedEditorChange(row.value,next,changes)) return stop('invalid_owned_task_change');
           } else {
+            next=clone(row.value);
             if(mutate(next)!==true)return stop('task_action_not_applicable');
             const dateFields=new Set(['dueDateISO','originalDueDateISO','postponedDays','updatedAtISO']);
             const keys=new Set([...Object.keys(row.value),...Object.keys(next)]);

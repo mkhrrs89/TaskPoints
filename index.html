@@ -8239,12 +8239,13 @@ ctx.restore();
   ctx.restore();
 }
   
-function bumpOneDay(task){
+function bumpOneDay(task, ownedDate = false){
   if (!task.dueDateISO) return;  // nothing to bump
   const d = new Date(task.dueDateISO + 'T00:00:00');
   const bumped = addDays(d, 1);
   const oldDue = task.dueDateISO;
   task.dueDateISO = dateKey(bumped);
+  if (ownedDate) task.dueDateISO = task.dueDateISO.padStart(10,'0');
   trackDueDatePush(task, oldDue, task.dueDateISO);
   task.updatedAtISO = new Date().toISOString();
 }
@@ -11055,10 +11056,10 @@ function toggleFlexRetired(id){
 
 /* ---------- TASKS ---------- */
 
-function taskDueMeta(t, today){
+function taskDueMeta(t, today, ownedDate = false){
   const parts = [t.importance || 'Medium'];
   if (t.dueDateISO) {
-    const dueDate = fromKey(t.dueDateISO);
+    const dueDate = ownedDate ? new Date(t.dueDateISO + 'T00:00:00') : fromKey(t.dueDateISO);
     const diff = Math.round((dueDate - today) / 86400000);
     parts.push(niceDate(dueDate).replace(/\b(\d{4})\b/, (_, year) => `’${year.slice(-2)}`));
     if (diff > 0) parts.push(`Due in ${diff}d`);
@@ -11345,14 +11346,16 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
               field.disabled = true;
               continue;
             }
-            field.addEventListener('input', () => owner.rememberTaskDraft(key, field.value));
+            const remember = () => owner.rememberTaskDraft(key, field.value, key === 'due' && !field.validity.valid);
+            field.addEventListener('input', remember);
+            if (key === 'due') field.addEventListener('change', remember);
           }
           if (editor.saving) lockOwnedTaskEditor(card);
         }
 
         const dueInput = card.querySelector('input[data-field="due"]');
         if (dueInput) {
-          dueInput.value = t.dueDateISO || '';
+          dueInput.value = editor ? editor.draft.due : (t.dueDateISO || '');
           dueInput.defaultValue = '';
         }
 
@@ -11379,7 +11382,7 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
               </div>
               <div class="task-main min-w-0">
                 <div class="font-semibold task-title">${escapeHtml(t.title)}</div>
-                <div class="task-meta-line muted text-xs">${taskDueMeta(t, today)}</div>
+              <div class="task-meta-line muted text-xs">${taskDueMeta(t, today, ownedDisplay && owner.owns(t.id))}</div>
               </div>
               <div class="task-card-header-actions">
                 <button class="btn btn-success btn-task btn-check" data-task-action="complete" data-task-id="${t.id}" aria-label="${doneToday ? 'Done today' : 'Done'}"${doneToday ? ' disabled' : ''}>✓</button>
@@ -13727,7 +13730,7 @@ function bumpTaskOneDay(id){
     if (!task.dueDateISO || task.completedAtISO || task.hidden || getTaskStatus(task) !== 'active')
       return false;
     task.originalDueDateISO ||= task.dueDateISO;
-    bumpOneDay(task);
+    bumpOneDay(task, ownedAction && owner.displayOnly);
     advanced = true;
     return true;
   };
@@ -13930,6 +13933,7 @@ function lockOwnedTaskEditor(card) {
   card.querySelector('[data-field="title"]').readOnly = true;
   card.querySelector('[data-field="tags"]').readOnly = true;
   card.querySelector('[data-field="points"]').readOnly = true;
+  card.querySelector('[data-field="due"]').readOnly = true;
   card.querySelector('[data-field="importance"]').disabled = true;
   card.querySelectorAll('[data-task-action]').forEach(button => { button.disabled = true; });
 }
@@ -13937,12 +13941,19 @@ function lockOwnedTaskEditor(card) {
 async function saveOwnedHomeTaskEdit(owner, id, card) {
   const edit = owner.taskEditor();
   if (!edit || edit.saving) return;
+  const dueInput = card.querySelector('[data-field="due"]');
+  if (edit.dueBadInput || !dueInput.validity.valid) {
+    alert('Enter a valid due date or clear the field.');
+    return;
+  }
   const draft = {};
-  for (const key of ['title', 'importance', 'tags', 'points']) {
+  for (const key of ['title', 'importance', 'tags', 'points', 'due']) {
     draft[key] = card.querySelector(`[data-field="${key}"]`).value;
-    owner.rememberTaskDraft(key, draft[key]);
+    if (key !== 'due' || edit.dueTouched || draft.due) owner.rememberTaskDraft(key, draft[key]);
   }
   const fields = {};
+  const due = draft.due.trim();
+  if ((edit.dueTouched || due) && due !== edit.original.due) fields.dueDateISO = due || null;
   const title = draft.title.trim() || edit.original.title;
   if (title !== edit.original.title) fields.title = title;
   if (draft.importance !== edit.original.importance && ['Low','Medium','High','Critical'].includes(draft.importance)) {
@@ -13961,9 +13972,13 @@ async function saveOwnedHomeTaskEdit(owner, id, card) {
       if (!result?.confirmedDurable) throw Error('The V2 Task edit could not be verified.');
     } catch (error) {
       renderTasks(state);
-      alert(error.message === 'owned_task_stale_edit'
-        ? 'This Task changed while you were editing. Your draft is still in the editor. Review the latest Task before trying again.'
-        : error.message);
+      let message = error.message;
+      if (error.message === 'owned_task_stale_edit') {
+        message = 'This Task changed while you were editing. Your draft is still in the editor. Review the latest Task before trying again.';
+      } else if (error.message === 'invalid_owned_task_intent' && Object.hasOwn(fields,'dueDateISO')) {
+        message = 'This due date could not be saved. Use a four-digit calendar year or clear the field.';
+      }
+      alert(message);
       return;
     }
   }

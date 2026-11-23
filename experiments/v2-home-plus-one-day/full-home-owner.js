@@ -11,6 +11,7 @@
   const titleOperation = 'home-task-title-edit';
   const classificationOperation = 'home-task-classification-edit';
   const pointsOperation = 'home-task-points-edit';
+  const dueOperation = 'home-task-due-date-edit';
   let selected = false, verified = null, error = '', read = null;
   let repaint, pending = null, writing = null, editor = null;
   // Latch selection for this document. Losing the marker during an open
@@ -80,14 +81,15 @@
       pending = null;
       window.ownerOutcome = {ok: result.confirmedDurable, date: result.task.dueDateISO,
         ...(operation !== bumpOperation ? {title: result.task.title} : {}),
-        ...(operation === classificationOperation || operation === pointsOperation
+        ...(operation === classificationOperation || operation === pointsOperation || operation === dueOperation
           ? {importance: result.task.importance, tags: result.task.tags} : {}),
-        ...(operation === pointsOperation ? {points: result.task.points} : {})};
+        ...(operation === pointsOperation || operation === dueOperation ? {points: result.task.points} : {})};
       return result;
     } catch (cause) {
       // A stale, uncommitted intent may be abandoned by closing the editor.
       // Uncertain outcomes keep their original ID and payload across retries.
-      if (cause.message === 'owned_task_stale_edit' && operation !== bumpOperation) pending = null;
+      if ((cause.message === 'owned_task_stale_edit' && operation !== bumpOperation)
+        || (operation === dueOperation && cause.message === 'invalid_owned_task_intent')) pending = null;
       await refresh();
       window.ownerOutcome = {ok: false, error: cause.message};
       throw cause;
@@ -125,6 +127,7 @@
       const task = basis.expectedTask;
       const original = {
         title: task.title,
+        due: task.dueDateISO || '',
         points: Number(task.points) || 0,
         importance: ['Low','Medium','High','Critical'].includes(task.importance) ? task.importance : 'Low',
         tags: Array.isArray(task.tags) ? task.tags : []
@@ -134,17 +137,26 @@
     taskEditor: () => editor && {
       original: editor.original,
       draft: editor.draft,
+      dueTouched: editor.dueTouched,
+      dueBadInput: editor.dueBadInput,
       saving: Boolean(writing),
       pending: Boolean(pending && pending.intent.operation !== bumpOperation)
     },
-    rememberTaskDraft(key, value) {
-      if (editor && Object.hasOwn(editor.draft, key)) editor.draft[key] = value;
+    rememberTaskDraft(key, value, invalid = false) {
+      if (editor && Object.hasOwn(editor.draft, key)) {
+        editor.draft[key] = value;
+        if (key === 'due') {
+          editor.dueTouched = true;
+          editor.dueBadInput = invalid;
+        }
+      }
     },
     endTaskEdit() { editor = null; },
     commitTaskEdit(id, fields) {
       if (id !== taskId || !editor) return Promise.reject(Error('Open the V2 Task editor before saving.'));
       // Use the Task and revision seen at editor open, even if a refresh has
       // since loaded a newer value underneath the draft.
+      if (Object.hasOwn(fields, 'dueDateISO')) return submit(dueOperation, () => editor.basis, {fields});
       if (Object.hasOwn(fields, 'points')) return submit(pointsOperation, () => editor.basis, {fields});
       if (Object.hasOwn(fields, 'importance') || Object.hasOwn(fields, 'tags')) {
         return submit(classificationOperation, () => editor.basis, {fields});

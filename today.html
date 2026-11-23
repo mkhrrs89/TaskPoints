@@ -975,6 +975,7 @@ async function init() {
   replayTodayCleanup();
   window.TaskPointsCore?.watchIsolatedTaskDone?.(ready=>{
     scheduleRender(renderTodayList);
+    window.updateCriticalTasksIsland?.(appState);
     if (ready) replayTodayCleanup();
   });
   window.addEventListener('pageshow',event=>{

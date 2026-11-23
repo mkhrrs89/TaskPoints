@@ -667,7 +667,8 @@ test('real Home title edit commits in V2 and survives Notes, ordinary save, comp
   await openTaskEdit(page);
   assert.equal(await titleField(page).inputValue(),originalTitle);
   assert.equal(await editCard(page).locator('[data-field="due"]').inputValue(),newDate);
-  assert.equal(await editCard(page).locator('[data-field="due"]').isDisabled(),true);
+  assert.equal(await editCard(page).locator('[data-field="due"]').isEnabled(),true);
+  assert.equal(await editCard(page).locator('[data-field="repeat"]').isDisabled(),true);
   assert.equal(await editCard(page).locator('[data-field="points"]').isEnabled(),true);
   await page.evaluate(()=>{legacyWrites.length=0;});
   await titleField(page).fill('  '+newerTitle+'  ');
@@ -980,7 +981,9 @@ for(const withPoints of [false,true])test(`real Home saves Importance, Tags and 
   await openTaskEdit(page);
   assert.equal(await importanceField(page).inputValue(),'High');
   assert.equal(await tagsField(page).inputValue(),'');
-  for(const field of ['due','repeat','repeatCustomCount','repeatCustomUnit'])
+  assert.equal(await editCard(page).locator('[data-field="due"]').isEnabled(),true);
+  assert.equal(await editCard(page).locator('[data-field="due"]').inputValue(),newDate);
+  for(const field of ['repeat','repeatCustomCount','repeatCustomUnit'])
     assert.equal(await editCard(page).locator('[data-field="'+field+'"]').isDisabled(),true);
   await fillClassification(page);
   await titleField(page).fill('  '+newerTitle+'  ');
@@ -2831,4 +2834,331 @@ for(const fault of ['metric reward','time zone','quota'])test(`real V2 Done cont
   assert.deepEqual(await canonicalCompletions(page),legacyRewards);
   assert.equal(await pointsFeedback(today).count()+await pointsFeedback(page).count(),0);
   assert.doesNotMatch(await todayTask(today).getAttribute('class'),/is-done/);
+});
+
+const dueOperation='home-task-due-date-edit';
+const dueField=page=>editCard(page).locator('[data-field="due"]');
+
+async function editDue(page,value){
+  const group=editCard(page).locator('xpath=ancestor::section[contains(@class,"task-date-group")][1]');
+  const header=group.locator('.task-date-group-header');
+  if(await header.getAttribute('aria-expanded')==='false')await header.click();
+  await openTaskEdit(page);
+  await dueField(page).fill(value);
+  const outcome=await submitTaskEdit(page);
+  assert.equal(outcome.ok,true,JSON.stringify(outcome));
+  assert.equal(outcome.date,value || null);
+}
+
+async function waitDueView(page,day){
+  await page.waitForFunction(day=>
+    TaskPointsOwnedTaskExperiment.taskView(TaskPointsHomeLiveState.getState()).tasks.find(row=>row.id==='t1')?.dueDateISO===day,
+  day);
+}
+
+test('V2 direct Due Date Save combines all editor fields, refreshes Today and Critical Tasks, and survives restart and rollback to V1',async t=>{
+  const profile=await completionProfile(t);
+  const legacyDue='2026-11-20';
+  const recurrence={mode:'custom',customCount:2,customUnit:'week',unknown:{keep:true}};
+  const {page,context,legacyRewards}=await seedScoringReads(t,profile.context,{write:true,controls:true,recurrence,dueDateISO:legacyDue});
+  // Settle the fixture's previous-day matchup scores using the normal
+  // verified scoring scope before testing an ordinary non-scoring save.
+  assert.equal(await page.evaluate(()=>TaskPointsCore.runWithVerifiedTaskScoring(
+    ()=>save('due-date-fixture-score-baseline',{userInitiated:true}))),true);
+  const {page:today}=await realDoneToday(context);
+  const mobile=await context.newPage();
+  await mobile.setViewportSize({width:390,height:844});
+  await mobile.clock.setFixedTime(new Date(quietDate+'T17:00:00Z'));
+  await mobile.goto(origin+prefix+'index.html');await waitHome(mobile);
+  assert.equal(await todayTask(today).count(),0);
+  const preserved=await partOfState(page), history=await rewardEvidence(page);
+  const before=await owned(page);
+  await openTaskEdit(page);
+  assert.equal(await dueField(page).inputValue(),legacyDue);
+  assert.equal(await dueField(page).isEnabled(),true);
+  for(const key of ['repeat','repeatCustomCount','repeatCustomUnit'])
+    assert.equal(await editCard(page).locator(`[data-field="${key}"]`).isDisabled(),true);
+  await dueField(page).fill(quietDate);
+  await titleField(page).fill('Synthetic dated Task');
+  await editCard(page).locator('[data-field="importance"]').selectOption('Critical');
+  await editCard(page).locator('[data-field="tags"]').fill('migration, date');
+  await pointsField(page).fill('12.75');
+  await page.evaluate(()=>{legacyWrites.length=0;});
+  const result=await submitTaskEdit(page);
+  assert.deepEqual(result,{ok:true,date:quietDate,title:'Synthetic dated Task',importance:'Critical',tags:['migration','date'],points:12.75});
+  const committed=await owned(page), row=ownedTask(committed), receipt=committed.journal[0];
+  const fields={dueDateISO:quietDate,title:result.title,importance:result.importance,tags:result.tags,points:result.points};
+  assert.equal(committed.journal.length,1);
+  assert.equal(receipt.intent.operation,dueOperation);
+  assert.deepEqual(receipt.intent.fields,fields);
+  assert.deepEqual(row,{...ownedTask(before),...fields,updatedAtISO:receipt.after.updatedAtISO});
+  assert.deepEqual(receipt.after,row);
+  assert.deepEqual(row.recurrence,recurrence);
+  assert.deepEqual(await dates(page),{home:quietDate,legacy:legacyDue});
+  assert.match(await editCard(page).locator('.task-meta-line').textContent(),/Due today/);
+  assert.equal(await page.evaluate(()=>legacyWrites.some(row=>['taskpoints_v1','taskpoints_pending_task_mutations_v1'].includes(row.key))),false);
+  await todayCheck(today).waitFor();
+  assert.equal(await todayTask(today).locator('.today-sub').textContent(),'12.75 pts');
+  for(const peer of [today,mobile])
+    await peer.locator('#criticalTasksIsland[data-active="1"]').waitFor({state:'attached'});
+  assert.deepEqual(await rewardEvidence(page),history);
+  assert.deepEqual(await verifiedRewards(page),ownedRewards.slice(1));
+  assert.deepEqual(await partOfState(page),preserved);
+
+  await page.locator('a.desktop-header-notes-link').click();await page.waitForURL('**/notes.html');
+  await page.getByRole('link',{name:'Main',exact:true}).first().click();
+  await waitHome(page);await waitDueView(page,quietDate);
+  await saveOrdinaryHome(page);
+  await page.evaluate(async()=>{
+    const core=TaskPointsCore;
+    core.journalTaskUpdates(['t2'],task=>{task.title='Unrelated journal edit';return true;});
+    if(!core.flushPendingTaskMutations())throw Error('Expected journal compaction');
+    core.queuePhase5CVerifiedSecondaryWrite();
+    await core.flushPhase5CVerifiedSecondaryWrites();
+  });
+  assert.deepEqual(await dates(page),{home:quietDate,legacy:legacyDue});
+  assert.deepEqual((await owned(page)).journal,[receipt]);
+
+  const restarted=await profile.restart();
+  const home=await openScoringPage(restarted,'index.html');await waitHome(home);
+  await waitDueView(home,quietDate);
+  assert.deepEqual((await owned(home)).journal,[receipt]);
+  const {page:todayReopened}=await realDoneToday(restarted);
+  await todayCheck(todayReopened).click();
+  await waitOwnedReward(home,todayReopened,12.75,'15.8');
+  const [completion]=await completionReceipts(home);
+  assert.equal(completion.intent.source,'today');
+  assert.equal(completion.after.dueDateISO,'2026-12-02');
+  assert.equal(completion.after.postponedDays,0);
+  assert.deepEqual(completion.after.recurrence,recurrence);
+  assert.deepEqual(await verifiedRewards(home),[...ownedRewards.slice(1),completion.completion]);
+  assert.deepEqual(await canonicalCompletions(home),legacyRewards);
+  const completedHistory=await rewardEvidence(home);
+  await editDue(home,'2026-12-04');
+  assert.deepEqual(await rewardEvidence(home),completedHistory);
+  assert.deepEqual(await verifiedRewards(home),[...ownedRewards.slice(1),completion.completion]);
+  const finalEdit=(await owned(home)).journal[2];
+  assert.equal(finalEdit.after.postponedDays,2);
+  await todayReopened.close();
+
+  const checkpoint=await home.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(3));
+  assert.deepEqual(checkpoint.receipts,[receipt,completion,finalEdit]);
+  const fresh=await browser.newContext({serviceWorkers:'block',timezoneId:'America/New_York'});
+  t.after(()=>fresh.close());await configureContext(fresh);
+  assert.deepEqual(await restoreCompletionCheckpoint(await rollbackLoader(fresh),checkpoint),{verified:true,checksum:checkpoint.checksum});
+  const restored=await openScoringPage(fresh,'index.html');await waitHome(restored);
+  assert.deepEqual(await dates(restored),{home:'2026-12-04',legacy:'2026-12-04'});
+  await assertHomeTitle(restored,result.title);await assertHomePoints(restored,result.points);
+  assert.deepEqual((await backingTask(restored)).tags,result.tags);
+  assert.equal((await backingTask(restored)).importance,result.importance);
+  assert.deepEqual((await backingTask(restored)).recurrence,recurrence);
+  assert.deepEqual(await canonicalCompletions(restored),[...legacyRewards,...ownedRewards.slice(1),completion.completion]);
+  assert.equal(await restored.evaluate(()=>computeTodayPoints()),15.8);
+  assert.equal(await restored.evaluate(()=>save('due-date-rollback',{userInitiated:true})),true);
+  assert.deepEqual(await canonicalCompletions(restored),[...legacyRewards,...ownedRewards.slice(1),completion.completion]);
+  assert.equal((await partOfState(restored)).task.title,'Unrelated journal edit');
+});
+
+test('V2 direct Due Date Save preserves the calendar and postponement across DST, local midnight, leap dates, and clearing',async t=>{
+  const {page}=await freshTaskOwner(t);
+  await page.clock.setFixedTime(new Date('2026-11-01T03:59:00Z')); // October 31 in New York.
+  const steps=[
+    ['2026-10-31',0], ['2026-11-02',2], ['2024-02-29',2],
+    ['0001-01-01',2], ['',2], ['9999-12-30',2], ['',2], [newDate,2]
+  ];
+  for(const [value,postponedDays] of steps){
+    await editDue(page,value);
+    const after=ownedTask(await owned(page));
+    assert.equal(after.dueDateISO,value || null);
+    assert.equal(after.originalDueDateISO,oldDate);
+    assert.equal(after.postponedDays,postponedDays);
+    if(value==='2026-10-31'){
+      assert.match(await editCard(page).locator('.task-meta-line').textContent(),/Due today/);
+      await page.clock.setFixedTime(new Date('2026-11-01T04:01:00Z'));
+      await page.evaluate(()=>renderTasks());
+      assert.match(await editCard(page).locator('.task-meta-line').textContent(),/1d overdue/);
+    }
+    if(!value)assert.match(await editCard(page).locator('.task-meta-line').textContent(),/No due date/);
+  }
+  assert.deepEqual(await press(page),{ok:true,date:'2026-11-17'});
+  assert.equal(ownedTask(await owned(page)).postponedDays,3);
+  assert.equal((await backingTask(page)).dueDateISO,oldDate);
+});
+
+for(const oneOff of [false,true])test(`V2 direct Due Date Save clears a ${oneOff?'one-off':'recurring'} Task and real Home Done follows its existing rule`,async t=>{
+  const {page,context,legacyRewards}=await seedScoringReads(t,undefined,{write:true,controls:true,oneOff});
+  const {page:today}=await realDoneToday(context);
+  await todayCheck(today).waitFor();
+  await openTaskEdit(page);
+  await dueField(page).evaluate(input=>{
+    input.value='';
+    input.dispatchEvent(new Event('change',{bubbles:true}));
+  });
+  const edit=await submitTaskEdit(page);
+  assert.equal(edit.ok,true);
+  assert.equal(edit.date,null);
+  await todayTask(today).waitFor({state:'detached'});
+  assert.deepEqual(await dates(page),{home:null,legacy:quietDate});
+  await homeDoneButton(page).click();
+  await waitOwnedReward(page,today,5,'8.0',{oneOff});
+  const [receipt]=await completionReceipts(page);
+  assert.equal(receipt.before.dueDateISO,null);
+  assert.equal(receipt.intent.source,'home');
+  assert.equal(receipt.after.dueDateISO,oneOff?null:'2026-11-19');
+  assert.equal(receipt.after.completedAtISO,oneOff?receipt.completion.completedAtISO:null);
+  assert.equal(receipt.after.status,oneOff?'done':'active');
+  assert.equal(receipt.after.postponedDays,oneOff?3:0);
+  assert.deepEqual(await canonicalCompletions(page),legacyRewards);
+});
+
+test('V2 direct Due Date Save refuses incomplete or impossible dates and Repeat changes',async t=>{
+  const {page}=await freshTaskOwner(t);
+  const before=await owned(page),alerts=[];
+  page.on('dialog',dialog=>alerts.push(dialog.message()));
+  await openTaskEdit(page);
+  await titleField(page).fill('Uncommitted title alongside invalid date');
+  await dueField(page).evaluate(input=>{
+    // A partial native date can expose an empty value with invalid input.
+    input.value='';
+    Object.defineProperty(input,'validity',{value:{valid:false}});
+    input.dispatchEvent(new Event('input',{bubbles:true}));
+  });
+  await page.evaluate(()=>renderTasks());
+  await titleSave(page).click();
+  assert.match(alerts.at(-1) || '',/Enter a valid due date/);
+  assert.deepEqual(await owned(page),before);
+  assert.equal(await titleField(page).inputValue(),'Uncommitted title alongside invalid date');
+  const intent={operation:dueOperation,taskId:'t1',generation:before.meta.generation,
+    expectedRevision:0,expectedTask:ownedTask(before)};
+  for(const fields of [{dueDateISO:''},{dueDateISO:'2026-02-29'},{dueDateISO:'2026-04-31'},
+    {dueDateISO:'0000-01-01'},{dueDateISO:'2026-11-18T00:00:00Z'},{dueDateISO:'10000-01-01'},
+    {dueDateISO:newDate,recurrence:{mode:'daily'}},{dueDateISO:newDate,postponedDays:90}]){
+    await assert.rejects(page.evaluate(({intent,fields})=>TaskPointsStateRuntimeV2.commitIsolatedOwnedTask({
+      ...intent,actionId:crypto.randomUUID(),fields
+    }),{intent,fields}),/invalid_owned_task_intent/);
+  }
+  assert.deepEqual(await owned(page),before);
+  assert.equal(await dueField(page).evaluate(input=>{
+    input.value='10000-01-01';
+    input.dispatchEvent(new Event('input',{bubbles:true}));
+    return input.value;
+  }),'10000-01-01');
+  assert.deepEqual(await submitTaskEdit(page),{ok:false,error:'invalid_owned_task_intent'});
+  assert.deepEqual(await owned(page),before);
+  await dueField(page).fill(newDate);
+  assert.equal((await submitTaskEdit(page)).date,newDate);
+});
+
+test('V2 direct Due Date Save and +1 Day reject each other’s stale revisions',async t=>{
+  const {page,context}=await freshTaskOwner(t);
+  const peer=await openScoringPage(context,'index.html');await waitHome(peer);
+  await openTaskEdit(page);
+  await dueField(page).fill('2026-11-14');
+  assert.deepEqual(await press(peer),{ok:true,date:newDate});
+  assert.deepEqual(await submitTaskEdit(page),{ok:false,error:'owned_task_stale_edit'});
+  assert.equal(await dueField(page).inputValue(),'2026-11-14');
+  await editCard(page).locator('[data-task-action="task-cancel"]').click();
+  await editDue(page,'2026-11-17');
+  assert.deepEqual(await press(peer),{ok:false,error:'owned_task_stale_edit'});
+  const state=await owned(peer);
+  assert.deepEqual(state.journal.map(row=>row.intent.operation),['home-plus-one-day',dueOperation]);
+  assert.equal(ownedTask(state).dueDateISO,'2026-11-17');
+  assert.equal(ownedTask(state).postponedDays,2);
+});
+
+test('V2 direct Due Date Save preserves one receipt and its draft across quota, repeated Save and lost readback',async t=>{
+  const {page}=await freshTaskOwner(t),before=await owned(page),history=await rewardEvidence(page);
+  await page.evaluate(operation=>{
+    const add=IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add=function(record,...args){
+      if(!window.dueQuotaRecovered&&record?.intent?.operation===operation)
+        throw new DOMException('synthetic date quota','QuotaExceededError');
+      return add.call(this,record,...args);
+    };
+  },dueOperation);
+  await openTaskEdit(page);await dueField(page).fill(newDate);
+  assert.deepEqual(await submitTaskEdit(page),{ok:false,error:'synthetic date quota'});
+  assert.deepEqual(await owned(page),before);
+  assert.equal(await dueField(page).inputValue(),newDate);
+  await page.evaluate(()=>{window.dueQuotaRecovered=true;});
+  await interruptOwnedWrite(page,'after commit');
+  await page.evaluate(()=>{
+    window.ownerOutcome=null;
+    const save=document.querySelector('[data-task-action="task-save"][data-task-id="t1"]');
+    save.click();save.click();
+  });
+  await page.waitForFunction(()=>window.ownerOutcome!==null);
+  assert.deepEqual(await page.evaluate(()=>ownerOutcome),{ok:false,error:'synthetic readback unavailable'});
+  await page.evaluate(async()=>{window.allowOwnedReadback=true;await TaskPointsOwnedTaskExperiment.refresh();});
+  assert.equal(await dueField(page).inputValue(),newDate);
+  const beforeRetry=await owned(page);
+  assert.equal(beforeRetry.journal.length,1);
+  assert.equal((await submitTaskEdit(page)).date,newDate);
+  assert.deepEqual(await owned(page),beforeRetry);
+  assert.deepEqual(await rewardEvidence(page),history);
+});
+
+test('V2 direct Due Date Save interruption before commit survives Chromium restart without a partial edit',async t=>{
+  const profile=await completionProfile(t);
+  const {page}=await fixture(t,profile.context);
+  await installOwner(page);
+  await openTaskEdit(page);await dueField(page).fill(newDate);
+  await titleField(page).fill('Interrupted title');
+  await interruptOwnedWrite(page,'before commit');
+  await titleSave(page).click();
+  await page.waitForFunction(()=>window.ownedInterruptionReached===true);
+  assert.notEqual(await page.evaluate(()=>window.ownerOutcome?.ok),true);
+  await page.close();
+  const context=await profile.restart();
+  const home=await openScoringPage(context,'index.html');await waitHome(home);
+  assert.deepEqual((await owned(home)).journal,[]);
+  assert.deepEqual(await dates(home),{home:oldDate,legacy:oldDate});
+  await assertHomeTitle(home,originalTitle);
+  await editDue(home,newDate);
+  assert.equal((await owned(home)).journal.length,1);
+});
+
+test('V2 direct Due Date Save leaves ordinary V1 clearing and forward moves on the original Save path',async t=>{
+  const {page}=await fixture(t);
+  for(const [key,expected] of [[newDate,1],['',1],[quietDate,1]]){
+    await openTaskEdit(page);await dueField(page).fill(key);await titleSave(page).click();
+    await page.waitForFunction(key=>TaskPointsCore.readTaskPointsStoredState().tasks.find(row=>row.id==='t1')?.dueDateISO===(key || null),key);
+    const row=await backingTask(page);
+    assert.equal(row.postponedDays,expected);
+    assert.equal(row.originalDueDateISO,oldDate);
+  }
+  assert.equal(await page.evaluate(async()=>!(await indexedDB.databases()).some(row=>row.name===TaskPointsStateRuntimeV2.DB_NAME)),true);
+});
+
+test('V2 direct Due Date Save records the first date on an undated Task and refuses altered postponement evidence',async t=>{
+  const {page}=await fixture(t);
+  await page.evaluate(()=>{
+    const state=TaskPointsCore.readTaskPointsStoredState();
+    const task=state.tasks.find(row=>row.id==='t1');
+    task.dueDateISO=null;
+    delete task.originalDueDateISO;
+    TaskPointsCore.writeTaskPointsStoredState(state);
+  });
+  await page.reload();await waitHome(page);await installOwner(page);
+  assert.equal(ownedTask(await owned(page)).originalDueDateISO,undefined);
+  await editDue(page,quietDate);
+  const committed=await owned(page),receipt=committed.journal[0];
+  assert.equal(receipt.after.originalDueDateISO,quietDate);
+  assert.equal(receipt.after.postponedDays,0);
+  await page.evaluate(id=>new Promise((resolve,reject)=>{
+    const open=indexedDB.open(TaskPointsStateRuntimeV2.DB_NAME);
+    open.onerror=()=>reject(open.error);
+    open.onsuccess=()=>{
+      const db=open.result,tx=db.transaction(['tasks','mutations'],'readwrite');
+      tx.oncomplete=()=>{db.close();resolve();};
+      tx.onabort=()=>{db.close();reject(tx.error);};
+      const tasks=tx.objectStore('tasks'),mutations=tx.objectStore('mutations');
+      const row=tasks.get('t1'),record=mutations.get(id);
+      row.onsuccess=()=>{row.result.value.postponedDays=3;tasks.put(row.result);};
+      record.onsuccess=()=>{record.result.after.postponedDays=3;mutations.put(record.result);};
+    };
+  }),receipt.id);
+  await assert.rejects(owned(page),/owned_task_journal_conflict/);
+  await assert.rejects(page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(1)),/owned_task_journal_conflict/);
+  assert.equal((await backingTask(page)).dueDateISO,null);
 });
