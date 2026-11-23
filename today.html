@@ -313,7 +313,10 @@
 
       function loadApp() {
         const res = window.TaskPointsCore?.loadAppState
-          ? TaskPointsCore.loadAppState({ storageKey: STORAGE_KEY })
+          ? TaskPointsCore.loadAppState({
+              storageKey: STORAGE_KEY,
+              ...(TaskPointsCore.usesIsolatedTaskScoring?.() ? {syncDerived:false,persistSync:false} : {})
+            })
           : { state: { tasks: [], habits: [], completions: [] } };
 
         appState = res.state || { tasks: [], habits: [], completions: [] };
@@ -610,13 +613,34 @@ const habits = getActiveHabits().filter(h => {
 
         const items = [];
 
+        // Project the checked item for display only. Today-list persistence
+        // still uses its existing V1 membership until reconciliation exists.
+        const ownedScoring = window.TaskPointsCore?.usesIsolatedTaskScoring?.();
+        let earned = null;
+        let verified = true;
+        if (ownedScoring) {
+          try {
+            earned = TaskPointsCore.readScoringCompletions(appState.completions)
+              .find(row => row.taskId === 't1' && dateKeyFromISO(row.completedAtISO) === dayKey);
+          } catch (_) {
+            verified = false;
+          }
+        }
+        const visibleTaskIds = new Set(todayStore.taskIds);
+        if (earned) visibleTaskIds.add(earned.taskId);
+
         // Tasks (kept visible even if recurring + moved due date after completion)
-        for (const taskId of todayStore.taskIds) {
+        for (const taskId of visibleTaskIds) {
           const t = (Array.isArray(appState.tasks) ? appState.tasks : []).find(x => x && x.id === taskId);
           if (!t) continue;
 
-          const done = hasTaskCompletionToday(taskId, dayKey) || (t.completedAtISO && dateKeyFromISO(t.completedAtISO) === dayKey);
-          const sub = (t.points != null) ? `${Number(t.points || 0)} pts` : '';
+          let done = hasTaskCompletionToday(taskId, dayKey) || (t.completedAtISO && dateKeyFromISO(t.completedAtISO) === dayKey);
+          let sub = (t.points != null) ? `${Number(t.points || 0)} pts` : '';
+          if (taskId === 't1' && ownedScoring) {
+            done = Boolean(earned);
+            sub = verified ? (earned ? `${TaskPointsCore.pointsForCompletion(earned, appState)} pts` : '')
+              : 'Verified completion unavailable';
+          }
           items.push({ kind: 'task', id: taskId, title: t.title || 'Untitled Task', sub, done });
         }
 
@@ -831,7 +855,8 @@ const habits = getActiveHabits().filter(h => {
         if (wantOpen) renderHabitPicker();
       }
 
-function init() {
+async function init() {
+  if (window.TaskPointsCore?.usesIsolatedTaskScoring?.()) await TaskPointsCore.refreshIsolatedTaskScoring();
   const dayKey = dayKeyNow();
 
   loadApp();
@@ -855,7 +880,8 @@ function init() {
 
         $('#clearDoneBtn').addEventListener('click', clearDone);
 
-        $('#todayRefreshBtn').addEventListener('click', () => {
+        $('#todayRefreshBtn').addEventListener('click', async () => {
+          if (window.TaskPointsCore?.usesIsolatedTaskScoring?.()) await TaskPointsCore.refreshIsolatedTaskScoring();
           loadApp();
           todayStore = loadTodayStore(dayKeyNow());
           saveTodayStore();

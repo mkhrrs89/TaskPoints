@@ -30,7 +30,7 @@ before(async()=>{
       const resolved=path.resolve(root,file);
       const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.svg':'image/svg+xml','.json':'application/json'}[path.extname(file)];
       if(!mime||!resolved.startsWith(root+path.sep)||file.startsWith('experiments/'))throw Error('Outside experiment');
-      const homeBundle=file==='scoring_core.js'&&['index.html','inbox.html','today.html'].some(page=>new URL(req.headers.referer||'http://localhost').pathname===prefix+page);
+      const homeBundle=file==='scoring_core.js'&&['index.html','inbox.html','today.html','game.html','matchups.html'].some(page=>new URL(req.headers.referer||'http://localhost').pathname===prefix+page);
       const content=homeBundle?bundle:fs.readFileSync(resolved);
       res.writeHead(200,{'Content-Type':mime,'Cache-Control':'no-store'});
       res.end(content);
@@ -1577,3 +1577,234 @@ test('Today can still complete an unrelated Task and a fresh V1 rollback awards 
   await rollbackToday.page.reload();
   assert.deepEqual(await canonicalCompletions(rollbackToday.page),rewards);
 });
+
+
+const ownedRewards=[
+  {id:'synthetic-owned-current',taskId:'t1',title:'Synthetic V2 reward',points:12.75,completedAtISO:quietDate+'T16:00:00Z',unknown:{keep:true}},
+  {id:'synthetic-owned-negative',taskId:'t1',title:'Synthetic negative reward',points:-2.25,completedAtISO:'2026-11-18T02:00:00Z'},
+  {id:'synthetic-owned-zero',taskId:'t1',title:'Synthetic zero reward',points:0,completedAtISO:'2026-11-17T02:00:00Z'}
+];
+const unrelatedRewardRows=[
+  {id:'synthetic-unrelated-current',taskId:'t2',title:'Synthetic unrelated reward',points:3,completedAtISO:quietDate+'T16:00:00Z'}
+];
+
+async function seedScoringReads(t,context){
+  const f=await prepareCompletionBoundary(t,context);
+  const legacyRewards=[{...ownedRewards[0],points:5},...unrelatedRewardRows];
+  await f.page.evaluate(async({marker,ownedRewards,legacyRewards,day})=>{
+    const core=TaskPointsCore,snapshot=core.readTaskPointsStoredState();
+    snapshot.completions=legacyRewards;
+    snapshot.tasks.find(row=>row.id==='t1').recurrence={mode:'daily'};
+    snapshot.scoringSettings={...snapshot.scoringSettings,inertia:{windowDays:7,multiplier:0}};
+    snapshot.players.push({id:'SYN2',name:'Synthetic second player',baseline:50},{id:'SYN3',name:'Synthetic third player',baseline:50});
+    snapshot.matchups.push({id:'synthetic-owned-matchup',date:day,dateKey:day,playerAId:'YOU',playerBId:'SYN',
+      scoreA:8,scoreB:46,matchupType:'exhibition'});
+    core.writeTaskPointsStoredState(snapshot);
+    const fixture={id:crypto.randomUUID(),syntheticOnly:true,homeTaskId:'t1',completionRead:true,phase:'prepared'};
+    localStorage.setItem('taskpoints_isolated_task_scoring_read_v1',fixture.id);
+    localStorage.setItem(marker,JSON.stringify(fixture));
+    await TaskPointsStateRuntimeV2.initializeIsolatedTaskOwner(snapshot,{completionSeed:ownedRewards});
+    localStorage.setItem(marker,JSON.stringify({...fixture,phase:'sealed'}));
+  },{marker,ownedRewards,legacyRewards,day:quietDate});
+  await f.page.reload();await waitHome(f.page);
+  return {...f,legacyRewards};
+}
+
+async function openScoringPage(context,file){
+  const page=await context.newPage();
+  page.setDefaultTimeout(12000);
+  page.on('dialog',dialog=>dialog.dismiss());
+  await page.clock.setFixedTime(new Date(quietDate+'T17:00:00Z'));
+  await page.goto(origin+prefix+file);
+  return page;
+}
+
+async function scoresFromCore(page){
+  return page.evaluate(()=>{
+    const core=TaskPointsCore,source=core.readTaskPointsStoredState();
+    const totals=core.youDailyTotalsWithInertia(source);
+    const current=core.buildDaySnapshot(core.todayKey(),source);
+    return {totals,entries:current.items.map(row=>[row.id,row.points]),
+      selectedLegacy:source.completions.find(row=>row.taskId==='t1')?.points};
+  });
+}
+
+test('verified completion reads agree across real Home, Today, Game, and persisted matchups after Chromium restart',async t=>{
+  const profile=fs.mkdtempSync(path.join(os.tmpdir(),'tp-verified-scores-'));
+  const launch=()=>chromium.launchPersistentContext(profile,{
+    executablePath:process.env.BOUNDARY_CHROMIUM_PATH||'/usr/bin/chromium',serviceWorkers:'block',timezoneId:'America/New_York'
+  });
+  let context=await launch();
+  t.after(async()=>{await context.close();fs.rmSync(profile,{recursive:true,force:true});});
+  const {page,legacyRewards}=await seedScoringReads(t,context);
+  const homeScore=await page.evaluate(async()=>{
+    try {
+      return {score:computeTodayPoints(),painted:document.getElementById('todayScoreIslandValue')?.textContent,
+        receipt:await TaskPointsStateRuntimeV2.readIsolatedTaskScoring().then(read=>read.completions)};
+    }catch(error){return {error:error.message,runtime:await TaskPointsStateRuntimeV2.readIsolatedTaskScoring().then(()=>true,e=>e.message)};}
+  });
+  assert.equal(homeScore.score,15.8,JSON.stringify(homeScore));
+  await page.waitForFunction(()=>document.getElementById('todayScoreIslandValue')?.textContent==='15.8');
+  assert.equal(await page.evaluate(()=>computeTodayPoints()),15.8);
+  const before=await scoresFromCore(page);
+  assert.equal(before.totals[quietDate],15.75);
+  assert.equal(before.totals['2026-11-17'],-2.25);
+  assert.equal(before.totals['2026-11-16'],0);
+  assert.equal(before.selectedLegacy,5);
+  assert.deepEqual(before.entries,[['synthetic-unrelated-current',3],['synthetic-owned-current',12.75]]);
+  assert.deepEqual(await scoresFromCore(page),before,'repeated reads never add another reward');
+
+  const today=await todayCompletionPage(context);
+  const selected=todayTask(today.page);
+  assert.equal(await selected.locator('.today-sub').textContent(),'12.75 pts');
+  assert.match(await selected.getAttribute('class'),/is-done/);
+  assert.deepEqual(await scoresFromCore(today.page),before);
+
+  const game=await openScoringPage(context,'game.html');
+  await game.locator('#playersList .playerCard').first().waitFor();
+  assert.equal(await game.evaluate(()=>computeTodayPoints()),15.8);
+  assert.deepEqual(await scoresFromCore(game),before);
+
+  const matchups=await openScoringPage(context,'matchups.html');
+  const scoringErrors=[];
+  matchups.on('console',msg=>{if(['error','warning'].includes(msg.type()))scoringErrors.push(msg.text());});
+  matchups.on('pageerror',error=>scoringErrors.push(error.message));
+  const action=matchups.locator('#matchupsChronological').getByRole('button',{name:'Generate retro matchups'}).first();
+  const header=action.locator('xpath=ancestor::section[1]').locator('.matchup-collapsible-header').first();
+  if(await header.getAttribute('aria-expanded')==='false')await header.click();
+  await action.click();
+  await matchups.waitForFunction(()=>{
+    const s=TaskPointsCore.parseTaskPointsStorageJson(localStorage.getItem(TaskPointsCore.STORAGE_KEY));
+    return s.matchups.find(row=>row.id==='synthetic-owned-matchup')?.scoreA===15.75
+      && s.matchups.find(row=>row.id==='synthetic-inbox-game')?.scoreB===-2.25;
+  },null,{timeout:3500}).catch(async error=>{
+    const evidence=await matchups.evaluate(()=>{
+      const s=TaskPointsCore.parseTaskPointsStorageJson(localStorage.getItem(TaskPointsCore.STORAGE_KEY));
+      return s.matchups.map(row=>[row.id,row.scoreA,row.scoreB]);
+    });
+    throw Error(JSON.stringify({scoringErrors,evidence}),{cause:error});
+  });
+  const persisted=await matchups.evaluate(()=>{
+    const core=TaskPointsCore;
+    return core.parseTaskPointsStorageJson(localStorage.getItem(core.STORAGE_KEY)).completions;
+  });
+  assert.deepEqual(persisted,legacyRewards,'V1 retains its original completion rows');
+
+  await context.close();context=await launch();await configureContext(context);
+  const reopened=await openScoringPage(context,'index.html');
+  await waitHome(reopened);
+  const afterRestart=await reopened.evaluate(async()=>{
+    try {return {score:computeTodayPoints(),painted:document.getElementById('todayScoreIslandValue')?.textContent};}
+    catch(error){
+      const {meta,sourceDrift}=await TaskPointsStateRuntimeV2.readIsolatedOwnedTasks();
+      const core=TaskPointsCore,current=core.parseTaskPointsStorageJson(localStorage.getItem(core.STORAGE_KEY));
+      return {error:error.message,sourceDrift,seed:meta.homeTaskEvidence,
+        current:{task:current.tasks.find(row=>row.id==='t1'),linked:current.completions.filter(row=>row.taskId==='t1'),
+          journal:core.readPendingTaskMutations(),generation:localStorage.getItem('taskpoints_state_v2_generation_v1')}};
+    }
+  });
+  assert.equal(afterRestart.score,15.8,JSON.stringify(afterRestart));
+  assert.deepEqual(await scoresFromCore(reopened),before);
+  await reopened.locator('a.desktop-header-notes-link').click();
+  await reopened.waitForURL('**/notes.html');
+  await reopened.getByRole('link',{name:'Main',exact:true}).first().click();
+  await waitHome(reopened);
+  assert.equal(await reopened.evaluate(()=>computeTodayPoints()),15.8);
+  assert.deepEqual(await scoresFromCore(reopened),before);
+  assert.deepEqual((await backingTask(reopened)).recurrence,{mode:'daily'});
+  await assert.rejects(reopened.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(0)),
+    /isolated_completion_checkpoint_requires_verified_transfer/);
+});
+
+test('verified scoring reads preserve unrelated journal edits through compaction and maintenance',async t=>{
+  const {page}=await seedScoringReads(t);
+  const v2=await owned(page);
+  await page.evaluate(()=>{
+    const core=TaskPointsCore;
+    core.journalTaskMutation({completionUpsert:{id:'synthetic-unrelated-extra',taskId:'t2',
+      title:'Synthetic extra reward',points:1.25,completedAtISO:TaskPointsCore.todayKey()+'T17:00:00Z'}});
+  });
+  assert.equal((await scoresFromCore(page)).totals[quietDate],17);
+  await page.evaluate(async()=>{
+    if(!TaskPointsCore.flushPendingTaskMutations())throw Error('Expected unrelated journal compaction');
+    TaskPointsCore.queuePhase5CVerifiedSecondaryWrite();
+    await TaskPointsCore.flushPhase5CVerifiedSecondaryWrites();
+  });
+  await page.reload();await waitHome(page);
+  assert.equal((await scoresFromCore(page)).totals[quietDate],17);
+  assert.deepEqual(await owned(page),v2);
+});
+
+for(const fault of ['missing completion','corrupt completion','missing receipt','missing ownership','competing legacy edit','malformed journal','interrupted read','recovery hold']){
+  test(`verified scoring refuses persisted matchup writes after ${fault}`,async t=>{
+    const {page,context}=await seedScoringReads(t);
+    const matchups=await openScoringPage(context,'matchups.html');
+    const action=matchups.locator('#matchupsChronological').getByRole('button',{name:'Generate retro matchups'}).first();
+    await action.waitFor();
+    if(fault==='missing receipt'){
+      await openTaskEdit(page);await pointsField(page).fill('19');
+      assert.equal((await submitTaskEdit(page)).points,19);
+    }
+    await matchups.evaluate(async ({fault,marker})=>{
+      if(fault==='missing ownership'){
+        localStorage.removeItem(marker);
+        return;
+      }
+      if(fault==='competing legacy edit'){
+        TaskPointsCore.journalTaskUpdates(['t1'],row=>{row.points=77;return true;});
+        return;
+      }
+      if(fault==='malformed journal'){
+        localStorage.setItem('taskpoints_pending_task_mutations_v1','{synthetic corrupt journal');
+        return;
+      }
+      if(fault==='recovery hold'){
+        localStorage.setItem('taskpoints_recovery_write_lock_v1','{synthetic recovery evidence');
+        return;
+      }
+      if(fault==='interrupted read'){
+        const transaction=IDBDatabase.prototype.transaction;
+        IDBDatabase.prototype.transaction=function(names,mode,...args){
+          if(this.name==='taskpoints_state_v2'&&mode==='readonly'&&names.includes('completions'))
+            throw new DOMException('synthetic interrupted read','AbortError');
+          return transaction.call(this,names,mode,...args);
+        };
+        return;
+      }
+      await new Promise((resolve,reject)=>{
+        const request=indexedDB.open('taskpoints_state_v2');
+        request.onerror=()=>reject(request.error);
+        request.onsuccess=()=>{
+          const db=request.result;
+          const storeName=fault==='missing receipt'?'mutations':'completions';
+          const tx=db.transaction(storeName,'readwrite'),store=tx.objectStore(storeName);
+          if(fault==='missing receipt') store.clear();
+          else if(fault==='missing completion') store.delete('isolated-score:synthetic-owned-current');
+          else {
+            const row=store.get('isolated-score:synthetic-owned-current');
+            row.onsuccess=()=>store.put({...row.result,value:{...row.result.value,points:500}});
+          }
+          tx.oncomplete=()=>{db.close();resolve();};
+          tx.onabort=()=>{db.close();reject(tx.error);};
+        };
+      });
+    },{fault,marker});
+    const before=await completionWriteEvidence(matchups);
+    await action.dispatchEvent('click');
+    // Join the real control's fresh read before checking the durable bytes.
+    assert.equal(await matchups.evaluate(()=>TaskPointsCore.refreshIsolatedTaskScoring()),false);
+    assert.deepEqual(await completionWriteEvidence(matchups),before);
+    await assert.rejects(matchups.evaluate(()=>{
+      const core=TaskPointsCore,source=core.readTaskPointsStoredState();
+      return core.buildDaySnapshot(core.todayKey(),source);
+    }),/Verified Task completions are unavailable/);
+    const rejected=await matchups.evaluate(()=>{
+      const core=TaskPointsCore,source=core.readTaskPointsStoredState();
+      source.matchups[0].scoreB=9000;
+      try {core.writeTaskPointsStoredState(source);return '';}
+      catch(error){return error.message;}
+    });
+    assert.match(rejected,/freshly verified Task completions/);
+    assert.deepEqual(await completionWriteEvidence(matchups),before);
+  });
+}

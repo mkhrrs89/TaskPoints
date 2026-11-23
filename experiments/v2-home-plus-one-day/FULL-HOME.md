@@ -121,9 +121,8 @@ Removing the same entry again is harmless. An unreadable day map should
 be preserved. This reconciliation has its own verification and cannot
 be part of the IndexedDB commit.
 
-The next prerequisite is a verified completion read path for Home,
-Today, and persisted Game/matchup scoring, exercised with seeded
-synthetic completion records before enabling either Done writer.
+That checkpoint left a verified completion read path as the next
+prerequisite before enabling either Done writer.
 
 The Done checkpoint reran all 47 existing full Home browser cases, 19
 component browser cases, and 258 scoped regressions. All passed,
@@ -138,6 +137,49 @@ compacted message in storage before and after navigation, then timed
 out waiting for the rendered message. The same test passed in the
 isolated rerun. Three isolated checks on `31bc2d20` also passed, so
 this run's display timeout was not reproduced on that baseline.
+
+## Verified completion reads
+
+The completion-read fixture explicitly selects synthetic Task `t1` and
+stores a separate scoring selection marker. At fixture creation only,
+V2 seals the seeded rewards and writes matching completion rows. A
+single IndexedDB read verifies those rows, the Task, its mutation
+receipts, and the owner metadata. A lost owner marker by itself leaves
+the separate scoring hold in place. This proof relies on the current
+synthetic pages and does not extend to old clients or total storage loss.
+
+Home's day snapshot and score summaries, Today's checked row, Game's
+player scores, and the shared `syncYouMatchups` calculation use the
+verified completions. The reader replaces just the selected Task's
+legacy rewards and includes the latest unrelated V1 completions and
+pending journals. An existing legacy reward must have a corresponding
+seeded ID and timestamp. The fixture verifies that a stale 5-point row
+contributes only its authoritative 12.75 points, a second Task adds
+3 points, and past days preserve -2.25 and 0. Home and Game round
+15.75 to 15.8 for display.
+
+The real Matchups generation control runs under fresh verification.
+The final V1 snapshot check rejects score changes outside that scope and
+checks the completion source immediately before replacement. This
+fixture saves the affected matchup synchronously inside its verified
+action, since the ordinary deferred toolbar write can outlive that
+verification. The V1 matchup snapshot carries calculated scores and
+keeps its original completion records. An affected write is refused
+if a receipt or completion is missing or corrupt, the owner evidence
+is lost, a read is interrupted, a recovery hold exists, or a legacy
+Task edit or malformed journal makes the source untrustworthy.
+
+Done remains paused. This is a seeded read path, with no live V2 reward
+writer. Today marks the item checked from verified data for display.
+Restart-safe Today-list persistence still needs reconciliation. The
+ordinary Task-only rollback checkpoint refuses seeded scoring fixtures
+until it can transfer and verify their V2 completions as well.
+
+The full run passed 59 of 60 browser cases. All 10 new scoring cases,
+19 component browser cases, and 264 scoped regressions passed. The
+one full-run failure was the existing intermittent Inbox assertion
+that the compacted edit must be durable before navigation. The
+isolated Inbox rerun passed. The assertion remains unchanged.
 
 ## How the integration works
 

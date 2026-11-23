@@ -7,6 +7,7 @@
   // Check the durable marker at the point of use, even in a Today tab that
   // loaded before selection or has no V2 adapter. Invalid bytes still reserve t1.
   const ISOLATED_TASK_FIXTURE_KEY = 'taskpoints_isolated_task_fixture_v1';
+  const ISOLATED_SCORING_KEY = 'taskpoints_isolated_task_scoring_read_v1';
   const isolatedCompletionOrigin = ['localhost', '127.0.0.1'].includes(global.location?.hostname);
   const isolatedCompletionPage = isolatedCompletionOrigin &&
     global.location.pathname?.startsWith('/experiments/v2-home-plus-one-day/full/');
@@ -29,10 +30,91 @@
       if (!isolatedCompletionSelected && !isolatedCompletionPage) return null;
       return 'Task completion is paused because its ownership could not be checked.';
     }
-    return isolatedCompletionSelected
+    return isolatedCompletionSelected || usesIsolatedTaskScoring()
       ? 'This Task is owned by the V2 experiment. Use a verified V1 rollback before completing it.'
       : null;
   }
+  let isolatedScoringSelected = false;
+  let verifiedCompletionRead = null;
+  let pendingCompletionRead = null;
+  let verifiedScoringWrite = null;
+
+  function usesIsolatedTaskScoring() {
+    if (!isolatedCompletionOrigin) return false;
+    try {
+      isolatedScoringSelected ||= global.localStorage.getItem(ISOLATED_SCORING_KEY) !== null;
+      const raw = global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY);
+      if (raw !== null) isolatedScoringSelected ||= JSON.parse(raw)?.completionRead === true;
+    } catch (_) {
+      return isolatedScoringSelected || isolatedCompletionSelected || isolatedCompletionPage;
+    }
+    return isolatedScoringSelected;
+  }
+
+  async function refreshIsolatedTaskScoring() {
+    if (!usesIsolatedTaskScoring()) return true;
+    pendingCompletionRead ||= Promise.resolve().then(async () => {
+      verifiedCompletionRead = null;
+      try {
+        verifiedCompletionRead = await global.TaskPointsStateRuntimeV2.readIsolatedTaskScoring();
+        return true;
+      } catch (error) {
+        console.warn('Verified Task scoring is paused:', error.message);
+        return false;
+      }
+    }).finally(() => { pendingCompletionRead = null; });
+    return pendingCompletionRead;
+  }
+
+  function readScoringCompletions(completions) {
+    if (!usesIsolatedTaskScoring()) return completions;
+    if (!verifiedCompletionRead) throw new Error('Verified Task completions are unavailable.');
+    const current = verifiedCompletionRead.assertCurrent();
+    const {taskId, completions: owned} = verifiedCompletionRead;
+    const legacy = current.filter(row => row?.taskId !== taskId);
+    const ids = new Set(owned.map(row => row.id));
+    if (legacy.some(row => ids.has(row?.id))) throw new Error('Conflicting completion identity.');
+    return [...legacy, ...owned.map(row => structuredClone(row))];
+  }
+
+  async function runWithVerifiedTaskScoring(operation) {
+    if (!await refreshIsolatedTaskScoring()) return;
+    const read = verifiedCompletionRead;
+    try {
+      verifiedScoringWrite = {read,source:JSON.stringify(read.assertCurrent())};
+    } catch (error) {
+      console.warn('Verified Task scoring is paused:', error.message);
+      return;
+    }
+    try { return operation(); }
+    finally { verifiedScoringWrite = null; }
+  }
+
+  function verifiedScoringSaveOptions() {
+    // Deferred toolbar saves outlive the verified scoring action. Persist
+    // inside the action so the last source check still applies.
+    return verifiedScoringWrite ? {immediateWrite:true} : {};
+  }
+
+  function assertIsolatedScoringWrite(raw) {
+    if (!usesIsolatedTaskScoring()) return;
+    const previousRaw = localStorage.getItem(STORAGE_KEY);
+    if (!previousRaw) throw new Error('Cannot verify the legacy scoring snapshot.');
+    const previous = parseTaskPointsStorageJson(previousRaw);
+    const candidate = parseTaskPointsStorageJson(raw);
+    const ownedRows = state => state.completions?.filter(row=>row?.taskId==='t1');
+    if (JSON.stringify(ownedRows(previous)) !== JSON.stringify(ownedRows(candidate)))
+      throw new Error('Legacy scoring cannot replace the selected Task completion history.');
+    const fields = ['matchups','gameHistory','goldLedger','goldEconomy'];
+    if (fields.every(key=>JSON.stringify(previous[key])===JSON.stringify(candidate[key]))) return;
+    if (!verifiedScoringWrite || verifiedScoringWrite.read !== verifiedCompletionRead)
+      throw new Error('Scoring write requires freshly verified Task completions.');
+    // Also check the legacy evidence at the point of storage replacement.
+    readScoringCompletions(candidate.completions);
+    if (JSON.stringify(verifiedCompletionRead.assertCurrent()) !== verifiedScoringWrite.source)
+      throw new Error('Completion source changed before the scoring write.');
+  }
+
   const PENDING_HABIT_DELTAS_KEY = "taskpoints_pending_habit_deltas_v1";
   const PROJECTS_STORAGE_KEY = "tp_projects_v1";
   const IMAGE_DB_NAME = "taskpoints";
@@ -852,8 +934,13 @@ function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
     const storageKey = options.storageKey || STORAGE_KEY;
     const protectedState = preserveAuthoritativeNotesBeforeSave(nextState, storageKey, options);
     const raw = serializeTaskPointsStoredState(protectedState, options);
-    safeReplaceTaskPointsStorage(storageKey, raw);
+    replaceCheckedTaskPointsStorage(storageKey, raw);
     return raw;
+  }
+
+  function replaceCheckedTaskPointsStorage(storageKey, serializedCandidate) {
+    if (storageKey === STORAGE_KEY) assertIsolatedScoringWrite(serializedCandidate);
+    safeReplaceTaskPointsStorage(storageKey, serializedCandidate);
   }
 
   function safeReplaceTaskPointsStorage(storageKey, serializedCandidate) {
@@ -882,7 +969,7 @@ function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
       const plan = buildOptimizedTaskPointsStorageRaw(pending.state);
       if (localStorage.getItem(storageKey) !== pending.rawSnapshot) return false;
       if (storageKey === STORAGE_KEY && readPendingHabitDeltas().length) return false;
-      safeReplaceTaskPointsStorage(storageKey, plan.chosenRaw);
+      replaceCheckedTaskPointsStorage(storageKey, plan.chosenRaw);
       if (global?.TP_DEBUG_PERF) console.debug('[TP_DEBUG_PERF] idle-recompress', { ms: Date.now() - started, encoding: plan.chosenEncoding, storageKey });
       return true;
     } catch (error) {
@@ -7843,7 +7930,7 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
         throw new Error('Inbox save source changed before snapshot replacement');
       }
       try {
-        safeReplaceTaskPointsStorage(storageKey, storagePlan.chosenRaw);
+        replaceCheckedTaskPointsStorage(storageKey, storagePlan.chosenRaw);
       } catch (err) {
         recordQuotaFailureDiagnostics({ savePath, stage, storageKey, storedBytes, candidateBytes: chosenStorageBytes, packedCandidateBytes, compressedCandidateBytes, unpackedCandidateBytes: candidateBytes, packedRawChars: storagePlan.packedRawChars, compressedRawChars: storagePlan.compressedRawChars, chosenStorageEncoding: storagePlan.chosenEncoding, chosenStorageChars: storagePlan.chosenChars, chosenStorageBytes, snapshot: candidateWithSticky });
         throw err;
@@ -8077,7 +8164,7 @@ const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
       if (inboxCheck.raw !== undefined && localStorage.getItem(storageKey) !== inboxCheck.raw) {
         throw new Error('Inbox save source changed before storage warning replacement');
       }
-      safeReplaceTaskPointsStorage(storageKey, warningRaw);
+      replaceCheckedTaskPointsStorage(storageKey, warningRaw);
     } catch (warningErr) {
       console.warn('TaskPointsCore: unable to persist storage warning after quota failure.', warningErr);
     }
@@ -9331,7 +9418,7 @@ function buildDailyBreakdowns(state){
   function buildDaySnapshot(dateKeyStr, state){
     const normalized = normalizeState(state || {});
     const key = dateKey(dateKeyStr);
-    const comps = Array.isArray(normalized.completions) ? normalized.completions : [];
+    const comps = readScoringCompletions(Array.isArray(normalized.completions) ? normalized.completions : []);
 
     const dayComps = comps.filter(c => {
       if (!c || !c.completedAtISO) return false;
@@ -9573,7 +9660,7 @@ function buildDailyBreakdowns(state){
 
     const aggregated = (() => {
       aggregateCalls += 1;
-      return aggregateCompletionsByDate(normalized.completions, normalized);
+      return aggregateCompletionsByDate(readScoringCompletions(normalized.completions), normalized);
     })();
     const dailyTotals = aggregated.dailyTotals || {};
     const dayKeys = Array.from(new Set([
@@ -9958,7 +10045,13 @@ function computeRankingsPageRows(state){
   function syncYouMatchups(state, options = {}){
     // Invariant: options.normalized is only set when state already passed through normalizeState().
     const normalized = options.normalized ? (state || {}) : normalizeState(state || {});
-    const { dayScoreMap } = buildYouDayScoreMap(normalized, { normalized: true });
+    let dayScoreMap;
+    try {
+      ({ dayScoreMap } = buildYouDayScoreMap(normalized, { normalized: true }));
+    } catch (error) {
+      if (!usesIsolatedTaskScoring()) throw error;
+      return { state: normalized, changed: false, scoringBlocked: true };
+    }
 
     if (!dayScoreMap.size) {
       return { state: normalized, changed: false };
@@ -10871,10 +10964,15 @@ return Number(cappedScore.toFixed(1));
     assertTaskPointsParserAvailableForRaw,
     readTaskPointsStoredState,
     getLegacyTaskCompletionHold,
+    usesIsolatedTaskScoring,
+    refreshIsolatedTaskScoring,
+    readScoringCompletions,
+    runWithVerifiedTaskScoring,
+    verifiedScoringSaveOptions,
     serializeTaskPointsStoredState,
     writeTaskPointsStoredState,
     parseTaskPointsStorageJson,
-    safeReplaceTaskPointsStorage,
+    safeReplaceTaskPointsStorage: replaceCheckedTaskPointsStorage,
     scheduleInteractiveRecompress,
     flushPendingInteractiveRecompresses,
     getPendingInteractiveRecompressCount: () => pendingInteractiveRecompresses.size,

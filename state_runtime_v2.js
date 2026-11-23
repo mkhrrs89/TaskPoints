@@ -16,6 +16,7 @@
   const PREVIEW_RECOVERY_SCHEMA = 1;
   const DARK_MODE_KEY = 'taskpoints_state_v2_dark_mode_v1';
   const OWNED_TASK_FIXTURE = 'taskpoints_isolated_task_fixture_v1';
+  const OWNED_TASK_SCORING = 'taskpoints_isolated_task_scoring_read_v1';
   const WAL_TEST_ACTIVE_GLOBAL = '__taskpointsStateV2WalKillHoldV1';
   const GENERATION_KEY = 'taskpoints_state_v2_generation_v1';
   const REVISION_SIGNAL_KEY = 'taskpoints_state_v2_revision_signal_v1';
@@ -20119,7 +20120,7 @@
   // Isolated synthetic Task ownership only. The ordinary runtime/dark mirror
   // stays V1-authoritative. These APIs are never selected by production startup.
   const OWNED_TASK_META = 'isolated-task-owner-v1';
-  function ownedTaskContext(seed = false) {
+  function ownedTaskContext(seed = false, scoringRead = false) {
     if (!['localhost','127.0.0.1'].includes(global.location?.hostname)
       || !String(global.location?.pathname || '').startsWith('/experiments/v2-home-plus-one-day/')
       || global.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ !== true)
@@ -20131,7 +20132,8 @@
     for (const key of ['taskpoints_recovery_write_lock_v1','taskpoints_recovery_attempt_lock_v1','taskpoints_emergency_recovery_hold_v1'])
       if (global.localStorage.getItem(key) !== null) throw new Error('recovery_evidence_blocks_task_write');
     if (fixture.homeTaskId !== undefined && (typeof fixture.homeTaskId !== 'string' || !fixture.homeTaskId
-      || global.location.pathname !== '/experiments/v2-home-plus-one-day/full/index.html'
+      || (scoringRead ? !/^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups)\.html$/.test(global.location.pathname)
+        : global.location.pathname !== '/experiments/v2-home-plus-one-day/full/index.html')
       || global.localStorage.getItem('taskpoints_storage_guard_incident_v1') !== null))
       throw new Error('owned_home_task_context_or_recovery_conflict');
     return fixture;
@@ -20155,6 +20157,9 @@
     const task = core.normalizeTask(matches[0]);
     // Home materializes this empty editor default during ordinary saves.
     if (task.skills === undefined) task.skills = [];
+    // A legacy matchup merge can materialize an empty skip-date list.
+    // Actual skipped dates remain part of the compared Task evidence.
+    if (task.skipDates === undefined) task.skipDates = [];
     const linked = rows => rows.filter(row => String(row?.taskId) === taskId);
     const completions = linked(snapshot.completions);
     const upserts = linked(journal.record.completionUpserts);
@@ -20170,13 +20175,15 @@
   function ownedTaskSourceConflict(meta) {
     if (!meta.homeTaskId) return stableJson(meta.source) !== stableJson(ownedLegacyEvidence());
     try {
-      return stableJson(meta.homeTaskEvidence) !== stableJson(ownedHomeTaskEvidence(meta.homeTaskId));
+      const expected = meta.homeTaskEvidence;
+      const task = {skipDates:[], ...expected.task};
+      return stableJson({...expected,task}) !== stableJson(ownedHomeTaskEvidence(meta.homeTaskId));
     } catch (_) {
       return true; // Missing or unreadable evidence is never a clean source.
     }
   }
-  async function openOwnedTasks(seed = false) {
-    ownedTaskContext(seed);
+  async function openOwnedTasks(seed = false, scoringRead = false) {
+    ownedTaskContext(seed, scoringRead);
     if (typeof global.indexedDB?.databases !== 'function') throw new Error('database_catalog_required');
     const catalog = await global.indexedDB.databases(), prior = catalog.find(d=>d.name===DB_NAME);
     if (!seed && !prior) throw new Error('owned_task_database_missing_no_legacy_fallback');
@@ -20193,7 +20200,20 @@
       q.onsuccess=()=>{if(abandoned){q.result.close();return;}q.result.onversionchange=()=>q.result.close();resolve(q.result);};
     });
   }
-  async function initializeIsolatedTaskOwner(snapshot) {
+  function validateOwnedScoringSeed(rows, evidence, taskId) {
+    if (!Array.isArray(rows) || rows.some(row => !row || row.taskId !== taskId
+      || typeof row.id !== 'string' || !row.id || typeof row.title !== 'string'
+      || !Number.isFinite(row.points) || typeof row.completedAtISO !== 'string'
+      || !Number.isFinite(Date.parse(row.completedAtISO))
+      || Object.keys(row).some(key => !['id','taskId','title','points','completedAtISO','unknown'].includes(key)))
+      || new Set(rows.map(row => row.id)).size !== rows.length
+      || new Set(rows.map(row => core.dateKey(row.completedAtISO))).size !== rows.length
+      || evidence.completions.some(old => !rows.some(row => row.id === old.id && row.completedAtISO === old.completedAtISO))) {
+      throw new Error('isolated_completion_seed_unverified');
+    }
+    return rows;
+  }
+  async function initializeIsolatedTaskOwner(snapshot, options = {}) {
     const fixture=ownedTaskContext(true), source=ownedLegacyEvidence();
     const baseline=clone(snapshot);
     if (!baseline || !Array.isArray(baseline.tasks) || baseline.tasks.some(t=>!t||typeof t.id!=='string'||!t.id)
@@ -20204,6 +20224,10 @@
     if (homeTaskEvidence && (!baseline.tasks.some(task => task.id === homeTaskId)
       || homeTaskEvidence.taskJournal.length || homeTaskEvidence.upserts.length || homeTaskEvidence.deletes.length))
       throw new Error('owned_home_task_seed_has_competing_evidence');
+    if (fixture.completionRead === true && (homeTaskId !== 't1' || global.localStorage.getItem(OWNED_TASK_SCORING) !== fixture.id))
+      throw new Error('isolated_completion_selection_unverified');
+    const scoringSeed = fixture.completionRead === true
+      ? clone(validateOwnedScoringSeed(options.completionSeed, homeTaskEvidence, homeTaskId)) : null;
     const generation=newResetGeneration('isolated-task'),db=await openOwnedTasks(true);
     try {
       const names=Array.from(db.objectStoreNames),tx=db.transaction(names,'readwrite',{durability:'strict'}),done=transactionPromise(tx);
@@ -20217,8 +20241,11 @@
             if (ownedTaskContext(true).id!==fixture.id || stableJson(ownedLegacyEvidence())!==stableJson(source))
               throw new Error('seed_source_changed');
             baseline.tasks.forEach((value,legacyIndex)=>tx.objectStore('tasks').add({id:value.id,value,legacyIndex,ownerRevision:0,ownerGeneration:generation}));
+            if (scoringSeed) for (const value of scoringSeed) {
+              tx.objectStore('completions').add({id:'isolated-score:'+value.id,value,ownerGeneration:generation});
+            }
             tx.objectStore('meta').add({id:OWNED_TASK_META,schemaVersion:1,fixtureId:fixture.id,generation,revision:0,mode:'owned',baseline,source,
-              ...(homeTaskId ? {homeTaskId,homeTaskEvidence} : {})});
+              ...(homeTaskId ? {homeTaskId,homeTaskEvidence} : {}), ...(scoringSeed ? {scoringSeed} : {})});
           } catch(e) { failure=e; tx.abort(); }
         };
       }
@@ -20259,13 +20286,16 @@
       && stableJson(after) === stableJson({ ...before, ...fields, updatedAtISO: after.updatedAtISO });
   }
 
-  async function readOwnedSnapshot(db) {
-    const tx=db.transaction(['tasks','mutations','meta'],'readonly'),done=transactionPromise(tx);
-    const [meta,rows,receipts]=await Promise.all([
+  async function readOwnedSnapshot(db, scoringRead = false) {
+    const names = ['tasks','mutations','meta'];
+    if (scoringRead) names.push('completions');
+    const tx=db.transaction(names,'readonly'),done=transactionPromise(tx);
+    const [meta,rows,receipts,completionRows]=await Promise.all([
       requestPromise(tx.objectStore('meta').get(OWNED_TASK_META)),requestPromise(tx.objectStore('tasks').getAll()),
-      requestPromise(tx.objectStore('mutations').getAll()),done
+      requestPromise(tx.objectStore('mutations').getAll()),
+      scoringRead ? requestPromise(tx.objectStore('completions').getAll()) : null,done
     ]);
-    const fixture=ownedTaskContext();
+    const fixture=ownedTaskContext(false, scoringRead);
     if (!meta || meta.fixtureId!==fixture.id || meta.homeTaskId!==fixture.homeTaskId || meta.schemaVersion!==1 || !['owned','rollback-frozen'].includes(meta.mode)
       || !Number.isSafeInteger(meta.revision)||meta.revision<0) throw new Error('owned_task_authority_missing');
     if (typeof meta.generation!=='string'||!Array.isArray(meta.baseline?.tasks)||!Array.isArray(meta.source)
@@ -20287,13 +20317,47 @@
       expected.set(r.taskId,{value:r.after,revision:r.revision});
     }
     for(const r of rows){const e=expected.get(r.id);if(!e||r.ownerRevision!==e.revision||stableJson(r.value)!==stableJson(e.value))throw new Error('owned_task_row_receipt_mismatch');}
-    return {meta,rows,journal,sourceDrift:ownedTaskSourceConflict(meta)};
+    return {meta,rows,journal,completionRows,sourceDrift:ownedTaskSourceConflict(meta)};
   }
   async function readIsolatedOwnedTasks() {
     const db=await openOwnedTasks();
-    try {const s=await readOwnedSnapshot(db);return {...s,authority:'v2-isolated-task',tasks:s.rows.sort((a,b)=>a.legacyIndex-b.legacyIndex).map(r=>clone(r.value))};}
+    try {const {completionRows: _unused,...s}=await readOwnedSnapshot(db);return {...s,authority:'v2-isolated-task',tasks:s.rows.sort((a,b)=>a.legacyIndex-b.legacyIndex).map(r=>clone(r.value))};}
     finally{db.close();}
   }
+  async function readIsolatedTaskScoring() {
+    const fixture = ownedTaskContext(false, true);
+    const marker = global.localStorage.getItem(OWNED_TASK_FIXTURE);
+    if (fixture.homeTaskId !== 't1' || fixture.completionRead !== true)
+      throw new Error('isolated_completion_read_not_selected');
+    const db = await openOwnedTasks(false, true);
+    try {
+      const {meta,completionRows,sourceDrift} = await readOwnedSnapshot(db, true);
+      if (sourceDrift || meta.mode !== 'owned') throw new Error('isolated_completion_source_conflict');
+      const seed = validateOwnedScoringSeed(meta.scoringSeed, meta.homeTaskEvidence, meta.homeTaskId);
+      const expected = new Map(seed.map(value=>['isolated-score:'+value.id,value]));
+      if (completionRows.length !== expected.size || completionRows.some(row=>row.ownerGeneration!==meta.generation
+        || !expected.has(row.id) || stableJson(row.value)!==stableJson(expected.get(row.id)))) {
+        throw new Error('isolated_completion_rows_unverified');
+      }
+      const assertCurrent = () => {
+        ownedTaskContext(false, true);
+        const flex = inspectReadOnlyFlexJournalsForCutover();
+        if (global.localStorage.getItem(OWNED_TASK_SCORING)!==fixture.id
+          || global.localStorage.getItem(OWNED_TASK_FIXTURE)!==marker || ownedTaskSourceConflict(meta)
+          || [flex.completions,flex.order].some(journal=>journal.reason==='malformed'))
+          throw new Error('isolated_completion_source_conflict');
+        // The ordinary load path can tolerate a malformed Habit journal.
+        // Award-dependent scoring has to leave it intact and stop.
+        core.readPendingHabitDeltas();
+        const current = core.readTaskPointsStoredState();
+        if (!Array.isArray(current?.completions)) throw new Error('isolated_completion_source_unreadable');
+        return current.completions;
+      };
+      assertCurrent();
+      return {taskId:meta.homeTaskId,completions:clone(seed),assertCurrent};
+    } finally { db.close(); }
+  }
+
   async function commitIsolatedOwnedTask(input) {
     const fixture=ownedTaskContext();
     if(!input || typeof input.actionId!=='string'||!input.actionId||input.actionId.length>128
@@ -20368,6 +20432,7 @@
     try{
       const prior=await readOwnedSnapshot(db);
       if(prior.sourceDrift)throw new Error('legacy_source_changed_preserved_reconciliation_required');
+      if(prior.meta.scoringSeed)throw new Error('isolated_completion_checkpoint_requires_verified_transfer');
       const rollbackSource = ownedLegacyEvidence();
       if (prior.meta.homeTaskId) {
         // These ordinary readers can leave unreadable journal bytes unapplied.
@@ -20434,6 +20499,7 @@
     open,
     initializeIsolatedTaskOwner,
     readIsolatedOwnedTasks,
+    readIsolatedTaskScoring,
     commitIsolatedOwnedTask,
     prepareIsolatedTaskRollback,
     inspectStartupMeta,

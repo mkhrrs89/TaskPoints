@@ -2158,7 +2158,8 @@ function getDerived(){
   // A lifecycle refresh, journal compaction or storage reconciliation can
   // replace state/completions without calling markCompletionsDirty(). Never
   // reuse a cache built for a different state or a different completions array.
-  const comps = Array.isArray(state?.completions) ? state.completions : [];
+  const legacyComps = Array.isArray(state?.completions) ? state.completions : [];
+  const comps = window.TaskPointsCore?.readScoringCompletions?.(legacyComps) ?? legacyComps;
   if (_derived.builtRev === _derived.rev
     && _derived.builtState === state
     && _derived.builtCompletions === comps
@@ -4958,7 +4959,9 @@ function save(savePath, extraOptions = {}) {
   try {
     pruneOpponentDripSchedulesToTodayOnly();
 
-    const saveOptions = buildHomeSaveOptions(savePath, extraOptions);
+    const saveOptions = buildHomeSaveOptions(savePath, {
+      ...extraOptions, ...window.TaskPointsCore?.verifiedScoringSaveOptions?.()
+    });
 
     if (window.TaskPointsCore?.saveStateSnapshot) {
       const result = TaskPointsCore.saveStateSnapshot(state, saveOptions);
@@ -15397,7 +15400,7 @@ function applyCapitalizeWordsInput(input) {
   });
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   const earlyBootPromise = window.__tpMatrixFinishedPromise;
   const shouldPlayBoot = !hasSeenBootThisSession();
 
@@ -15514,8 +15517,15 @@ updateWeekToggleButtons();
 updateFlexDayToggleButton();
 
 // Preserve first-load daily initialization without re-reading storage.
-maybeAutoSimToday();
-state = syncStateWithMatchups(state);
+if (window.TaskPointsCore?.usesIsolatedTaskScoring?.()) {
+  await TaskPointsCore.runWithVerifiedTaskScoring(() => {
+    maybeAutoSimToday();
+    state = syncStateWithMatchups(state);
+  });
+} else {
+  maybeAutoSimToday();
+  state = syncStateWithMatchups(state);
+}
 markHomeLifecycleBaseline();
 
 renderHabitWeekLabels();
@@ -15576,6 +15586,9 @@ function refreshMainPageIfChanged(reason = 'lifecycle') {
   if (window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true && owner?.displayOnly && owner.isEnabled()) {
     // V2 can change without a V1 revision bump, including while Home is hidden.
     owner.refresh(() => renderTasks(state));
+  }
+  if (window.TaskPointsCore?.usesIsolatedTaskScoring?.()) {
+    return TaskPointsCore.runWithVerifiedTaskScoring(refreshMainPageFromStorage);
   }
   const currentRevision = readHomeStateRevision();
   const currentGameDayKey = readHomeGameDayKey();
