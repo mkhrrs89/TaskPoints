@@ -272,6 +272,8 @@
     // completion a second time on EACH foreground Work/Task interaction.
     // Keep the original validation path for any future untrusted caller.
     const normalized = alreadyNormalized ? record : (normalizeRecord(record) || emptyRecord());
+    if ((core.filterIsolatedRollbackTaskJournal?.(normalized) ?? normalized) !== normalized)
+      throw new Error('Detached rollback forbids changing a permanently deleted Task or its earned history.');
     const expectedRaw = isEmpty(normalized) ? null : JSON.stringify(normalized);
     assertPreviewTaskGeneration();
     if (!recoveryWriteAllowed()) {
@@ -462,7 +464,8 @@
     const state = sourceState && typeof sourceState === 'object' && !Array.isArray(sourceState)
       ? { ...sourceState }
       : {};
-    const record = suppliedRecord || readRecord().record;
+    const pending = suppliedRecord || readRecord().record;
+    const record = core.filterIsolatedRollbackTaskJournal?.(pending) ?? pending;
 
     const tasks = Array.isArray(state.tasks) ? [...state.tasks] : [];
     const taskIndex = record.tasks.length >= 8 ? new Map() : null;
@@ -871,6 +874,8 @@
     try { global.TaskPointsPerf?.mark?.('taskMutation.compactionStart', { reason }); } catch (_) {}
     const snapshot = current.record;
     try {
+      if ((core.filterIsolatedRollbackTaskJournal?.(snapshot) ?? snapshot) !== snapshot)
+        throw new Error('Detached rollback retained a journal that conflicts with a permanent deletion.');
       // Freeze the *raw* V1 snapshot used to build this candidate. Reading
       // and decoding a large compressed snapshot can give a peer tab time
       // to commit a newer full-state save even if the Task journal is unchanged.

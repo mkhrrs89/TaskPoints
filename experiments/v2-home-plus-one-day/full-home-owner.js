@@ -115,7 +115,7 @@
     read = (async () => {
       try {
         const result = await TaskPointsStateRuntimeV2.readIsolatedOwnedTasks();
-        if (result.meta.homeTaskId !== seedTaskId || !result.rows.some(row => row.id === seedTaskId))
+        if (result.meta.homeTaskId !== seedTaskId || !result.ownedIds.includes(seedTaskId))
           throw Error('Home ownership evidence does not match the selected Task');
         verified = result;
         error = result.sourceDrift ? 'Competing or unreadable V1 Task evidence. Further edits are paused.' : '';
@@ -229,6 +229,7 @@
       if (!verified || verified.sourceDrift || verified.meta.mode !== 'owned' || !TaskPointsCore.usesIsolatedTaskDone()) return [];
       const now = Date.now();
       return verified.deletions.filter(row=>{
+        if (row.type === 'sealed-v1-trash') return false;
         const elapsed = now - Date.parse(row.committedAtISO);
         return elapsed >= 0 && elapsed < TaskPointsStateRuntimeV2.OWNED_TRASH_UNDO_MS;
       });

@@ -481,10 +481,9 @@ includes any needed cleanup for the detached V1 copy. Unreadable Today
 data is preserved and blocks an affected rollback. The fresh V1 copy
 keeps trashed Tasks in Trash and restored Tasks at their original IDs.
 
-Delete Forever remains available for ordinary V1 Tasks. For experimental
-V2-owned Tasks it requires verified rollback. Metric-derived reward
-refusals, time-zone checks, the installed iPhone handoff, and old-client
-safety gates still apply.
+Delete Forever is available in ordinary V1 and the gated V2 Trash path
+described below. Metric-derived reward refusals, time-zone checks, the
+installed iPhone handoff, and old-client safety gates still apply.
 
 All 11 Delete and Undo browser tests passed. The existing full-Home
 suite passed 142 of 143. One malformed-Inbox rollback assertion caught
@@ -507,7 +506,8 @@ Restore clears the Trash fields and restores the prior status. It keeps
 the original ID, recurrence, due date, and earned history. A restored
 completed one-off stays complete. A restored active Task can reappear in
 Home, Today, Critical Tasks, and Week without changing unrelated ordering.
-A V2-owned trashed row without a verified deletion receipt remains held.
+A V2-owned trashed row needs a verified deletion receipt or the sealed V1
+deletion evidence described below.
 Home Undo retains its 4.5-second deadline.
 
 All 7 Restore tests, 154 existing browser tests, 19 component tests, and
@@ -516,11 +516,41 @@ passed after extending the fresh V1 test to cover an ordinary save.
 The broader suite had 484 passes, 14 failures, and one TODO. The same
 14 failures and TODO reproduced on `022601ee`.
 
+## Trash Delete Forever and V1 admission
+
+The real Trash control keeps its original confirmation. V1 removes the Task
+row and keeps linked completions and their scores. V2 keeps that behavior and
+uses its permanent-deletion receipt as a tombstone. One IndexedDB transaction
+removes the Task and records the revision and receipt. Restoring and permanently
+deleting the same revision compete inside that transaction. Retrying a verified
+permanent deletion returns its original receipt. The ID stays reserved.
+
+The existing Today reconciler removes only the permanently deleted Task's list
+and order references, including historical lists. A detached rollback leaves
+the Task absent and imports the earned history once. The fresh synthetic V1
+profile uses the checkpoint tombstones to block conflicting snapshot or journal
+writes. Stale backup and journal evidence remains available for inspection.
+
+The selected synthetic Task can be adopted from existing V1 Trash when its
+sealed canonical row has explicit Home or Week deletion provenance, agreeing
+timestamps and prior status, and no conflicting pending journal. The V1 evidence
+identifies that deletion for Restore or Delete Forever. It creates no past V2
+receipt and opens no Undo window. Ambiguous rows, including records without
+verifiable provenance, stay held. Whole-collection admission is still open.
+
+All 10 new Trash tests, 19 component tests, and 32 targeted checks passed.
+The existing full-Home run passed 159 of 161 tests. The Today admission
+setup and detached rollback interruption checks each failed once during
+setup. Both passed on focused reruns here and on `02ef827f`. The scoped run
+had 516 passes, 14 failures, and one TODO, with the same results and failure
+names on `02ef827f`. The existing intermittent Inbox issue remains tracked.
+
 ### Remaining Task work for M02
 
-1. **Trash** — migrate confirmed Delete Forever with durable evidence that
-   prevents resurrection. Preserve linked rewards according to the V1 rule.
-   Establish verified deletion lineage when initially adopting V1 Trash rows.
+1. **Trash** — verified in the synthetic experiment. Restore and confirmed
+   Delete Forever use the same deletion evidence, preserve linked rewards,
+   and support detached rollback. Sealed V1 Trash rows meeting those conditions
+   can be adopted for the selected synthetic Task. Ambiguous rows stay held.
 2. **Home and Archive** — migrate individual and bulk overdue Postpone,
    the action-sheet snooze and date picker, swipe rescheduling, Hide,
    Won't Do and recurring skips. Route Archive Un-Archive, Won't Do, and

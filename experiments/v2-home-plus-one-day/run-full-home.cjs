@@ -192,7 +192,7 @@ async function partOfState(page){return page.evaluate(async inboxEventId=>{
     gold:s.goldLedger?.find(g=>g.id==='synthetic-gold'),inbox:s.inboxMessages?.find(r=>r.id===inboxEventId),
     projects:localStorage.getItem('tp_projects_v1'),notes:localStorage.getItem('taskpoints_notes_v1'),
     flex:s.flexActions?.find(action=>action.id==='synthetic-flex'),
-    unknownTask:s.tasks.find(t=>t.id==='t1').unknownTask,
+    unknownTask:s.tasks.find(t=>t.id==='t1')?.unknownTask,
     unknownRaw:localStorage.getItem('synthetic_unknown_key'),
     quarantine:localStorage.getItem('taskpoints_quarantined_snapshot'),
     image:[...new Uint8Array(await image.arrayBuffer())]};
@@ -4059,9 +4059,9 @@ test('V2 Home Trash and Undo use the real controls and refresh open Home, Today,
   assert.deepEqual(await canonicalCompletions(page),legacyRewards);
   assert.equal((await backingTask(page)).status,'active');
   assert.deepEqual(await partOfState(page),preservation);
-  const hold=trash.waitForEvent('dialog');
+  const confirmation=trash.waitForEvent('dialog');
   await trashListing(trash,before.title).getByRole('button',{name:'Delete Forever',exact:true}).click();
-  assert.match((await hold).message(),/verified rollback/);
+  assert.equal((await confirmation).message(),'Delete forever? This cannot be undone.');
   assert.deepEqual(await trashReceipts(page),[deletion]);
 
   await useUndo(peer,'t1');
@@ -4678,4 +4678,384 @@ test('V2 Trash Restore rejects an invalid receipt chain and retains the legacy b
   await page.getByRole('status').filter({hasText:'owned_task_trash_receipt_conflict'}).waitFor();
   assert.equal(await taskCard(page,'t1').count(),0);
   assert.equal((await partOfState(page)).task.title,title);
+});
+
+const foreverIntent=deletion=>({...undoIntent(deletion),operation:'trash-delete-forever'});
+const foreverReceipts=async page=>(await trashReceipts(page)).filter(row=>row.intent.operation==='trash-delete-forever');
+const foreverButton=(page,id)=>page.locator(`#trashList [data-action="delete"][data-id="${id}"]`);
+async function clickDeleteForever(trash,id,accept=true){
+  const handle=async dialog=>{
+    assert.equal(dialog.type(),'confirm');
+    assert.equal(dialog.message(),'Delete forever? This cannot be undone.');
+    if(accept)await dialog.accept();
+    else await dialog.dismiss();
+  };
+  // This helper handles the confirmation. Tests can attach their own alert
+  // handler for refusals when a write is faulted.
+  const confirmation=trash.waitForEvent('dialog',{predicate:dialog=>dialog.type()==='confirm'});
+  const click=foreverButton(trash,id).click();
+  await handle(await confirmation);
+  await click;
+}
+
+async function ordinaryLegacyTrash(t,source='TasksScreen'){
+  const {page,context}=await prepareCompletionBoundary(t);
+  await setTrashClock(page);
+  const reward={id:'legacy-trash-earned',taskId:'t1',title:'Legacy Trash reward',points:8.25,
+    completedAtISO:'2026-11-17T15:00:00.000Z',source:'task',legacyRewardField:{keep:true}};
+  await page.evaluate(reward=>{
+    const state=TaskPointsCore.readTaskPointsStoredState();
+    state.completions=[reward,...state.completions];
+    TaskPointsCore.writeTaskPointsStoredState(state);
+  },reward);
+  await page.reload();
+  await waitHome(page);
+  if (source==='WeekScreen') {
+    const week=await openScoringPage(context,'week.html');
+    week.removeAllListeners('dialog');
+    week.once('dialog',dialog=>dialog.accept());
+    await weekTask(week).getByRole('button',{name:'Delete task'}).click();
+    await weekTask(week).waitFor({state:'detached'});
+    await week.close();
+  } else {
+    page.removeAllListeners('dialog');
+    await clickTaskDelete(page,'t1');
+    await page.evaluate(()=>TaskPointsCore.flushPendingTaskMutations());
+  }
+  await page.waitForFunction(()=>TaskPointsCore.parseTaskPointsStorageJson(localStorage.getItem(TaskPointsCore.STORAGE_KEY))
+    .tasks.find(row=>row.id==='t1')?.status==='trashed');
+  return {page,context,reward};
+}
+
+async function adoptLegacyTrash(page){
+  return page.evaluate(async marker=>{
+    const core=TaskPointsCore,seed={id:crypto.randomUUID(),syntheticOnly:true,homeTaskId:'t1',
+      completionRead:true,completionWrite:true,completionControls:true,adoptLegacyTrash:true,phase:'prepared'};
+    const baseline=core.readTaskPointsStoredState();
+    localStorage.setItem('taskpoints_isolated_task_scoring_read_v1',seed.id);
+    localStorage.setItem(marker,JSON.stringify(seed));
+    const admitted=await TaskPointsStateRuntimeV2.initializeIsolatedTaskOwner(baseline);
+    localStorage.setItem(marker,JSON.stringify({...seed,phase:'sealed'}));
+    return admitted;
+  },marker);
+}
+
+test('V2 permanent Trash baseline uses ordinary V1 Delete Forever and keeps its linked reward and score',async t=>{
+  const {page,context,reward}=await ordinaryLegacyTrash(t);
+  const before=await scoresFromCore(page);
+  const trash=await openScoringPage(context,'trash.html');
+  trash.removeAllListeners('dialog');
+  await clickDeleteForever(trash,'t1',false);
+  assert.equal(await foreverButton(trash,'t1').count(),1);
+  await clickDeleteForever(trash,'t1');
+  await foreverButton(trash,'t1').waitFor({state:'detached'});
+  await trash.reload();
+  await trash.locator('#empty').waitFor();
+  assert.deepEqual((await canonicalCompletions(trash)).filter(row=>row.taskId==='t1'),[reward]);
+  assert.equal((await scoresFromCore(trash)).totals['2026-11-17'],before.totals['2026-11-17']);
+});
+
+test('V2 permanent Trash deletes selected and created Tasks through real controls and guards restart and fresh V1 rollback',async t=>{
+  const profile=await completionProfile(t);
+  const {page,context,legacyRewards}=await seedTrash(t,profile.context,{create:true});
+  const before=await partOfState(page);
+  const old=await owned(page);
+  await openTaskEdit(page);
+  await editCard(page).locator('[data-field="importance"]').selectOption('Critical');
+  assert.equal((await submitTaskEdit(page)).importance,'Critical');
+  const today=await openScoringPage(context,'today.html');
+  await today.setViewportSize({width:390,height:844});
+  await today.reload();
+  const critical=today.locator('#criticalTasksIsland[data-active="1"]');
+  await critical.waitFor({state:'attached'});
+  const week=await openScoringPage(context,'week.html');
+  await weekTask(week).waitFor();
+  await putCreateForm(page,{title:'Synthetic permanent recurring Task',due:quietDate,repeat:'daily',points:'9.25'});
+  const created=await saveCreateForm(page);
+  const [createdReceipt]=await createReceipts(page);
+  await taskCard(page,created).locator('[data-task-action="complete"]').click();
+  await page.waitForFunction(()=>document.getElementById('todayScoreIslandValue')?.textContent==='12.3');
+  const rewards=await verifiedRewards(page);
+  assert.equal(rewards.find(row=>row.taskId===created)?.points,9.25);
+  const scores=(await scoresFromCore(page)).totals;
+  assert.equal(scores[quietDate],12.25);
+  const {receipt:first}=await trashCommit(page,await deleteIntent(page,'t1'));
+  const {receipt:second}=await trashCommit(page,await deleteIntent(page,created));
+  const trash=await openScoringPage(context,'trash.html');
+  trash.removeAllListeners('dialog');
+  const original=structuredClone(cleanedTodayList);
+  original.tasksByDay['2026-11-17'].push('t1',created);
+  original.orderByDay['2026-11-17'].push('task:t1','task:'+created);
+  const expectedToday=structuredClone(cleanedTodayList);
+  expectedToday.tasksByDay['2026-11-15']=['unaffected'];
+  expectedToday.orderByDay['2026-11-15']=['task:unaffected'];
+  await writeTodayFixture(page,JSON.stringify(original));
+
+  await clickDeleteForever(trash,'t1',false);
+  assert.deepEqual(await foreverReceipts(page),[]);
+  await clickDeleteForever(trash,'t1');
+  await foreverButton(trash,'t1').waitFor({state:'detached'});
+  await clickDeleteForever(trash,created);
+  await foreverButton(trash,created).waitFor({state:'detached'});
+  await waitTodayBytes(today,JSON.stringify(expectedToday));
+  const snapshot=await owned(page);
+  assert.deepEqual(snapshot.permanentIds,['t1',created]);
+  assert.ok(snapshot.rows.every(row=>!snapshot.permanentIds.includes(row.id)));
+  const [one,two]=await foreverReceipts(page);
+  assert.deepEqual([one.before,two.before],[first.after,second.after]);
+  assert.deepEqual([one.after,two.after],[null,null]);
+  assert.deepEqual(await verifiedRewards(page),rewards);
+  assert.deepEqual(await canonicalCompletions(page),legacyRewards);
+  assert.deepEqual((await scoresFromCore(page)).totals,scores);
+  await critical.waitFor({state:'detached'});
+  for(const id of ['t1',created]){
+    await taskCard(page,id).waitFor({state:'detached'});
+    await todayTask(today,id).waitFor({state:'detached'});
+    await week.locator(`#weekGrid [data-task-id="${id}"]`).waitFor({state:'detached'});
+  }
+
+  await assert.rejects(trashCommit(page,undoIntent(first)),/owned_task_permanently_deleted/);
+  await assert.rejects(trashCommit(trash,restoreIntent(second)),/owned_task_permanently_deleted/);
+  await assert.rejects(prepareCompletion(page,'home'),/owned_task_permanently_deleted/);
+  await assert.rejects(page.evaluate(({old})=>TaskPointsStateRuntimeV2.commitIsolatedOwnedTask({
+    operation:'home-task-title-edit',actionId:'stale-after-permanent-delete',taskId:'t1',generation:old.meta.generation,
+    expectedRevision:0,expectedTask:old.tasks.find(row=>row.id==='t1'),title:'Stale edit'
+  }),{old}),/owned_task_stale_edit/);
+  await assert.rejects(directCreate(page,{...createdReceipt.intent,actionId:'0a123456-1234-4123-a123-123456789abc'}),
+    /owned_task_create_id_conflict/);
+  assert.deepEqual(await trashCommit(trash,foreverIntent(first)),{confirmedDurable:true,replayed:true,receipt:one});
+
+  const beforeBackup=await page.evaluate(()=>localStorage.getItem(TaskPointsCore.STORAGE_KEY));
+  const restarted=await profile.restart();
+  const home=await openScoringPage(restarted,'index.html');
+  await taskCard(home,'t2').waitFor();
+  assert.equal(await taskCard(home,'t1').count(),0);
+  assert.equal(await taskCard(home,created).count(),0);
+  const reTrash=await openScoringPage(restarted,'trash.html');
+  await reTrash.locator('#empty').waitFor();
+  assert.deepEqual(await trashCommit(reTrash,foreverIntent(second)),{confirmedDurable:true,replayed:true,receipt:two});
+  await reTrash.close();
+  await home.evaluate(raw=>{
+    localStorage.setItem('taskpoints_backup_prev3',raw);
+    localStorage.setItem(TaskPointsCore.STORAGE_KEY,raw);
+  },beforeBackup);
+  assert.deepEqual((await owned(home)).permanentIds,['t1',created]);
+  const revision=(await owned(home)).meta.revision;
+  const checkpoint=await home.evaluate(revision=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(revision),revision);
+  assert.deepEqual(checkpoint.permanentIds,['t1',created]);
+  assert.deepEqual(checkpoint.snapshot.tasks.map(row=>row.id),['t2']);
+  assert.deepEqual(checkpoint.completions,rewards);
+
+  const fresh=await browser.newContext({serviceWorkers:'block',timezoneId:'America/New_York'});
+  t.after(()=>fresh.close());await configureContext(fresh);
+  const loader=await rollbackLoader(fresh);
+  assert.deepEqual(await restoreCompletionCheckpoint(loader,checkpoint),{verified:true,checksum:checkpoint.checksum});
+  assert.equal(await loader.evaluate(()=>localStorage.getItem('taskpoints_backup_prev3')),beforeBackup);
+  const v1=await openScoringPage(fresh,'index.html');
+  await taskCard(v1,'t2').waitFor();
+  const assertRetired=async()=>assert.deepEqual(await v1.evaluate(()=>TaskPointsCore.readTaskPointsStoredState().tasks.map(row=>row.id)),['t2']);
+  await assertRetired();
+  assert.deepEqual(await canonicalCompletions(v1),[...legacyRewards,...rewards]);
+  assert.deepEqual((await scoresFromCore(v1)).totals,scores);
+  assert.equal(await v1.evaluate(()=>save('permanent-trash-rollback',{userInitiated:true})),true);
+  assert.deepEqual(await canonicalCompletions(v1),[...legacyRewards,...rewards]);
+  await assert.rejects(v1.evaluate(raw=>TaskPointsCore.writeTaskPointsStoredState(TaskPointsCore.parseTaskPointsStorageJson(raw)),beforeBackup),
+    /forbids restoring permanently deleted Tasks/);
+  await assert.rejects(v1.evaluate(()=>TaskPointsCore.journalTaskMutation({task:{id:'t1',title:'Stale Task'}})),
+    /forbids changing a permanently deleted Task/);
+  await assert.rejects(owned(v1),/detached_rollback_task_authority_is_v1/);
+  await assertRetired();
+  const staleJournal=await v1.evaluate(({beforeBackup,reward})=>{
+    const row=TaskPointsCore.parseTaskPointsStorageJson(beforeBackup).tasks.find(row=>row.id==='t1');
+    const raw=JSON.stringify({schemaVersion:1,tasks:[row],completionUpserts:[{...reward,points:99}],
+      completionDeletes:[],updatedAtISO:new Date().toISOString()});
+    localStorage.setItem('taskpoints_pending_task_mutations_v1',raw);
+    if(TaskPointsCore.flushPendingTaskMutations())throw Error('Stale journal compacted');
+    return raw;
+  },{beforeBackup,reward:rewards.at(-1)});
+  await assertRetired();
+  assert.equal(await v1.evaluate(()=>TaskPointsCore.readPendingTaskMutations().raw),staleJournal);
+  assert.equal((await scoresFromCore(v1)).totals[quietDate],scores[quietDate]);
+  await v1.reload();
+  await taskCard(v1,'t2').waitFor();
+  assert.equal(await taskCard(v1,'t1').count(),0);
+  await assertRetired();
+  const after=await partOfState(v1);
+  for(const key of ['task','habit','inbox','game','gold','flex','projects','notes','image','unknownRaw','quarantine'])
+    assert.deepEqual(after[key],before[key],key);
+});
+
+test('V2 permanent Trash competing Restore and Delete Forever cannot both commit',async t=>{
+  const {page,context}=await seedTrash(t);
+  const {receipt:deletion}=await trashCommit(page,await deleteIntent(page,'t1'));
+  const left=await openScoringPage(context,'trash.html');
+  const right=await openScoringPage(context,'trash.html');
+  left.removeAllListeners('dialog');
+  for(const tab of [left,right])await tab.evaluate(()=>{
+    const runtime=TaskPointsStateRuntimeV2,commit=runtime.commitIsolatedOwnedTaskTrash;
+    window.trashRequests=[];
+    runtime.commitIsolatedOwnedTaskTrash=intent=>new Promise((resolve,reject)=>{
+      trashRequests.push(intent);
+      window.releaseTrash=()=>{
+        runtime.commitIsolatedOwnedTaskTrash=commit;
+        commit(intent).then(resolve,reject);
+      };
+    });
+  });
+  await Promise.all([clickDeleteForever(left,'t1'),trashRestore(right,'t1').click()]);
+  for(const tab of [left,right])await tab.waitForFunction(()=>window.trashRequests.length===1);
+  await left.evaluate(()=>document.querySelector('#trashList [data-action="delete"]').click());
+  assert.equal(await left.evaluate(()=>trashRequests.length),1);
+  assert.deepEqual(await trashReceipts(page),[deletion]);
+  left.on('dialog',dialog=>dialog.dismiss());
+  await Promise.all([left,right].map(tab=>tab.evaluate(()=>releaseTrash())));
+  await Promise.all([left,right].map(tab=>foreverButton(tab,'t1').waitFor({state:'detached'})));
+  const [,winning]=await trashReceipts(page);
+  assert.equal((await trashReceipts(page)).length,2);
+  if(winning.after===null){
+    assert.deepEqual(await trashCommit(left,foreverIntent(deletion)),{confirmedDurable:true,replayed:true,receipt:winning});
+    await assert.rejects(trashCommit(right,restoreIntent(deletion)),/owned_task_permanently_deleted/);
+  } else {
+    assert.equal(winning.after.status,'active');
+    await assert.rejects(trashCommit(left,foreverIntent(deletion)),/owned_task_stale_edit/);
+  }
+  assert.deepEqual(await completionReceipts(page),[]);
+});
+
+test('V2 permanent Trash quota refuses deletion and a lost response recovers exactly one tombstone',async t=>{
+  const {page,context}=await seedTrash(t);
+  const {receipt:deletion}=await trashCommit(page,await deleteIntent(page,'t1'));
+  const trash=await openScoringPage(context,'trash.html');
+  trash.removeAllListeners('dialog');
+  trash.on('dialog',dialog=>{if(dialog.type()==='alert')return dialog.dismiss();});
+  await trash.evaluate(()=>{
+    const add=IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add=function(row,...args){
+      if(window.foreverQuota&&row?.intent?.operation==='trash-delete-forever')
+        throw new DOMException('Synthetic Delete Forever quota','QuotaExceededError');
+      return add.call(this,row,...args);
+    };
+    window.foreverQuota=true;
+  });
+  const failure=trash.waitForEvent('dialog',{predicate:dialog=>dialog.type()==='alert'});
+  await clickDeleteForever(trash,'t1');
+  assert.match((await failure).message(),/Synthetic Delete Forever quota/);
+  assert.deepEqual(await trashReceipts(page),[deletion]);
+  assert.equal(await foreverButton(trash,'t1').getAttribute('data-deletion-id'),deletion.id);
+  await trash.evaluate(()=>{
+    window.foreverQuota=false;
+    const runtime=TaskPointsStateRuntimeV2,commit=runtime.commitIsolatedOwnedTaskTrash;
+    runtime.commitIsolatedOwnedTaskTrash=async intent=>{
+      runtime.commitIsolatedOwnedTaskTrash=commit;
+      window.lostForever=(await commit(intent)).receipt;
+      throw Error('Synthetic lost Delete Forever response');
+    };
+  });
+  await clickDeleteForever(trash,'t1');
+  await foreverButton(trash,'t1').waitFor({state:'detached'});
+  const [saved]=await foreverReceipts(page);
+  assert.deepEqual(await trash.evaluate(()=>lostForever),saved);
+  assert.deepEqual(await trashCommit(trash,foreverIntent(deletion)),{confirmedDurable:true,replayed:true,receipt:saved});
+});
+
+for(const phase of ['before commit','after commit'])test(
+  `V2 permanent Trash interruption ${phase} recovers exactly one tombstone after Chromium restart`,async t=>{
+  const profile=await completionProfile(t);
+  const {page,context}=await seedTrash(t,profile.context);
+  const {receipt:deletion}=await trashCommit(page,await deleteIntent(page,'t1'));
+  const trash=await openScoringPage(context,'trash.html');
+  trash.removeAllListeners('dialog');
+  trash.on('dialog',dialog=>{if(dialog.type()==='alert')return dialog.dismiss();});
+  await interruptOwnedWrite(trash,phase);
+  await clickDeleteForever(trash,'t1');
+  await trash.waitForFunction(()=>window.ownedInterruptionReached===true);
+  const reopened=await profile.restart();
+  const home=await openScoringPage(reopened,'index.html');
+  const peer=await openScoringPage(reopened,'trash.html');
+  await taskCard(home,'t2').waitFor();
+  if(phase==='before commit'){
+    assert.deepEqual(await foreverReceipts(home),[]);
+    peer.removeAllListeners('dialog');
+    await clickDeleteForever(peer,'t1');
+    await foreverButton(peer,'t1').waitFor({state:'detached'});
+  } else await peer.locator('#empty').waitFor();
+  const [receipt]=await foreverReceipts(home);
+  assert.deepEqual(await trashCommit(peer,foreverIntent(deletion)),{confirmedDurable:true,replayed:true,receipt});
+  assert.deepEqual((await owned(home)).permanentIds,['t1']);
+  assert.equal(await taskCard(home,'t1').count(),0);
+});
+
+test('V2 permanent Trash refuses a malformed tombstone without exposing a live row or authorizing rollback',async t=>{
+  const {page,context}=await seedTrash(t);
+  const {receipt:deletion}=await trashCommit(page,await deleteIntent(page,'t1'));
+  const trash=await openScoringPage(context,'trash.html');
+  const {receipt}=await trashCommit(trash,foreverIntent(deletion));
+  await page.evaluate(receipt=>new Promise((resolve,reject)=>{
+    const request=indexedDB.open(TaskPointsStateRuntimeV2.DB_NAME);
+    request.onsuccess=()=>{
+      const db=request.result,tx=db.transaction('mutations','readwrite');
+      tx.objectStore('mutations').put({...receipt,intent:{...receipt.intent,deletionId:'invalid-deletion'}});
+      tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};
+    };
+  }),receipt);
+  const conflict=/owned_task_restore_stale|owned_task_trash_receipt_conflict/;
+  await assert.rejects(owned(page),conflict);
+  await assert.rejects(trashCommit(trash,foreverIntent(deletion)),conflict);
+  await assert.rejects(page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(2)),conflict);
+  await page.reload();
+  await page.getByRole('status').filter({hasText:conflict}).waitFor();
+  assert.equal(await taskCard(page,'t1').count(),0);
+});
+
+for(const action of ['restore','delete'])test(`V2 permanent Trash adopts a real sealed V1 deletion for ${action} with its original reward`,async t=>{
+  const provenance=action==='restore' ? 'TasksScreen' : 'WeekScreen';
+  const {page,context,reward}=await ordinaryLegacyTrash(t,provenance);
+  const original=await backingTask(page);
+  assert.equal(original.deletedFrom,provenance);
+  await adoptLegacyTrash(page);
+  const before=await owned(page);
+  assert.deepEqual(before.journal,[]);
+  const [source]=before.deletions;
+  assert.equal(source.type,'sealed-v1-trash');
+  assert.equal(source.deletedAtISO,original.deletedAtISO);
+  assert.equal(source.committedAtISO,undefined);
+  assert.deepEqual(await verifiedRewards(page),[reward]);
+  await assert.rejects(trashCommit(page,undoIntent(source)),/owned_task_undo_expired/);
+  const trash=await openScoringPage(context,'trash.html');
+  await setTrashClock(trash,10000);
+  if(action==='restore')await restoreViaTrash(trash,'t1');
+  else {
+    trash.removeAllListeners('dialog');
+    await clickDeleteForever(trash,'t1');
+    await foreverButton(trash,'t1').waitFor({state:'detached'});
+  }
+  const [receipt]=await trashReceipts(page);
+  assert.equal(receipt.intent.deletionId,source.id);
+  assert.equal(receipt.priorRevision,0);
+  if(action==='restore')assert.equal(receipt.after.status,original.prevStatus);
+  else assert.equal(receipt.after,null);
+  assert.deepEqual(await verifiedRewards(page),[reward]);
+  assert.equal((await backingTask(page)).status,'trashed');
+});
+
+test('V2 permanent Trash refuses ambiguous V1 deletion provenance and pending competing evidence',async t=>{
+  const {page}=await ordinaryLegacyTrash(t);
+  const canonical=await page.evaluate(()=>localStorage.getItem(TaskPointsCore.STORAGE_KEY));
+  for(const changes of [{prevStatus:null},{deletedFrom:null},{deletedAt:'2026-11-12T01:00:00.000Z'},{hidden:true}]){
+    const bad=await page.evaluate(({canonical,changes})=>{
+      const state=TaskPointsCore.parseTaskPointsStorageJson(canonical);
+      Object.assign(state.tasks.find(row=>row.id==='t1'),changes);
+      return TaskPointsCore.writeTaskPointsStoredState(state);
+    },{canonical,changes});
+    await assert.rejects(adoptLegacyTrash(page),/isolated_legacy_trash_lineage_unverified/);
+    assert.equal(await page.evaluate(()=>localStorage.getItem(TaskPointsCore.STORAGE_KEY)),bad);
+  }
+  await page.evaluate(canonical=>{
+    localStorage.setItem(TaskPointsCore.STORAGE_KEY,canonical);
+    TaskPointsCore.journalTaskMutation({task:{...TaskPointsCore.readTaskPointsStoredState().tasks.find(row=>row.id==='t1'),title:'Conflicting Task evidence'}});
+  },canonical);
+  const pending=await page.evaluate(()=>TaskPointsCore.readPendingTaskMutations().raw);
+  await assert.rejects(adoptLegacyTrash(page),/owned_home_task_seed_has_competing_evidence/);
+  assert.equal(await page.evaluate(()=>TaskPointsCore.readPendingTaskMutations().raw),pending);
+  assert.equal(await page.evaluate(async()=> (await indexedDB.databases()).some(db=>db.name===TaskPointsStateRuntimeV2.DB_NAME)),false);
 });

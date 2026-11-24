@@ -9,6 +9,7 @@
   const ISOLATED_TASK_FIXTURE_KEY = 'taskpoints_isolated_task_fixture_v1';
   const ISOLATED_TASK_CREATE_PENDING_PREFIX = 'taskpoints_isolated_task_create_pending_v1:';
   const ISOLATED_SCORING_KEY = 'taskpoints_isolated_task_scoring_read_v1';
+  const ISOLATED_ROLLBACK_TOMBSTONES_KEY = 'taskpoints_isolated_rollback_tombstones_v1';
   const isolatedCompletionOrigin = ['localhost', '127.0.0.1'].includes(global.location?.hostname);
   const isolatedCompletionPage = isolatedCompletionOrigin &&
     global.location.pathname?.startsWith('/experiments/v2-home-plus-one-day/full/');
@@ -141,17 +142,20 @@
   function projectIsolatedDoneTasks(tasks, {keepSeedWhenUnavailable = false} = {}) {
     if (!usesIsolatedTaskDone()) return tasks;
     const owned = new Map();
+    let verified = false;
     if (verifiedCompletionRead) {
       try {
         verifiedLegacyCompletions(verifiedCompletionRead);
         for (const task of verifiedCompletionRead.tasks) owned.set(task.id,structuredClone(task));
+        verified = true;
       } catch (_) { /* Withhold unverified owned rows. */ }
     }
     const existing = new Set(tasks.map(task=>task.id));
     const result = [...owned.values()].filter(task=>!existing.has(task.id));
     for (const task of tasks) {
       if (owned.has(task.id)) result.push(owned.get(task.id));
-      else if (!getLegacyTaskCompletionHold(task.id) || (keepSeedWhenUnavailable && task.id==='t1')) result.push(task);
+      else if (!getLegacyTaskCompletionHold(task.id)
+        || (keepSeedWhenUnavailable && !verified && task.id==='t1')) result.push(task);
     }
     return result;
   }
@@ -249,8 +253,12 @@
     }
   }
 
-  function removeIsolatedTodayTrash(list, tasks, day = todayKey()) {
-    for (const task of tasks) if (task.status === 'trashed') removeIsolatedTodayTask(list,day,task.id);
+  function removeIsolatedTodayTrash(list, tasks, permanentIds = []) {
+    for (const task of tasks) if (task.status === 'trashed') removeIsolatedTodayTask(list,todayKey(),task.id);
+    if (permanentIds.length) {
+      const days = new Set([...Object.keys(list.tasksByDay || {}),...Object.keys(list.orderByDay || {}),list.dayKey]);
+      for (const id of permanentIds) for (const day of days) removeIsolatedTodayTask(list,day,id);
+    }
   }
 
   async function reconcileIsolatedTodayList(edit, expectedRaw) {
@@ -269,7 +277,7 @@
       for (const {taskId, completedAtISO} of proof.completions) {
         removeIsolatedTodayTask(list,dateKey(completedAtISO),taskId);
       }
-      removeIsolatedTodayTrash(list,proof.tasks);
+      removeIsolatedTodayTrash(list,proof.tasks,proof.permanentIds);
 
       const candidate = JSON.stringify(list);
       parseIsolatedTodayList(candidate);
@@ -1094,6 +1102,50 @@ function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
     throw new Error(message);
   }
 
+  let observedRollbackTombstones = null;
+  function isolatedRollbackTombstones() {
+    if (!isolatedCompletionPage || global.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ !== true) return null;
+    const raw = localStorage.getItem(ISOLATED_ROLLBACK_TOMBSTONES_KEY);
+    if (raw === null && observedRollbackTombstones === null) return null;
+    if (observedRollbackTombstones !== null && observedRollbackTombstones !== raw)
+      throw new Error('Detached rollback tombstones changed.');
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data?.ids) || !data.ids.length || new Set(data.ids).size !== data.ids.length
+      || data.ids.some(id=>id!=='t1' && !isIsolatedCreatedTaskId(id)) || !Array.isArray(data.rewards)
+      || data.rewards.some(row=>typeof row?.id!=='string' || !data.ids.includes(row.taskId))
+      || new Set(data.rewards.map(row=>row.id)).size!==data.rewards.length)
+      throw new Error('Detached rollback tombstones are unreadable.');
+    observedRollbackTombstones = raw;
+    return data;
+  }
+
+  function protectIsolatedRollbackState(state, guard = isolatedRollbackTombstones()) {
+    if (!guard) return state;
+    const tasks = Array.isArray(state?.tasks) ? state.tasks : [];
+    const completions = Array.isArray(state?.completions) ? state.completions : [];
+    const linked = completions.filter(row=>guard.ids.includes(row?.taskId));
+    const byId = new Map(guard.rewards.map(row=>[row.id,row]));
+    if (completions.some(row=>byId.has(row?.id) && byId.get(row.id).taskId!==row.taskId))
+      throw new Error('Detached rollback completion identity conflict.');
+    if (tasks.every(row=>!guard.ids.includes(row?.id))
+      && linked.length===byId.size && new Set(linked.map(row=>row.id)).size===byId.size
+      && linked.every(row=>deepEqual(row,byId.get(row.id)))) return state;
+    return {...state,tasks:tasks.filter(row=>!guard.ids.includes(row?.id)),
+      completions:[...completions.filter(row=>!guard.ids.includes(row?.taskId)),...guard.rewards]};
+  }
+
+  function filterIsolatedRollbackTaskJournal(record) {
+    const guard = isolatedRollbackTombstones();
+    if (!guard) return record;
+    const tasks = record.tasks.filter(row=>!guard.ids.includes(row.id));
+    const completionUpserts = record.completionUpserts.filter(row=>!guard.ids.includes(row.taskId)
+      && !guard.rewards.some(reward=>reward.id===row.id));
+    const completionDeletes = record.completionDeletes.filter(id=>!guard.rewards.some(reward=>reward.id===id));
+    return tasks.length===record.tasks.length && completionUpserts.length===record.completionUpserts.length
+      && completionDeletes.length===record.completionDeletes.length ? record
+      : {...record,tasks,completionUpserts,completionDeletes};
+  }
+
   function readTaskPointsStoredState(storageKey = STORAGE_KEY, fallback = null) {
     const key = storageKey || STORAGE_KEY;
     const raw = localStorage.getItem(key);
@@ -1104,7 +1156,7 @@ function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
       applyPendingHabitDeltas(state);
       applyPendingPlayerEdits(state);
     }
-    return state;
+    return key === STORAGE_KEY ? protectIsolatedRollbackState(state) : state;
   }
 
   function getNotesCacheAuthorityState() {
@@ -1165,7 +1217,16 @@ function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
   }
 
   function replaceCheckedTaskPointsStorage(storageKey, serializedCandidate) {
-    if (storageKey === STORAGE_KEY) assertIsolatedScoringWrite(serializedCandidate);
+    if (storageKey === STORAGE_KEY) {
+      const guard = isolatedRollbackTombstones();
+      if (guard) {
+        const state = parseTaskPointsStorageJson(serializedCandidate,null);
+        if (!Array.isArray(state?.tasks) || !Array.isArray(state?.completions)
+          || protectIsolatedRollbackState(state,guard) !== state)
+          throw new Error('Detached rollback forbids restoring permanently deleted Tasks or changing their earned history.');
+      }
+      assertIsolatedScoringWrite(serializedCandidate);
+    }
     safeReplaceTaskPointsStorage(storageKey, serializedCandidate);
   }
 
@@ -6608,7 +6669,7 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
 
     endLoadParse?.({ preloaded: !!options.preloadedState });
     const endLoadNormalize = global.TaskPointsPerf?.span?.('storage.load.normalize');
-    let state = normalizeState(parsed);
+    let state = normalizeState(protectIsolatedRollbackState(parsed));
     endLoadNormalize?.();
     // This is the authoritative app-wide recovery point. Every page using the
     // shared loader sees pending taps before scoring, rendering, or saves.
@@ -11191,6 +11252,8 @@ return Number(cappedScore.toFixed(1));
     readTaskPointsStoredState,
     getLegacyTaskCompletionHold,
     isIsolatedCreatedTaskId,
+    ISOLATED_ROLLBACK_TOMBSTONES_KEY,
+    filterIsolatedRollbackTaskJournal,
     ISOLATED_TASK_CREATE_PENDING_PREFIX,
     projectIsolatedDoneTasks,
     isolatedTaskTrashDeletion,
