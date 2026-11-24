@@ -123,3 +123,13 @@ test('Sunday hiding, 40-hour goal and midnight re-render remain intact',()=>{
   assert.match(home,/renderHomeWorkHours\(\)/);
   assert.match(home,/const HOME_WORK_HOURS_GOAL = 40/);
 });
+
+test('Remaining Work Hours number and hrs left stay together on iPhone', () => {
+  const markup = home.match(/<section id="homeWorkHoursSection"[\s\S]*?<\/section>/)?.[0] || '';
+  assert.match(markup, /id="homeWorkHoursRemaining"[\s\S]*?hrs left<\/span>/);
+  const mobile = styles.match(/@media\s*\(max-width:\s*480px\)\s*\{([\s\S]*?)\n\}/)?.[1] || '';
+  const rule = mobile.match(/\.home-work-hours-remaining\s*>\s*div\s*\{([^}]+)\}/)?.[1] || '';
+  assert.match(rule, /white-space:\s*nowrap\s*;/);
+  assert.match(rule, /transform:\s*translateX\(-6px\)\s*;/);
+  assert.match(styles, /\.home-work-hours-totals\s*\{\s*display:\s*grid/);
+});

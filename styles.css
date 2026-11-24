@@ -5794,6 +5794,11 @@ metal background attached only to the day-bubble row.
   .home-work-hours-card { padding: 13px 14px 12px; }
   .home-work-hours-number { font-size: 2.1rem; }
   .home-work-hours-unit { font-size: 0.74rem; }
+  /* Prevent "32.45 hrs left" wrapping on iPhone and nudge only its value left. */
+  .home-work-hours-remaining > div {
+    white-space: nowrap;
+    transform: translateX(-6px);
+  }
   .home-work-hours-heading { margin-bottom: 9px; }
 }
 
