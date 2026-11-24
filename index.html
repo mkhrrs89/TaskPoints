@@ -6890,23 +6890,29 @@ function scheduleHomeHistoricalRepairPersistenceAfterFirstPaint() {
       return;
     }
 
-    try {
-      // Re-read *current* durable state, never persist a stale startup copy.
-      const latest = TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY);
-      if (!latest) return;
-      const repaired = TaskPointsCore.repairConfirmedJune2026LifetimeHistory(latest);
-      if (!repaired?.changed) return; // already saved by normal daily simulation
-      const saved = TaskPointsCore.mergeAndSaveState(repaired.state, {
-        storageKey: STORAGE_KEY,
-        savePath: 'june-2026-lifetime-history-repair'
-      });
-      if (saved?.skipped || saved?.blocked || saved?.blockedByQuotaCircuit) {
-        console.warn('June history repair persistence deferred by storage protection; in-memory correction retained.');
+    const persistRepair = () => {
+      try {
+        // Re-read *current* durable state, never persist a stale startup copy.
+        const latest = TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY);
+        if (!latest) return;
+        const repaired = TaskPointsCore.repairConfirmedJune2026LifetimeHistory(latest);
+        if (!repaired?.changed) return; // already saved by normal daily simulation
+        const saved = TaskPointsCore.mergeAndSaveState(repaired.state, {
+          storageKey: STORAGE_KEY,
+          savePath: 'june-2026-lifetime-history-repair'
+        });
+        if (saved?.skipped || saved?.blocked || saved?.blockedByQuotaCircuit) {
+          console.warn('June history repair persistence deferred by storage protection; in-memory correction retained.');
+        }
+      } catch (error) {
+        // No clearing, reset or fallback overwrite: protected data stays intact.
+        console.warn('Deferred June history repair could not be persisted; retry on next launch.', error);
       }
-    } catch (error) {
-      // No clearing, reset or fallback overwrite: protected data stays intact.
-      console.warn('Deferred June history repair could not be persisted; retry on next launch.', error);
+    };
+    if (window.TaskPointsCore?.usesIsolatedTaskScoring?.()) {
+      return TaskPointsCore.runWithVerifiedTaskScoring(persistRepair);
     }
+    persistRepair();
   };
 
   if (window.TaskPointsHomeIdleQueue?.enqueue) {

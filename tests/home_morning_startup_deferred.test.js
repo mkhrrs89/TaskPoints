@@ -72,7 +72,7 @@ function setup({ hidden = false, revealed = false, hasTodayMatchup = false, hour
     schedule: () => vm.runInContext('scheduleHomeDailySimulationAfterReveal()', context),
     reveal: () => { shown = true; },
     resume: () => { context.document.hidden = false; },
-    tick: () => { assert.ok(jobs.length); jobs.shift().fn(); },
+    tick: () => { assert.ok(jobs.length); return jobs.shift().fn(); },
     frame: () => { assert.ok(frames.length); frames.shift()(); }
   };
 }
@@ -172,6 +172,35 @@ test('fresh launches and waking an overnight app both use the same nonblocking s
     'the original protected save must still run');
   assert.ok(home.includes('TaskPointsCore.withGoldNpcScoringBatch(state, scoreNpcParticipants)'),
     'the existing Gold speedup remains');
+});
+
+test('deferred Home scoring waits for a verified V2 read whenever synthetic ownership is selected', async () => {
+  const h = setup({ revealed: true });
+  let verified = false;
+  let reads = 0;
+  const core = {
+    usesIsolatedTaskScoring: () => true,
+    async runWithVerifiedTaskScoring(work) {
+      reads += 1;
+      if (verified) work();
+    }
+  };
+  h.context.TaskPointsCore = h.context.window.TaskPointsCore = core;
+
+  assert.equal(h.schedule(),true);
+  h.tick(); h.frame(); await h.tick();
+  assert.equal(reads,1);
+  assert.equal(h.calls.simulations,0);
+  assert.equal(h.calls.sync,0);
+  assert.equal(h.calls.baselines,0);
+
+  verified = true;
+  assert.equal(h.schedule(),true);
+  h.tick(); h.frame(); await h.tick();
+  assert.equal(reads,2);
+  assert.equal(h.calls.simulations,1);
+  assert.equal(h.calls.sync,1);
+  assert.equal(h.calls.baselines,1);
 });
 
 test('mobile boot records stage boundaries without requiring a trace to load data', () => {

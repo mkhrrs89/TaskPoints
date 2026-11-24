@@ -1300,7 +1300,7 @@ test('Points edits keep real historical rewards and future V1 Done earns the new
   });
   let context=await launch();
   t.after(async()=>{await context.close();fs.rmSync(profile,{recursive:true,force:true});});
-  const {page}=await fixture(t,context);
+  const {page}=await fixture(t,context,{beforeHome:page=>page.clock.setFixedTime(new Date(time))});
   await page.clock.setFixedTime(new Date('2026-11-14T17:00:00Z'));
   await openTaskEdit(page);
   await editCard(page).locator('[data-field="repeat"]').selectOption('daily');
@@ -1314,8 +1314,12 @@ test('Points edits keep real historical rewards and future V1 Done earns the new
   await page.evaluate(()=>TaskPointsCore.flushPendingSaves());
   await page.evaluate(()=>{
     const core=TaskPointsCore;
-    const saved=core.saveValidatedSnapshot(core.readTaskPointsStoredState(),{immediateWrite:true,savePath:'synthetic-points-backup'});
+    // Seal the fixture after the normal matchup and Gold reconciliation.
+    // Main now does its first daily save before that derived-state pass.
+    const settled=core.syncYouMatchups(core.readTaskPointsStoredState()).state;
+    const saved=core.saveValidatedSnapshot(settled,{immediateWrite:true,savePath:'synthetic-points-backup'});
     if(saved?.blocked||saved?.skipped)throw Error('Synthetic backup save refused');
+    core.clearStateHotCache();
   });
   const history=await rewardEvidence(page),preserved=await partOfState(page);
   assert.equal(preserved.task.status,'done');
@@ -1792,6 +1796,8 @@ for(const [fault,refusal] of [
   const {page}=await seedScoringReads(t);
   const evidence=await page.evaluate(async({fault,ownedRewards})=>{
     const core=TaskPointsCore,runtime=TaskPointsStateRuntimeV2;
+    // Finish the genuine startup mirror before comparing all source bytes.
+    await core.flushPhase5CVerifiedSecondaryWrites();
     const db=await new Promise((resolve,reject)=>{
       const request=indexedDB.open(runtime.DB_NAME);
       request.onsuccess=()=>resolve(request.result);
@@ -2303,7 +2309,12 @@ test('V2 completion transaction serializes Home and Today tabs, verifies scores 
   await reopened.waitForFunction(()=>document.getElementById('todayScoreIslandValue')?.textContent==='15.8');
   const game=await openScoringPage(reopenedContext,'game.html');
   await game.locator('#playersList .playerCard').first().waitFor();
-  assert.equal(await game.evaluate(()=>computeTodayPoints()),15.8);
+  const gameScore=await game.evaluate(async()=>{
+    // Player cards can paint before the independent completion read.
+    if(!await TaskPointsCore.refreshIsolatedTaskScoring(true))throw Error('Game completion proof unavailable');
+    return computeTodayPoints();
+  });
+  assert.equal(gameScore,15.8);
   const totals=(await scoresFromCore(game)).totals;
   assert.equal(totals[quietDate],15.75);
   assert.equal(totals['2026-11-17'],-2.25);
