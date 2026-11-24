@@ -5715,18 +5715,10 @@ metal background attached only to the day-bubble row.
 .home-work-hours-total { min-width: 0; }
 .home-work-hours-missed { text-align: center; }
 .home-work-hours-remaining { text-align: right; }
-.home-work-hours-missed .home-work-hours-caption {
-  font-size: 0.61rem;
-  letter-spacing: 0.035em;
-}
 .home-work-hours-missed-value {
-  color: #f0faf9;
-  font-family: 'Teko', 'Inter', ui-sans-serif, system-ui, sans-serif;
-  font-size: clamp(1.55rem, 5vw, 2.2rem);
-  font-weight: 600;
-  line-height: 1;
+  /* All three values share .home-work-hours-number typography. Only keep
+     the currency value on one line within the center column. */
   white-space: nowrap;
-  font-variant-numeric: tabular-nums;
 }
 .home-work-hours-caption {
   display: block;

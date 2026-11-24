@@ -124,12 +124,37 @@ test('Sunday hiding, 40-hour goal and midnight re-render remain intact',()=>{
   assert.match(home,/const HOME_WORK_HOURS_GOAL = 40/);
 });
 
-test('Remaining Work Hours number and hrs left stay together on iPhone', () => {
+test('Remaining Work Hours number and hrs stay together on iPhone', () => {
   const markup = home.match(/<section id="homeWorkHoursSection"[\s\S]*?<\/section>/)?.[0] || '';
-  assert.match(markup, /id="homeWorkHoursRemaining"[\s\S]*?hrs left<\/span>/);
+  assert.match(markup, /id="homeWorkHoursRemaining"[\s\S]*?hrs<\/span>/);
+  assert.doesNotMatch(markup, /hrs left<\/span>/);
   const mobile = styles.match(/@media\s*\(max-width:\s*480px\)\s*\{([\s\S]*?)\n\}/)?.[1] || '';
   const rule = mobile.match(/\.home-work-hours-remaining\s*>\s*div\s*\{([^}]+)\}/)?.[1] || '';
   assert.match(rule, /white-space:\s*nowrap\s*;/);
   assert.match(rule, /transform:\s*translateX\(-6px\)\s*;/);
   assert.match(styles, /\.home-work-hours-totals\s*\{\s*display:\s*grid/);
+});
+
+test('All three Work Hours values and captions use identical typography', () => {
+  const markup = home.match(/<section id="homeWorkHoursSection"[\s\S]*?<\/section>/)?.[0] || '';
+  assert.match(markup, /id="homeWorkHoursLogged" class="home-work-hours-number"/);
+  assert.match(markup, /id="homeWorkMissedTakeHome" class="home-work-hours-number home-work-hours-missed-value"/);
+  assert.match(markup, /id="homeWorkHoursRemaining" class="home-work-hours-number"/);
+  assert.match(markup, /home-work-hours-caption">Logged<\/span>/);
+  assert.match(markup, /home-work-hours-caption">Missed take-home<\/span>/);
+  assert.match(markup, /home-work-hours-caption">Until 40<\/span>/);
+
+  const sharedNumber = css.match(/\.home-work-hours-number\s*\{([^}]+)\}/)?.[1] || '';
+  const sharedCaption = css.match(/\.home-work-hours-caption\s*\{([^}]+)\}/)?.[1] || '';
+  const middleOverride = css.match(/\.home-work-hours-missed-value\s*\{([^}]+)\}/)?.[1] || '';
+  assert.match(sharedNumber, /font-family:\s*'Teko'/);
+  assert.match(sharedNumber, /font-size:\s*clamp\(2rem,\s*5vw,\s*2\.5rem\)/);
+  assert.match(sharedNumber, /font-weight:\s*500/);
+  assert.match(sharedCaption, /font-size:\s*0\.68rem/);
+  assert.match(sharedCaption, /letter-spacing:\s*0\.08em/);
+  assert.doesNotMatch(css, /\.home-work-hours-missed\s+\.home-work-hours-caption\s*\{/,
+    'middle label should not override the shared caption typography');
+  assert.match(middleOverride, /white-space:\s*nowrap/);
+  assert.doesNotMatch(middleOverride, /\b(?:font-(?:family|size|weight)|color|line-height):/,
+    'middle value must not override shared typography');
 });
