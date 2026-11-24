@@ -161,14 +161,28 @@ function auditDuplicateHabitCompletions(daysBack = 45) {
   }
 }
 
+// Always restore the Game shortcut from the shared toolbar, rather than
+// depending on the late Gold economy runtime (which some pages do not load).
+// The Gold runtime may also add this link; the lookup prevents duplicates.
+function ensureGoldLedgerGameMenuLink(menu) {
+  if (!menu || menu.querySelector('a[href="gold_ledger.html"]')) return;
+  const ratings = menu.querySelector('a[href="game_ratings.html"]');
+  if (!ratings) return; // This isn't the Game dropdown.
+  const link = document.createElement('a');
+  link.href = 'gold_ledger.html';
+  link.className = 'btn btn-teal btn-toolbar nav-btn';
+  link.textContent = 'Gold Ledger';
+  ratings.insertAdjacentElement('afterend', link);
+}
+
 function setupDropdowns(root = document) {
   root.querySelectorAll('.dropdown').forEach((dropdown) => {
+    const menu = dropdown.querySelector('.dropdown-menu');
+    ensureGoldLedgerGameMenuLink(menu);
     if (dropdown.dataset.dropdownReady) return;
     dropdown.dataset.dropdownReady = 'true';
     const toggle = dropdown.querySelector('[data-dropdown-toggle]');
     if (!toggle) return;
-
-    const menu = dropdown.querySelector('.dropdown-menu');
 
     // Prevent taps inside menu from closing it
     if (menu) {
@@ -201,7 +215,35 @@ setExpanded(dropdown.classList.contains('open'));
   });
 }
 
+// The draggable bottom toolbar replaces the old header navigation on phones.
+// Detach those links entirely (rather than hiding them after paint), while
+// keeping their nodes intact so they can be restored when entering desktop mode.
+const detachedMobileHeaderNavs = [];
+function syncRetiredMobileHeaderNavigation() {
+  const mobile = window.matchMedia?.('(max-width: 767px)')?.matches;
+  if (mobile == null) return;
+  if (mobile) {
+    document.querySelectorAll('header .header-nav').forEach((nav) => {
+      const placeholder = document.createComment('desktop-only header navigation');
+      nav.parentNode?.replaceChild(placeholder, nav);
+      if (placeholder.isConnected) detachedMobileHeaderNavs.push({ placeholder, nav });
+    });
+  } else {
+    while (detachedMobileHeaderNavs.length) {
+      const { placeholder, nav } = detachedMobileHeaderNavs.pop();
+      if (placeholder.isConnected) placeholder.replaceWith(nav);
+    }
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  syncRetiredMobileHeaderNavigation();
+  const mobileHeaderQuery = window.matchMedia?.('(max-width: 767px)');
+  if (mobileHeaderQuery?.addEventListener) {
+    mobileHeaderQuery.addEventListener('change', syncRetiredMobileHeaderNavigation);
+  } else {
+    mobileHeaderQuery?.addListener?.(syncRetiredMobileHeaderNavigation);
+  }
   setupDropdowns();
 
   // Close when tapping/clicking outside
@@ -244,6 +286,7 @@ function buildMobileBottomNavLinks() {
   <a href="gamehub.html" class="btn btn-teal btn-toolbar nav-btn">Game Hub</a>
   <a href="game.html" class="btn btn-teal btn-toolbar nav-btn">Players</a>
   <a href="game_ratings.html" class="btn btn-teal btn-toolbar nav-btn">Ratings</a>
+  <a href="gold_ledger.html" class="btn btn-teal btn-toolbar nav-btn">Gold Ledger</a>
   <a href="matchups.html" class="btn btn-teal btn-toolbar nav-btn">Matchups</a>
   <a href="head_to_heads.html" class="btn btn-teal btn-toolbar nav-btn">Head to Heads</a>
   <a href="schedule.html" class="btn btn-teal btn-toolbar nav-btn">Schedule</a>

@@ -10,13 +10,22 @@
   <meta name="apple-mobile-web-app-title" content="TaskPoints"/><link rel="stylesheet" href="assets/tailwind.css">
 
 <link rel="stylesheet" href="styles.css">
+  <style>
+    /* Settings does not use #appRoot: give its first row the same iPhone
+       safe-area clearance as Home, plus a small minimum mobile offset. */
+    @media (max-width: 767px) {
+      #settingsContentRoot {
+        padding-top: max(44px, calc(env(safe-area-inset-top, 0px) + 10px));
+      }
+    }
+  </style>
   
   <link rel="preload" href="toolbar.js" as="script">
   <script src="toolbar.js" defer></script>
 </head>
 
 <body class="min-h-screen">
-  <div class="mx-auto max-w-6xl p-4 sm:p-6 pb-20 md:pb-6">
+  <div id="settingsContentRoot" class="mx-auto max-w-6xl p-4 sm:p-6 pb-20 md:pb-6">
 
     <div class="flex items-center justify-between gap-3 mb-3 md:hidden">
       <a href="index.html" class="flex items-center gap-3">
@@ -67,7 +76,6 @@
             </div>
           </div>
 
-          <a href="projects.html" class="btn btn-teal btn-toolbar nav-btn">Projects</a>
 
           <a href="season.html" class="btn btn-teal btn-toolbar nav-btn">Season</a>
         <a href="settings.html" class="btn btn-teal btn-toolbar nav-btn active" aria-label="Settings" aria-current="page">Settings</a>
@@ -124,6 +132,23 @@
 
 
 
+      <details class="glass space-y-3" id="morningStartupDiagnosticsSection">
+        <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
+          <div>
+            <div class="text-lg font-semibold">Morning Startup Diagnostics</div>
+            <div class="muted text-sm">Check where the last iPhone Home opening slowed or stopped. No task or player details are recorded.</div>
+          </div>
+        </summary>
+        <div class="space-y-3 pt-4">
+          <div class="flex flex-wrap gap-2">
+            <button id="showMorningStartupReportBtn" type="button" class="btn btn-ghost btn-toolbar nav-btn">Show Last Startup Report</button>
+            <button id="copyMorningStartupReportBtn" type="button" class="btn btn-ghost btn-toolbar nav-btn">Copy Report</button>
+          </div>
+          <pre id="morningStartupReport" class="muted text-xs hidden" style="max-height:320px;white-space:pre-wrap;overflow-wrap:anywhere;overflow:auto;"></pre>
+          <div id="morningStartupReportStatus" class="muted text-xs" role="status" aria-live="polite"></div>
+        </div>
+      </details>
+
       <section class="glass space-y-3" aria-labelledby="shadowMigrationTitle">
         <div>
           <div id="shadowMigrationTitle" class="text-lg font-semibold">Shadow IndexedDB Migration</div>
@@ -132,6 +157,56 @@
         <div id="shadowMigrationStatus" class="muted text-xs">Checking migration status…</div>
         <div class="flex flex-wrap gap-2"><button id="runShadowMigrationBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">Run Shadow Migration</button><button id="downloadShadowMigrationDiagnosticsBtn" class="btn btn-ghost btn-toolbar nav-btn hidden" type="button">Download Diagnostic JSON</button></div>
       </section>
+
+      <details class="glass space-y-3" id="hourlyWageSettingsSection">
+        <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
+          <div>
+            <div class="text-lg font-semibold">Hourly Wage &amp; Tax Withholding</div>
+            <div class="muted text-sm">Store your hourly wage and the percentage withheld for taxes.</div>
+          </div>
+        </summary>
+        <form id="hourlyWageForm" class="space-y-3 pt-4">
+          <label for="hourlyWageInput" class="block text-sm font-semibold">Hourly wage (USD per hour)</label>
+          <div class="flex flex-wrap gap-2 items-center">
+            <span aria-hidden="true" class="text-lg">$</span>
+            <input id="hourlyWageInput" type="number" inputmode="decimal" min="0" step="0.01"
+              placeholder="25.00" class="input" style="max-width:155px" aria-describedby="hourlyWageExplanation" />
+            <button id="hourlyWageSaveBtn" type="submit" class="btn btn-teal btn-toolbar nav-btn">Save Wage</button>
+          </div>
+          <p id="hourlyWageExplanation" class="muted text-xs">Saved in TaskPoints and included in standard backups. Leave blank and save to clear it. This does not change Work Hours points.</p>
+          <div id="hourlyWageStatus" class="muted text-xs" role="status" aria-live="polite"></div>
+        </form>
+        <form id="takeHomeTaxPercentForm" class="space-y-3 pt-4 mt-4" aria-label="Tax withholding">
+          <label for="takeHomeTaxPercentInput" class="block text-sm font-semibold">Tax withheld before take-home pay (%)</label>
+          <div class="flex flex-wrap gap-2 items-center">
+            <input id="takeHomeTaxPercentInput" type="number" inputmode="decimal" min="0" max="100" step="0.01"
+              placeholder="20.00" class="input" style="max-width:155px" aria-describedby="takeHomeTaxPercentExplanation" />
+            <span aria-hidden="true" class="text-lg">%</span>
+            <button id="takeHomeTaxPercentSaveBtn" type="submit" class="btn btn-teal btn-toolbar nav-btn">Save Tax Rate</button>
+          </div>
+          <p id="takeHomeTaxPercentExplanation" class="muted text-xs">Enter the percent of gross pay withheld for taxes before take-home pay. Leave blank and save to clear. This is a saved setting only; it doesn't affect points or track other deductions.</p>
+          <div id="takeHomeTaxPercentStatus" class="muted text-xs" role="status" aria-live="polite"></div>
+        </form>
+      </details>
+
+      <details class="glass space-y-3" id="goldInterestSettingsSection">
+        <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
+          <div>
+            <div class="text-lg font-semibold">Gold Interest Rate</div>
+            <div class="muted text-sm">Set the optional Gold interest applied at the start of each two-month season.</div>
+          </div>
+        </summary>
+        <form id="goldInterestRateForm" class="space-y-3 pt-4">
+          <label for="goldInterestRateInput" class="block text-sm font-semibold">Interest rate (%)</label>
+          <div class="flex flex-wrap gap-2 items-center">
+            <input id="goldInterestRateInput" type="number" inputmode="decimal" min="0" max="100" step="0.01" value="0" required
+              class="input" style="max-width:150px" aria-describedby="goldInterestRateExplanation" />
+            <button id="goldInterestRateSaveBtn" type="submit" class="btn btn-teal btn-toolbar nav-btn">Save Interest Rate</button>
+          </div>
+          <p id="goldInterestRateExplanation" class="muted text-xs">Next season: <strong id="goldInterestNextSeasonDate">2027-01-01</strong>. Seasons begin every January, March, May, July, September, and November 1. Nothing accrues automatically: you'll choose Yes or No when a new season starts. Each wallet's interest is rounded to 0.1 Gold.</p>
+          <div id="goldInterestRateStatus" class="muted text-xs" role="status" aria-live="polite"></div>
+        </form>
+      </details>
 
       <details class="glass space-y-3" id="seasonChampionshipRepairSection">
         <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
@@ -646,6 +721,7 @@
   </div>
 
   <script src="scoring_core.js"></script>
+  <script src="gold_season_interest.js?v=20261111-season-interest-1"></script>
 <script>
     const SETTINGS_STORAGE_KEY = (window.TaskPointsCore && TaskPointsCore.STORAGE_KEY) || "taskpoints_v1";
 
@@ -5141,5 +5217,105 @@ return;
     <span>Top</span>
   </button>
   <div id="bottomToolbarMount"></div>
+  <script>
+  (function enableMorningStartupDiagnostics() {
+    function summaryOf(key, title) {
+      let data = null;
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw) data = JSON.parse(raw);
+      } catch (_) {}
+      if (!data || !Array.isArray(data.phases) || !data.phases.length) {
+        return title + ': No saved phase information yet.';
+      }
+      const lines = [title + ' (' + String(data.dateKey || 'date unknown') + ')'];
+      const attempts = [...(Array.isArray(data.priorAttempts) ? data.priorAttempts : []), data.phases];
+      attempts.forEach((phases, index) => {
+        if (!Array.isArray(phases) || !phases.length) return;
+        if (attempts.length > 1) lines.push('Attempt ' + (index + 1) + ' of ' + attempts.length + ':');
+        let last = null;
+        for (const phase of phases) {
+          const time = Number(phase.atMs);
+          const gap = Number.isFinite(time) && last !== null
+            ? ' | +' + Math.max(0, Math.round(time - last)) + ' ms since previous step'
+            : '';
+          const detail = ['players', 'historyRows', 'matchups', 'ledgerRows', 'saved', 'processedPlayers', 'scoringMs', 'dripMs']
+            .filter(key => phase[key] !== undefined)
+            .map(key => key + '=' + String(phase[key]))
+            .join(', ');
+          lines.push('  ' + String(phase.name || 'step') +
+            (Number.isFinite(time) ? ' at ' + Math.round(time) + ' ms' : '') +
+            gap + (detail ? ' (' + detail + ')' : ''));
+          if (Number.isFinite(time)) last = time;
+        }
+      });
+      return lines.join(String.fromCharCode(10));
+    }
+    function scriptReplaySummary() {
+      let report = null;
+      try {
+        const raw = localStorage.getItem('tp_home_boot_script_timing_v1');
+        report = raw ? JSON.parse(raw) : null;
+      } catch (_) {}
+      if (!report?.current) return 'Startup script details: No saved information yet.';
+      const attempts = [
+        ...(Array.isArray(report.priorAttempts) ? report.priorAttempts : []),
+        report.current
+      ];
+      const lines = ['Startup script details (' + String(report.dateKey || 'date unknown') + ')'];
+      attempts.forEach((attempt, index) => {
+        if (!attempt) return;
+        if (attempts.length > 1) lines.push('Attempt ' + (index + 1) + ' of ' + attempts.length + ':');
+        lines.push('  Completed ' + Number(attempt.completed || 0) + ' / ' +
+          Number(attempt.total || 0) + ' scripts');
+        if (attempt.active?.name) {
+          lines.push('  Last running: ' + attempt.active.name +
+            ' (script ' + attempt.active.index + ', began ' +
+            attempt.active.startedAtMs + ' ms)');
+        }
+        for (const item of (Array.isArray(attempt.slowest) ? attempt.slowest : []).slice(0, 8)) {
+          lines.push('  ' + item.name + ': ' + Number(item.durationMs || 0) + ' ms');
+        }
+      });
+      return lines.join(String.fromCharCode(10));
+    }
+    function buildReport() {
+      return summaryOf('tp_home_boot_timing_v1', 'Home boot/loading') +
+        String.fromCharCode(10, 10) +
+        summaryOf('tp_home_morning_startup_trace_v1', 'First-of-day games') +
+        String.fromCharCode(10, 10) + scriptReplaySummary();
+    }
+    function bind() {
+      const show = document.getElementById('showMorningStartupReportBtn');
+      const copy = document.getElementById('copyMorningStartupReportBtn');
+      const output = document.getElementById('morningStartupReport');
+      const status = document.getElementById('morningStartupReportStatus');
+      if (!show || !copy || !output || !status) return;
+      show.addEventListener('click', function () {
+        output.textContent = buildReport();
+        output.classList.remove('hidden');
+        status.textContent = 'Read-only report. Saved game data was not accessed or changed.';
+      });
+      copy.addEventListener('click', async function () {
+        const report = buildReport();
+        output.textContent = report;
+        output.classList.remove('hidden');
+        try {
+          if (!navigator.clipboard || !navigator.clipboard.writeText) {
+            throw new Error('Clipboard unavailable');
+          }
+          await navigator.clipboard.writeText(report);
+          status.textContent = 'Startup report copied.';
+        } catch (_) {
+          status.textContent = 'Copy is unavailable here; the report is displayed above for manual copying.';
+        }
+      });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind, { once: true });
+    else bind();
+  })();
+  </script>
+  <script src="hourly_wage_settings.js?v=20261121-1"></script>
+  <script src="tax_withholding_settings.js?v=20261124-1"></script>
 </body>
 </html>
