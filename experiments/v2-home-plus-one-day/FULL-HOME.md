@@ -415,10 +415,58 @@ The broad run passed 116 of 117 existing browser cases. The known
 Inbox display timeout failed there and passed on focused rerun. The
 previously tracked Today setup and native-startup checks passed.
 
+## Add Task
+
+The existing Home form keeps its title formatting, defaults, date shortcuts,
+Points, tags, and recurrence inputs. The synthetic Add path stores the
+scheduler's `everyWeekday` value for the Weekdays option so a Friday
+completion advances to Monday. The V1 form keeps its existing path.
+
+The loopback fixture must explicitly opt in to creation. Each submission
+gets a random action ID and a separate random Task ID. The pending form
+stores both IDs and its exact fields before the IndexedDB transaction.
+Reopening Add Task offers the pending form again with its fields fixed for
+retry. Separate submissions can share a name. The receipt, new row, and
+revision are written in one transaction. The receipt also grants ownership.
+Home verifies the receipt and row before closing the form. A retry can
+recover an existing receipt even if another tab already cleared the pending
+form. An unresolved pending form pauses detached rollback.
+
+The new row can be fully edited, moved with +1 Day, and completed through
+Home or Today. Home, Today, Critical Tasks, and Week read the verified row.
+The reward constraint is per Task and local day. Matchups and Game combine
+the verified rewards with unrelated V1 rewards. The detached checkpoint
+adds V2-created Tasks and their rewards to a fresh V1 profile exactly once.
+Home's remaining legacy actions and Week's write actions are held for created
+Tasks. Metric-derived rewards, time-zone changes, the real-data iPhone
+handoff, and old-client safeguards retain their existing restrictions.
+
+The browser test also exposed an existing Inbox writer that used Home's
+in-memory state while reacting to a matchup update. That state could omit
+Inbox fields and the writer could replace the effective list with an empty
+journal. When the background check is about to save, it now rereads the
+current Inbox and its pending edits. The acceptance test requires the
+original message to survive the matchup write and the restored V1 startup.
+
+The isolated V1 comparison still displays an ordinary Add in memory without
+persisting it, as reproduced on `7fc91190` with the same full-Home fixture.
+The comparison checks routing and form values, and the existing V1
+fast-path unit tests cover journal persistence.
+
+All eight Add Task browser tests passed. The existing browser suite
+passed 134 of 135 tests. The rollback readiness
+check in the shared scoring test refused a changed snapshot revision and
+passed on rerun. All six focused browser reruns passed, including the
+previously intermittent Inbox display check. The component suite passed
+19 of 19 checks and the Inbox and notification suite passed 70 of 70.
+The broader scoped run had 472 passes, 14 failures, and one TODO. The
+same 14 failures and TODO reproduced on `7fc91190`.
+
 ## How the integration works
 
-- The loopback harness explicitly selects a single synthetic Task and checks the
-  fixture marker against V2 metadata. The Home card and Critical Tasks display use
+- The loopback harness selects a seed Task and checks the fixture marker
+  against V2 metadata. The Add Task fixture also admits Tasks through creation
+  receipts. The Home card and Critical Tasks display use
   a separate view verified against the durable V2 receipt chain. The card waits for
   that read at startup and stays withheld if V2 cannot be verified. Lifecycle
   refresh rereads V2 even when the V1 revision did not change.

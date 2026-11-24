@@ -3084,6 +3084,30 @@ function openAddTaskModal() {
   // ✅ add this
   const rep = $("repeatInput");
   syncCustomRepeatUI(rep);
+  const owner = window.TaskPointsOwnedTaskExperiment;
+  if (owner?.usesTaskCreation?.() && !ownedAddTaskWriting) {
+    try {
+      const pending = owner.recoverTaskCreation();
+      if (pending) {
+        $('titleInput').value = pending.title;
+        $('importanceInput').value = pending.importance;
+        $('dueDateInput').value = pending.dueDateISO || '';
+        $('pointsInput').value = pending.points;
+        $('tagsInput').value = pending.tags.join(', ');
+        rep.value = pending.recurrence.mode === 'everyWeekday' ? 'weekdays' : pending.recurrence.mode;
+        if (rep.value === 'custom') {
+          $('repeatCustomCount').value = pending.recurrence.customCount;
+          $('repeatCustomUnit').value = pending.recurrence.customUnit;
+        }
+        syncCustomRepeatUI(rep);
+      }
+      syncOwnedAddTaskForm(Boolean(pending));
+    } catch (error) {
+      syncOwnedAddTaskForm(true);
+      $('addBtn').disabled = true;
+      alert(error.message);
+    }
+  }
 }
 
 
@@ -11144,7 +11168,8 @@ function showTrashToast(taskId){
 }
 
 function renderTasks(stateInput = null){
-  if (window.TaskPointsCore?.usesIsolatedTaskDone?.() && taskCompletionAnimations.has('t1')) return;
+  if (window.TaskPointsCore?.usesIsolatedTaskDone?.()
+    && [...taskCompletionAnimations.keys()].some(id=>TaskPointsCore.usesIsolatedTaskDone(id))) return;
   const container=$('taskList'), empty=$('emptyList'); container.innerHTML='';
   window.updateUndatedReminderIsland?.();
   const owner = window.TaskPointsOwnedTaskExperiment;
@@ -12188,6 +12213,11 @@ function initTaskListDelegation(){
     const action = btn.getAttribute('data-task-action');
     const id = btn.getAttribute('data-task-id');
     if (!action) return;
+    if (window.TaskPointsCore?.isIsolatedCreatedTaskId?.(id) && ownedHomeTaskEditor(id)
+      && ['postpone','wont-do','hide','delete','task-delete'].includes(action)) {
+      alert('This action is available after a verified rollback to V1.');
+      return;
+    }
 
     switch (action) {
       case 'postpone-all-overdue':
@@ -13525,6 +13555,38 @@ block.onclick = () => {
 }
 
 
+let ownedAddTaskWriting = false;
+function syncOwnedAddTaskForm(pending, writing = false) {
+  const button = $('addBtn');
+  button.disabled = writing;
+  button.textContent = pending ? 'Retry Add Task' : 'Add Task';
+  button.setAttribute('aria-busy',String(writing));
+  $('addTaskModalBody').querySelectorAll('input, select, #addTaskQuickDueRow button').forEach(control => {
+    control.disabled = pending || writing;
+  });
+}
+
+async function addOwnedHomeTask(owner, fields) {
+  if (ownedAddTaskWriting || $('addBtn').disabled) return;
+  ownedAddTaskWriting = true;
+  syncOwnedAddTaskForm(true, true);
+  try {
+    const result = await owner.commitTaskCreation(fields);
+    if (!result?.confirmedDurable) throw Error('The saved Task could not be verified.');
+    renderTasks();
+    await owner.finishTaskCreation();
+    clearForm();
+    syncOwnedAddTaskForm(false);
+    closeAddTaskModal();
+  } catch (error) {
+    let pending = true;
+    try { pending = Boolean(owner.recoverTaskCreation()); } catch (_) {}
+    syncOwnedAddTaskForm(pending);
+    window.ownerOutcome = {ok:false,error:error.message};
+    alert('Add Task could not be confirmed. '+error.message);
+  } finally { ownedAddTaskWriting = false; }
+}
+
 function addTask(){
   const title = $('titleInput').value.trim();
   if(!title) return alert('Enter a task name');
@@ -13549,15 +13611,22 @@ function addTask(){
     rec.customUnit = unit;
   }
 
+  const fields = {title, importance: $('importanceInput').value,
+    dueDateISO: $('dueDateInput').value || null, points: Number($('pointsInput').value)||0, recurrence:rec, tags};
+  const owner = window.TaskPointsOwnedTaskExperiment;
+  if (owner?.usesTaskCreation?.()) {
+    // The legacy Add select emits "weekdays"; the editor and scheduler use
+    // "everyWeekday". Keep the visible option and store its scheduling value.
+    if (mode === 'weekdays') rec.mode = 'everyWeekday';
+    if ($('dueDateInput').validity.badInput || (fields.dueDateISO && !/^\d{4}-/.test(fields.dueDateISO)))
+      return alert('Enter a valid four-digit due date or clear the field.');
+    return addOwnedHomeTask(owner, fields);
+  }
+
 const task = {
   id: crypto.randomUUID(),
-  title,
-  importance: $('importanceInput').value,
-  dueDateISO: $('dueDateInput').value || null,
+  ...fields,
   originalDueDateISO: $('dueDateInput').value || null,
-  points: Number($('pointsInput').value)||0,
-  recurrence: rec,
-  tags,
   skills: [],
   skipDates: [],
   hidden: false,
@@ -14000,7 +14069,7 @@ function completeTask(id){
   // Retain the existing owner check if Home loaded a prior core bundle.
   if (hold || ownedHomeTaskEditor(id)) {
     if (window.TaskPointsCore?.usesIsolatedTaskDone?.(id) && ownedHomeTaskEditor(id)) {
-      const button = document.querySelector('[data-task-action="complete"][data-task-id="t1"]');
+      const button = document.querySelector(`[data-task-action="complete"][data-task-id="${CSS.escape(id)}"]`);
       if (button?.getAttribute('aria-busy') === 'true' || taskCompletionAnimations.has(id)) return;
       button?.setAttribute('aria-busy','true');
       TaskPointsCore.runIsolatedTaskDone(id,'home',receipt=>{
@@ -14085,7 +14154,7 @@ function editTask(id){
   const owner = ownedHomeTaskEditor(id);
   if (owner) {
     try {
-      owner.beginTaskEdit();
+      owner.beginTaskEdit(id);
     } catch (error) {
       alert(error.message);
       return;
@@ -16345,7 +16414,12 @@ let tasksInView = false;
 let reminderDismissed = false;
 let reminderTaskId = null;
 
-    const getUndatedReminderTasks = () => (Array.isArray(state?.tasks) ? state.tasks : []).filter((task) => (
+    const undatedReminderTaskList = () => {
+      const owner = window.TaskPointsOwnedTaskExperiment;
+      return owner?.usesTaskCreation?.() && owner.isEnabled()
+        ? owner.taskView(state).tasks : (Array.isArray(state?.tasks) ? state.tasks : []);
+    };
+    const getUndatedReminderTasks = () => undatedReminderTaskList().filter((task) => (
       task
       && !task.completedAtISO
       && !task.hidden
@@ -16408,9 +16482,7 @@ const openReminderTaskEditor = () => {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        const currentTask = Array.isArray(state?.tasks)
-          ? state.tasks.find((item) => item?.id === targetTaskId)
-          : null;
+        const currentTask = undatedReminderTaskList().find(item=>item?.id === targetTaskId);
 
         if (!currentTask) {
           console.warn(`Unable to open editor for reminder task: ${targetTaskId}`);

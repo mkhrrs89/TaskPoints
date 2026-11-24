@@ -411,13 +411,19 @@ function saveTodayStore(store = todayStore) {
             db[map][day] = store[key];
           }
           if (dismissOwned) {
-            const completed = completions.find(row=>dateKeyFromISO(row.completedAtISO)===day);
-            if (completed) {
+            const completed = completions.filter(row=>dateKeyFromISO(row.completedAtISO)===day
+              && (dismissOwned === true || dismissOwned === row.taskId));
+            if (completed.length) {
               const dismissed = Object.hasOwn(db,VERIFIED_COMPLETION_DISMISSALS)
                 ? db[VERIFIED_COMPLETION_DISMISSALS] : {};
               if (!dismissed || typeof dismissed !== 'object' || Array.isArray(dismissed))
                 throw new Error('Today dismissal evidence is unreadable.');
-              db[VERIFIED_COMPLETION_DISMISSALS] = {...dismissed,[day]:completed.id};
+              const previous = dismissed[day];
+              const priorIds = previous === undefined ? [] : Array.isArray(previous) ? previous : [previous];
+              if (priorIds.some(id=>typeof id!=='string' || !id))
+                throw new Error('Today dismissal evidence is unreadable.');
+              const ids = [...new Set([...priorIds,...completed.map(row=>row.id)])];
+              db[VERIFIED_COMPLETION_DISMISSALS] = {...dismissed,[day]:ids.length===1 ? ids[0] : ids};
             }
           }
         },expectedRaw).then(() => {
@@ -695,10 +701,8 @@ const habits = getActiveHabits().filter(h => {
             dismissed = source[VERIFIED_COMPLETION_DISMISSALS]?.[dayKey];
           }
           const writeFixture = window.TaskPointsCore?.usesIsolatedTaskDone?.();
-          const selected = writeFixture ? TaskPointsCore.isolatedTaskDoneView('t1') : null;
           const legacyTasks = Array.isArray(appState.tasks) ? appState.tasks : [];
-          const tasks = selected ? legacyTasks.map(task=>task?.id === selected.task.id ? selected.task : task)
-            : legacyTasks;
+          const tasks = window.TaskPointsCore?.projectIsolatedDoneTasks?.(legacyTasks,{keepSeedWhenUnavailable:true}) ?? legacyTasks;
           ensureAutoTasks(dayKey,tasks);
           if (writeFixture) {
             const score = $('#todayScoreIslandValue');
@@ -717,20 +721,23 @@ const habits = getActiveHabits().filter(h => {
         // The checked item comes from verified rewards. The reconciler owns
         // persisted list cleanup, including when another page completes it.
         const ownedScoring = window.TaskPointsCore?.usesIsolatedTaskScoring?.();
-        let earned = null;
+        const earned = new Map();
         let verified = true;
         if (ownedScoring) {
           try {
-            earned = TaskPointsCore.readScoringCompletions(appState.completions)
-              .find(row => row.taskId === 't1' && dateKeyFromISO(row.completedAtISO) === dayKey);
+            for (const row of TaskPointsCore.readScoringCompletions(appState.completions)) {
+              if (TaskPointsCore.getLegacyTaskCompletionHold(row.taskId) && dateKeyFromISO(row.completedAtISO) === dayKey)
+                earned.set(row.taskId,row);
+            }
           } catch (_) {
             verified = false;
           }
         }
         const visibleTaskIds = new Set(todayStore.taskIds);
-        if (earned) {
-          if (dismissed === earned.id) visibleTaskIds.delete(earned.taskId);
-          else visibleTaskIds.add(earned.taskId);
+        const dismissedIds = new Set(Array.isArray(dismissed) ? dismissed : [dismissed]);
+        for (const reward of earned.values()) {
+          if (dismissedIds.has(reward.id)) visibleTaskIds.delete(reward.taskId);
+          else visibleTaskIds.add(reward.taskId);
         }
 
         // Tasks (kept visible even if recurring + moved due date after completion)
@@ -740,9 +747,11 @@ const habits = getActiveHabits().filter(h => {
 
           let done = hasTaskCompletionToday(taskId, dayKey) || (t.completedAtISO && dateKeyFromISO(t.completedAtISO) === dayKey);
           let sub = (t.points != null) ? `${Number(t.points || 0)} pts` : '';
-          if (taskId === 't1' && ownedScoring) {
-            done = Boolean(earned);
-            sub = verified ? (earned ? `${TaskPointsCore.pointsForCompletion(earned, appState)} pts`
+          if (ownedScoring && TaskPointsCore.getLegacyTaskCompletionHold(taskId)) {
+            const reward = earned.get(taskId);
+            const selected = writeFixture ? TaskPointsCore.isolatedTaskDoneView(taskId) : null;
+            done = Boolean(reward);
+            sub = verified ? (reward ? `${TaskPointsCore.pointsForCompletion(reward, appState)} pts`
               : selected ? `${selected.task.points} pts` : '')
               : 'Verified completion unavailable';
           }
@@ -949,7 +958,7 @@ const habits = getActiveHabits().filter(h => {
           else if (kind === 'note') store.notes = store.notes.filter(note=>!(note && note.id===id));
           if (usesVerifiedToday()) setTodayOrderItem(store,kind,id,false);
           else syncTodayOrder();
-        },{dismissOwned:kind==='task' && id==='t1'});
+        },{dismissOwned:kind==='task' && id});
       }
 
       function toggleHabitPicker(forceOpen) {

@@ -446,8 +446,23 @@
       const loaded = core.loadAppState(loadOptions);
       const state = loaded?.state || loaded;
       if (!state || typeof state !== 'object') return null;
-      const result = reconcileState(state, options);
+      let result = reconcileState(state, options);
       if (!result.changed) return result;
+      if (loadOptions.preloadedState) {
+        // Home's display state can omit Inbox fields. A notification write
+        // replaces the effective message list, so base it on the persisted
+        // Inbox (including pending edits and deletions) before saving.
+        persistedStateReads += 1;
+        const latest = core.readTaskPointsStoredState?.(core.STORAGE_KEY, null);
+        if (!latest || typeof latest !== 'object') return null;
+        result = reconcileState({
+          ...state,
+          inboxMessages: latest.inboxMessages,
+          inboxProcessedEventIds: latest.inboxProcessedEventIds,
+          inboxStartedDateKey: latest.inboxStartedDateKey
+        }, options);
+        if (!result.changed) return result;
+      }
 
       let saved;
       suppressRevisionQueue = true;

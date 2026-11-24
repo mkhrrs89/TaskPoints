@@ -7,6 +7,7 @@
   // Check the durable marker at the point of use, even in a Today tab that
   // loaded before selection or has no V2 adapter. Invalid bytes still reserve t1.
   const ISOLATED_TASK_FIXTURE_KEY = 'taskpoints_isolated_task_fixture_v1';
+  const ISOLATED_TASK_CREATE_PENDING_PREFIX = 'taskpoints_isolated_task_create_pending_v1:';
   const ISOLATED_SCORING_KEY = 'taskpoints_isolated_task_scoring_read_v1';
   const isolatedCompletionOrigin = ['localhost', '127.0.0.1'].includes(global.location?.hostname);
   const isolatedCompletionPage = isolatedCompletionOrigin &&
@@ -22,8 +23,13 @@
     });
   }
 
+  // Reserve only the experiment's UUID namespace, even before its receipt
+  // is loaded or when the ownership read fails.
+  function isIsolatedCreatedTaskId(id) {
+    return typeof id === 'string' && /^v2-task-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id);
+  }
   function getLegacyTaskCompletionHold(taskId) {
-    if (!isolatedCompletionOrigin || taskId !== 't1') return null;
+    if (!isolatedCompletionOrigin || (taskId !== 't1' && !isIsolatedCreatedTaskId(taskId))) return null;
     try {
       isolatedCompletionSelected ||= global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY) !== null;
     } catch (_) {
@@ -73,10 +79,11 @@
   }
 
   function usesIsolatedTaskDone(taskId = 't1') {
-    if (taskId !== 't1' || !isolatedTaskDonePage()) return false;
+    if ((taskId !== 't1' && !isIsolatedCreatedTaskId(taskId)) || !isolatedTaskDonePage()) return false;
     try {
       const fixture = JSON.parse(global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY));
-      return fixture?.syntheticOnly === true && fixture.phase === 'sealed' && fixture.homeTaskId === taskId
+      return fixture?.syntheticOnly === true && fixture.phase === 'sealed'
+        && (fixture.homeTaskId === taskId || fixture.taskCreate === true)
         && fixture.completionRead === true && fixture.completionWrite === true && fixture.completionControls === true
         && global.localStorage.getItem(ISOLATED_SCORING_KEY) === fixture.id;
     } catch (_) { return false; }
@@ -125,9 +132,28 @@
     if (!usesIsolatedTaskDone(taskId) || !verifiedCompletionRead) return null;
     try {
       verifiedLegacyCompletions(verifiedCompletionRead);
-      return structuredClone({task:verifiedCompletionRead.task,
-        reward:verifiedCompletionRead.completions.find(row=>dateKey(row.completedAtISO)===todayKey())});
+      const task = verifiedCompletionRead.tasks.find(row=>row.id === taskId);
+      return task ? structuredClone({task,
+        reward:verifiedCompletionRead.completions.find(row=>row.taskId===taskId && dateKey(row.completedAtISO)===todayKey())}) : null;
     } catch (_) { return null; }
+  }
+
+  function projectIsolatedDoneTasks(tasks, {keepSeedWhenUnavailable = false} = {}) {
+    if (!usesIsolatedTaskDone()) return tasks;
+    const owned = new Map();
+    if (verifiedCompletionRead) {
+      try {
+        verifiedLegacyCompletions(verifiedCompletionRead);
+        for (const task of verifiedCompletionRead.tasks) owned.set(task.id,structuredClone(task));
+      } catch (_) { /* Withhold unverified owned rows. */ }
+    }
+    const existing = new Set(tasks.map(task=>task.id));
+    const result = [...owned.values()].filter(task=>!existing.has(task.id));
+    for (const task of tasks) {
+      if (owned.has(task.id)) result.push(owned.get(task.id));
+      else if (!getLegacyTaskCompletionHold(task.id) || (keepSeedWhenUnavailable && task.id==='t1')) result.push(task);
+    }
+    return result;
   }
 
   async function runIsolatedTaskDone(taskId, source, onVerified) {
@@ -136,7 +162,7 @@
     isolatedDonePending = true;
     try {
       const runtime = global.TaskPointsStateRuntimeV2;
-      const intent = await runtime.prepareIsolatedTaskCompletion(source);
+      const intent = await runtime.prepareIsolatedTaskCompletion(source,taskId);
       if (!usesIsolatedTaskDone(taskId)) throw new Error('Verified Task completion is paused.');
       let result;
       try {
@@ -205,16 +231,15 @@
       const original = JSON.stringify(list);
       if (edit) edit(list, structuredClone(proof.completions));
 
-      const taskId = proof.taskId;
-      const orderKey = 'task:'+taskId;
-      const days = new Set(proof.completions.map(row=>dateKey(row.completedAtISO)));
-      for (const day of days) {
+      for (const {taskId, completedAtISO} of proof.completions) {
+        const day = dateKey(completedAtISO);
+        const orderKey = 'task:'+taskId;
         if (list.tasksByDay?.[day]) list.tasksByDay[day] = list.tasksByDay[day].filter(id=>id!==taskId);
         if (list.orderByDay?.[day]) list.orderByDay[day] = list.orderByDay[day].filter(key=>key!==orderKey);
-      }
-      if (days.has(list.dayKey)) {
-        if (list.taskIds) list.taskIds = list.taskIds.filter(id=>id!==taskId);
-        if (list.order) list.order = list.order.filter(key=>key!==orderKey);
+        if (day === list.dayKey) {
+          if (list.taskIds) list.taskIds = list.taskIds.filter(id=>id!==taskId);
+          if (list.order) list.order = list.order.filter(key=>key!==orderKey);
+        }
       }
 
       const candidate = JSON.stringify(list);
@@ -237,7 +262,7 @@
   }
 
   function verifiedLegacyCompletions(proof) {
-    const legacy = proof.assertCurrent().filter(row => row?.taskId !== proof.taskId);
+    const legacy = proof.assertCurrent().filter(row => !proof.ownedIds.includes(row?.taskId));
     const ids = new Set(proof.completions.map(row => row.id));
     if (legacy.some(row => ids.has(row?.id))) throw new Error('Conflicting completion identity.');
     return legacy;
@@ -272,8 +297,10 @@
     if (!previousRaw) throw new Error('Cannot verify the legacy scoring snapshot.');
     const previous = parseTaskPointsStorageJson(previousRaw);
     const candidate = parseTaskPointsStorageJson(raw);
-    const ownedRows = state => state.completions?.filter(row=>row?.taskId==='t1');
-    if (JSON.stringify(ownedRows(previous)) !== JSON.stringify(ownedRows(candidate)))
+    const ownedRows = state => state.completions?.filter(row=>row?.taskId==='t1' || isIsolatedCreatedTaskId(row?.taskId));
+    const createdTasks = state => state.tasks?.filter(row=>isIsolatedCreatedTaskId(row?.id));
+    if (JSON.stringify(ownedRows(previous)) !== JSON.stringify(ownedRows(candidate))
+      || JSON.stringify(createdTasks(previous)) !== JSON.stringify(createdTasks(candidate)))
       throw new Error('Legacy scoring cannot replace the selected Task completion history.');
     const fields = ['matchups','gameHistory','goldLedger','goldEconomy'];
     if (fields.every(key=>JSON.stringify(previous[key])===JSON.stringify(candidate[key]))) return;
@@ -11134,6 +11161,9 @@ return Number(cappedScore.toFixed(1));
     assertTaskPointsParserAvailableForRaw,
     readTaskPointsStoredState,
     getLegacyTaskCompletionHold,
+    isIsolatedCreatedTaskId,
+    ISOLATED_TASK_CREATE_PENDING_PREFIX,
+    projectIsolatedDoneTasks,
     usesIsolatedTaskDone,
     watchIsolatedTaskDone,
     isolatedTaskDoneView,

@@ -3664,10 +3664,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true && owner?.displayOnly && owner.isEnabled()) {
       state = owner.taskView(state);
     } else if (window.TaskPointsCore?.usesIsolatedTaskDone?.()) {
-      const owned = TaskPointsCore.isolatedTaskDoneView('t1');
       const tasks = Array.isArray(state.tasks) ? state.tasks : [];
-      const otherTasks = tasks.filter(task=>task?.id !== 't1');
-      state = {...state,tasks:owned ? [...otherTasks,owned.task] : otherTasks};
+      state = {...state,tasks:TaskPointsCore.projectIsolatedDoneTasks(tasks)};
     }
     const todayKey = todayKeyFallback();
     const tasks = Array.isArray(state.tasks) ? state.tasks : [];

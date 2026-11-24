@@ -71,6 +71,8 @@ async function configureContext(context){
     Error.stackTraceLimit=36;
     const set=Storage.prototype.setItem,remove=Storage.prototype.removeItem;
     Storage.prototype.setItem=function(key,value){
+      if(this===localStorage && window.failOwnedCreateDraft && key.startsWith('taskpoints_isolated_task_create_pending_v1:'))
+        throw new DOMException('Synthetic draft quota','QuotaExceededError');
       if(this===localStorage&&this.getItem(key)!==String(value)) {
         const entry={key,stack:new Error().stack.split('\n').slice(2,36)};
         if(key==='taskpoints_v1'&&window.TaskPointsCore?.parseTaskPointsStorageJson){
@@ -1602,13 +1604,14 @@ const unrelatedRewardRows=[
   {id:'synthetic-unrelated-current',taskId:'t2',title:'Synthetic unrelated reward',points:3,completedAtISO:quietDate+'T16:00:00Z'}
 ];
 
-async function seedScoringReads(t,context,{oneOff=false,write=false,controls=false,recurrence,dueDateISO}={}){
+async function seedScoringReads(t,context,{oneOff=false,write=false,controls=false,recurrence,dueDateISO,create=false}={}){
   const f=await prepareCompletionBoundary(t,context);
   const legacyRewards=write?[...unrelatedRewardRows]:[{...ownedRewards[0],points:5},...unrelatedRewardRows];
   const completionSeed=write?(oneOff?[]:ownedRewards.slice(1)):(oneOff?ownedRewards.slice(0,1):ownedRewards);
-  await f.page.evaluate(async({marker,completionSeed,legacyRewards,day,oneOff,write,controls,recurrence,dueDateISO})=>{
+  await f.page.evaluate(async({marker,completionSeed,legacyRewards,day,oneOff,write,controls,recurrence,dueDateISO,create})=>{
     const core=TaskPointsCore,snapshot=core.readTaskPointsStoredState();
     snapshot.completions=legacyRewards;
+    if (create) snapshot.habits.find(row=>row.id==='h1').updatedAtISO=day+'T12:00:00Z';
     const task=snapshot.tasks.find(row=>row.id==='t1');
     task.recurrence=recurrence || {mode:oneOff?'none':'daily'};
     if(write)task.postponedDays=3;
@@ -1620,12 +1623,12 @@ async function seedScoringReads(t,context,{oneOff=false,write=false,controls=fal
       scoreA:8,scoreB:46,matchupType:'exhibition'});
     core.writeTaskPointsStoredState(snapshot);
     const fixture={id:crypto.randomUUID(),syntheticOnly:true,homeTaskId:'t1',completionRead:true,
-      ...(write?{completionWrite:true}:{}),...(controls?{completionControls:true}:{}),phase:'prepared'};
+      ...(write?{completionWrite:true}:{}),...(controls?{completionControls:true}:{}),...(create?{taskCreate:true}:{}),phase:'prepared'};
     localStorage.setItem('taskpoints_isolated_task_scoring_read_v1',fixture.id);
     localStorage.setItem(marker,JSON.stringify(fixture));
     await TaskPointsStateRuntimeV2.initializeIsolatedTaskOwner(snapshot,{completionSeed});
     localStorage.setItem(marker,JSON.stringify({...fixture,phase:'sealed'}));
-  },{marker,completionSeed,legacyRewards,day:quietDate,oneOff,write,controls,recurrence,dueDateISO});
+  },{marker,completionSeed,legacyRewards,day:quietDate,oneOff,write,controls,recurrence,dueDateISO,create});
   await f.page.reload();
   if(oneOff&&!write)await f.page.waitForFunction(()=>TaskPointsHomeLiveState?.getState()?.tasks?.find(row=>row.id==='t1')?.status==='done');
   else await waitHome(f.page);
@@ -3546,4 +3549,423 @@ test('V2 Repeat editor missing receipt stops owned scheduling views, Done and ro
   assert.match(alerts.at(-1) || '',/could not be confirmed/);
   assert.deepEqual(await canonicalCompletions(page),legacyRewards);
   assert.deepEqual(await backingTask(page),before);
+});
+
+const withTaskCreation = (t,context)=>seedScoringReads(t,context,{write:true,controls:true,create:true});
+const createReceipts = async page=>(await owned(page)).journal.filter(row=>row.type==='home-task-create');
+const taskCard = (page,id)=>page.locator(`#taskList .task-priority-card[data-task-id="${id}"]`);
+const addButton = page=>page.locator('#addTaskModal #addBtn');
+const createDraft = (title,changes={})=>({title,importance:'Medium',dueDateISO:null,
+  points:0,recurrence:{mode:'none'},tags:[],...changes});
+const pendingCreates = page=>page.evaluate(()=>Object.keys(localStorage)
+  .filter(key=>key.startsWith(TaskPointsCore.ISOLATED_TASK_CREATE_PENDING_PREFIX))
+  .map(key=>[key,JSON.parse(localStorage.getItem(key))]));
+const directCreate = (page,intent)=>page.evaluate(intent=>TaskPointsStateRuntimeV2.commitIsolatedOwnedTaskCreation(intent),intent);
+const putCreateForm = async (page,{title,due,points,importance,repeat,count,unit,tags,quickDue}={})=>{
+  await page.locator('#openAddTaskBtn').click();
+  if(title!==undefined)await page.locator('#titleInput').fill(title);
+  if(due!==undefined)await page.locator('#dueDateInput').fill(due);
+  if(points!==undefined)await page.locator('#pointsInput').fill(points);
+  if(importance)await page.locator('#importanceInput').selectOption(importance);
+  if(repeat)await page.locator('#repeatInput').selectOption(repeat);
+  if(count!==undefined)await page.locator('#repeatCustomCount').fill(count);
+  if(unit)await page.locator('#repeatCustomUnit').selectOption(unit);
+  if(tags!==undefined)await page.locator('#tagsInput').fill(tags);
+  if(quickDue)await page.locator(quickDue).click();
+};
+async function saveCreateForm(page){
+  await addButton(page).click();
+  await page.locator('#addTaskModal').waitFor({state:'hidden'});
+  const result = await page.evaluate(()=>window.ownerOutcome);
+  assert.equal(result?.ok,true,JSON.stringify(result));
+  return result.taskId;
+}
+async function expandCreated(page,id){
+  const card=taskCard(page,id);
+  const body=card.locator(`[data-task-card-body="${id}"]`);
+  if(await body.getAttribute('aria-expanded')==='false')await body.click();
+  return card;
+}
+async function openCreatedEditor(page,id){
+  await (await expandCreated(page,id)).locator('[data-task-action="edit"]').click();
+  return taskCard(page,id);
+}
+async function assertCreationOutsideV1(page,ids){
+  assert.deepEqual(await page.evaluate(ids=>{
+    const {tasks,completions}=TaskPointsCore.readTaskPointsStoredState();
+    const journal=TaskPointsCore.readPendingTaskMutations().record;
+    return [...tasks,...journal.tasks].filter(row=>ids.includes(row.id))
+      .concat([...completions,...journal.completionUpserts].filter(row=>ids.includes(row.taskId)));
+  },ids),[]);
+}
+
+test('V2 Home Add Task uses the real form, all fields and note navigation, Done, scoring, restart and fresh V1 rollback',async t=>{
+  const profile=await completionProfile(t);
+  const {page,context,legacyRewards}=await withTaskCreation(t,profile.context);
+  const today=await openScoringPage(context,'today.html');
+  const week=await openScoringPage(context,'week.html');
+  const before=await partOfState(page);
+  assert.ok(before.inbox);
+  const checkInbox = async (tab,stage)=>assert.deepEqual((await inboxState(tab)).effective,before.inbox,stage);
+  assert.equal(await page.evaluate(()=>typeof TaskPointsCore.getTaskCreateFastPathStatus),'function');
+  await putCreateForm(page,{title:'   Synthetic New Recurring Task   ',importance:'Critical',repeat:'custom',
+    count:'2.9',unit:'day',points:'12.75',tags:' trial , , next , trial ',
+    quickDue:'#addTaskQuickDueRow .addTaskTodayBtn:not(#quickDueTomorrowBtn)'});
+  const id=await saveCreateForm(page);
+  const [created]=await createReceipts(page);
+  assert.equal(created.taskId,id);
+  assert.ok(id.startsWith('v2-task-') && id!=='t1');
+  assert.deepEqual(created.intent.fields,createDraft('Synthetic New Recurring Task',{importance:'Critical',dueDateISO:quietDate,
+    points:12.75,recurrence:{mode:'custom',customCount:2,customUnit:'day'},tags:['trial','next','trial']}));
+  assert.equal(created.after.originalDueDateISO,quietDate);
+  assert.equal(created.after.createdAtISO,created.after.updatedAtISO);
+  assert.equal(created.after.postponedDays,0);
+  assert.deepEqual(created.after.skills,[]);
+  assert.deepEqual(created.after.skipDates,[]);
+  assert.equal(created.after.status,'active');
+  assert.equal(await page.evaluate(()=>TaskPointsCore.getTaskCreateFastPathStatus().fastPathHits),0);
+  await assertCreationOutsideV1(page,[id]);
+  await checkInbox(page,'after Task creation');
+  await taskCard(page,id).locator('.task-title').filter({hasText:'Synthetic New Recurring Task'}).waitFor();
+  const mobile=await context.newPage();
+  await mobile.setViewportSize({width:390,height:844});
+  await mobile.clock.setFixedTime(new Date(quietDate+'T17:00:00Z'));
+  await mobile.goto(origin+prefix+'index.html');
+  await mobile.locator('#criticalTasksIsland[data-active="1"]').waitFor({state:'attached'});
+  await mobile.close();
+  await checkInbox(page,'after Critical Tasks startup');
+  await todayTask(today,id).waitFor();
+  await week.locator(`#weekGrid [data-day-key="${quietDate}"] [data-task-id="${id}"]`).waitFor();
+
+  // Save every previously migrated field on a Task without a V1 backing row.
+  let editor=await openCreatedEditor(page,id);
+  await editor.locator('[data-field="title"]').fill('Synthetic edited recurring Task');
+  await editor.locator('[data-field="importance"]').selectOption('High');
+  await editor.locator('[data-field="tags"]').fill('new, edited');
+  await editor.locator('[data-field="points"]').fill('9.25');
+  await editor.locator('[data-field="due"]').fill('2026-11-17');
+  await editor.locator('[data-field="repeat"]').selectOption('daily');
+  await editor.locator('[data-task-action="task-save"]').click();
+  await taskCard(page,id).locator('.task-title').filter({hasText:'Synthetic edited recurring Task'}).waitFor();
+  await checkInbox(page,'after edit Save');
+  assert.deepEqual((await owned(page)).journal.at(-1).intent.fields,{title:'Synthetic edited recurring Task',
+    dueDateISO:'2026-11-17',importance:'High',tags:['new','edited'],points:9.25,recurrence:{mode:'daily'}});
+  await (await expandCreated(page,id)).locator('[data-task-action="bump"]').click();
+  await page.waitForFunction(id=>window.ownerOutcome?.ok && document.querySelector(`[data-task-id="${id}"] .task-meta-line`)
+    && ownerOutcome.date==='2026-11-18',id);
+  await checkInbox(page,'after +1 Day');
+  const activeToday=structuredClone(cleanedTodayList);
+  activeToday.tasksByDay[quietDate]=['t2',id];
+  activeToday.orderByDay[quietDate].push('task:'+id);
+  await writeTodayFixture(page,JSON.stringify(activeToday));
+  await checkInbox(page,'after Today list setup');
+  await todayTask(today,id).locator('.today-check').click();
+  await todayTask(today,id).and(today.locator('.is-done')).waitFor();
+  await page.waitForFunction(id=>document.querySelector(`#taskList [data-task-id="${id}"] [aria-label="Done today"]`)?.disabled,id);
+  const recurring = (await completionReceipts(page)).find(row=>row.taskId===id);
+  assert.equal(recurring.intent.source,'today');
+  assert.equal(recurring.completion.points,9.25);
+  assert.equal(recurring.after.dueDateISO,'2026-11-19');
+  assert.equal(recurring.after.postponedDays,0);
+  await checkInbox(page,'after Today Done');
+  await week.locator(`#weekGrid [data-day-key="2026-11-19"] [data-task-id="${id}"]`).waitFor();
+
+  await putCreateForm(page,{title:'Synthetic New One-off Task',due:quietDate,points:'-2.5'});
+  const oneOffId=await saveCreateForm(page);
+  await checkInbox(page,'after second Task creation');
+  await taskCard(page,oneOffId).locator('[data-task-action="complete"]').click();
+  await todayTask(today,oneOffId).and(today.locator('.is-done')).waitFor();
+  await waitTodayBytes(page,JSON.stringify(cleanedTodayList));
+  const completion = (await completionReceipts(page)).find(row=>row.taskId===oneOffId);
+  assert.equal(completion.intent.source,'home');
+  assert.equal(completion.completion.points,-2.5);
+  assert.equal(completion.after.status,'done');
+  await assertCreationOutsideV1(page,[id,oneOffId]);
+  assert.deepEqual(await canonicalCompletions(page),legacyRewards);
+  const rewards=await verifiedRewards(page);
+  assert.deepEqual(rewards.slice(-2),[recurring.completion,completion.completion]);
+  assert.equal((await scoresFromCore(page)).totals[quietDate],9.75);
+  await checkInbox(page,'after both completion controls');
+  const game=await openScoringPage(context,'game.html');
+  await game.locator('#playersList .playerCard').first().waitFor();
+  assert.equal((await scoresFromCore(game)).totals[quietDate],9.75);
+  await checkInbox(game,'after Game startup');
+  await today.close();await week.close();await game.close();
+  const matchups=await openScoringPage(context,'matchups.html');
+  const sync=matchups.locator('#matchupsChronological').getByRole('button',{name:'Generate retro matchups'}).first();
+  const header=sync.locator('xpath=ancestor::section[1]').locator('.matchup-collapsible-header').first();
+  if(await header.getAttribute('aria-expanded')==='false')await header.click();
+  await sync.click();
+  await matchups.waitForFunction(()=>{
+    const s=TaskPointsCore.parseTaskPointsStorageJson(localStorage.getItem(TaskPointsCore.STORAGE_KEY));
+    return s.matchups.find(row=>row.id==='synthetic-owned-matchup')?.scoreA===9.75;
+  });
+  await checkInbox(matchups,'after Matchups scoring');
+  await matchups.close();
+
+  // An unrelated pending edit must survive compaction and rollback.
+  await page.evaluate(()=>{
+    const t=TaskPointsCore.readTaskPointsStoredState().tasks.find(row=>row.id==='t2');
+    TaskPointsCore.journalTaskMutation({task:{...t,unknownCreateWitness:{keep:true}}});
+    if (!TaskPointsCore.flushPendingTaskMutations()) throw Error('Expected unrelated Task compaction');
+  });
+  await checkInbox(page,'after unrelated Task compaction');
+  await page.reload();await waitHome(page);
+  await saveOrdinaryHome(page);
+  await checkInbox(page,'after ordinary save');
+  await page.evaluate(async()=>{
+    TaskPointsCore.queuePhase5CVerifiedSecondaryWrite();
+    await TaskPointsCore.flushPhase5CVerifiedSecondaryWrites();
+  });
+  await checkInbox(page,'after maintenance');
+  await page.locator('a.desktop-header-notes-link').click();await page.waitForURL('**/notes.html');
+  await page.getByRole('link',{name:'Main',exact:true}).first().click();
+  await taskCard(page,id).waitFor();
+  await page.reload();
+  await taskCard(page,id).waitFor();
+  await checkInbox(page,'after Notes navigation and reload');
+  const reopened=await profile.restart();
+  const home=await openScoringPage(reopened,'index.html');
+  await taskCard(home,id).locator('.task-title').filter({hasText:'Synthetic edited recurring Task'}).waitFor();
+  assert.deepEqual(await verifiedRewards(home),rewards);
+  await assertCreationOutsideV1(home,[id,oneOffId]);
+  assert.deepEqual((await partOfState(home)).image,before.image);
+  await checkInbox(home,'after Chromium restart');
+  const revision=(await owned(home)).meta.revision;
+  const backup = await home.evaluate(()=>{
+    const key='taskpoints_backup_prev3';
+    const raw=JSON.stringify({timestamp:new Date().toISOString(),reason:'synthetic Add Task rollback fixture',
+      storageKey:TaskPointsCore.STORAGE_KEY,state:TaskPointsCore.readTaskPointsStoredState()});
+    localStorage.setItem(key,raw);
+    return [key,raw];
+  });
+  const checkpoint=await home.evaluate(revision=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(revision),revision);
+  assert.deepEqual(checkpoint.expected.inboxMessages.find(row=>row.id===inboxEventId),before.inbox,'in detached checkpoint');
+  assert.equal(checkpoint.snapshot.tasks.filter(row=>[id,oneOffId].includes(row.id)).length,2);
+  const fresh=await browser.newContext({serviceWorkers:'block',timezoneId:'America/New_York'});
+  t.after(()=>fresh.close());await configureContext(fresh);
+  const loader=await rollbackLoader(fresh);
+  assert.deepEqual(await restoreCompletionCheckpoint(loader,checkpoint),{verified:true,checksum:checkpoint.checksum});
+  assert.equal(await loader.evaluate(key=>localStorage.getItem(key),backup[0]),backup[1]);
+  const restored=await openScoringPage(fresh,'index.html');
+  await taskCard(restored,id).waitFor();
+  await checkInbox(restored,'after fresh V1 startup');
+  const restoredState=await restored.evaluate(()=>TaskPointsCore.readTaskPointsStoredState());
+  assert.deepEqual(restoredState.tasks.find(row=>row.id===id),recurring.after);
+  assert.deepEqual(restoredState.tasks.find(row=>row.id===oneOffId),completion.after);
+  assert.deepEqual(restoredState.tasks.find(row=>row.id==='t2').unknownCreateWitness,{keep:true});
+  assert.deepEqual(restoredState.completions,[...legacyRewards,...rewards]);
+  assert.equal((await scoresFromCore(restored)).totals[quietDate],9.75);
+  assert.equal(await restored.evaluate(()=>save('create-rollback',{userInitiated:true})),true);
+  assert.deepEqual(await canonicalCompletions(restored),[...legacyRewards,...rewards]);
+  const after=await partOfState(restored);
+  for(const key of ['habit','game','gold','inbox','flex','projects','notes','quarantine','image','unknownRaw','unknownTask'])
+    assert.deepEqual(after[key],before[key],key);
+});
+
+test('V2 Home Add Task preserves blank-title validation, form defaults, weekdays and normal V1 creation',async t=>{
+  const {page}=await withTaskCreation(t);
+  const alerts=[];page.on('dialog',dialog=>alerts.push(dialog.message()));
+  await putCreateForm(page,{title:'   '});
+  await addButton(page).click();
+  assert.equal(alerts.at(-1),'Enter a task name');
+  assert.deepEqual(await createReceipts(page),[]);
+  assert.deepEqual(await pendingCreates(page),[]);
+  await page.locator('#titleInput').fill('Synthetic Default Task');
+  const defaultId=await saveCreateForm(page);
+  assert.deepEqual((await createReceipts(page))[0].intent.fields,createDraft('Synthetic Default Task'));
+  assert.equal((await createReceipts(page))[0].after.originalDueDateISO,null);
+  await putCreateForm(page,{title:'Synthetic Weekday Task',due:'2026-11-13',repeat:'weekdays'});
+  const weekday=await saveCreateForm(page);
+  assert.deepEqual((await createReceipts(page))[1].after.recurrence,{mode:'everyWeekday'});
+  await taskCard(page,weekday).locator('[data-task-action="complete"]').click();
+  await page.waitForFunction(async id=>(await TaskPointsStateRuntimeV2.readIsolatedOwnedTasks())
+    .journal.some(row=>row.taskId===id && row.completion),weekday);
+  assert.equal((await completionReceipts(page)).find(row=>row.taskId===weekday).after.dueDateISO,'2026-11-16');
+  await assertCreationOutsideV1(page,[defaultId,weekday]);
+  const {page:legacy}=await fixture(t);
+  await putCreateForm(legacy,{title:'Synthetic Normal V1 Add Task',repeat:'weekdays',points:'3.75'});
+  await addButton(legacy).click();
+  await legacy.locator('#addTaskModal').waitFor({state:'hidden'});
+
+  // The baseline full-Home fixture renders this V1 add in live memory but
+  // does not persist it. Assert the existing route and fields independently
+  // of that known fixture behavior. The fast-path unit suite tests persistence.
+  const v1=await legacy.evaluate(()=>TaskPointsHomeLiveState.getState().tasks.find(row=>row.title==='Synthetic Normal V1 Add Task'));
+  assert.ok(v1);
+  assert.deepEqual(await pendingCreates(legacy),[]);
+  await assert.rejects(owned(legacy),/isolated_task_fixture_not_ready/);
+  assert.equal(v1.points,3.75);
+  assert.deepEqual(v1.recurrence,{mode:'weekdays'});
+  assert.equal(v1.id.startsWith('v2-task-'),false);
+});
+
+test('V2 Home Add Task keeps two simultaneous intentional same-name submissions and suppresses repeat taps',async t=>{
+  const {page,context}=await withTaskCreation(t);
+  const peer=await openScoringPage(context,'index.html');await waitHome(peer);
+  await Promise.all([page,peer].map(tab=>putCreateForm(tab,{title:'Synthetic Same Name'})));
+  for(const tab of [page,peer])await tab.evaluate(()=>{
+    const runtime=TaskPointsStateRuntimeV2,commit=runtime.commitIsolatedOwnedTaskCreation;
+    runtime.commitIsolatedOwnedTaskCreation=intent=>new Promise(resolve=>{
+      window.createIntent=intent;
+      window.releaseCreate=()=>{runtime.commitIsolatedOwnedTaskCreation=commit;resolve(commit(intent));};
+    });
+  });
+  await Promise.all([page,peer].map(async tab=>{
+    await addButton(tab).click();
+    await tab.waitForFunction(()=>window.createIntent);
+    await tab.evaluate(()=>{for(let i=0;i<8;i++) document.getElementById('addBtn').click();});
+  }));
+  assert.equal((await pendingCreates(page)).length,2);
+  assert.deepEqual(await createReceipts(page),[]);
+  await Promise.all([page,peer].map(tab=>tab.evaluate(()=>{releaseCreate();})));
+  await Promise.all([page,peer].map(tab=>tab.locator('#addTaskModal').waitFor({state:'hidden'})));
+  const receipts=await createReceipts(page);
+  assert.equal(receipts.length,2);
+  assert.equal(new Set(receipts.map(row=>row.taskId)).size,2);
+  assert.ok(receipts.every(row=>row.after.title==='Synthetic Same Name'));
+  assert.deepEqual(await Promise.all(receipts.map(receipt=>directCreate(peer,receipt.intent))),
+    receipts.map(receipt=>({confirmedDurable:true,replayed:true,receipt})));
+  assert.deepEqual(await pendingCreates(page),[]);
+  await assertCreationOutsideV1(page,receipts.map(row=>row.taskId));
+});
+
+test('V2 Home Add Task refuses collisions and concurrently replays the same identity exactly once',async t=>{
+  const {page,context}=await withTaskCreation(t);
+  const peer=await openScoringPage(context,'index.html');await waitHome(peer);
+  const before=await owned(page),intent={actionId:'4ac4391d-87e3-4bc9-a9a7-2ebfad25d415',
+    taskId:'v2-task-32607f1b-c221-49cb-a8a6-15309c6adccb',generation:before.meta.generation,
+    fields:createDraft('Synthetic ID collision')};
+  const id=intent.taskId;
+  await assert.rejects(page.evaluate(id=>TaskPointsStateRuntimeV2.prepareIsolatedTaskCompletion('home',id),id),/task_outside_home_ownership/);
+  await page.evaluate(id=>TaskPointsCore.journalTaskMutation({task:{id,title:'Synthetic unexpected legacy UUID',status:'trashed'}}),id);
+  const legacyJournal=await page.evaluate(()=>TaskPointsCore.readPendingTaskMutations().raw);
+  await assert.rejects(directCreate(page,intent),/owned_task_create_id_conflict/);
+  assert.equal(await page.evaluate(()=>TaskPointsCore.readPendingTaskMutations().raw),legacyJournal);
+  const working={...intent,actionId:'4ac4391d-87e3-4bc9-a9a7-2ebfad25d416',
+    taskId:'v2-task-32607f1b-c221-49cb-a8a6-15309c6adcdd'};
+  const results=await Promise.all([directCreate(page,working),directCreate(peer,working)]);
+  assert.equal(results.filter(row=>row.replayed).length,1);
+  assert.deepEqual(results[0].receipt,results[1].receipt);
+  const [result]=results;
+  const replayOnly=(page,intent)=>page.evaluate(intent=>TaskPointsStateRuntimeV2
+    .commitIsolatedOwnedTaskCreation(intent,{replayOnly:true}),intent);
+  assert.deepEqual(await replayOnly(peer,working),{confirmedDurable:true,replayed:true,receipt:result.receipt});
+  await assert.rejects(replayOnly(page,{...working,actionId:'4ac4391d-87e3-4bc9-a9a7-2ebfad25d417'}),
+    /owned_task_create_pending_draft_missing/);
+  await assert.rejects(directCreate(page,{...working,actionId:'4ac4391d-87e3-4bc9-a9a7-2ebfad25d417'}),
+    /owned_task_create_id_conflict/);
+  await assert.rejects(directCreate(page,{...working,fields:{...working.fields,points:15}}),/owned_task_action_id_conflict/);
+  const snapshot=await owned(page);
+  assert.equal(snapshot.meta.revision,1);
+  assert.equal(snapshot.journal[0].taskId,result.receipt.taskId);
+  assert.ok(snapshot.ownedIds.includes(result.receipt.taskId));
+  assert.ok(!snapshot.ownedIds.includes(id));
+});
+
+test('V2 Home Add Task keeps the original draft across quota, transaction abort and a lost response',async t=>{
+  const {page}=await withTaskCreation(t);
+  const alerts=[];page.on('dialog',dialog=>alerts.push(dialog.message()));
+  await putCreateForm(page,{title:'Synthetic Retry Task',due:quietDate,points:'0'});
+  await page.evaluate(()=>{window.failOwnedCreateDraft=true;});
+  await addButton(page).click();
+  await page.waitForFunction(()=>window.ownerOutcome?.ok===false);
+  assert.match(alerts.at(-1),/draft quota/);
+  assert.deepEqual(await pendingCreates(page),[]);
+  assert.deepEqual(await createReceipts(page),[]);
+  assert.equal(await page.locator('#titleInput').inputValue(),'Synthetic Retry Task');
+  await page.evaluate(()=>{
+    window.failOwnedCreateDraft=false;
+    const original=IDBObjectStore.prototype.add;
+    let remaining=2;
+    IDBObjectStore.prototype.add=function(value,...args){
+      if(this.name==='mutations' && value.type==='home-task-create' && remaining){
+        if(remaining--===2)throw new DOMException('Synthetic transaction quota','QuotaExceededError');
+        this.transaction.abort();
+        throw new DOMException('Synthetic transaction abort','AbortError');
+      }
+      return original.call(this,value,...args);
+    };
+  });
+  await addButton(page).click();
+  await page.waitForFunction(()=>window.ownerOutcome?.error==='Synthetic transaction quota');
+  const draft=await pendingCreates(page);
+  assert.equal(draft.length,1);
+  assert.deepEqual(await createReceipts(page),[]);
+  assert.equal(await addButton(page).textContent(),'Retry Add Task');
+  await addButton(page).click();
+  await page.waitForFunction(()=>window.ownerOutcome?.error==='Synthetic transaction abort');
+  assert.deepEqual(await pendingCreates(page),draft);
+  assert.deepEqual(await createReceipts(page),[]);
+  await page.evaluate(()=>{
+    const runtime=TaskPointsStateRuntimeV2, original=runtime.commitIsolatedOwnedTaskCreation;
+    runtime.commitIsolatedOwnedTaskCreation=async intent=>{
+      runtime.commitIsolatedOwnedTaskCreation=original;
+      window.lostCreate=(await original(intent)).receipt;
+      throw Error('Synthetic response lost');
+    };
+  });
+  await addButton(page).click();
+  await page.waitForFunction(()=>window.ownerOutcome?.error==='Synthetic response lost');
+  const [receipt]=await createReceipts(page);
+  assert.equal(receipt.intent.actionId,draft[0][1].intent.actionId);
+  assert.deepEqual(await pendingCreates(page),draft);
+  assert.equal(await saveCreateForm(page),receipt.taskId);
+  assert.equal(await page.evaluate(()=>ownerOutcome.replayed),true);
+  assert.deepEqual(await createReceipts(page),[receipt]);
+  assert.deepEqual(await pendingCreates(page),[]);
+  await assertCreationOutsideV1(page,[receipt.taskId]);
+});
+
+for(const phase of ['before commit','after commit'])test(`V2 Home Add Task resumes a Chromium interruption ${phase} with the exact draft and one receipt`,async t=>{
+  const profile=await completionProfile(t);
+  const {page}=await withTaskCreation(t,profile.context);
+  await putCreateForm(page,{title:'Synthetic Interrupted Add',points:'-1.75',repeat:'custom',count:'',unit:'week'});
+  await interruptOwnedWrite(page,phase);
+  await addButton(page).click();
+  await page.waitForFunction(()=>window.ownedInterruptionReached===true);
+  const draft=await pendingCreates(page);
+  assert.equal(draft.length,1);
+  assert.notEqual(await page.evaluate(()=>window.ownerOutcome?.ok),true);
+  assert.deepEqual(draft[0][1].intent.fields.recurrence,{mode:'custom',customCount:1,customUnit:'week'});
+  const reloaded=await profile.restart();
+  const home=await openScoringPage(reloaded,'index.html');await waitHome(home);
+  assert.deepEqual(await pendingCreates(home),draft);
+  assert.equal((await createReceipts(home)).length,phase==='after commit'?1:0);
+  const revision=(await owned(home)).meta.revision;
+  await assert.rejects(home.evaluate(revision=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(revision),revision),
+    /rollback_pending_task_create_requires_recovery/);
+  await putCreateForm(home);
+  assert.equal(await home.locator('#titleInput').inputValue(),'Synthetic Interrupted Add');
+  assert.equal(await addButton(home).textContent(),'Retry Add Task');
+  const id=await saveCreateForm(home);
+  assert.equal(id,draft[0][1].intent.taskId);
+  assert.deepEqual((await createReceipts(home)).map(row=>row.taskId),[id]);
+  await assertCreationOutsideV1(home,[id]);
+});
+
+test('V2 Home Add Task withholds a corrupted creation receipt and refuses replay, Done and rollback',async t=>{
+  const {page,context}=await withTaskCreation(t);
+  await putCreateForm(page,{title:'Synthetic unverified creation',due:quietDate,points:'17'});
+  const id=await saveCreateForm(page);
+  const [receipt]=await createReceipts(page);
+  await page.evaluate(receipt=>new Promise((resolve,reject)=>{
+    const req=indexedDB.open('taskpoints_state_v2');
+    req.onsuccess=()=>{
+      const db=req.result,tx=db.transaction('mutations','readwrite');
+      tx.objectStore('mutations').put({...receipt,after:{...receipt.after,title:'Synthetic corrupt receipt'}});
+      tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};
+    };
+  }),receipt);
+  await assert.rejects(directCreate(page,receipt.intent),/owned_task_create_receipt_conflict/);
+  await assert.rejects(page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(1)),/owned_task_create_receipt_conflict/);
+  await assert.rejects(page.evaluate(id=>TaskPointsStateRuntimeV2.prepareIsolatedTaskCompletion('home',id),id),
+    /owned_task_create_receipt_conflict/);
+  await page.reload();
+  await page.getByRole('status').filter({hasText:'owned_task_create_receipt_conflict'}).waitFor();
+  assert.equal(await taskCard(page,id).count(),0);
+  const today=await openScoringPage(context,'today.html');
+  assert.equal(await todayTask(today,id).count(),0);
+  assert.equal(await today.evaluate(id=>Boolean(TaskPointsCore.getLegacyTaskCompletionHold(id)),id),true);
+  await assertCreationOutsideV1(page,[id]);
 });

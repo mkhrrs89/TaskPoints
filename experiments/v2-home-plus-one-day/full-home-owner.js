@@ -6,7 +6,7 @@
     || window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ !== true) return;
 
   const marker = 'taskpoints_isolated_task_fixture_v1';
-  const taskId = 't1';
+  const seedTaskId = 't1';
   const bumpOperation = 'home-plus-one-day';
   const titleOperation = 'home-task-title-edit';
   const classificationOperation = 'home-task-classification-edit';
@@ -15,6 +15,92 @@
   const repeatOperation = 'home-task-repeat-edit';
   let selected = false, verified = null, error = '', read = null;
   let repaint, pending = null, writing = null, editor = null;
+  let createSelected = false, createPending = null;
+  function createKeys() {
+    const prefix = TaskPointsCore.ISOLATED_TASK_CREATE_PENDING_PREFIX;
+    return Object.keys(localStorage).filter(key=>key.startsWith(prefix)).sort();
+  }
+  function createFixture() {
+    return JSON.parse(localStorage.getItem(marker));
+  }
+  function usesTaskCreation() {
+    try { createSelected ||= createFixture()?.taskCreate === true || createKeys().length > 0; }
+    catch (_) { createSelected = true; }
+    return createSelected;
+  }
+  function owns(id) {
+    return id === seedTaskId || (usesTaskCreation() && TaskPointsCore.isIsolatedCreatedTaskId(id));
+  }
+
+  function recoverTaskCreation() {
+    if (!createPending) {
+      const fixture = createFixture();
+      const key = createKeys()[0];
+      if (!key) return null;
+      const raw = localStorage.getItem(key);
+      if (raw === null) throw Error('The pending Add Task changed. Reopen Add Task to check its outcome.');
+      const saved = JSON.parse(raw);
+      if (fixture?.taskCreate !== true || saved?.fixtureId !== fixture.id
+        || !TaskPointsCore.isIsolatedCreatedTaskId('v2-task-'+saved.intent?.actionId)
+        || !TaskPointsCore.isIsolatedCreatedTaskId(saved.intent.taskId)
+        || key !== TaskPointsCore.ISOLATED_TASK_CREATE_PENDING_PREFIX+saved.intent.actionId
+        || !saved.intent.fields)
+        throw Error('An unreadable Add Task attempt was preserved. Task creation is paused.');
+      createPending = {key,raw,intent:saved.intent};
+    }
+    return createPending.intent.fields;
+  }
+
+  async function commitTaskCreation(fields) {
+    window.ownerOutcome = null;
+    if (!createPending) {
+      await refresh();
+      const fixture = createFixture();
+      if (fixture?.taskCreate !== true || !verified || verified.sourceDrift || verified.meta.mode !== 'owned')
+        throw Error('Verified V2 Task creation is unavailable.');
+      const intent = {actionId:crypto.randomUUID(),taskId:'v2-task-'+crypto.randomUUID(),
+        generation:verified.meta.generation,fields};
+      const key = TaskPointsCore.ISOLATED_TASK_CREATE_PENDING_PREFIX+intent.actionId;
+      const raw = JSON.stringify({fixtureId:fixture.id,intent});
+      await navigator.locks.request(key, () => {
+        if (localStorage.getItem(key) !== null) throw Error('Add Task action identity is already reserved.');
+        // Record the exact intent before opening the write transaction. This
+        // draft is recoverable even if the tab never gets a commit response.
+        localStorage.setItem(key,raw);
+        if (localStorage.getItem(key) !== raw) throw Error('The pending Add Task could not be verified.');
+        createPending = {key,raw,intent};
+      });
+    }
+    const {key,raw,intent} = createPending;
+    if (JSON.stringify(fields) !== JSON.stringify(intent.fields))
+      throw Error('Retry the original pending Add Task without changing its fields.');
+    const savedDraft = localStorage.getItem(key);
+    if (savedDraft !== null && savedDraft !== raw)
+      throw Error('The pending Add Task no longer matches its original draft.');
+    // A peer may have acknowledged and cleared the same draft. Its
+    // verified receipt can be returned, but this tab cannot start a write
+    // when the durable retry envelope is missing.
+    const result = await TaskPointsStateRuntimeV2.commitIsolatedOwnedTaskCreation(intent,{replayOnly:savedDraft===null});
+    if (read) await read;
+    await refresh();
+    if (!result.confirmedDurable || !verified || verified.sourceDrift
+      || !verified.journal.some(row=>JSON.stringify(row) === JSON.stringify(result.receipt)))
+      throw Error('The saved Task could not be confirmed. Retry the same Add Task.');
+    window.ownerOutcome = {ok:true, taskId:result.receipt.taskId, replayed:result.replayed};
+    return result;
+  }
+
+  async function finishTaskCreation() {
+    const {key,raw} = createPending;
+    await navigator.locks.request(key, () => {
+      const current = localStorage.getItem(key);
+      if (current !== null && current !== raw)
+        throw Error('The pending Add Task was changed and has been preserved.');
+      localStorage.removeItem(key);
+      if (localStorage.getItem(key) !== null) throw Error('The pending Add Task could not be cleared.');
+      createPending = null;
+    });
+  }
   // Latch selection for this document. Losing the marker during an open
   // session must not send the next button press back to the V1 journal.
   function isEnabled() {
@@ -29,7 +115,7 @@
     read = (async () => {
       try {
         const result = await TaskPointsStateRuntimeV2.readIsolatedOwnedTasks();
-        if (result.meta.homeTaskId !== taskId || !result.rows.some(row => row.id === taskId))
+        if (result.meta.homeTaskId !== seedTaskId || !result.rows.some(row => row.id === seedTaskId))
           throw Error('Home ownership evidence does not match the selected Task');
         verified = result;
         error = result.sourceDrift ? 'Competing or unreadable V1 Task evidence. Further edits are paused.' : '';
@@ -43,30 +129,33 @@
 
   function taskView(legacy) {
     const legacyTasks = Array.isArray(legacy?.tasks) ? legacy.tasks : [];
-    const tasks = legacyTasks.filter(task => task.id !== taskId);
-    if (verified) {
-      const row = verified.rows.find(candidate => candidate.id === taskId);
-      const index = legacyTasks.findIndex(task => task.id === taskId);
-      tasks.splice(index < 0 ? tasks.length : index, 0, structuredClone(row.value));
+    const owned = new Map(verified?.tasks.filter(task=>verified.ownedIds.includes(task.id))
+      .map(task=>[task.id,structuredClone(task)]));
+    const tasks = legacyTasks.flatMap(task=>owns(task.id) ? (owned.has(task.id) ? [owned.get(task.id)] : []) : [task]);
+    for (const task of [...owned.values()].reverse()) {
+      if (!legacyTasks.some(row=>row.id===task.id)) {
+        if (task.id===seedTaskId) tasks.push(task);
+        else tasks.unshift(task);
+      }
     }
     return { ...legacy, tasks };
   }
 
-  function currentIntent() {
-    if (!verified) throw Error('V2 Task unavailable');
-    const row = verified.rows.find(candidate => candidate.id === taskId);
+  function currentIntent(taskId) {
+    const row = verified?.rows.find(candidate => candidate.id === taskId);
+    if (!row || !verified.ownedIds.includes(taskId)) throw Error('V2 Task unavailable');
     return {taskId, generation: verified.meta.generation,
       expectedRevision: row.ownerRevision, expectedTask: structuredClone(row.value)};
   }
 
-  function matchesPending(operation, payloadKey) {
-    return pending?.intent.operation === operation && pending.payloadKey === payloadKey;
+  function matchesPending(operation, taskId, payloadKey) {
+    return pending?.intent.operation === operation && pending.intent.taskId === taskId && pending.payloadKey === payloadKey;
   }
 
-  async function commit(operation, basis, payload, payloadKey, mutate) {
+  async function commit(operation, taskId, basis, payload, payloadKey, mutate) {
     window.ownerOutcome = null;
     try {
-      if (pending && !matchesPending(operation, payloadKey)) {
+      if (pending && !matchesPending(operation, taskId, payloadKey)) {
         throw Error('Retry the unchanged pending Task action, or reopen Home to verify its outcome.');
       }
       pending ||= {
@@ -98,13 +187,13 @@
     }
   }
 
-  function submit(operation, basis, payload, mutate) {
+  function submit(operation, taskId, basis, payload, mutate) {
     const payloadKey = JSON.stringify(payload);
     if (writing) {
-      if (matchesPending(operation, payloadKey)) return writing;
+      if (matchesPending(operation, taskId, payloadKey)) return writing;
       return Promise.reject(Error('A Task save is already in progress.'));
     }
-    writing = commit(operation, basis, payload, payloadKey, mutate).finally(() => { writing = null; });
+    writing = commit(operation, taskId, basis, payload, payloadKey, mutate).finally(() => { writing = null; });
     return writing;
   }
 
@@ -117,15 +206,16 @@
   });
 
   window.TaskPointsOwnedTaskExperiment = Object.freeze({
-    isEnabled, owns: id => id === taskId, displayOnly: true, refresh, taskView,
+    isEnabled, owns, displayOnly: true, refresh, taskView,
+    usesTaskCreation, recoverTaskCreation, commitTaskCreation, finishTaskCreation,
     onRender(onChange) {
       repaint = onChange;
       if (!verified && !error) refresh();
       return error || (!verified ? 'Reading the V2 Task…' : '');
     },
-    beginTaskEdit() {
+    beginTaskEdit(id) {
       if (writing) throw Error('A Task save is already in progress.');
-      const basis = currentIntent();
+      const basis = currentIntent(id);
       const task = basis.expectedTask;
       const recurrence = task.recurrence || {};
       const original = {
@@ -159,20 +249,19 @@
     },
     endTaskEdit() { editor = null; },
     commitTaskEdit(id, fields) {
-      if (id !== taskId || !editor) return Promise.reject(Error('Open the V2 Task editor before saving.'));
+      if (id !== editor?.basis.taskId) return Promise.reject(Error('Open the V2 Task editor before saving.'));
       // Use the Task and revision seen at editor open, even if a refresh has
       // since loaded a newer value underneath the draft.
-      if (Object.hasOwn(fields, 'recurrence')) return submit(repeatOperation, () => editor.basis, {fields});
-      if (Object.hasOwn(fields, 'dueDateISO')) return submit(dueOperation, () => editor.basis, {fields});
-      if (Object.hasOwn(fields, 'points')) return submit(pointsOperation, () => editor.basis, {fields});
+      if (Object.hasOwn(fields, 'recurrence')) return submit(repeatOperation, id, () => editor.basis, {fields});
+      if (Object.hasOwn(fields, 'dueDateISO')) return submit(dueOperation, id, () => editor.basis, {fields});
+      if (Object.hasOwn(fields, 'points')) return submit(pointsOperation, id, () => editor.basis, {fields});
       if (Object.hasOwn(fields, 'importance') || Object.hasOwn(fields, 'tags')) {
-        return submit(classificationOperation, () => editor.basis, {fields});
+        return submit(classificationOperation, id, () => editor.basis, {fields});
       }
-      return submit(titleOperation, () => editor.basis, {title: fields.title});
+      return submit(titleOperation, id, () => editor.basis, {title: fields.title});
     },
     commitPlusOneDay(id, _legacyTask, advance) {
-      if (id !== taskId) return Promise.reject(Error('Task is outside Home ownership'));
-      return submit(bumpOperation, currentIntent, {}, advance);
+      return submit(bumpOperation, id, () => currentIntent(id), {}, advance);
     }
   });
 })();

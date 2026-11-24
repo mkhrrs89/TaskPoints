@@ -1172,13 +1172,8 @@ function toggleHabitRetired(habitId, baseDate){
 /* -------- Tasks for arbitrary week -------- */
 function renderWeekTasks(baseDate){
   state=load();
-  let tasks = state.tasks;
-  if (window.TaskPointsCore?.usesIsolatedTaskDone?.()) {
-    // Keep the verified row in the schedule view, outside the V1 save state.
-    const owned = TaskPointsCore.isolatedTaskDoneView('t1');
-    tasks = owned ? tasks.map(task=>task?.id === 't1' ? owned.task : task)
-      : tasks.filter(task=>task?.id !== 't1');
-  }
+  // Keep the verified rows in the schedule view, outside the V1 save state.
+  const tasks = window.TaskPointsCore?.projectIsolatedDoneTasks?.(state.tasks) ?? state.tasks;
   const days=weekDays(baseDate);
   const grid=$('weekGrid'); grid.innerHTML='';
   const todayK = todayKey();
