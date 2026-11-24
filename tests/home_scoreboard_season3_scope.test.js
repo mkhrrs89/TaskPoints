@@ -41,5 +41,6 @@ test('Home scoreboard preserves the Season 3 ranking window and starts Season 4 
 
 test('Home scoreboard Gold keeps its existing independent Season 2 cutoff', () => {
   assert.match(html, /const HOME_SCOREBOARD_SEASON_TWO_START = "2026-07-01";/);
-  assert.match(functionSource('getHomepageGoldValue'), /key < HOME_SCOREBOARD_SEASON_TWO_START/);
+  assert.match(functionSource('getHomeHistoricalMarginGoldForReference'), /key < HOME_SCOREBOARD_SEASON_TWO_START/);
+  assert.match(functionSource('getHomepageGoldValue'), /goldApi\.goldBalance\(snapshot, playerId\)/);
 });

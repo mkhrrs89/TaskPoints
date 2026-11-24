@@ -479,8 +479,7 @@ function getStandingsScopeLabel() {
       }
     }
 
-function computeYouStats() {
-  const s = getScopedStandingsState();
+function computeYouStats(s = getScopedStandingsState()) {
 
   const record = window.TaskPointsCore?.computeRecord
     ? TaskPointsCore.computeRecord(s, "YOU", { includeToday: false, allowFallback: false })
@@ -584,11 +583,10 @@ function computeYouStats() {
     let sortKey = "winPct";
     let sortDir = "desc";
 
-function computePlayerStats(p) {
-  const s = getScopedStandingsState();
+function computePlayerStats(p, s = getScopedStandingsState()) {
 
   if (p && (p.id === "YOU" || p.isYou)) {
-    return computeYouStats();
+    return computeYouStats(s);
   }
 
   const record = window.TaskPointsCore?.computeRecord
@@ -723,13 +721,43 @@ const matchups = scoped && Array.isArray(scoped.matchups)
   return roundGoldValue(gold);
 }
 
-function getGoldCount(p) {
+// Standings' Gold column is the historical winning-margin total, not the
+// Greed wallet ledger. One render-local pass reproduces computeGoldForPlayerId
+// for every active player; it never mutates state or persists any cached values.
+function buildStandingsGoldIndex(scoped) {
+  const totals = new Map();
+  const matchups = scoped && Array.isArray(scoped.matchups) ? scoped.matchups : [];
+
+  for (const m of matchups) {
+    if (!m) continue;
+    const dateKey = getMatchupDateKey(m);
+    if (!dateKey || dateKey < GOLD_START_DATE) continue;
+    if (!isMatchupRevealed(m, false)) continue;
+    if (!activeIds.has(m.playerAId) || !activeIds.has(m.playerBId)) continue;
+
+    const aScore = Number(m.scoreA);
+    const bScore = Number(m.scoreB);
+    if (!Number.isFinite(aScore) || !Number.isFinite(bScore)) continue;
+
+    if (aScore > bScore) {
+      totals.set(m.playerAId, (totals.get(m.playerAId) || 0) + (aScore - bScore) / 10);
+    } else if (bScore > aScore) {
+      totals.set(m.playerBId, (totals.get(m.playerBId) || 0) + (bScore - aScore) / 10);
+    }
+  }
+
+  for (const [id, total] of totals) totals.set(id, roundGoldValue(total));
+  return totals;
+}
+
+function getGoldCount(p, goldIndex = null) {
   const id = p?.id || (p?.isYou ? 'YOU' : '');
-  return computeGoldForPlayerId(id);
+  // Missing winners, including YOU on a zero-Gold day, display as 0 as before.
+  return goldIndex instanceof Map ? (goldIndex.get(id) ?? 0) : computeGoldForPlayerId(id);
 }
   
-    function getSortValue(p, key) {
-      const stats = computePlayerStats(p);
+    function getSortValue(p, key, cachedStats = null, goldIndex = null) {
+      const stats = cachedStats || computePlayerStats(p);
       switch (key) {
         case "name":   return (p.name || "").toLowerCase();
         case "wins":   return stats.wins || 0;
@@ -742,7 +770,7 @@ case "matchups": return (stats.wins || 0) + (stats.losses || 0) + (stats.ties ||
         case "ppd":    return stats.ppd || 0;
         case "avgPpd": return stats.avgPPD || 0;
         case "lifetimePoints": return stats.totalPoints || 0;
-          case "gold": return getGoldCount(p);
+          case "gold": return getGoldCount(p, goldIndex);
         default:       return 0;
       }
     }
@@ -778,7 +806,13 @@ function formatOneDecimalNumber(value) {
     function renderTable() {
       const tbody = $("playersTableBody");
       if (!tbody) return;
-      tbody.innerHTML = "";
+      // All rows need these same results for display. Compute once per
+      // refresh, never inside the O(players log players) sort comparisons.
+      // The scope and its Gold index are short-lived and rebuilt on tab change.
+      const scopedState = getScopedStandingsState();
+      const goldIndex = buildStandingsGoldIndex(scopedState);
+      const statsByRow = new Map(players.map(p => [p, computePlayerStats(p, scopedState)]));
+      const fragment = document.createDocumentFragment();
 
       const sorted = [...players].sort((a, b) => {
         if (sortKey === "ppd") {
@@ -788,8 +822,8 @@ function formatOneDecimalNumber(value) {
           if (bIsYou && !aIsYou) return -1;
         }
 
-        const ak = getSortValue(a, sortKey);
-        const bk = getSortValue(b, sortKey);
+        const ak = getSortValue(a, sortKey, statsByRow.get(a), goldIndex);
+        const bk = getSortValue(b, sortKey, statsByRow.get(b), goldIndex);
 
         if (ak == null && bk == null) return 0;
         if (ak == null) return 1;
@@ -808,7 +842,7 @@ function formatOneDecimalNumber(value) {
 
       sorted.forEach(p => {
         const tr = document.createElement("tr");
-        const stats = computePlayerStats(p);
+        const stats = statsByRow.get(p);
         const isYou = p && (p.id === "YOU" || p.isYou);
 const wins = stats.wins || 0;
 const losses = stats.losses || 0;
@@ -823,7 +857,7 @@ const matchups = (wins || 0) + (losses || 0) + (ties || 0);
         const ppdDisplay    = isYou ? "-" : ((stats.ppd == null) ? "—" : stats.ppd.toFixed(1));
         const avgPpdDisplay = (stats.avgPPD == null) ? "—" : stats.avgPPD.toFixed(1);
 const lifetimeDisplay = formatOneDecimalNumber(stats.totalPoints);
-const goldDisplay = formatOneDecimalNumber(getGoldCount(p));
+const goldDisplay = formatOneDecimalNumber(getGoldCount(p, goldIndex));
 
         tr.innerHTML = `
           <td class="pr-4">${escapeHtml(p.name || "—")}</td>
@@ -839,8 +873,11 @@ const goldDisplay = formatOneDecimalNumber(getGoldCount(p));
 <td class="standings-lifetime-col">${lifetimeDisplay}</td>
 <td class="standings-gold-col">${goldDisplay}</td>
         `;
-        tbody.appendChild(tr);
+        fragment.appendChild(tr);
       });
+      // Build detached rows and attach in one operation to minimize WebKit
+      // layout work while retaining exactly the same table markup and order.
+      tbody.replaceChildren(fragment);
 
 const countLabel = $("playerCount");
 if (countLabel) {

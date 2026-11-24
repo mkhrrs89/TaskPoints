@@ -106,9 +106,9 @@ test('Gold Ledger clears the iPhone status bar and hides only its stray mobile P
     'the existing mobile navigation is retained');
 });
 
-test('every Gold Ledger section has its own native, initially open mobile-friendly disclosure', () => {
-  const ids = ['goldOverviewSection', 'goldCirculationSection', 'goldManualSection', 'goldTransactionsSection'];
-  assert.equal(page.split('<details id="gold').length - 1, ids.length, 'four independent Gold sections');
+test('five Gold Ledger sections remain independent, preserving four initially open disclosures', () => {
+  const ids = ['goldOverviewSection', 'goldCirculationSection', 'goldManualSection', 'goldRecalcSection', 'goldTransactionsSection'];
+  assert.equal(page.split('<details id="gold').length - 1, ids.length, 'five independent Gold sections');
   assert.equal(page.split('</details>').length - 1, ids.length, 'every section closes independently');
   assert.equal(page.split('<summary class="gold-fold-summary">').length - 1, ids.length);
   const appearances = ids.map(id => page.indexOf('<details id="' + id + '"'));
@@ -119,7 +119,7 @@ test('every Gold Ledger section has its own native, initially open mobile-friend
     const end = page.indexOf('</details>', start);
     assert.ok(start >= 0 && end > start, id + ' has a matching closing tag');
     const section = page.slice(start, end);
-    assert.ok(section.startsWith('<details id="' + id + '" class="gold-card p-4 sm:p-5 gold-fold" open>'));
+    assert.ok(section.startsWith('<details id="' + id + '" class="gold-card p-4 sm:p-5 gold-fold"' + (id === 'goldRecalcSection' ? '>' : ' open>')));
     assert.ok(section.includes('<summary class="gold-fold-summary">'), id + ' has a tappable heading');
     assert.ok(section.includes('<span class="gold-fold-chevron" aria-hidden="true"></span>'), id + ' has a chevron');
     assert.ok(section.includes('<div class="gold-fold-content">'), id + ' keeps its contents');

@@ -10,6 +10,10 @@ on:
       - greed_gold_economy.js
       - index.html
       - gold_manual_adjustment.js
+      - gold_recalculation.js
+      - gold_season_interest.js
+      - settings.html
+      - scoring_core.js
       - gold_circulation_total.js
       - gold_theft_top50_notifications.js
       - records_gold_theft_history_fix.js
@@ -17,10 +21,24 @@ on:
       - gold_ledger.html
       - rankings.html
       - tests/rankings_three_digit_fit.test.js
+      - tests/power_rankings_weighted_gold.test.js
+      - tests/home_scoreboard_power_rank_sync.test.js
+      - season_champion_gold_bonus.js
+      - rankings_tournament_trophies.js
+      - standings.html
+      - tests/standings_gold_sort.test.js
       - tests/gold_manual_adjustment.test.js
+      - tests/gold_recalculation.test.js
+      - tests/gold_season_interest.test.js
+      - tests/gold_season_interest_core_integration.test.js
       - tests/gold_circulation_total.test.js
       - tests/gold_manual_adjustment_core_integration.test.js
       - tests/greed_gold_economy.test.js
+      - tests/home_gold_ledger_dropdown.test.js
+      - tests/mobile_bottom_nav_streaks_tasks_swap.test.js
+      - toolbar.js
+      - game.html
+      - styles.css
       - tests/greed_gold_daily_scoring_batch.test.js
       - tests/greed_rating.test.js
       - tests/season_champion_gold_bonus.test.js
@@ -43,6 +61,8 @@ jobs:
       - name: Check Manual Gold adjustment syntax
         run: |
           node --check gold_manual_adjustment.js
+          node --check gold_recalculation.js
+          node --check gold_season_interest.js
           node --check gold_circulation_total.js
       - name: Check Gold Theft inbox notification syntax
         run: node --check gold_theft_top50_notifications.js
@@ -52,9 +72,22 @@ jobs:
         run: >-
           node --test
           tests/rankings_three_digit_fit.test.js
+          tests/power_rankings_weighted_gold.test.js
+          tests/home_scoreboard_power_rank_sync.test.js
+          tests/home_scoreboard_rank_gold.test.js
+          tests/home_scoreboard_season3_scope.test.js
+          tests/home_rank_percentile_line.test.js
+          tests/season_champion_gold_bonus.test.js
+          tests/rankings_tournament_trophies.test.js
+          tests/player_badge_power_rankings.test.js
           tests/greed_gold_economy.test.js
+          tests/home_gold_ledger_dropdown.test.js
+          tests/mobile_bottom_nav_streaks_tasks_swap.test.js
           tests/greed_gold_daily_scoring_batch.test.js
           tests/gold_manual_adjustment.test.js
+          tests/gold_recalculation.test.js
+          tests/gold_season_interest.test.js
+          tests/gold_season_interest_core_integration.test.js
           tests/gold_circulation_total.test.js
           tests/gold_manual_adjustment_core_integration.test.js
           tests/greed_rating.test.js
@@ -64,3 +97,4 @@ jobs:
           tests/records_gold_theft_history_fix.test.js
           tests/retroactive_gold_score_adjustments.test.js
           tests/main_home_fast_boot_gold_regression.test.js
+          tests/standings_gold_sort.test.js

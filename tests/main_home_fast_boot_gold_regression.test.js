@@ -104,3 +104,32 @@ test('Home scoring bundle is preloaded and replayed from exactly the same versio
   assert.match(worker, /redirectToCurrentCoreBundle\(request, version\)/);
   assert.match(worker, /CORE_BUNDLE_BROWSER_MAX_AGE/);
 });
+
+
+test('Home localStorage fallback preserves authoritative Gold wallet before late adapters', () => {
+  const begin = home.indexOf('function load() {');
+  const end = home.indexOf('\nfunction syncStateWithMatchups(', begin);
+  assert.ok(begin >= 0 && end > begin, 'Home localStorage fallback is present');
+  const context = vm.createContext({
+    getCachedStorageState: () => ({
+      tasks: [], completions: [], players: [], matchups: [],
+      goldEconomy: { version: 1, launchDateKey: '2026-11-05' },
+      goldLedger: [
+        { id: 'gold:opening:YOU', type: 'opening_balance', playerId: 'YOU', amount: 62.5 },
+        { id: 'gold:recalculation:YOU', type: 'gold_recalculation_adjustment', playerId: 'YOU', amount: 52.4 }
+      ]
+    }),
+    loadProjectsFromStorage: () => [],
+    normalizeHexColor: x => x,
+    normalizeHabitTagColors: x => x || {},
+    window: { TaskPointsCore: { normalizeScoringSettings: x => x } },
+    TaskPointsCore: { normalizeScoringSettings: x => x },
+    console
+  });
+  vm.runInContext(home.slice(begin, end), context);
+  const loaded = context.load();
+  assert.equal(loaded.goldEconomy.version, 1);
+  assert.equal(loaded.goldLedger.length, 2);
+  assert.equal(loaded.goldLedger.reduce((sum, row) => sum + row.amount, 0), 114.9);
+  assert.equal(loaded.goldLedger[1].type, 'gold_recalculation_adjustment');
+});

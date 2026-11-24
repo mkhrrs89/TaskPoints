@@ -223,3 +223,12 @@ test('Gold Ledger page exposes all controls and displays manual transactions', (
   assert.match(html, /gold_manual_adjustment\.js/);
   assert.match(html, /taskpoints:gold-manual-adjusted/);
 });
+
+
+test('the manual Gold picker visibly includes YOU as a separate, nonduplicated wallet', () => {
+  assert.match(html, /<select id="goldManualPlayer"[\s\S]*?<option value="YOU">You \(My Gold\)<\/option>/);
+  assert.match(source, /item\.id === 'YOU' \? select\.querySelector\?\.\('option\[value="YOU"\]'\)/);
+  assert.match(source, /item\.id === 'YOU' \? item\.name \+ ' \(You\)'/);
+  const h = harness(seed());
+  assert.equal(h.api.plan(h.current(), request('add', '1.0', 'YOU')).after, 3);
+});

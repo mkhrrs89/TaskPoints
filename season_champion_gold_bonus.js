@@ -231,6 +231,66 @@
     return result;
   }
 
+
+  // Read-only batch counterpart to the Power Rankings Gold display wrappers.
+  // All historical matchups and champion awards are scanned once, not once
+  // for each of 120 players. The same Gold amounts drive both ranking views.
+  function buildPowerRankingTotalGoldMap(sourceState, scopedState = sourceState, options = {}) {
+    const source = sourceState && typeof sourceState === 'object' ? sourceState : {};
+    const scoped = scopedState && typeof scopedState === 'object' ? scopedState : source;
+    const today = String(options.todayKey || todayDateKey()).slice(0, 10);
+    const historical = new Map(), scopedMargins = new Map();
+    const wallets = new Map(), champions = new Map();
+    const add = (map, id, value) => {
+      const key = String(id || '').trim();
+      if (key) map.set(key, (map.get(key) || 0) + value);
+    };
+    for (const match of collectCompleteRankingMatchups(source)) {
+      const day = rowDateKey(match);
+      if (!day || day < GOLD_START_DATE || (today && day >= today)) continue;
+      const a = sideScore(match, 'A'), b = sideScore(match, 'B');
+      if (a === null || b === null) continue;
+      if (a > b) add(historical, match.playerAId, (a - b) / 10);
+      else if (b > a && match.playerBId !== match.playerAId) add(historical, match.playerBId, (b - a) / 10);
+    }
+    // The legacy/no-ledger path uses the same Number(scoreA/B) semantics
+    // as the Rankings page's original scope-specific MOV/Gold helper.
+    for (const match of (Array.isArray(scoped.matchups) ? scoped.matchups : [])) {
+      const day = rowDateKey(match);
+      if (!day || day < GOLD_START_DATE || (today && day >= today)) continue;
+      const a = Number(match.scoreA), b = Number(match.scoreB);
+      if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+      if (a > b) add(scopedMargins, match.playerAId, (a - b) / 10);
+      else if (b > a && match.playerBId !== match.playerAId) add(scopedMargins, match.playerBId, (b - a) / 10);
+    }
+    const officialLedger = Number(source.goldEconomy?.version) === 1;
+    if (officialLedger) {
+      for (const entry of (Array.isArray(source.goldLedger) ? source.goldLedger : []))
+        add(wallets, entry?.playerId, Number(entry?.amount) || 0);
+    }
+    const seasons = [source.currentSeason, ...(Array.isArray(source.seasonHistory) ? source.seasonHistory : [])].filter(Boolean);
+    const seen = new Set();
+    for (let i = 0; i < seasons.length; i++) {
+      const season = seasons[i];
+      const key = seasonIdentity(season, i);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const boundary = seasonBoundaryDate(season);
+      if (boundary && boundary >= GOLD_START_DATE)
+        add(champions, championIdForSeason(season), championBonusForSeason(season));
+    }
+    const ids = new Set(['YOU']);
+    for (const player of (Array.isArray(source.players) ? source.players : []))
+      if (player?.id && player.active !== false) ids.add(player.id);
+    const totals = new Map();
+    for (const id of ids) {
+      const current = roundGold(officialLedger ? (wallets.get(id) || 0) : (scopedMargins.get(id) || 0));
+      const cumulative = roundGold(historical.get(id) || 0);
+      totals.set(id, roundGold(Math.max(current, cumulative) + (champions.get(id) || 0)));
+    }
+    return totals;
+  }
+
   function getCumulativeMatchupGold(playerId, stateInput = null, options = {}) {
     const id = String(playerId || '').trim();
     if (!id) return 0;
@@ -334,8 +394,27 @@
 
     const wrapped = function getHomepageGoldValueWithChampionBonus(playerId) {
       const base = original.apply(this, arguments);
+      // The pre-ledger historical margin + championship calculation is ONLY
+      // appropriate before the November 2026 Gold wallet launched. During
+      // Home boot this addon can install before/after the Greed Gold adapter.
+      // Never let its legacy cumulative/max logic temporarily inflate the
+      // actual wallet (or re-add a championship bonus already in the ledger).
+      // Prefer Home's live state to avoid loading/parsing the whole snapshot
+      // on each scoreboard repaint.
+      let live = null;
+      try { live = global.TaskPointsHomeLiveState?.getState?.() || null; } catch (_) {}
+      let state = live;
+      if (Number(state?.goldEconomy?.version) !== 1
+        || !Array.isArray(state?.goldLedger)) {
+        state = loadState() || live;
+      }
+      if (Number(state?.goldEconomy?.version) === 1) {
+        if (!Array.isArray(state.goldLedger)) return null;
+        const id = String(playerId || '');
+        return roundGold(state.goldLedger.reduce((sum, row) =>
+          String(row?.playerId || '') === id ? sum + (Number(row?.amount) || 0) : sum, 0));
+      }
       if (base == null) return base;
-      const state = loadState();
       const cumulative = state ? getCumulativeMatchupGold(playerId, state) : 0;
       const marginGold = Math.max(Number(base) || 0, cumulative);
       return roundGold(marginGold + getTournamentChampionGoldBonus(playerId, state));
@@ -401,7 +480,24 @@
     const rankingsReady = !isRankings || (rankingsHistoryReady && patchRankingsGold());
 
     if (!homepageReady || !rankingsReady) return false;
-    if (isHome) refreshHomeGold();
+    if (isHome) {
+      refreshHomeGold();
+      // The historical Gold helper loads separately. Refresh the rank labels
+      // after it installs, without re-running daily games or touching storage.
+      try {
+        const map = global.getCanonicalRankingMap?.();
+        const own = global.document?.getElementById?.('matchupYourRank');
+        if (own && map) own.textContent = String(map.get('YOU')?.rank ?? '—');
+        const other = global.document?.getElementById?.('matchupOpponentRank');
+        const source = global.TaskPointsHomeLiveState?.getState?.() || loadState() || {};
+        const match = core.chooseUserMatchupForDate?.(source, todayDateKey(), 'YOU');
+        const opponent = match?.playerAId === 'YOU' ? match.playerBId
+          : match?.playerBId === 'YOU' ? match.playerAId : '';
+        if (other && map) other.textContent =
+          String(opponent ? (map.get(opponent)?.rank ?? '—') : '—');
+        global.TaskPointsHomeRankPercentileLine?.scheduleRender?.();
+      } catch (_) { /* visual update only; never interfere with loading */ }
+    }
     if (isRankings && typeof global.renderRankings === 'function') {
       try { global.renderRankings(); } catch (_) {}
     }
@@ -427,6 +523,7 @@
     ALL_MATCHUPS_KEY,
     collectCompleteRankingMatchups,
     getCumulativeMatchupGold,
+    buildPowerRankingTotalGoldMap,
     championBonusForSeason,
     getTournamentChampionGoldBonus,
     installGoldDisplayPatches,

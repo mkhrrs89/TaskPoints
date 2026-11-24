@@ -72,15 +72,65 @@ test('Shared mobile drag expansion, press effects and toolbar height remain inst
   assert.doesNotMatch(toolbar, /mobileTasksMenu/);
 });
 
-test('Mobile header buttons remain visually hidden without collapsing the row', () => {
-  assert.match(nav, /\.header-nav > a\[href="index\.html"\]/);
-  assert.match(nav, /\.header-nav > a\[href="daily_sources\.html"\]/);
-  assert.match(nav, /\.header-nav > a\[href="log\.html"\]/);
-  assert.match(nav, /\.header-nav > a\[href="week\.html"\]/);
-  assert.match(nav, /\.header-nav > a\[href="season\.html"\]/);
-  assert.match(nav, /visibility: hidden !important/);
-  assert.match(nav, /pointer-events: none !important/);
-  assert.doesNotMatch(nav, /\.header-nav[\s\S]{0,500}display:\s*none\s*!important/);
+test('Old upper navigation is removed from mobile layout before first paint', () => {
+  const toolbar = fs.readFileSync(path.join(ROOT, 'toolbar.js'), 'utf8');
+  assert.match(styles, /@media \(max-width: 767px\)\s*\{\s*header \.header-nav\s*\{\s*display: none !important;/);
+  assert.match(toolbar, /function syncRetiredMobileHeaderNavigation\(\)/);
+  assert.match(toolbar, /document\.querySelectorAll\('header \.header-nav'\)/);
+  assert.match(toolbar, /replaceChild\(placeholder, nav\)/);
+  assert.match(toolbar, /placeholder\.replaceWith\(nav\)/);
+  assert.match(toolbar, /syncRetiredMobileHeaderNavigation\(\);\s*const mobileHeaderQuery/);
+  assert.doesNotMatch(nav, /visibility: hidden !important|HEADER_SPACER_STYLE_ID/);
+  for (const page of ['index.html', 'settings.html', 'audit.html', 'projects.html']) {
+    const html = fs.readFileSync(path.join(ROOT, page), 'utf8');
+    assert.match(html, /href="styles\.css(?:\?[^"]*)?"/, page + ' loads the pre-paint rule');
+    assert.match(html, /class="[^"]*header-nav/, page + ' retains desktop navigation');
+  }
+});
+
+test('Mobile nav detaches and desktop resize restores the same header node', () => {
+  const toolbar = fs.readFileSync(path.join(ROOT, 'toolbar.js'), 'utf8');
+  const begin = toolbar.indexOf('const detachedMobileHeaderNavs = [];');
+  const end = toolbar.indexOf("document.addEventListener('DOMContentLoaded', () => {", begin);
+  assert.ok(begin >= 0 && end > begin, 'shared header navigation lifecycle exists');
+  const snippet = toolbar.slice(begin, end);
+  const vm = require('node:vm');
+  let mobile = true;
+  let connected = true;
+  const parent = {
+    replaceChild(placeholder, nav) {
+      assert.equal(connected, true);
+      connected = false;
+      nav.parentNode = null;
+      placeholder.isConnected = true;
+    }
+  };
+  const original = { parentNode: parent };
+  const doc = {
+    querySelectorAll(selector) {
+      assert.equal(selector, 'header .header-nav');
+      return connected ? [original] : [];
+    },
+    createComment() {
+      return {
+        isConnected: false,
+        replaceWith(nav) {
+          nav.parentNode = parent;
+          connected = true;
+          this.isConnected = false;
+        }
+      };
+    }
+  };
+  const context = { window: { matchMedia: () => ({ matches: mobile }) }, document: doc };
+  vm.runInNewContext(snippet + ';this.sync = syncRetiredMobileHeaderNavigation;', context);
+  context.sync();
+  assert.equal(connected, false, 'mobile removes header from DOM');
+  context.sync();
+  assert.equal(connected, false, 'repeat mobile sync remains idempotent');
+  mobile = false;
+  context.sync();
+  assert.equal(connected, true, 'desktop restores exact same header node');
 });
 
 test('Bottom menu motion remains composited and avoids filtered shell animation', () => {
@@ -101,4 +151,21 @@ test('Task editing and adding features outside the retired toolbar are unaffecte
   assert.match(home, /id="homeTabTasks"/);
   assert.match(home, /id="homePanelTasks"/);
   assert.match(styles, /#mobileAddTaskFab/);
+});
+
+
+test('Gold Ledger is a permanent, nonduplicating Game dropdown shortcut on mobile and desktop', () => {
+  const home = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const game = fs.readFileSync(path.join(ROOT, 'game.html'), 'utf8');
+  const mobileMenu = section(toolbar, '<div class="dropdown-menu">', '</div>');
+  for (const [name, content] of [['mobile', mobileMenu], ['Home desktop', home], ['Players desktop', game]]) {
+    assert.match(content, /href="game_ratings\.html"[\s\S]*?href="gold_ledger\.html"[\s\S]*?href="records\.html"|href="game_ratings\.html"[\s\S]*?href="gold_ledger\.html"/,
+      name + ' menu keeps Gold Ledger after Ratings');
+  }
+  assert.equal((mobileMenu.match(/href="gold_ledger\.html"/g) || []).length, 1,
+    'mobile toolbar template includes exactly one Gold Ledger shortcut');
+  assert.match(toolbar, /function ensureGoldLedgerGameMenuLink\(menu\)/);
+  assert.match(toolbar, /menu\.querySelector\('a\[href="gold_ledger\.html"\]'\)/,
+    'shared dropdown setup must avoid a duplicate if the Gold runtime already inserted the link');
+  assert.match(toolbar, /ensureGoldLedgerGameMenuLink\(menu\)/);
 });

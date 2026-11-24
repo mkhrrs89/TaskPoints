@@ -149,6 +149,7 @@
           <div id="auditProgressTrack" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Audit progress">
             <div id="auditProgressFill"></div>
           </div>
+          <p id="auditHabitCreditStatus" class="muted text-xs" role="status" aria-live="polite"></p>
         </div>
       </div>
 
@@ -187,6 +188,7 @@
   <script src="audit_habit_vice_scoring_dates.js"></script>
   <script src="audit_gold_integrity.js?v=20261105-1"></script>
   <script src="audit_selected_day_breakdown.js"></script>
+  <script src="audit_run_habit_completion.js?v=20261118-1"></script>
 <script>
     const $ = (id) => document.getElementById(id);
 
@@ -3806,13 +3808,15 @@ if (!dripSchedule) {
       return reportPayload;
     }
 
-    function runAudit() {
+    function runAudit(options = {}) {
       if (window.__taskpointsAuditRunning) return;
       window.__taskpointsAuditRunning = true;
 
       setAuditControlsDisabled(true);
       setStatus('RUNNING', 'running');
       setAuditProgressState('running');
+      const habitStatus = $('auditHabitCreditStatus');
+      if (habitStatus) habitStatus.textContent = '';
 
       const summaryMeta = $('auditSummaryMeta');
       if (summaryMeta) {
@@ -3824,6 +3828,28 @@ if (!dripSchedule) {
           try {
             executeAudit();
             setAuditProgressState('complete');
+            // Successful automatic page-open audits and manual button audits
+            // both credit the habit. Internal re-runs remain diagnostic-only.
+            // Credit errors must never turn a completed Audit into ERROR.
+            if (options.userInitiated === true || options.autoOnLoad === true) {
+              try {
+                const credit = window.TaskPointsAuditRunHabitCompletion?.markForToday?.();
+                if (habitStatus) {
+                  habitStatus.textContent = credit?.status === 'completed'
+                    ? 'Run Audit habit marked complete for today.'
+                    : credit?.status === 'already-complete'
+                      ? 'Run Audit habit was already complete today.'
+                      : credit?.status === 'missing'
+                        ? 'No active Run Audit habit found; nothing marked.'
+                        : credit?.status === 'ambiguous'
+                          ? 'More than one active Run Audit habit found; nothing marked.'
+                          : 'Audit finished, but Run Audit habit was not recorded. ' + String(credit?.message || '');
+                }
+              } catch (creditError) {
+                console.warn('Audit habit credit skipped; completed Audit results preserved.', creditError);
+                if (habitStatus) habitStatus.textContent = 'Audit finished, but the habit could not be recorded.';
+              }
+            }
           } catch (error) {
             console.error('Audit failed', error);
             setStatus('ERROR', 'fail');
@@ -3970,14 +3996,14 @@ if (!dripSchedule) {
         dateInput.value = defaultAuditDate();
       }
       setAuditProgressState('idle');
-      bindPress('runAuditBtn', runAudit);
+      bindPress('runAuditBtn', () => runAudit({ userInitiated: true }));
       bindPress('syncMatchupsBtn', syncMatchups);
       bindPress('syncNotesBtn', syncNotesFromAudit);
       bindPress('copyReportBtn', copyReport);
       bindPress('exportJsonBtn', exportJson);
 
-      // Auto-run on load for convenience
-      runAudit();
+      // Auto-run on load for convenience; count a successful run toward today's habit.
+      runAudit({ autoOnLoad: true });
     });
   </script>
   <div id="bottomToolbarMount"></div>

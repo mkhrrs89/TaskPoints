@@ -274,6 +274,7 @@
 
 <section class="rankings-shell mb-6">
   <h2 class="text-2xl font-extrabold tracking-wide">POWER RANKINGS</h2>
+  <p class="text-xs opacity-70 mt-1">75% Win% · 25% Total Gold (normalized to the Gold leader)</p>
 
   <div class="rankingsScopeTabs mb-4 mt-3" role="tablist" aria-label="Rankings scope">
     <button type="button" class="rankingsScopeTab" data-rankings-scope="season4">Season 4</button>
@@ -545,14 +546,47 @@ function computeRankingExtrasForPlayer(player, row, state) {
   };
 }
 
-function rankingStatsHtml(player, row, state) {
-  const extras = computeRankingExtrasForPlayer(player, row, state);
+function rankingStatsHtml(player, row, state, precomputedExtras = null) {
+  const extras = precomputedExtras || computeRankingExtrasForPlayer(player, row, state);
 
   return `
     <span class="ranking-stat-gold">Gold ${formatOneDecimal(extras.gold)}</span>
     <span>• MOV ${formatSignedOneDecimal(extras.mov)}</span>
     <span>• B△ ${formatSignedOneDecimal(extras.baseDelta)}</span>
   `;
+}
+
+// This page's Power Rankings combine historical wins (75%) with TOTAL
+// displayed Gold (25%). The Gold metric already includes historical carryover
+// and tournament champion bonuses through the existing Gold wrapper.
+// Normalize Gold by the highest active entrant total so both parts span 0..1.
+function computePowerRankedRows(scopedState, playerById = new Map()) {
+  const canonical = window.TaskPointsCore?.computeCanonicalRankings
+    ? TaskPointsCore.computeCanonicalRankings(scopedState, { preindexed: true })
+    : [];
+  const withGold = canonical.map((row, canonicalIndex) => {
+    const player = playerById.get(row.playerId)
+      || { id: row.playerId, name: row.name || row.playerId };
+    // Also used on the card: no duplicate Gold computations for sorting.
+    const extras = computeRankingExtrasForPlayer(player, row, scopedState);
+    const displayedGold = Number(extras.gold);
+    return {
+      ...row,
+      powerGold: Number.isFinite(displayedGold) ? Math.max(0, displayedGold) : 0,
+      rankingsExtras: extras,
+      canonicalIndex
+    };
+  });
+  const goldLeader = withGold.reduce((max, row) => Math.max(max, row.powerGold), 0);
+  for (const row of withGold) {
+    const winShare = Number.isFinite(row.winPct)
+      ? Math.max(0, Math.min(1, row.winPct)) : 0;
+    const goldShare = goldLeader > 0 ? row.powerGold / goldLeader : 0;
+    row.powerScore = 0.75 * winShare + 0.25 * goldShare;
+  }
+  // Preserve the old canonical PPD/name tie-break order when scores tie.
+  withGold.sort((a, b) => b.powerScore - a.powerScore || a.canonicalIndex - b.canonicalIndex);
+  return withGold.map((row, index) => ({ ...row, rank: index + 1 }));
 }
 
     function getYouName(state) {
@@ -593,7 +627,7 @@ function rankingStatsHtml(player, row, state) {
       return `${year}-${month}-${day}`;
     }
 
-    function computePriorRankMap(state, anchorDate = new Date()) {
+    function computePriorRankMap(state, anchorDate = new Date(), playerById = new Map()) {
       const yesterday = new Date(anchorDate);
       yesterday.setHours(0, 0, 0, 0);
       yesterday.setDate(yesterday.getDate() - 1);
@@ -609,9 +643,16 @@ function rankingStatsHtml(player, row, state) {
         })
       };
 
-      const previousRankings = window.TaskPointsCore?.computeCanonicalRankings
-        ? TaskPointsCore.computeCanonicalRankings(yesterdayState)
-        : [];
+      // Rank movement compares the SAME formula with the prior day's data.
+      // Trim the historical cache as well so today's added Gold isn't used.
+      const completeKey = '__taskPointsAllRankingMatchups';
+      if (Array.isArray(state?.[completeKey])) {
+        yesterdayState[completeKey] = state[completeKey].filter((m) => {
+          const key = matchupDateKey(m);
+          return key && key < yesterdayKey;
+        });
+      }
+      const previousRankings = computePowerRankedRows(yesterdayState, playerById);
 
       return new Map(previousRankings.map((row) => [row.playerId, row.rank]));
     }
@@ -640,7 +681,7 @@ function rankingStatsHtml(player, row, state) {
         : `<div class="ranking-avatar" aria-hidden="true">No photo</div>`;
 
       return `
-        <article class="ranking-row">
+        <article class="ranking-row" data-player-id="${escapeHtml(player.playerId || player.id || '')}">
           <div class="ranking-rank">
             <div class="ranking-index${rank >= 100 ? ' ranking-index--three-digit' : ''}">${rank}</div>
             ${renderRankDelta(delta)}
@@ -679,9 +720,7 @@ const emptyEl = document.getElementById('emptyState');
           .map((player) => [player.id, player]))
       ]);
 
-const ranked = (window.TaskPointsCore?.computeCanonicalRankings
-  ? TaskPointsCore.computeCanonicalRankings(scopedState)
-  : [])
+const ranked = computePowerRankedRows(scopedState, playerById)
         .map((row) => {
           const player = playerById.get(row.playerId) || { id: row.playerId, name: row.name || row.playerId };
 return {
@@ -689,10 +728,10 @@ return {
   ...row,
   winPctLabel: formatWinPct(row.wins, row.games),
   ppdLabel: formatPPD(row.ppd),
-  rankingsStatsHtml: rankingStatsHtml(player, row, scopedState)
+  rankingsStatsHtml: rankingStatsHtml(player, row, scopedState, row.rankingsExtras)
 };
         });
-      const priorRankByPlayerId = computePriorRankMap(scopedState);
+      const priorRankByPlayerId = computePriorRankMap(scopedState, new Date(), playerById);
       const rankDeltaByPlayerId = new Map(
         ranked.map((row) => {
           const yesterdayRank = priorRankByPlayerId.get(row.playerId);
