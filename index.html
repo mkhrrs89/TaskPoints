@@ -11723,11 +11723,7 @@ function getTaskActionSheetFocusable(){
 function updateTaskActionSheetVisibility(){
   const sheet = $('taskActionSheet');
   if (!sheet) return;
-  sheet.querySelectorAll('[data-task-sheet-action]').forEach(btn => {
-    btn.classList.remove('hidden');
-    btn.disabled = Boolean(window.TaskPointsOwnedTaskExperiment && taskActionSheetSchedule
-      && ['hide','wont-do'].includes(btn.dataset.taskSheetAction));
-  });
+  sheet.querySelectorAll('[data-task-sheet-action]').forEach(btn => btn.classList.remove('hidden'));
 }
 
 function openTaskActionSheet(id, trigger){
@@ -12329,12 +12325,6 @@ function initTaskListDelegation(){
     const action = btn.getAttribute('data-task-action');
     const id = btn.getAttribute('data-task-id');
     if (!action) return;
-    if (window.TaskPointsCore?.isIsolatedCreatedTaskId?.(id) && ownedHomeTaskEditor(id)
-      && ['wont-do','hide'].includes(action)) {
-      alert('This action is available after a verified rollback to V1.');
-      return;
-    }
-
     switch (action) {
       case 'postpone-all-overdue':
         postponeAllOverdueTasks();
@@ -12456,8 +12446,10 @@ function initTaskListDelegation(){
           else snoozeTaskDays(targetId, 7);
           break;
         case 'pick-date': pickTaskDate(targetId, schedule); break;
-        case 'hide': hideTask(targetId); break;
-        case 'wont-do': wontDoMain(targetId); break;
+        case 'hide':
+          if (!changeOwnedHomeTaskStatus(targetId,'home-hide',schedule)) hideTask(targetId);
+          break;
+        case 'wont-do': wontDoMain(targetId,schedule); break;
         case 'delete': deleteTask(targetId); break;
         default: break;
       }
@@ -14069,7 +14061,27 @@ function postponeAllOverdueTasks(){
   }
   postponeTasks(overdue, today);
 }
-function wontDoMain(id){
+const pendingHomeTaskStatuses = new Set();
+function changeOwnedHomeTaskStatus(id, operation, rendered){
+  if (!ownedHomeTaskEditor(id) && !window.TaskPointsCore?.getLegacyTaskCompletionHold?.(id)) return false;
+  if (pendingHomeTaskStatuses.has(id)) return true;
+  try {
+    const selection = rendered === undefined ? homeSchedulingBasis(id) : rendered;
+    if (!selection) throw Error('Reopen Task actions to verify this change.');
+    const {owner,basis:{taskId,generation,expectedRevision,expectedTask}} = selection;
+    if (operation === 'home-decline' && (expectedTask.recurrence?.mode || 'none') === 'none'
+      && !confirm('Won’t do this task? It will be removed.')) return true;
+    pendingHomeTaskStatuses.add(id);
+    owner.changeStatus({operation,taskId,generation,expectedRevision,day:todayKey()})
+      .then(()=>replayHomeTodayCleanup())
+      .catch(error=>alert(error.message))
+      .finally(()=>pendingHomeTaskStatuses.delete(id));
+  } catch (error) { alert(error.message); }
+  return true;
+}
+
+function wontDoMain(id, rendered){
+  if (changeOwnedHomeTaskStatus(id,'home-decline',rendered)) return;
   const t=state.tasks.find(x=>x.id===id); if(!t || !assertTaskActionMutationWritable()) return;
   const mode = (t.recurrence && t.recurrence.mode) || 'none';
   if(mode==='none'){
@@ -14391,6 +14403,7 @@ function readTaskRepeatSettings(card) {
 }
 
 function hideTask(id){
+  if (changeOwnedHomeTaskStatus(id,'home-hide')) return;
   const t = state.tasks.find(x => x.id === id);
   if (!t) return;
   t.hidden = true;

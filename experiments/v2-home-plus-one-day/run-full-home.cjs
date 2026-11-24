@@ -40,7 +40,7 @@ before(async()=>{
       const resolved=path.resolve(root,file);
       const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.svg':'image/svg+xml','.json':'application/json'}[path.extname(file)];
       if(!mime||!resolved.startsWith(root+path.sep)||file.startsWith('experiments/'))throw Error('Outside experiment');
-      const homeBundle=file==='scoring_core.js'&&['index.html','inbox.html','today.html','game.html','matchups.html','week.html','trash.html'].some(page=>new URL(req.headers.referer||'http://localhost').pathname===prefix+page);
+      const homeBundle=file==='scoring_core.js'&&['index.html','inbox.html','today.html','game.html','matchups.html','week.html','trash.html','archive.html'].some(page=>new URL(req.headers.referer||'http://localhost').pathname===prefix+page);
       const content=homeBundle?bundle:fs.readFileSync(resolved);
       res.writeHead(200,{'Content-Type':mime,'Cache-Control':'no-store'});
       res.end(content);
@@ -5463,4 +5463,459 @@ test('V2 Home scheduling counts calendar days through DST and refuses an uncommi
   await assert.rejects(page.evaluate(intent=>TaskPointsStateRuntimeV2.commitIsolatedTaskScheduling(intent),stale),
     /owned_schedule_day_or_zone_changed/);
   assert.deepEqual(await scheduleReceipts(page),[receipt]);
+});
+
+const statusReceipts = async page=>(await owned(page)).journal.filter(row=>row.type==='isolated-task-status');
+const archiveTask=(page,id='t1')=>page.locator(`#archiveList [data-task-id="${id}"]`);
+const archiveControl=(page,id,name)=>archiveTask(page,id).getByRole('button',{name,exact:true});
+async function statusOutcome(page,click){
+  await page.evaluate(()=>{window.ownerOutcome=null;});
+  await click();
+  await page.waitForFunction(()=>window.ownerOutcome!==null);
+  return page.evaluate(()=>window.ownerOutcome);
+}
+
+async function homeStatus(page,id,action,{sheet=false}={}){
+  if(sheet){
+    await showTaskSheet(page,id);
+    return statusOutcome(page,()=>sheetAction(page,action).click());
+  }
+  const card=await showScheduleCard(page,id);
+  const body=card.locator('[data-task-card-body]');
+  if(await body.getAttribute('aria-expanded')==='false')await body.press('Enter');
+  return statusOutcome(page,()=>card.locator(`[data-task-action="${action}"]`).click());
+}
+
+const waitStatusCount=(page,count)=>page.evaluate(async count=>{
+  const until=performance.now()+10000;
+  do {
+    const {journal}=await TaskPointsStateRuntimeV2.readIsolatedOwnedTasks();
+    if(journal.filter(row=>row.type==='isolated-task-status').length===count)return;
+    await new Promise(resolve=>setTimeout(resolve,30));
+  } while(performance.now()<until);
+  throw Error('Expected '+count+' verified status receipts');
+},count);
+async function archiveReady(page,id='t1'){
+  const control=archiveControl(page,id,'Un-Archive');
+  await control.waitFor();
+  await page.waitForFunction(id=>document.querySelector(`#archiveList [data-task-id="${id}"] button`)?.disabled===false,id);
+}
+async function approveDeclines(page){
+  page.removeAllListeners('dialog');
+  page.on('dialog',async dialog=>{
+    if(dialog.type()==='confirm'){
+      assert.equal(dialog.message(),'Won’t do this task? It will be removed.');
+      await dialog.accept();
+    } else await dialog.dismiss();
+  });
+}
+
+test('V2 status real Hide and Un-Archive refresh all views, and Home one-off decline stays out of Trash',async t=>{
+  const {page,context}=await seedTrash(t,undefined,{recurrence:{mode:'none'}});
+  await openTaskEdit(page);
+  await editCard(page).locator('[data-field="importance"]').selectOption('Critical');
+  assert.equal((await submitTaskEdit(page)).ok,true);
+  const archive=await openScoringPage(context,'archive.html');
+  const today=await openScoringPage(context,'today.html');
+  await today.setViewportSize({width:390,height:844});
+  await today.reload();
+  const week=await openScoringPage(context,'week.html');
+  const trash=await openScoringPage(context,'trash.html');
+  const critical=today.locator('#criticalTasksIsland[data-active="1"]');
+  await critical.waitFor({state:'attached'});
+  await todayTask(today).waitFor();
+  await weekTask(week).waitFor();
+
+  const before=await trashedTask(page,'t1');
+  const legacy=await backingTask(page);
+  const earned=await verifiedRewards(page);
+  const original=structuredClone(cleanedTodayList);
+  original.tasksByDay[quietDate].push('t1');
+  original.orderByDay[quietDate].splice(2,0,'task:t1');
+  await writeTodayFixture(page,JSON.stringify(original));
+
+  const hidden=await homeStatus(page,'t1','hide',{sheet:true});
+  assert.equal(hidden.ok,true,JSON.stringify(hidden));
+  assert.deepEqual(hidden.receipt.after,{...before,hidden:true,status:'hidden',updatedAtISO:hidden.receipt.committedAtISO});
+  await archiveReady(archive);
+  await taskCard(page,'t1').waitFor({state:'detached'});
+  await todayTask(today).waitFor({state:'detached'});
+  await critical.waitFor({state:'detached'});
+  await weekTask(week).waitFor(); // V1 Week still shows hidden scheduled Tasks.
+  assert.equal(await trashListing(trash,before.title).count(),0);
+  await waitTodayBytes(today,JSON.stringify(cleanedTodayList));
+
+  await archiveControl(archive,'t1','Un-Archive').click();
+  await waitStatusCount(page,2);
+  await archiveTask(archive).waitFor({state:'detached'});
+  await taskCard(page,'t1').waitFor();
+  await todayTask(today).waitFor();
+  await critical.waitFor({state:'attached'});
+  const restored=await trashedTask(page,'t1');
+  assert.deepEqual(restored,{...before,hidden:false,status:'active',updatedAtISO:restored.updatedAtISO});
+  assert.deepEqual(await verifiedRewards(page),earned);
+
+  await showTaskSheet(page);
+  const refused=page.waitForEvent('dialog');
+  await sheetAction(page,'wont-do').click();
+  assert.equal((await refused).message(),'Won’t do this task? It will be removed.');
+  assert.equal((await statusReceipts(page)).length,2);
+  await approveDeclines(page);
+  const declined=await homeStatus(page,'t1','wont-do');
+  assert.equal(declined.ok,true,JSON.stringify(declined));
+  assert.deepEqual(declined.receipt.after,{...restored,status:'wontdo',deletedAtISO:null,deletedAt:null,prevStatus:null,
+    updatedAtISO:declined.receipt.committedAtISO});
+  await taskCard(page,'t1').waitFor({state:'detached'});
+  await todayTask(today).waitFor({state:'detached'});
+  await weekTask(week).waitFor({state:'detached'});
+  await critical.waitFor({state:'detached'});
+  assert.equal(await archiveTask(archive).count(),0);
+  assert.equal(await trashListing(trash,before.title).count(),0);
+  assert.deepEqual(await verifiedRewards(page),earned);
+  assert.deepEqual(await backingTask(page),legacy);
+});
+
+test('V2 status Archive one-off decline keeps its real Trash and Restore behavior without creating an Undo or a reward',async t=>{
+  const {page,context}=await seedTrash(t,undefined,{create:true});
+  await putCreateForm(page,{title:'Synthetic archived decline',due:quietDate,points:'11'});
+  const id=await saveCreateForm(page);
+  const archive=await openScoringPage(context,'archive.html');
+  const trash=await openScoringPage(context,'trash.html');
+  const earned=await verifiedRewards(page);
+  const hidden=await homeStatus(page,id,'hide');
+  assert.equal(hidden.ok,true,JSON.stringify(hidden));
+  await archiveReady(archive,id);
+  await approveDeclines(archive);
+  await archiveControl(archive,id,'Won’t do').click();
+  await waitStatusCount(page,2);
+  const [,declined]=await statusReceipts(page);
+  assert.deepEqual(declined.after,{...hidden.receipt.after,deletedAtISO:declined.committedAtISO,
+    updatedAtISO:declined.committedAtISO});
+  await archiveTask(archive,id).waitFor({state:'detached'});
+  await trashRestore(trash,id).waitFor();
+  assert.equal(await trashUndo(page,id).count(),0);
+  await assert.rejects(trashCommit(page,undoIntent(declined)),/owned_task_undo_expired/);
+  await restoreViaTrash(trash,id);
+  await archiveReady(archive,id);
+  const restored=await trashedTask(page,id);
+  assert.deepEqual([restored.hidden,restored.status,restored.deletedAtISO],[true,'active',null]);
+  await archiveControl(archive,id,'Un-Archive').click();
+  await waitStatusCount(page,3);
+  assert.deepEqual([ (await trashedTask(page,id)).hidden,(await trashedTask(page,id)).status ],[false,'active']);
+  assert.deepEqual(await verifiedRewards(page),earned);
+  await assertCreationOutsideV1(page,[id]);
+});
+
+test('V2 status recurring skips keep source-specific dates, recurrence, counters and earned history',async t=>{
+  const {page,context}=await seedTrash(t,undefined,{recurrence:{mode:'everyWeekday'}});
+  await setSchedulingDue(page,'2026-11-13'); // Friday before the selected Wednesday.
+  const archived=await openScoringPage(context,'archive.html');
+  const history=await verifiedRewards(page);
+  const before=await trashedTask(page,'t1');
+  await setTrashClock(page,6000);
+  const skipped=await homeStatus(page,'t1','wont-do');
+  assert.equal(skipped.ok,true,JSON.stringify(skipped));
+  assert.deepEqual(skipped.receipt.after,{...before,dueDateISO:'2026-11-16',skipDates:['2026-11-13']});
+  assert.equal(skipped.receipt.completion,undefined);
+  const hidden=await homeStatus(page,'t1','hide');
+  assert.equal(hidden.ok,true,JSON.stringify(hidden));
+  await archiveReady(archived);
+  await setTrashClock(archived,10000);
+  await archiveControl(archived,'t1','Won’t do').click();
+  await waitStatusCount(page,3);
+  const [, , archiveSkip]=await statusReceipts(page);
+  assert.deepEqual(archiveSkip.after,{...hidden.receipt.after,dueDateISO:'2026-11-17',
+    skipDates:['2026-11-13',quietDate],updatedAtISO:archiveSkip.committedAtISO});
+  assert.deepEqual(await verifiedRewards(page),history);
+  assert.equal((await completionReceipts(page)).length,0);
+  assert.equal((await trashReceipts(page)).length,0);
+});
+
+test('V2 status Archive Done awards the latest verified points once, preserves Archive rules and rolls back to fresh V1',async t=>{
+  const {page,context,legacyRewards}=await seedTrash(t,undefined,{create:true,recurrence:{mode:'custom',customCount:1,customUnit:'month'}});
+  await openTaskEdit(page);
+  await dueField(page).fill('2026-10-31');
+  await pointsField(page).fill('12.75');
+  const edit=await submitTaskEdit(page);
+  assert.equal(edit.ok,true,JSON.stringify(edit));
+  const recurring=await homeStatus(page,'t1','hide');
+  assert.equal(recurring.ok,true,JSON.stringify(recurring));
+  await putCreateForm(page,{title:'Synthetic Archive one-off Done',due:quietDate,points:'-2.75'});
+  const oneOff=await saveCreateForm(page);
+  assert.equal((await homeStatus(page,oneOff,'hide')).ok,true);
+  await putCreateForm(page,{title:'Synthetic permanently retired Archive task',due:quietDate,points:'1'});
+  const retired=await saveCreateForm(page);
+  const {receipt:deletion}=await trashCommit(page,await deleteIntent(page,retired));
+  const trash=await openScoringPage(context,'trash.html');
+  await trashCommit(trash,foreverIntent(deletion));
+  await trash.close();
+
+  const archive=await openScoringPage(context,'archive.html');
+  await archiveReady(archive);
+  await archiveReady(archive,oneOff);
+  const today=await openScoringPage(context,'today.html');
+  const historical=await verifiedRewards(page);
+  await archiveControl(archive,'t1','Done').click();
+  await archiveControl(archive,'t1','Done').waitFor({state:'attached'});
+  await archive.waitForFunction(()=>document.querySelector('#archiveList [data-task-id="t1"] .btn-check')?.disabled);
+  await archive.evaluate(()=>{document.querySelector('#archiveList [data-task-id="t1"] .btn-check').click();});
+  await archiveControl(archive,oneOff,'Done').click();
+  await archiveTask(archive,oneOff).waitFor({state:'detached'});
+  await todayTask(today,'t1').and(today.locator('.is-done')).waitFor();
+  await todayTask(today,oneOff).and(today.locator('.is-done')).waitFor();
+
+  const [rDone,oneDone]=await completionReceipts(page);
+  assert.deepEqual([rDone.intent.source,rDone.completion.source,rDone.completion.points],['archive','task',12.75]);
+  assert.deepEqual(rDone.after,{...rDone.before,dueDateISO:'2026-12-01',postponedDays:0,completedAtISO:null,
+    updatedAtISO:rDone.committedAtISO});
+  assert.deepEqual([oneDone.intent.source,oneDone.completion.points],['archive',-2.75]);
+  assert.deepEqual(oneDone.after,{...oneDone.before,completedAtISO:oneDone.committedAtISO,updatedAtISO:oneDone.committedAtISO});
+  const totals=(await scoresFromCore(today)).totals;
+  assert.equal(totals[quietDate],13);
+  assert.deepEqual(await verifiedRewards(page),[...historical,rDone.completion,oneDone.completion]);
+  assert.deepEqual(await canonicalCompletions(page),legacyRewards);
+  await assert.rejects(trashCommit(archive,{operation:'archive-unarchive',taskId:retired,expectedRevision:deletion.revision,
+    generation:deletion.generation,day:quietDate}),/owned_task_permanently_deleted/);
+  await assert.rejects(archive.evaluate(id=>TaskPointsStateRuntimeV2.prepareIsolatedTaskCompletion('archive',id),retired),
+    /owned_task_permanently_deleted/);
+
+  await archive.close();await today.close();
+  const revision=(await owned(page)).meta.revision;
+  const checkpoint=await page.evaluate(revision=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(revision),revision);
+  assert.deepEqual(checkpoint.permanentIds,[retired]);
+  assert.deepEqual(checkpoint.snapshot.tasks.find(row=>row.id==='t1'),rDone.after);
+  assert.deepEqual(checkpoint.snapshot.tasks.find(row=>row.id===oneOff),oneDone.after);
+  const fresh=await browser.newContext({serviceWorkers:'block',timezoneId:'America/New_York'});
+  t.after(()=>fresh.close());
+  await configureContext(fresh);
+  const loader=await rollbackLoader(fresh);
+  assert.deepEqual(await restoreCompletionCheckpoint(loader,checkpoint),{verified:true,checksum:checkpoint.checksum});
+  const freshArchive=await openScoringPage(fresh,'archive.html');
+  await freshArchive.locator('#archiveList .task-title').filter({hasText:rDone.after.title}).waitFor();
+  assert.equal(await freshArchive.locator('#archiveList .task-title').filter({hasText:oneDone.after.title}).count(),0);
+  const freshHome=await openScoringPage(fresh,'index.html');
+  await taskCard(freshHome,'t2').waitFor();
+  assert.equal(await taskCard(freshHome,retired).count(),0);
+  assert.deepEqual((await scoresFromCore(freshHome)).totals,totals);
+  assert.deepEqual(await canonicalCompletions(freshHome),[...legacyRewards,...checkpoint.completions]);
+});
+
+test('V2 status refuses a stale Home action sheet and serializes Archive Un-Archive against Archive Done',async t=>{
+  const {page,context}=await seedTrash(t);
+  const peer=await openScoringPage(context,'index.html');
+  await waitHome(peer);
+  await showTaskSheet(peer);
+  const hidden=await homeStatus(page,'t1','hide');
+  assert.equal(hidden.ok,true);
+  const refused=await statusOutcome(peer,()=>sheetAction(peer,'wont-do').click());
+  assert.match(refused.error,/owned_task_stale_edit/);
+
+  const archive=await openScoringPage(context,'archive.html');
+  const other=await openScoringPage(context,'archive.html');
+  await archiveReady(archive);
+  await archiveReady(other);
+  await archive.evaluate(()=>{
+    const runtime=TaskPointsStateRuntimeV2,commit=runtime.commitIsolatedOwnedTaskTrash;
+    runtime.commitIsolatedOwnedTaskTrash=intent=>new Promise(resolve=>{
+      window.releaseArchiveStatus=()=>resolve(commit(intent));
+    }).then(value=>{window.archiveStatusResult=value;return value;});
+  });
+  await other.evaluate(()=>{
+    const runtime=TaskPointsStateRuntimeV2,commit=runtime.commitIsolatedTaskCompletion;
+    runtime.commitIsolatedTaskCompletion=intent=>new Promise(resolve=>{
+      window.releaseArchiveDone=()=>resolve(commit(intent));
+    }).then(value=>{window.archiveDoneResult=value;return value;});
+  });
+  await Promise.all([archiveControl(archive,'t1','Un-Archive').click(),archiveControl(other,'t1','Done').click()]);
+  await Promise.all([archive.waitForFunction(()=>window.releaseArchiveStatus),other.waitForFunction(()=>window.releaseArchiveDone)]);
+  await Promise.all([archive.evaluate(()=>{releaseArchiveStatus();}),other.evaluate(()=>{releaseArchiveDone();})]);
+  await Promise.all([archive,other].map(tab=>tab.waitForFunction(()=>!document.querySelector('#archiveList [aria-busy="true"]'))));
+  const statuses=await statusReceipts(page), completions=await completionReceipts(page);
+  assert.equal(statuses.length+completions.length,2);
+  assert.equal((await trashedTask(page,'t1')).hidden,completions.length===1);
+});
+
+test('V2 status Archive skip recovers a lost response, refuses quota and does not duplicate an exact request',async t=>{
+  const {page,context}=await seedTrash(t,undefined,{recurrence:{mode:'weekly'}});
+  const hidden=await homeStatus(page,'t1','hide');
+  assert.equal(hidden.ok,true);
+  const archive=await openScoringPage(context,'archive.html');
+  await archiveReady(archive);
+  await archive.evaluate(()=>{
+    const api=TaskPointsStateRuntimeV2,commit=api.commitIsolatedOwnedTaskTrash;
+    const add=IDBObjectStore.prototype.add;
+    window.failStatusQuota=true;
+    IDBObjectStore.prototype.add=function(row,...args){
+      if(window.failStatusQuota && row?.type==='isolated-task-status')
+        throw new DOMException('Synthetic status quota','QuotaExceededError');
+      return add.call(this,row,...args);
+    };
+    api.commitIsolatedOwnedTaskTrash=async intent=>{
+      window.lastStatusIntent=intent;
+      const result=await commit(intent);
+      if(!window.lostStatusReceipt) {
+        window.lostStatusReceipt=result.receipt;
+        throw Error('Synthetic lost status response');
+      }
+      return result;
+    };
+  });
+  const quota=archive.waitForEvent('dialog',{predicate:dialog=>dialog.type()==='alert'});
+  await archiveControl(archive,'t1','Won’t do').click();
+  assert.match((await quota).message(),/Synthetic status quota/);
+  assert.deepEqual(await statusReceipts(page),[hidden.receipt]);
+  await archive.evaluate(()=>{window.failStatusQuota=false;});
+  await archiveReady(archive);
+  await archiveControl(archive,'t1','Won’t do').click();
+  await waitStatusCount(page,2);
+  const [,skip]=await statusReceipts(page);
+  assert.deepEqual(skip,await archive.evaluate(()=>lostStatusReceipt));
+  assert.equal(skip.after.dueDateISO,'2026-11-25');
+  const input=await archive.evaluate(()=>lastStatusIntent);
+  await archive.reload();
+  assert.deepEqual(await trashCommit(archive,input),{confirmedDurable:true,replayed:true,receipt:skip});
+  assert.equal((await statusReceipts(page)).length,2);
+});
+
+for(const phase of ['before commit','after commit'])test(
+  `V2 status Hide interrupted ${phase} reopens safely and reconciles Today after Chromium restart`,async t=>{
+    const profile=await completionProfile(t);
+    const {page}=await seedTrash(t,profile.context);
+    const original=structuredClone(cleanedTodayList);
+    original.tasksByDay[quietDate].push('t1');
+    original.orderByDay[quietDate].push('task:t1');
+    await writeTodayFixture(page,JSON.stringify(original));
+    await showTaskSheet(page);
+    await interruptOwnedWrite(page,phase);
+    await sheetAction(page,'hide').click();
+    await page.waitForFunction(()=>window.ownedInterruptionReached===true);
+    assert.notEqual(await page.evaluate(()=>window.ownerOutcome?.ok),true);
+    const restarted=await profile.restart();
+    const home=await openScoringPage(restarted,'index.html');
+    const archive=await openScoringPage(restarted,'archive.html');
+    const after=phase==='after commit';
+    assert.equal((await statusReceipts(home)).length,Number(after));
+    if(after){
+      await archiveReady(archive);
+      await waitTodayBytes(home,JSON.stringify(cleanedTodayList));
+      assert.equal(await taskCard(home,'t1').count(),0);
+    } else{
+      await taskCard(home,'t1').waitFor();
+      assert.equal(await archiveTask(archive).count(),0);
+      assert.deepEqual(JSON.parse(await todayBytes(home)),original);
+    }
+  });
+
+test('V2 status preserves ordinary V1 Archive controls with experimental ownership disabled',async t=>{
+  const {page}=await prepareCompletionBoundary(t);
+  await page.evaluate(()=>{
+    const core=TaskPointsCore;
+    const source=core.readTaskPointsStoredState();
+    const task=source.tasks.find(row=>row.id==='t1');
+    Object.assign(task,{recurrence:{mode:'weekly'},postponedDays:4});
+    core.writeTaskPointsStoredState(source);
+  });
+  await page.reload();
+  await waitHome(page);
+  assert.equal(await page.evaluate(()=>TaskPointsCore.usesIsolatedTaskScoring()),false);
+  const card=await showScheduleCard(page);
+  await card.locator('[data-task-card-body]').press('Enter');
+  await card.getByRole('button',{name:'Hide',exact:true}).click();
+  await card.waitFor({state:'detached'});
+  await page.evaluate(()=>{
+    TaskPointsCore.flushPendingSaves();
+    TaskPointsCore.flushPendingTaskMutations();
+  });
+  const history=await canonicalCompletions(page);
+  const archive=page;
+  await archive.goto(origin+prefix+'archive.html');
+  const listed=archive.locator('#archiveList .glass').filter({hasText:'Synthetic V2 target'});
+  await listed.getByRole('button',{name:'Un-Archive',exact:true}).waitFor();
+  const original=await backingTask(archive);
+  assert.deepEqual(original.recurrence,{mode:'weekly'});
+  assert.deepEqual(await archive.evaluate(()=>TaskPointsCore.readPendingTaskMutations().record.tasks),[]);
+  const actionTime=Math.max(Date.parse(trashClock),Date.parse(original.updatedAtISO)||0,Date.parse(original.createdAtISO)||0)+1000;
+  await archive.clock.setFixedTime(new Date(actionTime));
+  await archive.evaluate(()=>{
+    const core=TaskPointsCore,save=core.saveStateSnapshot;
+    window.archiveVerifiedWrites=[];
+    core.saveStateSnapshot=(...args)=>{
+      const result=save(...args);
+      const persisted=core.parseTaskPointsStorageJson(localStorage.getItem(core.STORAGE_KEY));
+      archiveVerifiedWrites.push(persisted.tasks.find(row=>row.id==='t1'));
+      return result;
+    };
+  });
+  await listed.getByRole('button',{name:'Done',exact:true}).click();
+  const [fresh]= (await canonicalCompletions(archive)).filter(row=>!history.some(old=>old.id===row.id));
+  assert.deepEqual([fresh.taskId,fresh.points,fresh.source],['t1',5,'task']);
+  const written=await archive.evaluate(at=>archiveVerifiedWrites.find(row=>row.updatedAtISO===at),new Date(actionTime).toISOString());
+  assert.ok(written,'The V1 Done write was verified before returning');
+  assert.deepEqual([written.hidden,written.dueDateISO,written.postponedDays],[true,'2026-11-25',0]);
+  const completed=await backingTask(archive);
+  await t.test('V1 Archive Done keeps its saved advance after the full worker bundle runs',
+    {todo:'The V1 Task row reverts in this fixture on e4cab9e0 and this branch'},()=>{
+      assert.deepEqual([completed.hidden,completed.dueDateISO,completed.postponedDays],[true,'2026-11-25',0]);
+    });
+  await archive.clock.setFixedTime(new Date(actionTime+1000));
+  await listed.getByRole('button',{name:'Un-Archive',exact:true}).click();
+  const writtenUnarchive=await archive.evaluate(at=>archiveVerifiedWrites.find(row=>row.updatedAtISO===at),
+    new Date(actionTime+1000).toISOString());
+  assert.equal(writtenUnarchive?.hidden,false);
+  const unarchived=await backingTask(archive);
+  await t.test('Ordinary V1 Un-Archive remains visible after the full worker bundle runs',
+    {todo:'The V1 Task row reverts in this fixture on e4cab9e0 and this branch'},()=>{
+      assert.equal(unarchived.hidden,false);
+    });
+  assert.equal(await archive.evaluate(()=>TaskPointsCore.usesIsolatedTaskScoring()),false);
+});
+
+test('V2 status refuses unsupported recurrence evidence and preserves malformed Today bytes while Hide is durable',async t=>{
+  const {page,context}=await seedTrash(t,undefined,{recurrence:{mode:'custom',customCount:2,customUnit:'unknown'}});
+  const baseline=await trashedTask(page,'t1');
+  const malformed='{"tasksByDay":{"2026-11-18":';
+  await writeTodayFixture(page,malformed);
+  const refused=await homeStatus(page,'t1','wont-do');
+  assert.match(refused.error,/owned_task_skip_recurrence_unreadable/);
+  assert.deepEqual(await trashedTask(page,'t1'),baseline);
+  assert.deepEqual(await statusReceipts(page),[]);
+  const hidden=await homeStatus(page,'t1','hide');
+  assert.equal(hidden.ok,true);
+  const archive=await openScoringPage(context,'archive.html');
+  await archiveReady(archive);
+  await assert.rejects(commitCompletion(archive,await prepareCompletion(archive,'archive')), /owned_archive_recurrence_unreadable/);
+  assert.deepEqual(await completionReceipts(page),[]);
+  await assert.rejects(archive.evaluate(()=>TaskPointsCore.reconcileIsolatedTodayList()));
+  assert.equal(await todayBytes(archive),malformed);
+  assert.equal((await trashedTask(page,'t1')).hidden,true);
+});
+
+test('V2 status simultaneous real Archive Done clicks share one receipt and block a same-day Home reward',async t=>{
+  const {page,context}=await seedTrash(t);
+  const hidden=await homeStatus(page,'t1','hide');
+  assert.equal(hidden.ok,true);
+  const left=await openScoringPage(context,'archive.html');
+  const right=await openScoringPage(context,'archive.html');
+  for(const tab of [left,right]) {
+    await archiveReady(tab);
+    await tab.evaluate(()=>{
+      const api=TaskPointsStateRuntimeV2, commit=api.commitIsolatedTaskCompletion;
+      api.commitIsolatedTaskCompletion=intent=>new Promise(resolve=>{
+        window.releaseArchiveAward=()=>resolve(commit(intent));
+      }).then(result=>{window.archiveAward=result;return result;});
+    });
+  }
+  await Promise.all([left,right].map(tab=>archiveControl(tab,'t1','Done').click()));
+  await Promise.all([left,right].map(tab=>tab.waitForFunction(()=>window.releaseArchiveAward)));
+  await Promise.all([left,right].map(tab=>tab.evaluate(()=>{releaseArchiveAward();})));
+  for(const tab of [left,right]) await tab.waitForFunction(()=>window.archiveAward?.confirmedDurable);
+  const awards=await Promise.all([left,right].map(tab=>tab.evaluate(()=>archiveAward)));
+  assert.deepEqual(awards[0].receipt,awards[1].receipt);
+  assert.equal(awards.filter(row=>row.replayed).length,1);
+  assert.deepEqual(await completionReceipts(page),[awards[0].receipt]);
+  await archiveReady(left);
+  await archiveControl(left,'t1','Un-Archive').click();
+  await waitStatusCount(page,2);
+  await assert.rejects(commitCompletion(page,await prepareCompletion(page,'home')),/owned_completion_already_awarded/);
+  assert.deepEqual(await completionReceipts(page),[awards[0].receipt]);
 });

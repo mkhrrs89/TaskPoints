@@ -20161,7 +20161,7 @@
     for (const key of ['taskpoints_recovery_write_lock_v1','taskpoints_recovery_attempt_lock_v1','taskpoints_emergency_recovery_hold_v1'])
       if (global.localStorage.getItem(key) !== null) throw new Error('recovery_evidence_blocks_task_write');
     if (fixture.homeTaskId !== undefined && (typeof fixture.homeTaskId !== 'string' || !fixture.homeTaskId
-      || (scoringRead ? !/^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups|week|trash)\.html$/.test(global.location.pathname)
+      || (scoringRead ? !/^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups|week|trash|archive)\.html$/.test(global.location.pathname)
         : global.location.pathname !== '/experiments/v2-home-plus-one-day/full/index.html')
       || global.localStorage.getItem('taskpoints_storage_guard_incident_v1') !== null))
       throw new Error('owned_home_task_context_or_recovery_conflict');
@@ -20434,40 +20434,88 @@
 
   const OWNED_TASK_DONE = 'isolated-task-completion';
   const OWNED_TASK_TRASH = 'isolated-task-trash';
+  const OWNED_TASK_STATUS = 'isolated-task-status';
   const OWNED_TRASH_UNDO_MS = 4500;
+  const ownedStatusOperations = ['home-hide','home-decline','archive-unarchive','archive-decline'];
 
   function ownedTrashIntent(input) {
-    const {operation, taskId, generation, expectedRevision, deletionId} = input || {};
+    const {operation, taskId, generation, expectedRevision, deletionId, day} = input || {};
     const requiresDeletion = ['home-undo-trash','trash-restore','trash-delete-forever'].includes(operation);
-    if ((!requiresDeletion && operation !== 'home-move-to-trash') || (taskId !== 't1' && !core.isIsolatedCreatedTaskId(taskId))
+    const status = ownedStatusOperations.includes(operation);
+    if ((!status && !requiresDeletion && operation !== 'home-move-to-trash') || (taskId !== 't1' && !core.isIsolatedCreatedTaskId(taskId))
       || typeof generation !== 'string' || !generation || !Number.isSafeInteger(expectedRevision)
-      || expectedRevision < 0 || (requiresDeletion ? typeof deletionId !== 'string' || !deletionId : deletionId !== undefined))
+      || expectedRevision < 0 || (requiresDeletion ? typeof deletionId !== 'string' || !deletionId : deletionId !== undefined)
+      || (status ? !Number.isFinite(taskDueDateMillis(day)) : day !== undefined))
       throw new Error('invalid_owned_trash_intent');
     const actionId = operation+'-'+taskId+'-'+expectedRevision;
-    return {actionId, operation, taskId, generation, expectedRevision, ...(requiresDeletion ? {deletionId} : {})};
+    return {actionId, operation, taskId, generation, expectedRevision, ...(requiresDeletion ? {deletionId} : {}),
+      ...(status ? {day} : {})};
+  }
+
+  function ownedTaskVisibleForAction(task, archived) {
+    const status = core.normalizeTask(task).status;
+    return !task.completedAtISO && !task.deletedAt && !task.deletedAtISO
+      && (archived ? !!task.hidden && ['active','hidden'].includes(status) : !task.hidden && status === 'active');
+  }
+
+  function supportsOwnedOccurrence(task) {
+    const {mode,customUnit} = task.recurrence || {};
+    return ['daily','everyWeekday','weekly','monthly','yearly','custom'].includes(mode)
+      && (mode !== 'custom' || ['day','week','month','year'].includes(customUnit || 'day'));
+  }
+
+  function ownedTaskStatusResult(before, intent, at) {
+    const {operation,day} = intent;
+    const archived = operation.startsWith('archive-');
+    if (core.dateKey(at) !== day || !ownedTaskVisibleForAction(before,archived))
+      throw new Error('owned_task_status_not_applicable');
+    if (operation === 'home-hide') return {...before,hidden:true,status:'hidden',updatedAtISO:at};
+    if (operation === 'archive-unarchive') return {...before,hidden:false,status:'active',updatedAtISO:at};
+    const mode = before.recurrence?.mode || 'none';
+    if (mode === 'none') {
+      // V1 Archive decline appears in Trash via the timestamp. Unlike
+      // Home deletion, it does not change the status or grant an Undo.
+      return archived ? {...before,deletedAtISO:at,updatedAtISO:at}
+        : {...before,status:'wontdo',deletedAtISO:null,deletedAt:null,prevStatus:null,updatedAtISO:at};
+    }
+    if (!supportsOwnedOccurrence(before))
+      throw new Error('owned_task_skip_recurrence_unreadable');
+    const skipped = archived ? day : before.dueDateISO || day;
+    if (before.skipDates !== undefined && (!Array.isArray(before.skipDates)
+      || before.skipDates.some(key=>!Number.isFinite(taskDueDateMillis(key)))))
+      throw new Error('owned_task_skip_history_unreadable');
+    const skipDates = before.skipDates || [];
+    const dueDateISO = nextOwnedOccurrence(before,day);
+    if (!Number.isFinite(taskDueDateMillis(dueDateISO))) throw new Error('owned_task_skip_recurrence_unreadable');
+    return {...before,skipDates:skipDates.includes(skipped) ? skipDates : [...skipDates,skipped],
+      dueDateISO,...(archived ? {updatedAtISO:at} : {})};
   }
 
   function ownedTrashResult(before, intent, at, deletion) {
     const time = Date.parse(at);
     if (!Number.isFinite(time) || new Date(time).toISOString() !== at)
       throw new Error('invalid_owned_trash_timestamp');
+    if (ownedStatusOperations.includes(intent.operation)) return ownedTaskStatusResult(before,intent,at);
     const status = core.normalizeTask(before).status;
     if (intent.operation === 'home-move-to-trash') {
-      if (status === 'trashed') throw new Error('owned_task_already_trashed');
+      if (status === 'trashed' || before.deletedAtISO || before.deletedAt) throw new Error('owned_task_already_trashed');
       const prevStatus = before.prevStatus || status;
       if (!['active','done','hidden','wontdo'].includes(prevStatus)) throw new Error('invalid_owned_trash_status');
       return {...before, prevStatus, status:'trashed', deletedAtISO:at, deletedAt:at, deletedFrom:'TasksScreen', updatedAtISO:at};
     }
-    if (!deletion || deletion.id !== intent.deletionId || deletion.revision !== intent.expectedRevision || status !== 'trashed')
+    const archiveDecline = deletion?.intent?.operation === 'archive-decline' && before.deletedAtISO === deletion.committedAtISO;
+    if (!deletion || deletion.id !== intent.deletionId || deletion.revision !== intent.expectedRevision
+      || (!archiveDecline && status !== 'trashed'))
       throw new Error(intent.operation === 'home-undo-trash' ? 'owned_task_undo_stale' : 'owned_task_restore_stale');
     const elapsed = time - Date.parse(deletion.deletedAtISO ?? deletion.committedAtISO);
-    if (intent.operation === 'home-undo-trash' && (deletion.type === 'sealed-v1-trash' || elapsed < 0 || elapsed >= OWNED_TRASH_UNDO_MS))
+    if (intent.operation === 'home-undo-trash' && (deletion.intent?.operation !== 'home-move-to-trash' || elapsed < 0 || elapsed >= OWNED_TRASH_UNDO_MS))
       throw new Error('owned_task_undo_expired');
     if (elapsed < 0) throw new Error('invalid_owned_trash_timestamp');
     // The receipt is the tombstone. The live Task row is removed, while
     // the original value and linked completion rows remain as evidence.
     if (intent.operation === 'trash-delete-forever') return null;
-    return {...before, status:before.prevStatus, prevStatus:null, deletedAtISO:null, deletedAt:null, deletedFrom:null, updatedAtISO:at};
+    return {...before, status:archiveDecline ? (before.prevStatus || 'active') : before.prevStatus,
+      prevStatus:null, deletedAtISO:null, deletedAt:null, deletedFrom:null, updatedAtISO:at};
   }
   const OWNED_TASK_STORES = ['tasks','mutations','meta','completions'];
   function localCompletionTimeZone() {
@@ -20480,7 +20528,7 @@
     if (typeof actionId !== 'string' || !/^[\w-]{1,128}$/.test(actionId)
       || (taskId !== 't1' && !core.isIsolatedCreatedTaskId(taskId))
       || typeof generation !== 'string' || !generation || !Number.isSafeInteger(expectedRevision)
-      || expectedRevision < 0 || !['home','today'].includes(source) || typeof day !== 'string'
+      || expectedRevision < 0 || !['home','today','archive'].includes(source) || typeof day !== 'string'
       || !/^\d{4}-\d{2}-\d{2}$/.test(day) || core.dateKey(day) !== day)
       throw new Error('invalid_owned_completion_intent');
     return {actionId, taskId, generation, expectedRevision, source, day, operation:OWNED_TASK_DONE};
@@ -20488,45 +20536,52 @@
   function ownedCompletionKey(intent) {
     return 'isolated-done-day:'+intent.taskId+':'+intent.day;
   }
+  // Shared by completion and skip. Recurrence uses the prior due date,
+  // including overdue occurrences and the legacy month-end rollover.
+  function nextOwnedOccurrence(task, day) {
+    const {mode,customCount,customUnit} = task.recurrence || {};
+    const base = task.dueDateISO || day;
+    if (!Number.isFinite(taskDueDateMillis(base)))
+      throw new Error('invalid_owned_completion_due_date');
+    const next = new Date(base + 'T00:00:00');
+    const count = Number.isFinite(customCount) && customCount > 0 ? customCount : 1;
+    if (mode === 'monthly' || (mode === 'custom' && customUnit === 'month')) {
+      next.setMonth(next.getMonth() + (mode === 'monthly' ? 1 : count));
+    } else if (mode === 'yearly' || (mode === 'custom' && customUnit === 'year')) {
+      next.setFullYear(next.getFullYear() + (mode === 'yearly' ? 1 : count));
+    } else {
+      const advance = mode === 'weekly' ? 7
+        : mode === 'custom' && customUnit === 'week' ? count * 7
+        : mode === 'custom' && (!customUnit || customUnit === 'day') ? count : 1;
+      next.setDate(next.getDate() + advance);
+      if (mode === 'everyWeekday') {
+        if (next.getDay() === 6) next.setDate(next.getDate() + 2);
+        else if (next.getDay() === 0) next.setDate(next.getDate() + 1);
+      }
+    }
+    const nextKey = core.dateKey(next);
+    if (nextKey === 'invalid') throw new Error('invalid_owned_completion_due_date');
+    return nextKey.padStart(10,'0');
+  }
   function ownedCompletionResult(task, intent, at) {
+    const archived = intent.source === 'archive';
+    const points = archived ? task.points || 0 : task.points;
     if (typeof at !== 'string' || !Number.isFinite(Date.parse(at)) || new Date(at).toISOString() !== at
-      || core.dateKey(at) !== intent.day || typeof task.title !== 'string' || !Number.isFinite(task.points)
-      || core.normalizeTask(task).status !== 'active' || task.completedAtISO || task.hidden
-      || task.deletedAt || task.deletedAtISO) throw new Error('invalid_owned_completion_task_or_day');
+      || core.dateKey(at) !== intent.day || typeof task.title !== 'string' || !Number.isFinite(points)
+      || !ownedTaskVisibleForAction(task,archived)) throw new Error('invalid_owned_completion_task_or_day');
     const completion = {id:'isolated-done:'+intent.actionId, taskId:task.id,
-      title:task.title, points:task.points, completedAtISO:at};
+      title:task.title, points, completedAtISO:at,...(archived ? {source:'task'} : {})};
     if (core.deriveCompletionPoints(completion,{scoringSettings:{}}))
       throw new Error('owned_completion_requires_metric_scoring');
     const after = {...task, updatedAtISO:at};
-    const {mode = 'none', customCount, customUnit} = task.recurrence || {};
-    if (!mode || mode === 'none') {
-      after.status = 'done';
+    const mode = task.recurrence?.mode || 'none';
+    if (mode === 'none') {
+      if (!archived) after.status = 'done';
       after.completedAtISO = at;
     } else {
-      // Home and Today both advance from the existing due date, including
-      // overdue dates and JavaScript's calendar rollover at month-end.
-      const base = task.dueDateISO || intent.day;
-      if (!Number.isFinite(taskDueDateMillis(base)))
-        throw new Error('invalid_owned_completion_due_date');
-      const next = new Date(base + 'T00:00:00');
-      const count = Number.isFinite(customCount) && customCount > 0 ? customCount : 1;
-      if (mode === 'monthly' || (mode === 'custom' && customUnit === 'month')) {
-        next.setMonth(next.getMonth() + (mode === 'monthly' ? 1 : count));
-      } else if (mode === 'yearly' || (mode === 'custom' && customUnit === 'year')) {
-        next.setFullYear(next.getFullYear() + (mode === 'yearly' ? 1 : count));
-      } else {
-        const advance = mode === 'weekly' ? 7
-          : mode === 'custom' && customUnit === 'week' ? count * 7
-          : mode === 'custom' && (!customUnit || customUnit === 'day') ? count : 1;
-        next.setDate(next.getDate() + advance);
-        if (mode === 'everyWeekday') {
-          if (next.getDay() === 6) next.setDate(next.getDate() + 2);
-          else if (next.getDay() === 0) next.setDate(next.getDate() + 1);
-        }
-      }
-      const nextKey = core.dateKey(next);
-      if (nextKey === 'invalid') throw new Error('invalid_owned_completion_due_date');
-      after.dueDateISO = nextKey.padStart(10,'0');
+      if (archived && !supportsOwnedOccurrence(task)) throw new Error('owned_archive_recurrence_unreadable');
+      after.dueDateISO = nextOwnedOccurrence(task,intent.day);
+      if (archived && !Number.isFinite(taskDueDateMillis(after.dueDateISO))) throw new Error('owned_archive_recurrence_unreadable');
       after.postponedDays = 0;
       after.completedAtISO = null;
     }
@@ -20534,7 +20589,7 @@
   }
 
   function ownedTaskJournal(receipts) {
-    return receipts.filter(r=>['isolated-task-update',OWNED_TASK_DONE,OWNED_TASK_CREATE,OWNED_TASK_TRASH].includes(r.type))
+    return receipts.filter(r=>['isolated-task-update',OWNED_TASK_DONE,OWNED_TASK_CREATE,OWNED_TASK_TRASH,OWNED_TASK_STATUS].includes(r.type))
       .sort((a,b)=>a.revision-b.revision);
   }
 
@@ -20599,13 +20654,16 @@
         const {after,completion} = ownedCompletionResult(old.value,r.intent,r.committedAtISO);
         if (stableJson([after,completion]) !== stableJson([r.after,r.completion]))
           throw new Error('owned_completion_receipt_conflict');
-      } else if (r.type === OWNED_TASK_TRASH) {
+      } else if (r.type === OWNED_TASK_TRASH || r.type === OWNED_TASK_STATUS) {
+        const statusChange = ownedStatusOperations.includes(r.intent.operation);
         if (fixture.completionWrite !== true || !ownedIds.has(r.taskId)
+          || statusChange !== (r.type === OWNED_TASK_STATUS)
           || stableJson(r.intent) !== stableJson(ownedTrashIntent(r.intent)))
           throw new Error('owned_task_trash_receipt_conflict');
         const after = ownedTrashResult(old.value,r.intent,r.committedAtISO,deletions.get(r.taskId));
         if (stableJson(r.after) !== stableJson(after)) throw new Error('owned_task_trash_receipt_conflict');
-        if (r.intent.operation === 'home-move-to-trash') deletions.set(r.taskId,r);
+        if (r.intent.operation === 'home-move-to-trash'
+          || (r.intent.operation === 'archive-decline' && after.deletedAtISO)) deletions.set(r.taskId,r);
         else deletions.delete(r.taskId);
         if (after === null) {
           permanentIds.add(r.taskId);
@@ -20727,6 +20785,8 @@
         const tasks = rows.filter(row=>snapshot.ownedIds.includes(row.id)).sort((a,b)=>a.legacyIndex-b.legacyIndex);
         const proof = {taskId:meta.homeTaskId,ownedIds:snapshot.ownedIds,tasks:tasks.map(row=>clone(row.value)),generation:meta.generation,
           revision:meta.revision,completions:clone(rewards),deletions:clone(snapshot.deletions),permanentIds:snapshot.permanentIds,assertCurrent,
+          statusReceipts:clone(snapshot.journal.filter(row=>row.type===OWNED_TASK_STATUS)),
+          taskRevision(taskId) { return tasks.find(row=>row.id===taskId)?.ownerRevision; },
           findReceipt(input) {
             const intent = completionIntent(input);
             const receipt = snapshot.journal.find(row=>row.type===OWNED_TASK_DONE
@@ -20735,7 +20795,7 @@
           },
           findTrashReceipt(input) {
             const intent = ownedTrashIntent(input);
-            const receipt = snapshot.journal.find(row=>row.type===OWNED_TASK_TRASH
+            const receipt = snapshot.journal.find(row=>(row.type===OWNED_TASK_TRASH || row.type===OWNED_TASK_STATUS)
               && row.intent.actionId===intent.actionId);
             return receipt && stableJson(receipt.intent)===stableJson(intent) ? clone(receipt) : null;
           }};
@@ -20746,17 +20806,19 @@
     } finally { db.close(); }
   }
 
-  function ownedCompletionContext() {
+  function ownedCompletionContext(source) {
     const fixture = ownedTaskContext(false, true);
+    const archive = global.location.pathname.endsWith('/archive.html');
     if (fixture.completionWrite !== true || fixture.completionRead !== true || fixture.homeTaskId !== 't1'
-      || !/\/(index|today)\.html$/.test(global.location.pathname))
+      || (archive ? source !== 'archive' || fixture.completionControls !== true
+        : source === 'archive' || !/\/(index|today)\.html$/.test(global.location.pathname)))
       throw new Error('isolated_completion_write_not_selected');
     return fixture;
   }
 
-  async function prepareIsolatedTaskCompletion(source, taskId = 't1') {
-    const fixture = ownedCompletionContext();
-    if (!['home','today'].includes(source)) throw new Error('invalid_owned_completion_intent');
+  async function prepareIsolatedTaskCompletion(source, taskId = 't1', renderedBasis) {
+    if (!['home','today','archive'].includes(source)) throw new Error('invalid_owned_completion_intent');
+    const fixture = ownedCompletionContext(source);
     const marker = global.localStorage.getItem(OWNED_TASK_FIXTURE);
     const day = core.todayKey();
     const db = await openOwnedTasks(false,true);
@@ -20770,6 +20832,8 @@
         && row.intent.source===source && row.intent.day===day);
       if (retry) return clone(retry.intent);
       if (meta.mode !== 'owned') throw new Error('rollback_frozen_no_task_writes');
+      if (renderedBasis && (renderedBasis.taskId !== taskId || renderedBasis.generation !== meta.generation
+        || renderedBasis.expectedRevision !== row.ownerRevision)) throw new Error('owned_task_stale_edit');
       // Include the Task identity for newly created rows. Keep existing
       // envelopes valid for the original synthetic Task.
       const suffix = taskId === fixture.homeTaskId ? '' : '-'+taskId;
@@ -20779,11 +20843,11 @@
   }
 
   async function commitIsolatedTaskCompletion(input) {
-    const fixture = ownedCompletionContext();
-    const marker = global.localStorage.getItem(OWNED_TASK_FIXTURE);
+    const fixture = ownedCompletionContext(input?.source);
     // The caller keeps this exact envelope for retry. Its action ID becomes
     // durable with the reward. A new ID never bypasses the durable day key.
     const intent = completionIntent(input);
+    const marker = global.localStorage.getItem(OWNED_TASK_FIXTURE);
     const id = 'isolated-task-action:'+intent.actionId;
     const db = await openOwnedTasks(false,true);
     try {
@@ -20884,17 +20948,19 @@
 
   async function commitIsolatedOwnedTaskTrash(input) {
     const intent = ownedTrashIntent(input), id = 'isolated-task-action:'+intent.actionId;
-    const fromTrash = ['trash-restore','trash-delete-forever'].includes(intent.operation);
-    const fixture = ownedTaskContext(false,fromTrash);
+    const page = intent.operation.startsWith('trash-') ? 'trash' : intent.operation.startsWith('archive-') ? 'archive' : 'index';
+    const peerPage = page !== 'index';
+    const type = ownedStatusOperations.includes(intent.operation) ? OWNED_TASK_STATUS : OWNED_TASK_TRASH;
+    const fixture = ownedTaskContext(false,peerPage);
     if (fixture.completionWrite !== true || fixture.completionControls !== true
-      || (fromTrash && global.location.pathname !== '/experiments/v2-home-plus-one-day/full/trash.html'))
+      || global.location.pathname !== '/experiments/v2-home-plus-one-day/full/'+page+'.html')
       throw new Error('isolated_task_trash_not_selected');
     const marker = global.localStorage.getItem(OWNED_TASK_FIXTURE);
-    const db = await openOwnedTasks(false,fromTrash);
+    const db = await openOwnedTasks(false,peerPage);
     try {
       const tx = db.transaction(OWNED_TASK_STORES,'readwrite',{durability:'strict'});
       const {receipt,replayed} = await withOwnedRecords(tx, (meta,rows,receipts,completionRows) => {
-        const context = ownedTaskContext(false,fromTrash);
+        const context = ownedTaskContext(false,peerPage);
         const snapshot = verifyOwnedSnapshot(context,meta,rows,receipts,completionRows);
         if (context.completionControls !== true || meta.generation !== intent.generation)
           throw new Error('owned_task_generation_conflict');
@@ -20902,7 +20968,7 @@
         ownedScoringSource(fixture,marker,meta,snapshot.completionRewards,snapshot.ownedIds);
         const previous = receipts.find(row=>row.id===id);
         if (previous) {
-          if (previous.type !== OWNED_TASK_TRASH || stableJson(previous.intent)!==stableJson(intent))
+          if (previous.type !== type || stableJson(previous.intent)!==stableJson(intent))
             throw new Error('owned_task_action_id_conflict');
           return {receipt:previous,replayed:true};
         }
@@ -20913,7 +20979,7 @@
         const committedAtISO = nowIso(), revision = meta.revision+1;
         const deletion = snapshot.deletions.find(receipt=>receipt.taskId===row.id);
         const after = ownedTrashResult(row.value,intent,committedAtISO,deletion);
-        const receipt = {id,type:OWNED_TASK_TRASH,intent,taskId:row.id,generation:meta.generation,
+        const receipt = {id,type,intent,taskId:row.id,generation:meta.generation,
           revision,priorRevision:row.ownerRevision,before:row.value,after,committedAtISO};
         const tasks = tx.objectStore('tasks');
         if (after === null) tasks.delete(row.id);
@@ -20922,7 +20988,7 @@
         tx.objectStore('meta').put({...meta,revision});
         return {receipt,replayed:false};
       });
-      const verified = await readOwnedSnapshot(db,fromTrash);
+      const verified = await readOwnedSnapshot(db,peerPage);
       const saved = verified.journal.find(row=>row.id===id);
       ownedScoringSource(fixture,marker,verified.meta,verified.completionRewards,verified.ownedIds);
       if (!saved || stableJson(saved)!==stableJson(receipt)) throw new Error('owned_task_trash_readback_unverified');
@@ -21211,10 +21277,13 @@
     const expected = replaceOwnedRollbackRows(effective,meta.homeTaskId,tasks,rewards,pending,prior);
     const todayRaw = legacyEntries.get(core.ISOLATED_TODAY_LIST_KEY);
     let todayAfterTrash;
-    if (todayRaw !== undefined && (prior.deletions.length || prior.permanentIds.length)) {
+    const statusReceipts = journal.filter(row=>row.type===OWNED_TASK_STATUS);
+    const archiveCompletions = journal.filter(row=>row.type===OWNED_TASK_DONE && row.intent.source==='archive');
+    if (todayRaw !== undefined && (prior.deletions.length || prior.permanentIds.length || statusReceipts.length || archiveCompletions.length)) {
       const list = core.parseIsolatedTodayList(todayRaw);
       const original = JSON.stringify(list);
-      core.removeIsolatedTodayTrash(list,tasks,prior.permanentIds);
+      core.reconcileIsolatedTodayTaskMembership(list,tasks,prior.permanentIds,statusReceipts);
+      for (const row of archiveCompletions) core.removeIsolatedTodayTask(list,row.intent.day,row.taskId);
       const candidate = JSON.stringify(list);
       if (candidate !== original) todayAfterTrash = candidate;
     }

@@ -580,16 +580,57 @@ and 32 targeted checks passed. The broader scoped run had 527 passes,
 stylesheet version assertion. A later scoped run had one additional Habit
 render timing failure. That check passed on focused reruns on both revisions.
 
+## Home and Archive status (M02 Package 2B)
+
+Hide keeps the Task and its history in Archive. Week still shows the
+scheduled hidden Task, as V1 does. Un-Archive clears the hidden flag and
+sets the owned Task to active so Home and Today can use it again.
+
+Home's one-off Won't Do records a declined status with no reward and no
+Trash entry. Archive's one-off Won't Do records its original deletion
+timestamp and sends the Task to Trash without a reward or a Home Undo.
+Trash Restore verifies that specific decline and returns the Task to
+Archive. Delete Forever retains the existing ID and reward safeguards.
+
+Both recurring skips advance one occurrence and preserve the postponement
+counter and earned history. Home records the occurrence's due date, using
+today when it has no date. Archive records today's date and updates the
+Task timestamp. Archive Done uses the existing completion transaction.
+A recurring Task stays archived, advances its due date, and resets its
+postponement counter. A one-off gets a completion timestamp and leaves
+the Archive list. Archive shares the V2 one-award-per-Task-per-local-day
+safeguard with Home and Today. Unsupported recurrence data is refused.
+The existing metric-derived reward and time-zone holds still apply.
+
+Home and Archive use the same receipt and revision checks as Trash for
+non-reward changes. Today replays membership cleanup from verified evidence
+and keeps unrelated entries, ordering, notes, and habits. Malformed Today
+bytes stay intact. Detached V1 rollback retains Task statuses, schedule
+fields, earned history and permanent-deletion evidence.
+
+The ordinary V1 Archive path still exhibits two persistence failures in
+the full-worker synthetic fixture, reproduced on `e4cab9e0`. Archive Done
+writes the advance and reward, then the Task row reverts while the reward
+remains. Un-Archive also writes the new Task row before it reverts. The test
+keeps both expected persistence assertions as TODOs. The V2 controls use
+verified transactions and pass these assertions in their own lifecycle tests.
+
+Package 2B had 11 passing browser tests and the two reproduced V1 TODOs.
+All 181 existing browser tests, 19 component tests, and 13 targeted legacy
+checks passed. The scoped suite had 536 passes, 15 failures, and one TODO,
+with identical failure names and counts on `e4cab9e0`. The documented
+intermittent Habit, Inbox, and startup issues remain open.
+
 ### Remaining Task work for M02
 
 1. **Trash** — verified in the synthetic experiment. Restore and confirmed
    Delete Forever use the same deletion evidence, preserve linked rewards,
    and support detached rollback. Sealed V1 Trash rows meeting those conditions
    can be adopted for the selected synthetic Task. Ambiguous rows stay held.
-2. **Home and Archive** — Package 2A verifies individual and bulk overdue
-   Postpone, action-sheet Snooze +1 and +7 and date picking, and swipe
-   rescheduling in the synthetic experiment. Package 2B remains open for
-   Hide, Un-Archive, Won't Do, recurring skips, and Archive Done.
+2. **Home and Archive** — verified in the synthetic experiment. Package 2A
+   covers individual and bulk overdue Postpone, action-sheet Snooze +1 and
+   +7 and date picking, and swipe rescheduling. Package 2B covers Hide,
+   Un-Archive, Home and Archive Won't Do, recurring skips, and Archive Done.
 3. **Week** — route Add Task and the existing +1 Day, Postpone, Won't Do,
    Done and Delete controls through the shared Task operations. Verify
    the selected-day and weekly recurrence rules of each control.

@@ -325,7 +325,7 @@
       if (!verified || verified.sourceDrift || verified.meta.mode !== 'owned' || !TaskPointsCore.usesIsolatedTaskDone()) return [];
       const now = Date.now();
       return verified.deletions.filter(row=>{
-        if (row.type === 'sealed-v1-trash') return false;
+        if (row.intent?.operation !== 'home-move-to-trash') return false;
         const elapsed = now - Date.parse(row.committedAtISO);
         return elapsed >= 0 && elapsed < TaskPointsStateRuntimeV2.OWNED_TRASH_UNDO_MS;
       });
@@ -335,6 +335,7 @@
       const {taskId,generation,expectedRevision} = currentIntent(id);
       return {operation:'home-move-to-trash',taskId,generation,expectedRevision};
     },
+    changeStatus: commitTrash,
     moveToTrash: commitTrash,
     undoTrash(deletion) {
       return commitTrash({operation:'home-undo-trash',taskId:deletion.taskId,generation:deletion.generation,

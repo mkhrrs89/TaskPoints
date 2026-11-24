@@ -77,7 +77,7 @@
 
   function isolatedTaskDonePage() {
     return isolatedCompletionPage && global.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true
-      && /^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups|week|trash)\.html$/.test(global.location.pathname);
+      && /^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups|week|trash|archive)\.html$/.test(global.location.pathname);
   }
 
   function usesIsolatedTaskDone(taskId = 't1') {
@@ -135,7 +135,8 @@
     try {
       verifiedLegacyCompletions(verifiedCompletionRead);
       const task = verifiedCompletionRead.tasks.find(row=>row.id === taskId);
-      return task ? structuredClone({task,
+      return task ? structuredClone({task,basis:{taskId,generation:verifiedCompletionRead.generation,
+        expectedRevision:verifiedCompletionRead.taskRevision(taskId)},
         reward:verifiedCompletionRead.completions.find(row=>row.taskId===taskId && dateKey(row.completedAtISO)===todayKey())}) : null;
     } catch (_) { return null; }
   }
@@ -182,13 +183,13 @@
     }
   }
 
-  async function runIsolatedTaskDone(taskId, source, onVerified) {
+  async function runIsolatedTaskDone(taskId, source, onVerified, renderedBasis) {
     if (!usesIsolatedTaskDone(taskId)) throw new Error('Verified Task completion is paused.');
     if (isolatedDonePending) return;
     isolatedDonePending = true;
     try {
       const runtime = global.TaskPointsStateRuntimeV2;
-      const intent = await runtime.prepareIsolatedTaskCompletion(source,taskId);
+      const intent = await runtime.prepareIsolatedTaskCompletion(source,taskId,renderedBasis);
       if (!usesIsolatedTaskDone(taskId)) throw new Error('Verified Task completion is paused.');
       let result;
       try {
@@ -254,11 +255,22 @@
     }
   }
 
-  function removeIsolatedTodayTrash(list, tasks, permanentIds = []) {
+  function reconcileIsolatedTodayTaskMembership(list, tasks, permanentIds = [], statusReceipts = []) {
     for (const task of tasks) if (task.status === 'trashed') removeIsolatedTodayTask(list,todayKey(),task.id);
     if (permanentIds.length) {
       const days = new Set([...Object.keys(list.tasksByDay || {}),...Object.keys(list.orderByDay || {}),list.dayKey]);
       for (const id of permanentIds) for (const day of days) removeIsolatedTodayTask(list,day,id);
+    }
+    if (!statusReceipts.length) return;
+    const latest = new Map(tasks.map(task=>[task.id,task]));
+    for (const {taskId,intent} of statusReceipts) {
+      if (intent.operation === 'archive-unarchive') continue;
+      const task = latest.get(taskId);
+      // Remove only the affected day's active membership. A later
+      // unarchive or schedule can make this Task due again on that day.
+      if (task && normalizeTask(task).status === 'active' && !task.hidden && !task.deletedAtISO && !task.deletedAt
+        && !task.completedAtISO && task.dueDateISO === intent.day) continue;
+      removeIsolatedTodayTask(list,intent.day,taskId);
     }
   }
 
@@ -278,7 +290,7 @@
       for (const {taskId, completedAtISO} of proof.completions) {
         removeIsolatedTodayTask(list,dateKey(completedAtISO),taskId);
       }
-      removeIsolatedTodayTrash(list,proof.tasks,proof.permanentIds);
+      reconcileIsolatedTodayTaskMembership(list,proof.tasks,proof.permanentIds,proof.statusReceipts);
 
       const candidate = JSON.stringify(list);
       parseIsolatedTodayList(candidate);
@@ -11270,7 +11282,8 @@ return Number(cappedScore.toFixed(1));
     readScoringCompletions,
     parseIsolatedTodayList,
     reconcileIsolatedTodayList,
-    removeIsolatedTodayTrash,
+    removeIsolatedTodayTask,
+    reconcileIsolatedTodayTaskMembership,
     ISOLATED_TODAY_LIST_KEY: TODAY_LIST_KEY,
     runWithVerifiedTaskScoring,
     verifiedScoringSaveOptions,
