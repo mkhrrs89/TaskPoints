@@ -42,6 +42,7 @@
 <script>
 const STORAGE_KEY = 'taskpoints_v1';
 let appState = { tasks: [] };
+const restoringOwnedTasks = new Set();
 
 function loadState() {
   if (window.TaskPointsCore?.loadAppState) {
@@ -69,14 +70,33 @@ function fmt(iso) {
   return d.toLocaleString();
 }
 
-function holdOwnedTrashAction(id) {
-  if (!window.TaskPointsCore?.getLegacyTaskCompletionHold?.(id)) return false;
-  alert('For this V2 Task, use Home Undo while available or restore it after verified rollback to V1.');
-  return true;
+async function restoreOwnedTask(id, button) {
+  if (restoringOwnedTasks.has(id)) return;
+  const deletion = TaskPointsCore.isolatedTaskTrashDeletion?.(id);
+  if (!deletion || deletion.id !== button?.dataset.deletionId) {
+    alert('This deletion could not be verified. Check Trash and try again.');
+    return;
+  }
+  restoringOwnedTasks.add(id);
+  button.disabled = true;
+  button.setAttribute('aria-busy','true');
+  try {
+    const result = await TaskPointsCore.runIsolatedTaskTrash({
+      operation:'trash-restore',taskId:id,generation:deletion.generation,
+      expectedRevision:deletion.revision,deletionId:deletion.id
+    });
+    if (!result.confirmedDurable) throw Error('The restoration could not be confirmed.');
+  } catch (error) {
+    alert('Task restoration could not be confirmed. '+error.message);
+  } finally {
+    await TaskPointsCore.refreshIsolatedTaskScoring();
+    restoringOwnedTasks.delete(id);
+    render();
+  }
 }
 
-function restoreTask(id) {
-  if (holdOwnedTrashAction(id)) return;
+function restoreTask(id, button) {
+  if (window.TaskPointsCore?.getLegacyTaskCompletionHold?.(id)) return restoreOwnedTask(id,button);
   const task = appState.tasks.find(t => t && t.id === id);
   if (!task) return;
   const now = new Date().toISOString();
@@ -91,7 +111,10 @@ function restoreTask(id) {
 }
 
 function deleteForever(id) {
-  if (holdOwnedTrashAction(id)) return;
+  if (window.TaskPointsCore?.getLegacyTaskCompletionHold?.(id)) {
+    alert('Delete Forever for this V2 Task requires a verified rollback to V1.');
+    return;
+  }
   if (!confirm('Delete forever? This cannot be undone.')) return;
   appState.tasks = (Array.isArray(appState.tasks) ? appState.tasks : []).filter(t => t && t.id !== id);
   saveState(appState);
@@ -123,6 +146,13 @@ function render() {
           <button class="btn btn-warn btn-toolbar" data-action="delete" data-id="${t.id}">Delete Forever</button>
         </div>
       </div>`;
+    if (window.TaskPointsCore?.getLegacyTaskCompletionHold?.(t.id)) {
+      const button = row.querySelector('[data-action="restore"]');
+      const deletion = TaskPointsCore.isolatedTaskTrashDeletion?.(t.id);
+      if (deletion) button.dataset.deletionId = deletion.id;
+      button.disabled = !deletion || restoringOwnedTasks.has(t.id);
+      if (restoringOwnedTasks.has(t.id)) button.setAttribute('aria-busy','true');
+    }
     listEl.appendChild(row);
   });
 }
@@ -132,7 +162,7 @@ document.addEventListener('click', (e) => {
   if (!btn) return;
   const id = btn.getAttribute('data-id');
   const action = btn.getAttribute('data-action');
-  if (action === 'restore') restoreTask(id);
+  if (action === 'restore') restoreTask(id,btn);
   if (action === 'delete') deleteForever(id);
 });
 

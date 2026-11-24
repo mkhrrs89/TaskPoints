@@ -150,19 +150,8 @@
 
   async function commitTrash(intent) {
     window.ownerOutcome = null;
-    const runtime = TaskPointsStateRuntimeV2;
-    let result;
     try {
-      try { result = await runtime.commitIsolatedOwnedTaskTrash(intent); }
-      catch (error) {
-        // A lost response may conceal a committed action. Verify the exact
-        // intent by replaying it later, or recover it from the read-only chain.
-        const latest = await runtime.readIsolatedOwnedTasks().catch(()=>null);
-        const receipt = !latest?.sourceDrift && latest?.meta.mode === 'owned' && latest.journal.find(row=>
-          row.type === 'isolated-task-trash' && Object.entries(intent).every(([key,value])=>row.intent[key]===value));
-        if (!receipt) throw error;
-        result = {confirmedDurable:true,replayed:true,receipt};
-      }
+      const result = await TaskPointsCore.runIsolatedTaskTrash(intent);
       if (read) await read;
       await refresh();
       if (!result.confirmedDurable || verified?.sourceDrift || !verified?.journal.some(row=>row.id===result.receipt.id))

@@ -481,10 +481,10 @@ includes any needed cleanup for the detached V1 copy. Unreadable Today
 data is preserved and blocks an affected rollback. The fresh V1 copy
 keeps trashed Tasks in Trash and restored Tasks at their original IDs.
 
-The separate Trash Restore and Delete Forever controls remain available
-for ordinary V1 Tasks. For experimental V2-owned Tasks they require
-verified rollback. Metric-derived reward refusals, time-zone checks,
-the installed iPhone handoff, and old-client safety gates still apply.
+Delete Forever remains available for ordinary V1 Tasks. For experimental
+V2-owned Tasks it requires verified rollback. Metric-derived reward
+refusals, time-zone checks, the installed iPhone handoff, and old-client
+safety gates still apply.
 
 All 11 Delete and Undo browser tests passed. The existing full-Home
 suite passed 142 of 143. One malformed-Inbox rollback assertion caught
@@ -493,6 +493,56 @@ on rerun, and the same rollback assertion passed in a focused run on
 `30d95a13`. All 19 component and 32 targeted legacy and tracker
 checks passed. The broader scoped suite had 484 passes, 14 failures,
 and one TODO, matching the results on `30d95a13`.
+
+## Trash Restore
+
+The actual Trash Restore control uses the same V2 transaction and state
+transition as Home Undo. It can restore after the Undo window expires,
+including after a restart. The button carries the deletion ID from the
+verified row. The runtime checks that ID and the Task revision again in
+the write transaction. Two concurrent clicks can verify the same receipt
+and a replay of that receipt leaves any newer deletion in place.
+
+Restore clears the Trash fields and restores the prior status. It keeps
+the original ID, recurrence, due date, and earned history. A restored
+completed one-off stays complete. A restored active Task can reappear in
+Home, Today, Critical Tasks, and Week without changing unrelated ordering.
+A V2-owned trashed row without a verified deletion receipt remains held.
+Home Undo retains its 4.5-second deadline.
+
+All 7 Restore tests, 154 existing browser tests, 19 component tests, and
+32 targeted legacy and tracker checks passed. Two focused reruns also
+passed after extending the fresh V1 test to cover an ordinary save.
+The broader suite had 484 passes, 14 failures, and one TODO. The same
+14 failures and TODO reproduced on `022601ee`.
+
+### Remaining Task work for M02
+
+1. **Trash** — migrate confirmed Delete Forever with durable evidence that
+   prevents resurrection. Preserve linked rewards according to the V1 rule.
+   Establish verified deletion lineage when initially adopting V1 Trash rows.
+2. **Home and Archive** — migrate individual and bulk overdue Postpone,
+   the action-sheet snooze and date picker, swipe rescheduling, Hide,
+   Won't Do and recurring skips. Route Archive Un-Archive, Won't Do, and
+   Done through the corresponding verified operations.
+3. **Week** — route Add Task and the existing +1 Day, Postpone, Won't Do,
+   Done and Delete controls through the shared Task operations. Verify
+   the selected-day and weekly recurrence rules of each control.
+4. **Completion history** — migrate Log date edits and the linked
+   completion-deletion/Trash transaction with correct historical
+   totals. Resolve the existing metric-derived reward and time-zone
+   limits before claiming full behavior.
+5. **Authority and acceptance** — verify the whole Task collection and
+   pending Task journals, including Create/Delete fast paths, ordinary
+   snapshot saves and raw fallbacks, idle compaction, history-merge
+   backups, imports, reset, and verified-secondary/emergency restore.
+   Prove the controlled iPhone handoff and old-client protection before
+   switching owners. Verify original behavior, durability before feedback,
+   and lossless V1 fallback and rollback without duplicate rows or rewards.
+
+M02 remains Working. The official pass condition covers the full live
+Task writer family. See the [tracker](../../V2-PROGRESS-TRACKER.md)
+and the [writer handoff matrix](../../docs/state-runtime-v2-writer-handoff-matrix.md).
 
 ## How the integration works
 

@@ -4060,7 +4060,7 @@ test('V2 Home Trash and Undo use the real controls and refresh open Home, Today,
   assert.equal((await backingTask(page)).status,'active');
   assert.deepEqual(await partOfState(page),preservation);
   const hold=trash.waitForEvent('dialog');
-  await trashListing(trash,before.title).getByRole('button',{name:'Restore',exact:true}).click();
+  await trashListing(trash,before.title).getByRole('button',{name:'Delete Forever',exact:true}).click();
   assert.match((await hold).message(),/verified rollback/);
   assert.deepEqual(await trashReceipts(page),[deletion]);
 
@@ -4396,4 +4396,286 @@ test('V2 Home Trash editor Delete and toast Undo recover lost responses by verif
   assert.equal((await trashedTask(page,'t1')).title,original.title);
   assert.equal(await titleField(page).count(),0);
   assert.equal((await owned(page)).tasks.filter(row=>row.id==='t1').length,1);
+});
+
+const restoreIntent=deletion=>({...undoIntent(deletion),operation:'trash-restore'});
+const restorationReceipts=async page=>(await trashReceipts(page)).filter(row=>row.intent.operation==='trash-restore');
+const trashRestore=(page,id)=>page.locator(`#trashList [data-action="restore"][data-id="${id}"]`);
+const readTrashProof=(page,id)=>page.evaluate(id=>TaskPointsStateRuntimeV2.readIsolatedTaskScoring(proof=>({
+  task:proof.tasks.find(row=>row.id===id),deletion:proof.deletions.find(row=>row.taskId===id),
+  rewards:proof.completions
+})),id);
+async function restoreViaTrash(trash,id){
+  const button=trashRestore(trash,id);
+  await button.click();
+  await button.waitFor({state:'detached'});
+}
+test('V2 Trash Restore reopens after expiry and restart, resumes the real Home and Today Task lifecycle, and leaves old rewards intact',async t=>{
+  const profile=await completionProfile(t);
+  const {page,legacyRewards}=await seedTrash(t,profile.context);
+  await openTaskEdit(page);
+  await editCard(page).locator('[data-field="importance"]').selectOption('Critical');
+  assert.equal((await submitTaskEdit(page)).importance,'Critical');
+  const original=await trashedTask(page,'t1');
+  const before=await partOfState(page);
+  const history=await verifiedRewards(page);
+  const expectedToday=structuredClone(cleanedTodayList);
+  expectedToday.tasksByDay[quietDate]=['t2','t1'];
+  expectedToday.orderByDay[quietDate].push('task:t1');
+  await writeTodayFixture(page,JSON.stringify(expectedToday));
+  page.removeAllListeners('dialog');
+  await clickTaskDelete(page,'t1');
+  await trashUndo(page,'t1').waitFor();
+  await waitTodayBytes(page,JSON.stringify(cleanedTodayList));
+  const [deletion]=await trashReceipts(page);
+
+  const context=await profile.restart();
+  const home=await openScoringPage(context,'index.html');
+  await setTrashClock(home,5000);
+  await taskCard(home,'t2').waitFor();
+  assert.equal(await trashUndo(home,'t1').count(),0);
+  assert.equal(await taskCard(home,'t1').count(),0);
+  await assert.rejects(trashCommit(home,undoIntent(deletion)),/owned_task_undo_expired/);
+  await assert.rejects(trashCommit(home,restoreIntent(deletion)),/isolated_task_trash_not_selected/);
+  const today=await openScoringPage(context,'today.html');
+  await today.setViewportSize({width:390,height:844});
+  await today.reload();
+  const critical=today.locator('#criticalTasksIsland[data-active="1"]');
+  const week=await openScoringPage(context,'week.html');
+  const slot=week.locator(`#weekGrid [data-day-key="${quietDate}"] [data-task-id="t1"]`);
+  const trash=await openScoringPage(context,'trash.html');
+  await setTrashClock(trash,5000);
+  assert.equal(await critical.count(),0);
+  assert.equal(await todayTask(today).count(),0);
+  assert.equal(await slot.count(),0);
+  assert.equal(await trashRestore(trash,'t1').getAttribute('data-deletion-id'),deletion.id);
+
+  await restoreViaTrash(trash,'t1');
+  await taskCard(home,'t1').waitFor();
+  await todayTask(today).waitFor();
+  await critical.waitFor({state:'attached'});
+  await slot.waitFor();
+  const [receipt]=await restorationReceipts(home);
+  const restoredAt=new Date(Date.parse(trashClock)+5000).toISOString();
+  assert.deepEqual(receipt.after,{...original,prevStatus:null,deletedAtISO:null,deletedAt:null,deletedFrom:null,updatedAtISO:restoredAt});
+  assert.deepEqual(receipt.before,deletion.after);
+  assert.equal(receipt.intent.deletionId,deletion.id);
+  assert.deepEqual(await verifiedRewards(home),history);
+  assert.deepEqual(await canonicalCompletions(home),legacyRewards);
+  assert.deepEqual(await partOfState(home),before);
+  assert.equal(await todayBytes(today),JSON.stringify(cleanedTodayList));
+
+  await openTaskEdit(home);
+  await titleField(home).fill('Restored synthetic Task');
+  await pointsField(home).fill('9.25');
+  assert.equal((await submitTaskEdit(home)).points,9.25);
+  await setTrashClock(home,5500);
+  assert.deepEqual(await press(home),{ok:true,date:'2026-11-19'});
+  await homeDoneButton(home).click();
+  await home.waitForFunction(async()=> (await TaskPointsStateRuntimeV2.readIsolatedOwnedTasks())
+    .journal.some(row=>row.type==='isolated-task-completion'&&row.taskId==='t1'));
+  const [done]=await completionReceipts(home);
+  assert.equal(done.completion.points,9.25);
+  assert.equal(done.after.dueDateISO,'2026-11-20');
+  assert.equal(done.after.postponedDays,0);
+  assert.deepEqual(await verifiedRewards(home),[...history,done.completion]);
+  await setTrashClock(home,6000);
+  home.removeAllListeners('dialog');
+  await clickTaskDelete(home,'t1');
+  await trashUndo(home,'t1').waitFor();
+  await trashRestore(trash,'t1').waitFor();
+  const newer=(await trashReceipts(home)).at(-1);
+  assert.notEqual(newer.id,deletion.id);
+  assert.deepEqual(await trashCommit(trash,restoreIntent(deletion)),{confirmedDurable:true,replayed:true,receipt});
+  assert.equal((await trashedTask(home,'t1')).status,'trashed');
+  assert.deepEqual(await verifiedRewards(home),[...history,done.completion]);
+});
+
+test('V2 Trash Restore keeps a V2-created completed one-off done and imports that restoration and reward exactly once into fresh V1',async t=>{
+  const {page,context,legacyRewards}=await seedTrash(t,undefined,{create:true});
+  const before=await partOfState(page);
+  await putCreateForm(page,{title:'Synthetic Completed Restore',due:quietDate,points:'-2.75'});
+  const id=await saveCreateForm(page);
+  const today=await openScoringPage(context,'today.html');
+  await todayTask(today,id).locator('.today-check').click();
+  await todayTask(today,id).and(today.locator('.is-done')).waitFor();
+  const [done]=await completionReceipts(page);
+  assert.deepEqual([done.taskId,done.after.status,done.completion.points],[id,'done',-2.75]);
+  // A completed one-off has already left the Home active list.
+  const {receipt:deleteReceipt}=await trashCommit(page,await deleteIntent(page,id));
+  assert.equal(deleteReceipt.after.prevStatus,'done');
+  assert.equal(deleteReceipt.after.completedAtISO,done.completion.completedAtISO);
+  const trash=await openScoringPage(context,'trash.html');
+  await setTrashClock(trash,5000);
+  await restoreViaTrash(trash,id);
+  const [restored]=await restorationReceipts(page);
+  assert.deepEqual(restored.after,{...done.after,deletedAtISO:null,updatedAtISO:restored.committedAtISO});
+  await taskCard(page,id).waitFor({state:'detached'});
+  assert.deepEqual(await verifiedRewards(page),[...ownedRewards.slice(1),done.completion]);
+  await today.close();await trash.close();
+  await assertCreationOutsideV1(page,[id]);
+  const revision=(await owned(page)).meta.revision;
+  const checkpoint=await page.evaluate(revision=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(revision),revision);
+  assert.deepEqual(checkpoint.snapshot.tasks.filter(row=>row.id===id),[restored.after]);
+  const fresh=await browser.newContext({serviceWorkers:'block',timezoneId:'America/New_York'});
+  t.after(()=>fresh.close());await configureContext(fresh);
+  const loader=await rollbackLoader(fresh);
+  assert.deepEqual(await restoreCompletionCheckpoint(loader,checkpoint),{verified:true,checksum:checkpoint.checksum});
+  const v1=await openScoringPage(fresh,'index.html');
+  await taskCard(v1,'t1').waitFor();
+  const rows=await v1.evaluate(id=>TaskPointsCore.readTaskPointsStoredState().tasks.filter(row=>row.id===id),id);
+  assert.deepEqual(rows,[restored.after]);
+  assert.equal(await taskCard(v1,id).count(),0);
+  assert.deepEqual(await canonicalCompletions(v1),[...legacyRewards,...checkpoint.completions]);
+  assert.equal((await scoresFromCore(v1)).totals[quietDate],0.25);
+  const v1Trash=await openScoringPage(fresh,'trash.html');
+  await v1Trash.locator('#empty').waitFor();
+  assert.equal(await v1.evaluate(()=>save('trash-restore-rollback',{userInitiated:true})),true);
+  assert.deepEqual(await canonicalCompletions(v1),[...legacyRewards,...checkpoint.completions]);
+  const after=await partOfState(v1);
+  for(const key of ['inbox','game','gold','flex','projects','notes','image','unknownTask','unknownRaw','quarantine'])
+    assert.deepEqual(after[key],before[key],key);
+});
+
+test('V2 Trash Restore serializes two real Restore clicks, refuses stale deletion evidence and preserves the Home Undo race',async t=>{
+  const {page,context}=await seedTrash(t);
+  const {receipt:deletion}=await trashCommit(page,await deleteIntent(page,'t1'));
+  const left=await openScoringPage(context,'trash.html');
+  const right=await openScoringPage(context,'trash.html');
+  for(const tab of [left,right])await tab.evaluate(()=>{
+    const runtime=TaskPointsStateRuntimeV2, commit=runtime.commitIsolatedOwnedTaskTrash;
+    window.requestedRestores=[];
+    runtime.commitIsolatedOwnedTaskTrash=intent=>new Promise(resolve=>{
+      requestedRestores.push(intent);
+      window.releaseRestore=()=>{
+        runtime.commitIsolatedOwnedTaskTrash=commit;
+        resolve(commit(intent).then(result=>{window.completedRestore=result;return result;}));
+      };
+    });
+  });
+  await Promise.all([left,right].map(tab=>trashRestore(tab,'t1').click()));
+  await Promise.all([left,right].map(tab=>tab.waitForFunction(()=>window.requestedRestores.length===1)));
+  await left.evaluate(()=>document.querySelector('#trashList [data-action="restore"]').click());
+  assert.equal(await left.evaluate(()=>requestedRestores.length),1);
+  await Promise.all([left,right].map(tab=>tab.evaluate(()=>releaseRestore())));
+  await Promise.all([left,right].map(tab=>trashRestore(tab,'t1').waitFor({state:'detached'})));
+  const results=await Promise.all([left,right].map(tab=>tab.evaluate(()=>completedRestore)));
+  assert.equal(results.filter(row=>row.replayed).length,1);
+  assert.deepEqual(results[0].receipt,results[1].receipt);
+  assert.equal(results[0].receipt.intent.deletionId,deletion.id);
+  const {receipt:newer}=await trashCommit(page,await deleteIntent(page,'t1'));
+  await trashRestore(left,'t1').waitFor();
+  const bad={...restoreIntent(newer),deletionId:deletion.id};
+  await assert.rejects(trashCommit(left,bad),/owned_task_restore_stale/);
+  const race=await Promise.allSettled([trashCommit(left,restoreIntent(newer)),trashCommit(page,undoIntent(newer))]);
+  assert.equal(race.filter(row=>row.status==='fulfilled').length,1);
+  assert.equal((await trashedTask(page,'t1')).status,'active');
+  assert.equal((await trashReceipts(page)).length,4);
+  assert.deepEqual(await completionReceipts(page),[]);
+});
+
+test('V2 Trash Restore refuses quota without hiding the Task and recovers a lost response through the original receipt',async t=>{
+  const {page,context}=await seedTrash(t);
+  const {receipt:deletion}=await trashCommit(page,await deleteIntent(page,'t1'));
+  const trash=await openScoringPage(context,'trash.html');
+  await setTrashClock(trash,5000);
+  const alerts=[];trash.on('dialog',dialog=>alerts.push(dialog.message()));
+  await trash.evaluate(()=>{
+    const add=IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add=function(row,...args){
+      if(row?.intent?.operation==='trash-restore'&&window.restoreQuota)
+        throw new DOMException('Synthetic Restore quota','QuotaExceededError');
+      return add.call(this,row,...args);
+    };
+    window.restoreQuota=true;
+  });
+  const failed=trash.waitForEvent('dialog');
+  await trashRestore(trash,'t1').click();
+  assert.match((await failed).message(),/Synthetic Restore quota/);
+  assert.deepEqual(await trashReceipts(page),[deletion]);
+  assert.equal((await trashedTask(page,'t1')).status,'trashed');
+  assert.equal(await trashRestore(trash,'t1').getAttribute('data-deletion-id'),deletion.id);
+  await trash.evaluate(()=>{
+    window.restoreQuota=false;
+    const runtime=TaskPointsStateRuntimeV2,commit=runtime.commitIsolatedOwnedTaskTrash;
+    runtime.commitIsolatedOwnedTaskTrash=async intent=>{
+      runtime.commitIsolatedOwnedTaskTrash=commit;
+      window.lostRestore=(await commit(intent)).receipt;
+      throw Error('Synthetic lost Restore response');
+    };
+  });
+  await restoreViaTrash(trash,'t1');
+  const [saved]=await restorationReceipts(page);
+  assert.deepEqual(await trash.evaluate(()=>lostRestore),saved);
+  assert.deepEqual(await trashCommit(trash,restoreIntent(deletion)),{confirmedDurable:true,replayed:true,receipt:saved});
+  assert.equal(alerts.length,1);
+  assert.equal((await owned(page)).tasks.filter(row=>row.id==='t1').length,1);
+});
+
+for(const phase of ['before commit','after commit'])test(
+  `V2 Trash Restore interruption ${phase} recovers the original action after Chromium restart`,async t=>{
+  const profile=await completionProfile(t);
+  const {page,context}=await seedTrash(t,profile.context);
+  const {receipt:deletion}=await trashCommit(page,await deleteIntent(page,'t1'));
+  const trash=await openScoringPage(context,'trash.html');
+  await setTrashClock(trash,5000);
+  await interruptOwnedWrite(trash,phase);
+  await trashRestore(trash,'t1').click();
+  await trash.waitForFunction(()=>window.ownedInterruptionReached===true);
+  const restarted=await profile.restart();
+  const home=await openScoringPage(restarted,'index.html');
+  await setTrashClock(home,6000);
+  const reopened=await openScoringPage(restarted,'trash.html');
+  await setTrashClock(reopened,6000);
+  if(phase==='before commit'){
+    assert.equal((await restorationReceipts(home)).length,0);
+    await restoreViaTrash(reopened,'t1');
+  } else {
+    await taskCard(home,'t1').waitFor();
+    assert.equal(await trashRestore(reopened,'t1').count(),0);
+  }
+  const [receipt]=await restorationReceipts(home);
+  assert.equal(receipt.intent.deletionId,deletion.id);
+  assert.deepEqual(await trashCommit(reopened,restoreIntent(deletion)),{confirmedDurable:true,replayed:true,receipt});
+  assert.equal((await owned(home)).tasks.filter(row=>row.id==='t1'&&row.status==='active').length,1);
+  assert.deepEqual(await completionReceipts(home),[]);
+});
+
+test('V2 Trash Restore rejects an invalid receipt chain and retains the legacy backup, journals and scoring history',async t=>{
+  const {page,context}=await seedTrash(t);
+  const backup=await page.evaluate(()=>localStorage.getItem(TaskPointsCore.STORAGE_KEY));
+  const history=await verifiedRewards(page);
+  const {receipt:deletion}=await trashCommit(page,await deleteIntent(page,'t1'));
+  const trash=await openScoringPage(context,'trash.html');
+  await setTrashClock(trash,5000);
+  await restoreViaTrash(trash,'t1');
+  const [restored]=await restorationReceipts(page);
+  const title=await page.evaluate(backup=>{
+    localStorage.setItem(TaskPointsCore.STORAGE_KEY,backup);
+    const other=TaskPointsCore.readTaskPointsStoredState().tasks.find(row=>row.id==='t2');
+    const title='Unrelated pending Task edit survives Restore';
+    TaskPointsCore.journalTaskMutation({task:{...other,title}});
+    if(!TaskPointsCore.flushPendingTaskMutations())throw Error('Expected unrelated Task compaction');
+    TaskPointsCore.queuePhase5CVerifiedSecondaryWrite();
+    return title;
+  },backup);
+  await page.evaluate(()=>TaskPointsCore.flushPhase5CVerifiedSecondaryWrites());
+  assert.equal((await partOfState(page)).task.title,title);
+  assert.deepEqual(await verifiedRewards(page),history);
+  assert.deepEqual((await trashedTask(page,'t1')),restored.after);
+  await page.evaluate(receipt=>new Promise((resolve,reject)=>{
+    const request=indexedDB.open(TaskPointsStateRuntimeV2.DB_NAME);
+    request.onsuccess=()=>{
+      const db=request.result,tx=db.transaction('mutations','readwrite');
+      tx.objectStore('mutations').put({...receipt,after:{...receipt.after,completedAtISO:'2026-11-03T17:00:00Z'}});
+      tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};
+    };
+  }),restored);
+  await assert.rejects(readTrashProof(trash,'t1'),/owned_task_trash_receipt_conflict/);
+  await assert.rejects(trashCommit(trash,restoreIntent(deletion)),/owned_task_trash_receipt_conflict/);
+  await assert.rejects(page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(2)),/owned_task_trash_receipt_conflict/);
+  await page.reload();
+  await page.getByRole('status').filter({hasText:'owned_task_trash_receipt_conflict'}).waitFor();
+  assert.equal(await taskCard(page,'t1').count(),0);
+  assert.equal((await partOfState(page)).task.title,title);
 });

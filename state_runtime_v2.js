@@ -20372,13 +20372,13 @@
 
   function ownedTrashIntent(input) {
     const {operation, taskId, generation, expectedRevision, deletionId} = input || {};
-    const undo = operation === 'home-undo-trash';
-    if ((!undo && operation !== 'home-move-to-trash') || (taskId !== 't1' && !core.isIsolatedCreatedTaskId(taskId))
+    const restore = operation === 'home-undo-trash' || operation === 'trash-restore';
+    if ((!restore && operation !== 'home-move-to-trash') || (taskId !== 't1' && !core.isIsolatedCreatedTaskId(taskId))
       || typeof generation !== 'string' || !generation || !Number.isSafeInteger(expectedRevision)
-      || expectedRevision < 0 || (undo ? typeof deletionId !== 'string' || !deletionId : deletionId !== undefined))
+      || expectedRevision < 0 || (restore ? typeof deletionId !== 'string' || !deletionId : deletionId !== undefined))
       throw new Error('invalid_owned_trash_intent');
     const actionId = operation+'-'+taskId+'-'+expectedRevision;
-    return {actionId, operation, taskId, generation, expectedRevision, ...(undo ? {deletionId} : {})};
+    return {actionId, operation, taskId, generation, expectedRevision, ...(restore ? {deletionId} : {})};
   }
 
   function ownedTrashResult(before, intent, at, deletion) {
@@ -20393,9 +20393,11 @@
       return {...before, prevStatus, status:'trashed', deletedAtISO:at, deletedAt:at, deletedFrom:'TasksScreen', updatedAtISO:at};
     }
     if (!deletion || deletion.id !== intent.deletionId || deletion.revision !== intent.expectedRevision || status !== 'trashed')
-      throw new Error('owned_task_undo_stale');
+      throw new Error(intent.operation === 'home-undo-trash' ? 'owned_task_undo_stale' : 'owned_task_restore_stale');
     const elapsed = time - Date.parse(deletion.committedAtISO);
-    if (elapsed < 0 || elapsed >= OWNED_TRASH_UNDO_MS) throw new Error('owned_task_undo_expired');
+    if (intent.operation === 'home-undo-trash' && (elapsed < 0 || elapsed >= OWNED_TRASH_UNDO_MS))
+      throw new Error('owned_task_undo_expired');
+    if (elapsed < 0) throw new Error('invalid_owned_trash_timestamp');
     return {...before, status:before.prevStatus, prevStatus:null, deletedAtISO:null, deletedAt:null, deletedFrom:null, updatedAtISO:at};
   }
   const OWNED_TASK_STORES = ['tasks','mutations','meta','completions'];
@@ -20636,10 +20638,16 @@
         assertCurrent();
         const tasks = rows.filter(row=>snapshot.ownedIds.includes(row.id)).sort((a,b)=>a.legacyIndex-b.legacyIndex);
         const proof = {taskId:meta.homeTaskId,ownedIds:snapshot.ownedIds,tasks:tasks.map(row=>clone(row.value)),generation:meta.generation,
-          revision:meta.revision,completions:clone(rewards),assertCurrent,
+          revision:meta.revision,completions:clone(rewards),deletions:clone(snapshot.deletions),assertCurrent,
           findReceipt(input) {
             const intent = completionIntent(input);
             const receipt = snapshot.journal.find(row=>row.type===OWNED_TASK_DONE
+              && row.intent.actionId===intent.actionId);
+            return receipt && stableJson(receipt.intent)===stableJson(intent) ? clone(receipt) : null;
+          },
+          findTrashReceipt(input) {
+            const intent = ownedTrashIntent(input);
+            const receipt = snapshot.journal.find(row=>row.type===OWNED_TASK_TRASH
               && row.intent.actionId===intent.actionId);
             return receipt && stableJson(receipt.intent)===stableJson(intent) ? clone(receipt) : null;
           }};
@@ -20785,16 +20793,18 @@
   }
 
   async function commitIsolatedOwnedTaskTrash(input) {
-    const fixture = ownedTaskContext();
-    if (fixture.completionWrite !== true || fixture.completionControls !== true)
+    const intent = ownedTrashIntent(input), id = 'isolated-task-action:'+intent.actionId;
+    const fromTrash = intent.operation === 'trash-restore';
+    const fixture = ownedTaskContext(false,fromTrash);
+    if (fixture.completionWrite !== true || fixture.completionControls !== true
+      || (fromTrash && global.location.pathname !== '/experiments/v2-home-plus-one-day/full/trash.html'))
       throw new Error('isolated_task_trash_not_selected');
     const marker = global.localStorage.getItem(OWNED_TASK_FIXTURE);
-    const intent = ownedTrashIntent(input), id = 'isolated-task-action:'+intent.actionId;
-    const db = await openOwnedTasks();
+    const db = await openOwnedTasks(false,fromTrash);
     try {
       const tx = db.transaction(OWNED_TASK_STORES,'readwrite',{durability:'strict'});
       const {receipt,replayed} = await withOwnedRecords(tx, (meta,rows,receipts,completionRows) => {
-        const context = ownedTaskContext();
+        const context = ownedTaskContext(false,fromTrash);
         const snapshot = verifyOwnedSnapshot(context,meta,rows,receipts,completionRows);
         if (context.completionControls !== true || meta.generation !== intent.generation)
           throw new Error('owned_task_generation_conflict');
@@ -20819,7 +20829,7 @@
         tx.objectStore('meta').put({...meta,revision});
         return {receipt,replayed:false};
       });
-      const verified = await readOwnedSnapshot(db);
+      const verified = await readOwnedSnapshot(db,fromTrash);
       const saved = verified.journal.find(row=>row.id===id);
       ownedScoringSource(fixture,marker,verified.meta,verified.completionRewards,verified.ownedIds);
       if (!saved || stableJson(saved)!==stableJson(receipt)) throw new Error('owned_task_trash_readback_unverified');

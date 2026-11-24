@@ -156,6 +156,27 @@
     return result;
   }
 
+  function isolatedTaskTrashDeletion(taskId) {
+    if (!usesIsolatedTaskDone(taskId) || !verifiedCompletionRead) return null;
+    try {
+      verifiedLegacyCompletions(verifiedCompletionRead);
+      return structuredClone(verifiedCompletionRead.deletions.find(row=>row.taskId===taskId)) ?? null;
+    } catch (_) { return null; }
+  }
+
+  async function runIsolatedTaskTrash(intent) {
+    if (!usesIsolatedTaskDone(intent.taskId)) throw new Error('Verified Trash is paused.');
+    const runtime = global.TaskPointsStateRuntimeV2;
+    try { return await runtime.commitIsolatedOwnedTaskTrash(intent); }
+    catch (error) {
+      // A lost response may conceal a committed action. Only recover its
+      // exact receipt, without retrying a write that failed admission.
+      const receipt = await runtime.readIsolatedTaskScoring(proof=>proof.findTrashReceipt(intent)).catch(()=>null);
+      if (!receipt || !usesIsolatedTaskDone(intent.taskId)) throw error;
+      return {confirmedDurable:true,replayed:true,receipt};
+    }
+  }
+
   async function runIsolatedTaskDone(taskId, source, onVerified) {
     if (!usesIsolatedTaskDone(taskId)) throw new Error('Verified Task completion is paused.');
     if (isolatedDonePending) return;
@@ -11172,6 +11193,8 @@ return Number(cappedScore.toFixed(1));
     isIsolatedCreatedTaskId,
     ISOLATED_TASK_CREATE_PENDING_PREFIX,
     projectIsolatedDoneTasks,
+    isolatedTaskTrashDeletion,
+    runIsolatedTaskTrash,
     usesIsolatedTaskDone,
     watchIsolatedTaskDone,
     isolatedTaskDoneView,
