@@ -60,3 +60,19 @@ test('Mobile-only scope preserves desktop spacing and panel functionality', () =
   assert.ok(mobileRules.trimEnd().endsWith('}'),
     'Last stylesheet override should be confined to the mobile media block');
 });
+
+test('Mobile Home header restores a clear landing strip for floating alerts above rank line', () => {
+  const rule = css.match(/@media\s*\(max-width:\s*767px\)\s*\{\s*#appRoot\s*>\s*header:has\(\+\s*#homeTopCardStack\)\s*\{([^}]+)\}/)?.[1] || '';
+  assert.match(rule, /padding-bottom:\s*48px\s*;/,
+    'add actual reserved space beneath the mobile logo without changing its position');
+  assert.match(html, /<header class="mb-4">[\s\S]*?<\/header>[\s\S]*?<div id="homeTopCardStack"/,
+    'the spacer belongs between the original header and the scoreboard/rank strip');
+  assert.match(html, /src="assets\/taskpoints-logo\.png"/);
+  assert.match(html, /id="exportBtnMobile"/);
+  assert.match(html, /id="importInputMobile"/);
+  assert.match(html, /styles\.css\?v=20261124-home-floating-header-gap-1/,
+    'iPhone loads the refreshed stylesheet rather than a cached layout');
+  assert.equal((html.match(/styles\.css\?v=20261124-home-floating-header-gap-1/g)||[]).length,3);
+  assert.match(css, /\.tp-floating-island\s*\{[^}]*position:\s*fixed\s*;/,
+    'alert controls remain floating above the reserved blank space');
+});
