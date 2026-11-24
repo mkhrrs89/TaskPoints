@@ -13,9 +13,8 @@ function extract(start, end) {
   assert.ok(a>=0 && b>a, 'Home helper not found: '+start);
   return html.slice(a,b);
 }
-const apply = extract('function applyPostponeToTask(task)', '  function postponeTask(id)');
-const bulk = extract('function postponeAllOverdueTasks()', 'function wontDoMain(id)');
-const action = apply+'\n'+bulk+'\nthis.postponeAllOverdueTasks=postponeAllOverdueTasks;';
+const action = extract('function canPostponeTask(', 'function wontDoMain(');
+const render = extract('function renderTasks(', 'function formatHomeStreakBonusValue(');
 
 function harness(options={}) {
   const tasks = [
@@ -31,6 +30,7 @@ function harness(options={}) {
   const state={tasks};
   let renderCount=0,criticalCount=0,saveCount=0,writeCount=0,alerts=0;
   const writes=[];
+  const events=[];
   const context = {
     state,
     todayKey:()=> '2026-11-22',
@@ -41,22 +41,31 @@ function harness(options={}) {
       const delta=(Date.parse(to+'T00:00:00Z')-Date.parse(from+'T00:00:00Z'))/86400000;
       if(delta>0)task.postponedDays=(Number(task.postponedDays)||0)+delta;
     },
-    assertTaskActionMutationWritable:()=>options.preflightFails !== true,
     TaskPointsCore:options.noJournal ? {} : {
-      journalTaskMutations(rows) {
+      journalTaskUpdates(ids,prepare) {
+        if(options.preflightFails) throw Error('recovery lock');
+        const rows=[];
+        const latest=new Map(ids.map(id=>{
+          const row={...tasks.find(task=>task.id===id),...options.latestTasks?.[id]};
+          if(prepare(row)) rows.push(row);
+          return [id,row];
+        }));
+        if(!rows.length)return latest;
         writeCount++;
         if(options.failWrite)throw Error('unavailable');
         writes.push(JSON.parse(JSON.stringify(rows)));
+        events.push('journal');
+        return latest;
       }
     },
     save:()=>{saveCount++;return true;},
-    renderTasks:()=>{renderCount++;},
-    window:{updateCriticalTasksIsland:()=>{criticalCount++;},TaskPointsPerf:{mark(){}}},
+    renderTasks:()=>{renderCount++;events.push('render');context.window.updateCriticalTasksIsland();},
+    window:{updateCriticalTasksIsland:()=>{criticalCount++;},TaskPointsPerf:{mark(name,details){events.push([name,details.count]);}}},
     console:{warn(){}},
     alert(){alerts++;}
   };
   vm.runInNewContext(action,context,{filename:'HomePostponeAll.js'});
-  return {state,run:context.postponeAllOverdueTasks,writes,
+  return {state,run:context.postponeAllOverdueTasks,writes,events,
     metrics:()=>({renderCount,criticalCount,saveCount,writeCount,alerts})};
 }
 
@@ -66,9 +75,10 @@ test('Postpone All journals just eligible overdue tasks in one write before UI u
   const m=h.metrics();
   assert.deepEqual({writes:m.writeCount,fullSaves:m.saveCount,renders:m.renderCount,critical:m.criticalCount},
     {writes:1,fullSaves:0,renders:1,critical:1});
+  assert.deepEqual(h.events,['journal',['taskAction.postponeAllDurable',2],'render']);
   assert.deepEqual(Array.from(h.writes[0],t=>t.id),['a','b']);
   assert.equal(h.state.tasks[0].dueDateISO,'2026-11-22');
-  assert.equal(h.state.tasks[0].originalDueDateISO,'2026-11-22');
+  assert.equal(h.state.tasks[0].originalDueDateISO,'2026-11-17');
   assert.equal(h.state.tasks[0].postponedDays,6);
   assert.equal(h.state.tasks[1].postponedDays,2);
   const unchanged = {
@@ -78,6 +88,17 @@ test('Postpone All journals just eligible overdue tasks in one write before UI u
   for(const task of h.state.tasks.slice(2)) {
     assert.equal(task.dueDateISO,unchanged[task.id],task.id+' must keep its existing date');
   }
+});
+
+test('Postpone All uses the latest journal rows and refreshes Tasks skipped by eligibility',()=>{
+  const h=harness({latestTasks:{a:{title:'Edited elsewhere',postponedDays:9},b:{hidden:true}}});
+  h.run();
+  assert.deepEqual(Array.from(h.writes[0],t=>t.id),['a']);
+  assert.equal(h.state.tasks[0].title,'Edited elsewhere');
+  assert.equal(h.state.tasks[0].postponedDays,14);
+  assert.equal(h.state.tasks[1].dueDateISO,'2026-11-20');
+  assert.equal(h.state.tasks[1].hidden,true);
+  assert.deepEqual(h.events,['journal',['taskAction.postponeAllDurable',1],'render']);
 });
 
 test('Failed preflight or journal write never leaves a partially postponed task',()=>{
@@ -97,10 +118,11 @@ test('Journal-free environments keep the original full save fallback',()=>{
   assert.equal(h.metrics().renderCount,1);
 });
 
-test('Postpone All remains connected to mobile button and atomic batch journal',()=>{
+test('Postpone All remains connected to the mobile control, journal, and critical Tasks refresh',()=>{
   assert.match(html,/data-task-action="postpone-all-overdue"/);
   assert.match(html,/case 'postpone-all-overdue':\s*postponeAllOverdueTasks\(\)/);
-  assert.match(bulk,/TaskPointsCore\.journalTaskMutations\(postponedTasks\)/);
-  assert.doesNotMatch(bulk,/postponedTasks\.forEach[\s\S]*?journalTaskMutation\(/);
-  assert.match(journal,/core\.journalTaskMutations = journalTaskMutations;/);
+  assert.match(action,/TaskPointsCore\.journalTaskUpdates\(tasks\.map/);
+  assert.doesNotMatch(action,/journalTaskMutation\(/);
+  assert.match(journal,/core\.journalTaskUpdates = journalTaskUpdates;/);
+  assert.match(render,/window\.updateCriticalTasksIsland\?\.\(stateInput\)/);
 });

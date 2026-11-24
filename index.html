@@ -14535,15 +14535,23 @@ function applyPostponeToTask(task, today){
   return true;
 }
 
-function postponeTasks(tasks, today){
-  if (!tasks.length) return;
+function postponeTasks(tasks, today, bulk = false){
+  if (!tasks.length) return true;
   try {
     if (TaskPointsCore?.journalTaskUpdates) {
+      let changedCount = 0;
       const latest = TaskPointsCore.journalTaskUpdates(tasks.map(task => task.id),
-        draft => applyPostponeToTask(draft, today));
+        draft => {
+          if (!applyPostponeToTask(draft, today)) return false;
+          changedCount += 1;
+          return true;
+        });
       for (const [index, task] of state.tasks.entries()) {
         const saved = latest.get(String(task.id));
         if (saved) state.tasks[index] = saved;
+      }
+      if (bulk && changedCount) {
+        try { window.TaskPointsPerf?.mark?.('taskAction.postponeAllDurable', { count: changedCount }); } catch (_) {}
       }
     } else {
       const selected = new Set(tasks);
@@ -14561,9 +14569,10 @@ function postponeTasks(tasks, today){
   } catch (error) {
     console.warn('Task postponement was not confirmed.', error);
     alert(error?.message || 'Could not save the new due date. Please try again.');
-    return;
+    return false;
   }
   renderTasks(state);
+  return true;
 }
 
 function postponeTask(id){
@@ -14574,7 +14583,7 @@ function postponeTask(id){
 function postponeAllOverdueTasks(){
   const today = todayKey();
   const overdue = state.tasks.filter(task => canPostponeTask(task, today));
-  postponeTasks(overdue, today);
+  postponeTasks(overdue, today, true);
 }
 function wontDoMain(id){
   const t=state.tasks.find(x=>x.id===id); if(!t || !assertTaskActionMutationWritable()) return;
