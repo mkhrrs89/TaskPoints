@@ -121,7 +121,11 @@ test('Home wraps only pregame NPC scoring in the temporary Gold batch', () => {
   const end = home.indexOf('function getHistoryDateKey(g)', start);
   const simulation = home.slice(start, end);
   assert.ok(start >= 0 && end > start);
-  assert.ok(simulation.includes('const scoreNpcParticipants = () => participantIds.forEach(id => {'));
+  assert.ok(simulation.includes('const scoreNpcParticipants = () => {'));
+  assert.ok(simulation.includes('participantIds.forEach(id => {'),
+    'every NPC must still be scored in the Gold batch');
+  assert.ok(simulation.includes('canonicalRanksByPlayerId,'),
+    'one cached standings table must reach the unmodified scoring engine');
   assert.ok(simulation.includes('TaskPointsCore.withGoldNpcScoringBatch(state, scoreNpcParticipants);'));
   assert.ok(simulation.includes('scoreNpcParticipants();'),
     'the previous scoring loop must remain available without the Gold module');

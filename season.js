@@ -1542,7 +1542,7 @@ function getRoundForToday(season, dateKey = getEffectiveDateKey()) {
       </section>`;
   }
 
-  function renderTrophyCase(history, state = {}) {
+  function renderTrophyCase(history, state = {}, options = {}) {
     const seasons = Array.isArray(history) ? history : [];
     return `
       <section class="glass season-hero-card season-trophy-hero">
@@ -1550,7 +1550,7 @@ function getRoundForToday(season, dateKey = getEffectiveDateKey()) {
         <h2 class="season-title">Trophy Case</h2>
         <p class="muted text-sm">Archived Season Championship results collect here as trophy cards.</p>
       </section>
-      ${renderCreateSeasonShell(state)}
+      ${options.showCreateSeason === false ? '' : renderCreateSeasonShell(state)}
       <section class="season-trophy-grid">
         ${seasons.map((season) => `
           <details class="glass season-card season-trophy-card">
@@ -1593,14 +1593,62 @@ function getRoundForToday(season, dateKey = getEffectiveDateKey()) {
     };
   }
 
-  function renderSeasonView(state) {
+  // A saved "currentSeason" may be a future preview or an old completed
+  // tournament. Only its actual competition dates count as an ongoing event.
+  function isTournamentRunningNow(season, dateKey = getEffectiveDateKey()) {
+    if (!season) return false;
+    const status = String(season.status || '').toLowerCase();
+    if (['preview', 'champion_crowned', 'finalized'].includes(status)) return false;
+    const start = String(season.startDate || season.startDateKey || '').slice(0, 10);
+    const end = String(season.endDate || season.endDateKey || '').slice(0, 10);
+    if (start && dateKey < start) return false;
+    if (end && dateKey > end) return false;
+    return true;
+  }
+
+  function pastSeasonWinnersForDisplay(state) {
+    const seasons = Array.isArray(state?.seasonHistory) ? state.seasonHistory.slice() : [];
+    const current = state?.currentSeason;
+    if (current && ['champion_crowned', 'finalized'].includes(String(current.status || '').toLowerCase())) {
+      // A champion can be crowned before Admin Mode archives the current season.
+      // Only add that confirmed champion; never infer a winner from a preview.
+      const derived = typeof core.getChampionSummary === 'function'
+        ? core.getChampionSummary(current, { currentSeason: current }) : null;
+      const existing = current.championSummary || {};
+      const championId = existing.championId || derived?.championId || current.championId || '';
+      const championName = existing.championName || existing.name || derived?.championName || current.championName || '';
+      const alreadyArchived = seasons.some((season) => season?.id && season.id === current.id);
+      if ((championId || championName) && !alreadyArchived) {
+        seasons.push({
+          ...current,
+          championSummary: { ...(derived || {}), ...existing, championId, championName }
+        });
+      }
+    }
+    // Sort only these display copies, leaving saved history untouched.
+    return seasons.map((season, index) => ({ season, index }))
+      .filter(({ season }) => season && typeof season === 'object')
+      .sort((a, b) => {
+        const aDate = String(a.season.endDate || a.season.endDateKey || a.season.monthKey || '');
+        const bDate = String(b.season.endDate || b.season.endDateKey || b.season.monthKey || '');
+        return bDate.localeCompare(aDate) || b.index - a.index;
+      })
+      .map(({ season }) => season);
+  }
+
+  function renderSeasonView(state, options = {}) {
     const normalized = normalizeSeasonViewState(state || {});
     const currentSeason = normalized.currentSeason;
-    const history = Array.isArray(normalized.seasonHistory) ? normalized.seasonHistory : [];
-    const title = getSeasonTabTitle(normalized);
-    const body = currentSeason
-      ? renderCurrentSeason(currentSeason, normalized)
-      : (history.length ? renderTrophyCase(history, normalized) : renderSeasonSetupShell());
+    const winners = pastSeasonWinnersForDisplay(normalized);
+    const tournamentRunning = isTournamentRunningNow(currentSeason, getEffectiveDateKey(options));
+    const showTrophyCase = !tournamentRunning && winners.length > 0;
+    const title = showTrophyCase ? 'Trophy Case' : getSeasonTabTitle(normalized);
+    const currentView = currentSeason ? renderCurrentSeason(currentSeason, normalized) : '';
+    const body = tournamentRunning
+      ? currentView
+      : (showTrophyCase
+        ? renderTrophyCase(winners, normalized, { showCreateSeason: !currentSeason }) + currentView
+        : (currentView || renderSeasonSetupShell()));
 
     return `
       <div class="season-page-stack" data-season-title="${escapeHtml(title)}">

@@ -172,6 +172,10 @@ async function waitHome(page){
     && document.querySelector('[data-task-action="bump"][data-task-id="t1"]')
     && document.querySelector('#habitsList .habitDay[data-habit="h1"]')
     && (!document.getElementById('bootSplash')||getComputedStyle(document.getElementById('bootSplash')).opacity==='0'),null,{timeout:14000});
+  // Main now settles its first-of-day Game and Gold state after reveal.
+  // Take preservation baselines after that ordinary writer has finished.
+  await page.waitForFunction(()=>typeof homeMorningSimulationScheduled==='undefined'
+    || !homeMorningSimulationScheduled);
 }
 const owned=page=>page.evaluate(()=>TaskPointsStateRuntimeV2.readIsolatedOwnedTasks());
 const dates=page=>page.evaluate(()=>{
@@ -282,11 +286,14 @@ test('ordinary Home save serializes only the V1 backing date and does not invali
   const {page}=await acknowledged(t),before=await owned(page),unrelated=await partOfState(page);
   const write=await page.evaluate(()=>{
     legacyWrites.length=0;
+    TaskPointsHomeLiveState.getState().syntheticTaskSaveWitness='Verified ordinary Task compatibility save';
     const saved=save('home-task-compatibility-witness',{immediateWrite:true,userInitiated:true});
-    return {saved,writes:legacyWrites};
+    const witness=TaskPointsCore.parseTaskPointsStorageJson(localStorage.getItem('taskpoints_v1')).syntheticTaskSaveWitness;
+    return {saved,writes:legacyWrites,witness};
   });
   assert.equal(write.saved,true);
   assert.ok(write.writes.some(e=>e.key==='taskpoints_v1'));
+  assert.equal(write.witness,'Verified ordinary Task compatibility save');
   await assertShown(page,newDate);
   assert.equal((await assertV2(page,before)).sourceDrift,false);
   assert.deepEqual(await partOfState(page),unrelated);

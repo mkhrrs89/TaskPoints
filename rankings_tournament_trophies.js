@@ -387,8 +387,11 @@
     ensureTrophyStyles();
     const state = stateInput && typeof stateInput === 'object' ? stateInput : (loadState() || {});
     refreshChampionCounts(state);
-    const ids = rankedPlayerIds(state);
     const rows = Array.from(list.querySelectorAll('.ranking-row'));
+    // Power Rankings no longer necessarily matches canonical Win% order.
+    // Bind badges to explicit rendered player IDs rather than card positions.
+    const ids = rows.every((row) => row?.getAttribute?.('data-player-id'))
+      ? [] : rankedPlayerIds(state);
     if (!rows.length) return false;
 
     decorating = true;
@@ -398,7 +401,9 @@
         if (!nameElement) return;
 
         const cleanName = stripTrophySuffix(nameElement.textContent || '');
-        const playerId = ids[index] || playerIdForName(cleanName, state) || '';
+        const playerId = row?.getAttribute?.('data-player-id')
+          || playerIdForName(cleanName, state)
+          || ids[index] || '';
         const canonicalName = playerNameForId(playerId, state) || cleanName;
         const count = championCounts.get(playerId)
           || championNameCounts.get(normalizeName(canonicalName))

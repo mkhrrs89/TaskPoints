@@ -188,12 +188,16 @@ test('Streaks completed table follows canonical freeze-aware streak length', () 
   assert.match(streaksPage, /src="scoring_core\.js\?v=20261102-freeze-silver-credit-2"/);
 });
 
-test('a spent freeze is displayed as a white bubble with black numbers only on its protected day', () => {
+test('a spent freeze uses bordered brushed-metal styling without changing freeze behavior', () => {
   const styles = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
   const rule = styles.match(/\.habitDay\.off\.streak-freeze-used\s*\{([^}]+)\}/);
   assert.ok(rule, 'freeze-protected missed days have a dedicated visual rule');
-  assert.match(rule[1], /background:\s*#ffffff\s*!important/);
-  assert.match(rule[1], /color:\s*#000000\s*!important/);
+  assert.match(rule[1], /var\(--tp-brushed-overlay\)/, 'uses the completed-week metal texture');
+  assert.match(rule[1], /var\(--tp-brushed-base\)\s*!important/, 'uses the completed-week metal surface');
+  assert.match(rule[1], /color:\s*#f8fafc\s*!important/, 'light text contrasts with steel');
+  assert.match(rule[1], /border:\s*2px solid rgba\(222, 235, 242, 0\.96\)\s*!important/, 'silver border distinguishes frozen from missed');
+  assert.match(rule[1], /box-shadow:[\s\S]*?\!important/, 'dimensional metallic edge');
+  assert.doesNotMatch(rule[1], /#ffffff|#000000/, 'no solid white tile remains');
   assert.match(rule[1], /font-weight:\s*800\s*!important/, 'frozen day number is bold');
   assert.match(home, /const protectedDayKeys = new Set\(options\.protectedDays \|\| \[\]\)/);
   assert.match(home, /const isFreezeProtected = status === 'off' && protectedDayKeys\.has\(d\.key\)/);

@@ -760,31 +760,91 @@
     const f = String.fromCharCode;
     function compress(uncompressed, bitsPerChar, getCharFromInt) {
       if (uncompressed == null) return "";
-      let i; let value; const context_dictionary = {}; const context_dictionaryToCreate = {}; let context_c = ""; let context_wc = ""; let context_w = ""; let context_enlargeIn = 2; let context_dictSize = 3; let context_numBits = 2; const context_data = []; let context_data_val = 0; let context_data_position = 0;
-      for (let ii = 0; ii < uncompressed.length; ii += 1) {
-        context_c = uncompressed.charAt(ii);
-        if (!Object.prototype.hasOwnProperty.call(context_dictionary, context_c)) { context_dictionary[context_c] = context_dictSize++; context_dictionaryToCreate[context_c] = true; }
-        context_wc = context_w + context_c;
-        if (Object.prototype.hasOwnProperty.call(context_dictionary, context_wc)) { context_w = context_wc; } else {
-          if (Object.prototype.hasOwnProperty.call(context_dictionaryToCreate, context_w)) {
-            if (context_w.charCodeAt(0) < 256) { for (i = 0; i < context_numBits; i += 1) { context_data_val <<= 1; if (context_data_position == bitsPerChar - 1) { context_data_position = 0; context_data.push(getCharFromInt(context_data_val)); context_data_val = 0; } else context_data_position += 1; } value = context_w.charCodeAt(0); for (i = 0; i < 8; i += 1) { context_data_val = (context_data_val << 1) | (value & 1); if (context_data_position == bitsPerChar - 1) { context_data_position = 0; context_data.push(getCharFromInt(context_data_val)); context_data_val = 0; } else context_data_position += 1; value >>= 1; } }
-            else { value = 1; for (i = 0; i < context_numBits; i += 1) { context_data_val = (context_data_val << 1) | value; if (context_data_position == bitsPerChar - 1) { context_data_position = 0; context_data.push(getCharFromInt(context_data_val)); context_data_val = 0; } else context_data_position += 1; value = 0; } value = context_w.charCodeAt(0); for (i = 0; i < 16; i += 1) { context_data_val = (context_data_val << 1) | (value & 1); if (context_data_position == bitsPerChar - 1) { context_data_position = 0; context_data.push(getCharFromInt(context_data_val)); context_data_val = 0; } else context_data_position += 1; value >>= 1; } }
-            context_enlargeIn--; if (context_enlargeIn === 0) { context_enlargeIn = Math.pow(2, context_numBits); context_numBits++; } delete context_dictionaryToCreate[context_w];
-          } else { value = context_dictionary[context_w]; for (i = 0; i < context_numBits; i += 1) { context_data_val = (context_data_val << 1) | (value & 1); if (context_data_position == bitsPerChar - 1) { context_data_position = 0; context_data.push(getCharFromInt(context_data_val)); context_data_val = 0; } else context_data_position += 1; value >>= 1; } }
-          context_enlargeIn--; if (context_enlargeIn === 0) { context_enlargeIn = Math.pow(2, context_numBits); context_numBits++; } context_dictionary[context_wc] = context_dictSize++; context_w = String(context_c);
+      // LZ-String's dictionary is logically a (phrase, next UTF-16 code unit)
+      // trie. Numeric transitions avoid building and hashing temporary strings
+      // for every character in a multi-megabyte TaskPoints snapshot.
+      // The on-disk LZ16 wrapper, decode path, and safety checks do not change.
+      const charDictionary = new Int32Array(65536);
+      const newCharacterCodes = [];
+      const transitions = new Map();
+      let wCode = 0;
+      let dictSize = 3;
+      let enlargeIn = 2;
+      let numBits = 2;
+      const data = [];
+      let dataValue = 0;
+      let dataPosition = 0;
+
+      const writeBits = (count, inputValue) => {
+        let value = inputValue;
+        for (let i = 0; i < count; i += 1) {
+          dataValue = (dataValue << 1) | (value & 1);
+          if (dataPosition === bitsPerChar - 1) {
+            dataPosition = 0;
+            data.push(getCharFromInt(dataValue));
+            dataValue = 0;
+          } else {
+            dataPosition += 1;
+          }
+          value >>= 1;
+        }
+      };
+
+      const emit = (phraseCode) => {
+        const literal = newCharacterCodes[phraseCode];
+        if (literal !== undefined) {
+          writeBits(numBits, literal < 256 ? 0 : 1);
+          writeBits(literal < 256 ? 8 : 16, literal);
+          delete newCharacterCodes[phraseCode];
+          enlargeIn -= 1;
+          if (enlargeIn === 0) {
+            enlargeIn = Math.pow(2, numBits);
+            numBits += 1;
+          }
+        } else {
+          writeBits(numBits, phraseCode);
+        }
+        enlargeIn -= 1;
+        if (enlargeIn === 0) {
+          enlargeIn = Math.pow(2, numBits);
+          numBits += 1;
+        }
+      };
+
+      for (let i = 0; i < uncompressed.length; i += 1) {
+        const character = uncompressed.charCodeAt(i);
+        let characterCode = charDictionary[character];
+        if (!characterCode) {
+          characterCode = dictSize++;
+          charDictionary[character] = characterCode;
+          newCharacterCodes[characterCode] = character;
+        }
+        if (!wCode) {
+          wCode = characterCode;
+          continue;
+        }
+        // Exact numeric key for every practical browser dictionary size.
+        const key = wCode * 65536 + character;
+        const extensionCode = transitions.get(key);
+        if (extensionCode !== undefined) {
+          wCode = extensionCode;
+        } else {
+          emit(wCode);
+          transitions.set(key, dictSize++);
+          wCode = characterCode;
         }
       }
-      if (context_w !== "") {
-        if (Object.prototype.hasOwnProperty.call(context_dictionaryToCreate, context_w)) {
-          if (context_w.charCodeAt(0) < 256) { for (i = 0; i < context_numBits; i += 1) { context_data_val <<= 1; if (context_data_position == bitsPerChar - 1) { context_data_position = 0; context_data.push(getCharFromInt(context_data_val)); context_data_val = 0; } else context_data_position += 1; } value = context_w.charCodeAt(0); for (i = 0; i < 8; i += 1) { context_data_val = (context_data_val << 1) | (value & 1); if (context_data_position == bitsPerChar - 1) { context_data_position = 0; context_data.push(getCharFromInt(context_data_val)); context_data_val = 0; } else context_data_position += 1; value >>= 1; } }
-          else { value = 1; for (i = 0; i < context_numBits; i += 1) { context_data_val = (context_data_val << 1) | value; if (context_data_position == bitsPerChar - 1) { context_data_position = 0; context_data.push(getCharFromInt(context_data_val)); context_data_val = 0; } else context_data_position += 1; value = 0; } value = context_w.charCodeAt(0); for (i = 0; i < 16; i += 1) { context_data_val = (context_data_val << 1) | (value & 1); if (context_data_position == bitsPerChar - 1) { context_data_position = 0; context_data.push(getCharFromInt(context_data_val)); context_data_val = 0; } else context_data_position += 1; value >>= 1; } }
-          context_enlargeIn--; if (context_enlargeIn === 0) { context_enlargeIn = Math.pow(2, context_numBits); context_numBits++; } delete context_dictionaryToCreate[context_w];
-        } else { value = context_dictionary[context_w]; for (i = 0; i < context_numBits; i += 1) { context_data_val = (context_data_val << 1) | (value & 1); if (context_data_position == bitsPerChar - 1) { context_data_position = 0; context_data.push(getCharFromInt(context_data_val)); context_data_val = 0; } else context_data_position += 1; value >>= 1; } }
-        context_enlargeIn--; if (context_enlargeIn === 0) context_numBits++;
+      if (wCode) emit(wCode);
+      writeBits(numBits, 2);
+      while (true) {
+        dataValue <<= 1;
+        if (dataPosition === bitsPerChar - 1) {
+          data.push(getCharFromInt(dataValue));
+          break;
+        }
+        dataPosition += 1;
       }
-      value = 2; for (i = 0; i < context_numBits; i += 1) { context_data_val = (context_data_val << 1) | (value & 1); if (context_data_position == bitsPerChar - 1) { context_data_position = 0; context_data.push(getCharFromInt(context_data_val)); context_data_val = 0; } else context_data_position += 1; value >>= 1; }
-      while (true) { context_data_val <<= 1; if (context_data_position == bitsPerChar - 1) { context_data.push(getCharFromInt(context_data_val)); break; } else context_data_position += 1; }
-      return context_data.join('');
+      return data.join('');
     }
     function decompress(length, resetValue, getNextValue) {
       const dictionary = []; let enlargeIn = 4; let dictSize = 4; let numBits = 3; let entry = ''; const result = []; let i; let w; let bits; let resb; let maxpower; let power; let c; const data = { val: getNextValue(0), position: resetValue, index: 1 };
@@ -8059,6 +8119,27 @@ return { state: merged, storageKey };
             const newValues = Array.isArray(incomingEconomy[key]) ? incomingEconomy[key] : [];
             merged[key] = [...new Set([...oldValues, ...newValues])];
           }
+          // Seasonal interest decisions are permanent, keyed by the date the
+          // two-month season began. An unrelated/stale page save cannot erase
+          // or replace a prior decision, just as it cannot erase Gold rows.
+          const oldInterest = Array.isArray(savedEconomy.seasonInterestDecisions)
+            ? savedEconomy.seasonInterestDecisions : [];
+          const newInterest = Array.isArray(incomingEconomy.seasonInterestDecisions)
+            ? incomingEconomy.seasonInterestDecisions : [];
+          const interestBySeason = new Map();
+          [...oldInterest, ...newInterest].forEach((decision) => {
+            const key = String(decision?.seasonStartDateKey || '');
+            if (key && !interestBySeason.has(key)) interestBySeason.set(key, decision);
+          });
+          if (oldInterest.length || newInterest.length) {
+            merged.seasonInterestDecisions = [...interestBySeason.values()];
+          }
+          // An old Home tab must not undo a rate saved in Settings.
+          // Only the explicit Settings Gold-interest editor can change it.
+          if (options.allowGoldInterestRateOverwrite !== true
+            && Object.prototype.hasOwnProperty.call(savedEconomy, 'interestRatePercent')) {
+            merged.interestRatePercent = savedEconomy.interestRatePercent;
+          }
           merged.launchedAtISO = savedEconomy.launchedAtISO || merged.launchedAtISO;
           merged.launchDateKey = savedEconomy.launchDateKey || merged.launchDateKey;
           next.goldEconomy = merged;
@@ -10422,11 +10503,24 @@ function computeCanonicalRankings(state, options = {}) {
   const rows = [];
   const players = Array.isArray(state.players) ? state.players.filter(p => p && p.active !== false) : [];
 
-  const youRow = computeCanonicalRankingRow(state, null, true, { includeToday });
-  rows.push(youRow);
+  // Only the first-of-day NPC slate opts into this linear pass. It computes
+  // the exact same per-player stats in matchup order but visits each stored
+  // matchup once, rather than repeating the scan for all ~120 players.
+  // All ordinary ranking callers keep their existing calculation unchanged.
+  const statsByPlayerId = options.preindexed === true
+    ? buildCanonicalMatchupStatsIndex(state, ['YOU', ...players.map(p => p.id)], { includeToday })
+    : null;
+  const forPlayer = (player, isYou) => {
+    const playerId = isYou ? 'YOU' : player?.id;
+    return computeCanonicalRankingRow(state, player, isYou, {
+      includeToday,
+      ...(statsByPlayerId ? { matchupStats: statsByPlayerId.get(playerId) } : {})
+    });
+  };
 
+  rows.push(forPlayer(null, true));
   players.forEach((player) => {
-    rows.push(computeCanonicalRankingRow(state, player, false, { includeToday }));
+    rows.push(forPlayer(player, false));
   });
 
   rows.sort((a, b) => {
@@ -10449,7 +10543,7 @@ function computeCanonicalRankingRow(state, player, isYou, options = {}) {
     ? ((typeof state.youName === "string" && state.youName.trim()) ? state.youName.trim() : "You")
     : (player?.name || "Unnamed");
 
-  const matchupStats = computeCanonicalMatchupStats(state, playerId, { includeToday });
+  const matchupStats = options.matchupStats || computeCanonicalMatchupStats(state, playerId, { includeToday });
 
   return {
     id: playerId,
@@ -10463,6 +10557,53 @@ function computeCanonicalRankingRow(state, player, isYou, options = {}) {
     ppd: matchupStats.ppd,
     rawPpd: matchupStats.rawPpd
   };
+}
+
+// Build optional morning-only ranking stats in one O(matchups + players)
+// historical pass. Keep the same score validity, tie rules, TODAY exclusion
+// and per-player accumulation order as computeCanonicalMatchupStats below.
+function buildCanonicalMatchupStatsIndex(state, playerIds, options = {}) {
+  const includeToday = options.includeToday === true;
+  const today = dateKey(new Date());
+  const matches = Array.isArray(state?.matchups) ? state.matchups : [];
+  const accumulator = new Map();
+  for (const id of playerIds) {
+    if (!accumulator.has(id)) accumulator.set(id, {
+      wins: 0, losses: 0, totalScore: 0, scoredGames: 0
+    });
+  }
+  const includeSide = (id, score, opponentScore) => {
+    const stats = accumulator.get(id);
+    if (!stats) return;
+    const hasOwnScore = Number.isFinite(score);
+    if (hasOwnScore) {
+      stats.totalScore += score;
+      stats.scoredGames += 1;
+    }
+    if (hasOwnScore && Number.isFinite(opponentScore)) {
+      if (score > opponentScore) stats.wins += 1;
+      else if (score < opponentScore) stats.losses += 1;
+    }
+  };
+  for (const matchup of matches) {
+    if (!matchup) continue;
+    if (!includeToday && matchupDateKey(matchup) === today) continue;
+    const aId = matchup.playerAId;
+    const bId = matchup.playerBId;
+    // Legacy stats choose side A when a self-match lists the same ID twice.
+    includeSide(aId, matchup.scoreA, matchup.scoreB);
+    if (aId !== bId) includeSide(bId, matchup.scoreB, matchup.scoreA);
+  }
+  const result = new Map();
+  for (const [id, stats] of accumulator) {
+    const { wins, losses, totalScore, scoredGames } = stats;
+    result.set(id, {
+      wins, losses, games: wins + losses,
+      rawPpd: scoredGames ? totalScore / scoredGames : 0,
+      ppd: scoredGames ? Number((totalScore / scoredGames).toFixed(1)) : 0
+    });
+  }
+  return result;
 }
 
 function computeCanonicalMatchupStats(state, playerId, options = {}) {
@@ -10757,6 +10898,76 @@ function softCurbNpcScore(rawScore) {
     return { rating, streak, bonus };
   }
 
+  // Optional morning-only inputs. A daily slate scores each NPC once against
+  // fixed *historical* matchups. Build both scoring history indexes with one
+  // pass each; no game outcome, probability, random draw, or schema changes.
+  function buildNpcMorningScoringInputs(state, playerIds, beforeDateKey) {
+    const ids = new Set((Array.isArray(playerIds) ? playerIds : [])
+      .filter(id => id && id !== 'YOU'));
+    const npcLatestHistoryByPlayerId = new Map([...ids].map(id => [id, null]));
+    const badHistoryIds = new Set();
+    for (const row of (Array.isArray(state?.gameHistory) ? state.gameHistory : [])) {
+      if (!row || !ids.has(row.playerId) || badHistoryIds.has(row.playerId)) continue;
+      if (typeof row.date !== 'string') {
+        // Legacy score sorting expects .date.localeCompare. Leave unusual
+        // records on the established per-player path rather than reinterpret.
+        npcLatestHistoryByPlayerId.delete(row.playerId);
+        badHistoryIds.add(row.playerId);
+        continue;
+      }
+      const previous = npcLatestHistoryByPlayerId.get(row.playerId);
+      // A stable descending sort uses the earliest row for equal dates.
+      if (!previous || row.date.localeCompare(previous.date) > 0) {
+        npcLatestHistoryByPlayerId.set(row.playerId, row);
+      }
+    }
+
+    const npcStreakByPlayerId = new Map();
+    const date = String(beforeDateKey || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      for (const id of ids) npcStreakByPlayerId.set(id, 0);
+      return { npcLatestHistoryByPlayerId, npcStreakByPlayerId };
+    }
+    const seasonStart = getStreakySeasonStart(date);
+    const grouped = new Map([...ids].map(id => [id, []]));
+    for (const [index, matchup] of (Array.isArray(state?.matchups) ? state.matchups : []).entries()) {
+      if (!matchup || matchup.completed === false || matchup.result === 'pending') continue;
+      const key = String(matchup.dateKey || matchup.date || matchup.dateISO || '').slice(0, 10);
+      if (key < seasonStart || key >= date) continue;
+      const aId = String(matchup.playerAId || '');
+      const bId = String(matchup.playerBId || '');
+      if (!grouped.has(aId) && !grouped.has(bId)) continue;
+      if (matchup.scoreA == null || matchup.scoreB == null ||
+          matchup.scoreA === '' || matchup.scoreB === '') continue;
+      const a = Number(matchup.scoreA);
+      const b = Number(matchup.scoreB);
+      if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+      const game = Number(matchup.gameNumber || matchup.seriesGameNumber) || 0;
+      const draw = a === b;
+      if (grouped.has(aId)) {
+        grouped.get(aId).push({ key, order: index, game, result: draw ? 0 : (a > b ? 1 : -1) });
+      }
+      if (bId !== aId && grouped.has(bId)) {
+        grouped.get(bId).push({ key, order: index, game, result: draw ? 0 : (b > a ? 1 : -1) });
+      }
+    }
+    for (const [id, rows] of grouped) {
+      rows.sort((a, b) => b.key.localeCompare(a.key) || b.game - a.game || b.order - a.order);
+      if (!rows.length || rows[0].result === 0) {
+        npcStreakByPlayerId.set(id, 0);
+        continue;
+      }
+      const direction = rows[0].result;
+      let streak = 0;
+      for (const row of rows) {
+        if (row.result !== direction) break;
+        streak++;
+      }
+      npcStreakByPlayerId.set(id, streak * direction);
+    }
+    return { npcLatestHistoryByPlayerId, npcStreakByPlayerId };
+  }
+
 function simulateAiScoreForPlayerCore(player, dateKey, options = {}) {
   if (!player) {
     return NPC_SCORE_LOW_SOFT_CAP_MIN;
@@ -10775,7 +10986,11 @@ function simulateAiScoreForPlayerCore(player, dateKey, options = {}) {
     typeof player.varianceTilt === "number" ? player.varianceTilt : (player.varianceTilt || 50)
   );
   const momentum = Number(player.momentum);
-  const streakyEffect = computeStreakyEffect(player, computeNpcWinLossStreak(state, player.id, dateKey));
+  const streakMap = context.npcStreakByPlayerId;
+  const signedStreak = streakMap instanceof Map && streakMap.has(player.id)
+    ? streakMap.get(player.id)
+    : computeNpcWinLossStreak(state, player.id, dateKey);
+  const streakyEffect = computeStreakyEffect(player, signedStreak);
 
   let riskyRating = Number(player.risky);
   if (isNaN(riskyRating)) riskyRating = 0;
@@ -10783,9 +10998,12 @@ function simulateAiScoreForPlayerCore(player, dateKey, options = {}) {
 
   let previousScore = null;
   if (momentum && Array.isArray(state?.gameHistory) && state.gameHistory.length) {
-    const prev = state.gameHistory
-      .filter(g => g.playerId === player.id)
-      .sort((a,b) => b.date.localeCompare(a.date))[0];
+    const previousMap = context.npcLatestHistoryByPlayerId;
+    const prev = previousMap instanceof Map && previousMap.has(player.id)
+      ? previousMap.get(player.id)
+      : state.gameHistory
+        .filter(g => g.playerId === player.id)
+        .sort((a,b) => b.date.localeCompare(a.date))[0];
 
     if (prev && prev.date !== dateKey) {
       const parsedPrevScore = Number(prev.score);
@@ -10840,10 +11058,13 @@ let poiseApplied = false;
       intimidationApplied = true;
     }
 
-    const ranked = typeof computeCanonicalRankings === "function" && state
-      ? computeCanonicalRankings(state)
-      : [];
-    const rankingMap = new Map(ranked.map(row => [row.playerId, row]));
+    // A daily slate's matchups are unchanged until scoring finishes.
+    // Reuse one pre-game standings snapshot instead of re-reading every
+    // historical matchup separately for each NPC. Other callers stay unchanged.
+    const rankingMap = context.canonicalRanksByPlayerId instanceof Map
+      ? context.canonicalRanksByPlayerId
+      : new Map((typeof computeCanonicalRankings === "function" && state
+        ? computeCanonicalRankings(state) : []).map(row => [row.playerId, row]));
     const playerRank = rankingMap.get(playerId)?.rank ?? null;
     const opponentRank = rankingMap.get(opponentId)?.rank ?? null;
 
@@ -11326,6 +11547,7 @@ return Number(cappedScore.toFixed(1));
     roundPoints,
     computeMomentumEffects,
     computeNpcWinLossStreak,
+    buildNpcMorningScoringInputs,
     computeStreakyEffect,
     getStreakySeasonStart,
 generateOpponentDripScheduleCore,

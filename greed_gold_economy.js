@@ -475,8 +475,35 @@
     const batch = activeGoldReconciliationBatch?.state === state ? activeGoldReconciliationBatch : null;
     const settled = batch ? batch.settledKeys : new Set(Array.isArray(economy.settledMatchupKeys) ? economy.settledMatchupKeys : []);
     if (settled.has(identity)) return false;
+    // A completed outcome without its index key must not be replayed: its
+    // original Gold transactions may still exist. Audit before any repair.
+    if (matchup.goldOutcome?.settled === true) return false;
     const date = rowDateKey(matchup);
     if (!date || date < economy.launchDateKey) return false;
+    // YOUR live score changes throughout the day even after the NPC score
+    // appears. Never treat a same-day or future YOU matchup as final; require
+    // an explicit game date so a timestamp fallback cannot settle it early.
+    // Already-saved historical Gold transactions remain untouched.
+    const userMatchup = String(matchup.playerAId || '') === 'YOU'
+      || String(matchup.playerBId || '') === 'YOU';
+    if (userMatchup) {
+      const explicitDay = String(matchup.dateKey || matchup.date || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(explicitDay)
+        || explicitDay !== date || explicitDay >= localDateKey()) return false;
+      // A saved win/loss label or winner can lag behind changing scores.
+      // Do not permanently award/steal Gold from an inconsistent snapshot.
+      const resultFromScores = goldWinner(matchup);
+      const expectedResult = resultFromScores
+        ? (resultFromScores.winnerId === 'YOU' ? 'you-win' : 'you-loss')
+        : 'you-tie';
+      const savedResult = String(matchup.result || '').trim().toLowerCase();
+      if (['you-win', 'you-loss', 'you-tie', 'tie'].includes(savedResult)
+        && (savedResult === 'tie' ? 'you-tie' : savedResult) !== expectedResult) return false;
+      const declaredWinner = String(matchup.winnerId || '').trim();
+      const declaredLoser = String(matchup.loserId || '').trim();
+      if (declaredWinner && declaredWinner !== String(resultFromScores?.winnerId || '')) return false;
+      if (declaredLoser && declaredLoser !== String(resultFromScores?.loserId || '')) return false;
+    }
     if (date === economy.launchDateKey && (Array.isArray(economy.ignoredSameDayMatchupKeys) ? economy.ignoredSameDayMatchupKeys : []).includes(identity)) return false;
 
     const scoreA = sideScore(matchup, 'A');
@@ -1011,6 +1038,27 @@
     return stored;
   }
 
+  // Home may have a partial boot state while the Gold display has loaded
+  // complete saved data. Expose only a read-only authoritative view.
+  function getGoldLedgerViewState() {
+    let live = null;
+    try { live = global.TaskPointsHomeLiveState?.getState?.() || null; } catch (_) {}
+    const revision = currentStorageRevision();
+    if (Array.isArray(live?.goldLedger) && live.goldLedger.length) return live;
+    if (Array.isArray(displayStateCache?.goldLedger)
+      && displayStateCache.goldLedger.length
+      && (!revision || revision === displayStateCacheRevision)) return displayStateCache;
+    // The original stored-state loader avoids the Greed load wrapper, which
+    // can reconcile and write Gold. No transactions are created by this read.
+    const stored = readStoredState();
+    if (stored && typeof stored === 'object') {
+      displayStateCache = stored;
+      displayStateCacheRevision = currentStorageRevision() || revision;
+      return stored;
+    }
+    return displayStateCache || live || {};
+  }
+
   function patchGoldDisplays() {
     let changed = false;
     if (typeof global.getHomepageGoldValue === 'function' && !global.getHomepageGoldValue.__taskPointsLedgerGold) {
@@ -1137,7 +1185,25 @@
   }
 
   function patchWhenReady() {
-    patchGoldDisplays();
+    const installed = patchGoldDisplays();
+    if (installed) {
+      // After the late Gold adapter installs, repaint just the Gold text.
+      // Do not resimulate scores, change transactions, or force a full save.
+      try {
+        const yourGold = global.document?.getElementById?.('matchupYourGold');
+        if (yourGold && typeof global.formatHomepageGold === 'function') {
+          yourGold.textContent = global.formatHomepageGold('YOU');
+          const opponentGold = global.document.getElementById('matchupOpponentGold');
+          const snapshot = global.TaskPointsHomeLiveState?.getState?.() || null;
+          const todayMatch = snapshot && typeof core.chooseUserMatchupForDate === 'function'
+            ? core.chooseUserMatchupForDate(snapshot, localDateKey(), 'YOU') : null;
+          const opponentId = todayMatch?.playerAId === 'YOU' ? todayMatch.playerBId
+            : todayMatch?.playerBId === 'YOU' ? todayMatch.playerAId : '';
+          if (opponentGold) opponentGold.textContent = opponentId
+            ? global.formatHomepageGold(opponentId) : 'Gold: —';
+        }
+      } catch (error) { console.warn('Gold scoreboard refresh skipped', error); }
+    }
     patchMatchupDescriptions();
     installLedgerNavLink();
     patchAttempts += 1;
@@ -1164,6 +1230,7 @@
     reconcileChampionBonuses,
     settleOneMatchup,
     goldBalance,
+    getGoldLedgerViewState,
     activeNpcPlayers,
     richestActiveNpcGold,
     opponentGoldRating,

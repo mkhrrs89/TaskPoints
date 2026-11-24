@@ -210,14 +210,14 @@ Nothing visible on the page is built here. === -->
   
   <!-- Your app scripts + CSS -->
 <link rel="preload" href="assets/tailwind.css" as="style">
-<link rel="preload" href="styles.css?v=20261105-calories-nottracked-1" as="style">
+<link rel="preload" href="styles.css?v=20261124-home-floating-header-gap-1" as="style">
 
 <link rel="stylesheet" href="assets/tailwind.css" media="print" onload="this.media='all'">
-<link rel="stylesheet" href="styles.css?v=20261105-calories-nottracked-1" media="print" onload="this.media='all'">
+<link rel="stylesheet" href="styles.css?v=20261124-home-floating-header-gap-1" media="print" onload="this.media='all'">
 
 <noscript>
   <link rel="stylesheet" href="assets/tailwind.css">
-  <link rel="stylesheet" href="styles.css?v=20261105-calories-nottracked-1">
+  <link rel="stylesheet" href="styles.css?v=20261124-home-floating-header-gap-1">
 </noscript>
   <style>
 
@@ -1009,6 +1009,7 @@ Nothing visible on the page is built here. === -->
           <a href="head_to_heads.html" class="btn btn-teal btn-toolbar nav-btn">Head to Heads</a>
           <a href="schedule.html" class="btn btn-teal btn-toolbar nav-btn">Schedule</a>
           <a href="game_ratings.html" class="btn btn-teal btn-toolbar nav-btn">Ratings</a>
+          <a href="gold_ledger.html" class="btn btn-teal btn-toolbar nav-btn">Gold Ledger</a>
           <a href="records.html" class="btn btn-teal btn-toolbar nav-btn">Records</a>
         </div>
       </div>
@@ -1034,8 +1035,17 @@ Nothing visible on the page is built here. === -->
       <div class="glass sm:col-span-2 lg:col-span-1 home-scoreboard-card">
         <div class="matchup-scoreboard">
           
-          <!-- LEFT SIDE: YOU -->
-          <div class="scoreboard-side">
+          <!-- LEFT SIDE: YOU (tap to inspect your Gold transactions) -->
+          <div
+            id="homeYourGoldLedgerTrigger"
+            class="scoreboard-side home-gold-ledger-trigger"
+            role="button"
+            tabindex="0"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-controls="homeYourGoldLedgerDropdown"
+            aria-label="Your Gold ledger. Tap to show your five most recent transactions."
+          >
             <div class="scoreboard-name-row scoreboard-name-row--you">
               <div id="matchupYourName" class="scoreboard-name">You</div>
               <div
@@ -1274,9 +1284,14 @@ Nothing visible on the page is built here. === -->
       <span class="home-work-hours-caption">Logged</span>
       <div><span id="homeWorkHoursLogged" class="home-work-hours-number">0</span><span class="home-work-hours-unit"> hrs</span></div>
     </div>
+    <div class="home-work-hours-total home-work-hours-missed"
+      title="Estimated take-home pay short of a 40-hour week, assuming no more hours are logged">
+      <span class="home-work-hours-caption">Missed take-home</span>
+      <div id="homeWorkMissedTakeHome" class="home-work-hours-number home-work-hours-missed-value" aria-live="polite">—</div>
+    </div>
     <div class="home-work-hours-total home-work-hours-remaining">
       <span class="home-work-hours-caption">Until 40</span>
-      <div><span id="homeWorkHoursRemaining" class="home-work-hours-number">40</span><span class="home-work-hours-unit"> hrs left</span></div>
+      <div><span id="homeWorkHoursRemaining" class="home-work-hours-number">40</span><span class="home-work-hours-unit"> hrs</span></div>
     </div>
   </div>
   <div id="homeWorkHoursProgressTrack" class="home-work-hours-progress-track" role="progressbar" aria-label="Work hours toward 40 this week" aria-valuemin="0" aria-valuemax="40" aria-valuenow="0">
@@ -1840,6 +1855,7 @@ Nothing visible on the page is built here. === -->
 </script>
 <script src="/scoring_core.js"></script>  
 <script src="home_rank_percentile_line.js?v=20261104-season4-opponent-record-1"></script>
+<script src="gold_season_interest.js?v=20261111-season-interest-1"></script>
 <script>
 const STORAGE_KEY="taskpoints_v1";
 const PENDING_HABIT_DELTAS_KEY="taskpoints_pending_habit_deltas_v1";
@@ -2061,7 +2077,7 @@ let state = (() => {
       preloadedState: nativeCandidate,
       syncDerived: false,
       persistSync: false,
-      persistConfirmedHistoricalRepairs: true
+      persistConfirmedHistoricalRepairs: false
     });
     if (__TP_PERF_BOOT) console.timeEnd('LOAD: IndexedDB native prepare');
 
@@ -3553,7 +3569,7 @@ function getCachedStorageState() {
   const parsed = TaskPointsCore.loadAppState({
     syncDerived: false,
     persistSync: false,
-    persistConfirmedHistoricalRepairs: true
+    persistConfirmedHistoricalRepairs: false
   }).state;
   if (__TP_PERF_BOOT) console.timeEnd('LOAD: JSON.parse');
 
@@ -3647,6 +3663,12 @@ function load() {
       vo2MaxHistory: Array.isArray(p.vo2MaxHistory) ? p.vo2MaxHistory : [],
       liveDiffHistory: p.liveDiffHistory && typeof p.liveDiffHistory === "object" ? p.liveDiffHistory : {},
       liveDiffSnapshots: p.liveDiffSnapshots && typeof p.liveDiffSnapshots === "object" ? p.liveDiffSnapshots : {},
+      // Preserve the authoritative Gold economy during Home's localStorage
+      // fallback boot. Dropping these fields makes the scoreboard briefly
+      // calculate legacy win-margin Gold before the wallet module catches up.
+      // Keep the complete ledger unchanged; save/recovery guards remain intact.
+      goldEconomy: p.goldEconomy && typeof p.goldEconomy === "object" ? p.goldEconomy : undefined,
+      goldLedger: Array.isArray(p.goldLedger) ? p.goldLedger : undefined,
       gameHistory:  Array.isArray(p.gameHistory)  ? p.gameHistory  : [],
       matchups:     Array.isArray(p.matchups)     ? p.matchups     : [],
       schedule:     Array.isArray(p.schedule)     ? p.schedule     : [],
@@ -4250,17 +4272,74 @@ function getHomeScoreboardCurrentSeasonState(asOfKey = getGameDayKey(new Date())
   };
 }
 
+// Home ranks now use the same 75% Win% + 25% total Gold calculation
+// as Power Rankings; canonical scores for gameplay and standings stay intact.
+let homePowerRankingCache = null;
 function getCanonicalRankingMap(){
   if (!window.TaskPointsCore?.computeCanonicalRankings) return new Map();
-
+  const snapshot = state || {};
+  const date = getGameDayKey(new Date());
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const goldBuilder = window.TaskPointsSeasonChampionGoldBonus?.buildPowerRankingTotalGoldMap;
+  // Only coalesce multiple reads in one screen update. Never cache results
+  // indefinitely across player edits, Gold adjustments or new game days.
+  if (homePowerRankingCache?.snapshot === snapshot
+      && homePowerRankingCache.date === date
+      && homePowerRankingCache.goldBuilder === goldBuilder
+      && now - homePowerRankingCache.at < 100) return homePowerRankingCache.map;
   const scopedState = getHomeScoreboardCurrentSeasonState();
-  const rows = TaskPointsCore.computeCanonicalRankings(scopedState);
-  const byId = new Map();
-
-  rows.forEach((row) => {
-    byId.set(row.playerId, row);
-  });
-
+  // Power Rankings' historical helper also restores archived tournament and
+  // recoverable gameHistory matchups before filtering by season. Apply the
+  // SAME list to the rank calculation, without changing Home records, game
+  // simulation or the authoritative state stored on disk.
+  const historyApi = window.TaskPointsSeasonChampionGoldBonus;
+  const completeMatchups = typeof historyApi?.collectCompleteRankingMatchups === 'function'
+    ? historyApi.collectCompleteRankingMatchups(snapshot)
+    : null;
+  const rankingState = Array.isArray(completeMatchups)
+    ? { ...scopedState, matchups: getHomeScoreboardCurrentSeasonRows(completeMatchups, date) }
+    : scopedState;
+  const goldSource = Array.isArray(completeMatchups)
+    ? { ...snapshot, [historyApi.ALL_MATCHUPS_KEY]: completeMatchups }
+    : snapshot;
+  const canonical = TaskPointsCore.computeCanonicalRankings(rankingState, { preindexed: true });
+  let gold = goldBuilder?.(goldSource, rankingState, { todayKey: date });
+  if (!(gold instanceof Map)) {
+    // The addon loads asynchronously; use a one-pass provisional Gold index
+    // until the full historical/championship calculation is available.
+    gold = new Map();
+    if (Number(snapshot.goldEconomy?.version) === 1) {
+      for (const row of (Array.isArray(snapshot.goldLedger) ? snapshot.goldLedger : [])) {
+        const id = String(row?.playerId || '');
+        gold.set(id, (gold.get(id) || 0) + (Number(row?.amount) || 0));
+      }
+    } else {
+      for (const row of (Array.isArray(snapshot.matchups) ? snapshot.matchups : [])) {
+        const key = getHomeScoreboardDateKey(row);
+        if (!key || key < HOME_SCOREBOARD_SEASON_TWO_START || key >= date) continue;
+        const a = Number(row.scoreA), b = Number(row.scoreB);
+        if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+        if (a > b) gold.set(row.playerAId, (gold.get(row.playerAId) || 0) + (a - b) / 10);
+        else if (b > a) gold.set(row.playerBId, (gold.get(row.playerBId) || 0) + (b - a) / 10);
+      }
+    }
+    for (const [id, amount] of gold)
+      gold.set(id, Math.round((amount + Number.EPSILON) * 10) / 10);
+  }
+  const rows = canonical.map((row, canonicalIndex) => ({
+    ...row, canonicalIndex,
+    powerGold: Math.max(0, Number(gold.get(row.playerId)) || 0)
+  }));
+  const goldLeader = rows.reduce((max, row) => Math.max(max, row.powerGold), 0);
+  for (const row of rows) {
+    const winShare = Number.isFinite(row.winPct)
+      ? Math.min(1, Math.max(0, row.winPct)) : 0;
+    const goldShare = goldLeader > 0 ? row.powerGold / goldLeader : 0;
+    row.powerScore = 0.75 * winShare + 0.25 * goldShare;
+  }
+  rows.sort((a, b) => b.powerScore - a.powerScore || a.canonicalIndex - b.canonicalIndex);
+  const byId = new Map(rows.map((row, index) => [row.playerId, { ...row, rank: index + 1 }]));
+  homePowerRankingCache = { snapshot, date, at: now, goldBuilder, map: byId };
   return byId;
 }
   
@@ -4276,6 +4355,27 @@ function getHomepageRankValue(playerId) {
 }
 
 function getHomepageGoldValue(playerId) {
+  if (!playerId) return null;
+
+  // Do not show an estimated win-margin total and then swap to wallet Gold.
+  // Before the Gold runtime is ready, show a placeholder, never a fake balance.
+  const goldApi = window.TaskPointsGreedGoldEconomy;
+  if (!goldApi) return null;
+  let snapshot = state || {};
+  if (Number(snapshot.goldEconomy?.version) !== 1 || !Array.isArray(snapshot.goldLedger)) {
+    snapshot = goldApi.getGoldLedgerViewState?.() || snapshot;
+  }
+  if (Number(snapshot.goldEconomy?.version) === 1) {
+    if (!Array.isArray(snapshot.goldLedger)) return null;
+    return goldApi.goldBalance(snapshot, playerId);
+  }
+  if (snapshot.goldEconomy || snapshot.goldLedger) return null;
+  return goldApi.legacyGoldForPlayer(snapshot, playerId, getGameDayKey(new Date()));
+}
+
+// Retain the pre-ledger margin logic as a reference for older stored data,
+// but never use it to show a provisional current-wallet total.
+function getHomeHistoricalMarginGoldForReference(playerId) {
   if (!playerId) return null;
 
   const today = getGameDayKey(new Date());
@@ -4447,6 +4547,27 @@ function ensureUpcomingSchedule(days = 7){
       used.add(m.playerAId);
       used.add(m.playerBId);
     });
+    // An idle season job can materialize some NPC results before the morning
+    // simulation. Retain already scheduled, not-yet-recorded pairings (notably
+    // YOU's) instead of replacing the whole daily slate with those NPC rows.
+    // Never replace a scored pairing or schedule someone twice.
+    const storedIds = new Set(safePairs.map(m => String(m.id || m.matchupId || '')).filter(Boolean));
+    const planned = Array.isArray(existing?.matchups) ? existing.matchups : [];
+    planned.forEach(m => {
+      if (!m?.playerAId || !m?.playerBId || used.has(m.playerAId) || used.has(m.playerBId)) return;
+      const id = String(m.id || m.matchupId || '');
+      if (id && storedIds.has(id)) return;
+      const row = { ...m, dateKey: m.dateKey || todayKey };
+      const safe = seasonControlApplies && window.TaskPointsCore?.sanitizeSeasonMatchupMetadataForDate
+        ? TaskPointsCore.sanitizeSeasonMatchupMetadataForDate(state, row, todayKey)
+        : row;
+      if (!safe?.playerAId || !safe?.playerBId) return;
+      if (used.has(safe.playerAId) || used.has(safe.playerBId)) return;
+      safePairs.push(safe);
+      used.add(safe.playerAId);
+      used.add(safe.playerBId);
+      if (id) storedIds.add(id);
+    });
 
     const preservedByeIds = Array.isArray(existing?.byeIds)
       ? existing.byeIds.filter((id) => id && !used.has(id))
@@ -4563,14 +4684,48 @@ function makeId() {
   return "id_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2);
 }
 
+// Minimal, content-free phase markers survive an interrupted iPhone startup.
+const HOME_MORNING_TRACE_KEY = 'tp_home_morning_startup_trace_v1';
+function markHomeMorningStartupPhase(phase, details = {}) {
+  try {
+    const day = getGameDayKey(new Date());
+    const raw = localStorage.getItem(HOME_MORNING_TRACE_KEY);
+    let report = raw ? JSON.parse(raw) : null;
+    if (!report || report.dateKey !== day || !Array.isArray(report.phases)) {
+      report = { version: 1, dateKey: day, phases: [], priorAttempts: [] };
+    }
+    if (phase === 'scheduled' && report.phases.length) {
+      report.priorAttempts = Array.isArray(report.priorAttempts) ? report.priorAttempts : [];
+      report.priorAttempts.push(report.phases);
+      report.priorAttempts = report.priorAttempts.slice(-3);
+      report.phases = [];
+    }
+    const safe = {};
+    for (const key of ['players', 'historyRows', 'matchups', 'ledgerRows', 'saved', 'processedPlayers', 'scoringMs', 'dripMs']) {
+      if (typeof details[key] === 'boolean') safe[key] = details[key];
+      else if (Number.isFinite(details[key])) safe[key] = Math.max(0, Math.floor(details[key]));
+    }
+    report.phases.push({ name: String(phase), atMs: Math.round(performance.now()), ...safe });
+    report.phases = report.phases.slice(-16);
+    localStorage.setItem(HOME_MORNING_TRACE_KEY, JSON.stringify(report));
+  } catch (_) { /* diagnostics must never stop startup or recovery */ }
+}
+
 function simulateToday() {
   const todayKey = getGameDayKey(new Date());
+  markHomeMorningStartupPhase('simulation-start', {
+    players: state.players?.length,
+    historyRows: state.gameHistory?.length,
+    matchups: state.matchups?.length,
+    ledgerRows: state.goldLedger?.length
+  });
 
   state.gameHistory = state.gameHistory || [];
   state.matchups    = state.matchups    || [];
   state.schedule    = state.schedule    || [];
 
-  ensureUpcomingSchedule();
+  const scheduleChanged = ensureUpcomingSchedule();
+  markHomeMorningStartupPhase('schedule-ready');
 
   const todaysSchedule = state.schedule.find(d => d && d.date === todayKey);
   const todaysPairs = todaysSchedule && Array.isArray(todaysSchedule.matchups)
@@ -4578,7 +4733,11 @@ function simulateToday() {
     : [];
 
   if (!todaysPairs.length) {
-    save();
+    // A legitimate bye/off-day needs no daily score write. Persist only if
+    // schedule generation itself changed something; otherwise repeated Home
+    // opens used to compress the whole history without changing a single game.
+    const saved = scheduleChanged ? save() : false;
+    markHomeMorningStartupPhase('simulation-finished', { saved });
     return;
   }
 
@@ -4603,7 +4762,32 @@ const effectsById = {};
     scoresById['YOU'] = youScore;
   }
 
-const scoreNpcParticipants = () => participantIds.forEach(id => {
+// Index today's first history row once, instead of re-scanning years of
+// previous days for every NPC score in the morning's simulated slate.
+const todayHistoryByPlayer = new Map();
+for (const entry of state.gameHistory) {
+  if (!entry || getHistoryDateKey(entry) !== todayKey) continue;
+  const id = String(entry.playerId || '');
+  if (id && !todayHistoryByPlayer.has(id)) todayHistoryByPlayer.set(id, entry);
+}
+const scoreNpcParticipants = () => {
+  // withGoldNpcScoringBatch performs its required reconciliation first.
+  markHomeMorningStartupPhase('gold-preflight-finished');
+  // Today's new gameHistory entries do not change existing matchup standings.
+  const canonicalRanksByPlayerId = typeof TaskPointsCore?.computeCanonicalRankings === 'function'
+    ? new Map(TaskPointsCore.computeCanonicalRankings(state, { preindexed: true }).map(row => [row.playerId, row]))
+    : null;
+  markHomeMorningStartupPhase('rankings-ready');
+  const morningScoringInputs = typeof TaskPointsCore?.buildNpcMorningScoringInputs === 'function'
+    ? TaskPointsCore.buildNpcMorningScoringInputs(state, participantIds, todayKey)
+    : null;
+  markHomeMorningStartupPhase('npc-inputs-ready');
+  let processedPlayers = 0;
+  let scoringMs = 0;
+  let dripMs = 0;
+  const timerNow = () => typeof performance !== 'undefined' && performance.now
+    ? performance.now() : Date.now();
+  participantIds.forEach(id => {
   if (id === 'YOU') return;
   const player = playerMap.get(id);
   if (!player) return;
@@ -4618,31 +4802,50 @@ const scoreNpcParticipants = () => participantIds.forEach(id => {
 
 let capturedEffects = null;
 
+const scoreStarted = timerNow();
 const score = simulateAiScoreForPlayer(player, todayKey, {
   opponent,
+  canonicalRanksByPlayerId,
+  ...(morningScoringInputs || {}),
 
   captureEffects(effects) {
     capturedEffects = effects || null;
   }
 });
+scoringMs += timerNow() - scoreStarted;
 
 scoresById[id] = score;
 effectsById[id] = capturedEffects;
+  const dripStarted = timerNow();
   ensureOpponentDripSchedule(todayKey, id, score);
-  const existingHistory = state.gameHistory.find(g => getHistoryDateKey(g) === todayKey && String(g.playerId || '') === String(id));
+  dripMs += timerNow() - dripStarted;
+  processedPlayers += 1;
+  if (processedPlayers % 30 === 0) {
+    markHomeMorningStartupPhase('npc-progress', {
+      processedPlayers, scoringMs, dripMs
+    });
+  }
+  const existingHistory = todayHistoryByPlayer.get(String(id));
   if (existingHistory) {
     if (capturedEffects && typeof capturedEffects === 'object') existingHistory.effects = capturedEffects;
   } else {
-    state.gameHistory.push({
+    const historyRow = {
       id: makeId(),
       date: todayKey,
       playerId: id,
       score,
       effects: capturedEffects
-    });
+    };
+    state.gameHistory.push(historyRow);
+    todayHistoryByPlayer.set(String(id), historyRow);
   }
-});
+  });
+  markHomeMorningStartupPhase('npc-loop-finished', {
+    processedPlayers, scoringMs, dripMs
+  });
+};
 
+  markHomeMorningStartupPhase('gold-preflight-start');
   // Home's first daily simulation has no new Gold outcomes until after all
   // NPC scores have been computed. Share the current pre-game wallets for this
   // one scoring pass, then discard them before matchups settle and save.
@@ -4650,6 +4853,39 @@ effectsById[id] = capturedEffects;
     TaskPointsCore.withGoldNpcScoringBatch(state, scoreNpcParticipants);
   } else {
     scoreNpcParticipants();
+  }
+  markHomeMorningStartupPhase('npc-scores-ready');
+
+  // Index only today's matchups once. Previously every generated pair
+  // searched all historical games with findIndex, which becomes expensive
+  // after months of league history on an iPhone.
+  const todayMatchupIndexes = [];
+  const todayMatchupIds = new Map();
+  const todayMatchupPairs = new Map();
+  const matchupPairKey = (row) => {
+    const pair = [String(row?.playerAId || ''), String(row?.playerBId || '')].sort();
+    return JSON.stringify([pair[0], pair[1], String(row?.matchupType || '')]);
+  };
+  const rememberTodayMatchup = (row, index) => {
+    const id = String(row?.id || row?.matchupId || '');
+    if (id && !todayMatchupIds.has(id)) todayMatchupIds.set(id, index);
+    const pair = matchupPairKey(row);
+    if (!todayMatchupPairs.has(pair)) todayMatchupPairs.set(pair, index);
+  };
+  const rebuildTodayMatchupIndex = () => {
+    todayMatchupIds.clear();
+    todayMatchupPairs.clear();
+    for (const index of todayMatchupIndexes) {
+      const row = state.matchups[index];
+      if (row && getMatchupDateKeyLocal(row) === todayKey) rememberTodayMatchup(row, index);
+    }
+  };
+  for (let index = 0; index < state.matchups.length; index++) {
+    const row = state.matchups[index];
+    if (row && getMatchupDateKeyLocal(row) === todayKey) {
+      todayMatchupIndexes.push(index);
+      rememberTodayMatchup(row, index);
+    }
   }
 
   todaysPairs.forEach(pair => {
@@ -4670,34 +4906,57 @@ playerBEffects: effectsById[pair.playerBId] ?? null
     };
 
     const stableId = String(matchup.id || matchup.matchupId || '');
-    const existingIndex = state.matchups.findIndex(m => {
-      if (!m || getMatchupDateKeyLocal(m) !== todayKey) return false;
-      if (stableId && String(m.id || m.matchupId || '') === stableId) return true;
-      const a = String(m.playerAId || '');
-      const b = String(m.playerBId || '');
-      return [a, b].sort().join('|') === [String(matchup.playerAId), String(matchup.playerBId)].sort().join('|')
-        && String(m.matchupType || '') === String(matchup.matchupType || '');
-    });
-if (existingIndex >= 0) {
-  const existing = state.matchups[existingIndex];
-
-  state.matchups[existingIndex] = {
-    ...matchup,
-    ...existing,
-
-    playerAEffects:
-      existing.playerAEffects ??
-      matchup.playerAEffects ??
-      null,
-
-    playerBEffects:
-      existing.playerBEffects ??
-      matchup.playerBEffects ??
-      null
-  };
-} else {
-  state.matchups.push(matchup);
-}
+    const pairKey = matchupPairKey(matchup);
+    const byId = stableId ? todayMatchupIds.get(stableId) : undefined;
+    const byPair = todayMatchupPairs.get(pairKey);
+    // Match the old findIndex rule: the earliest same-day row matching either
+    // this ID or unordered pair + matchup type wins, even with duplicates.
+    const existingIndex = Math.min(
+      byId === undefined ? Infinity : byId,
+      byPair === undefined ? Infinity : byPair
+    );
+    if (Number.isFinite(existingIndex)) {
+      const existing = state.matchups[existingIndex];
+      const oldId = String(existing.id || existing.matchupId || '');
+      const oldPair = matchupPairKey(existing);
+      const updatedMatchup = {
+        ...matchup,
+        ...existing,
+        playerAEffects: existing.playerAEffects ?? matchup.playerAEffects ?? null,
+        playerBEffects: existing.playerBEffects ?? matchup.playerBEffects ?? null
+      };
+      if (!hasRecordedMatchupScore(existing)) {
+        // An idle season job may have created an unscored placeholder. Keep
+        // its matchup identity and metadata, but populate ONLY missing scores
+        // from the actual simulation. Never rewrite a completed game.
+        const validScore = value => value != null && value !== ''
+          && Number.isFinite(Number(value));
+        for (const side of ['A', 'B']) {
+          const field = 'score' + side;
+          const alias = 'player' + side + 'Score';
+          const recorded = validScore(existing[field]) ? existing[field] : existing[alias];
+          if (!validScore(recorded)) {
+            updatedMatchup[field] = matchup[field];
+            updatedMatchup[alias] = matchup[field];
+          } else {
+            updatedMatchup[field] = recorded;
+            updatedMatchup[alias] = recorded;
+          }
+        }
+      }
+      state.matchups[existingIndex] = updatedMatchup;
+      const updated = state.matchups[existingIndex];
+      if (oldId !== String(updated.id || updated.matchupId || '')
+        || oldPair !== matchupPairKey(updated)
+        || getMatchupDateKeyLocal(updated) !== todayKey) {
+        rebuildTodayMatchupIndex(); // rare changing-key fallback, still only today's rows
+      }
+    } else {
+      const index = state.matchups.length;
+      state.matchups.push(matchup);
+      todayMatchupIndexes.push(index);
+      rememberTodayMatchup(matchup, index);
+    }
   });
 
   if (window.TaskPointsCore?.dedupeSameDayGeneratedSlateState) {
@@ -4712,7 +4971,9 @@ if (existingIndex >= 0) {
     (seasonSync.errors || []).forEach((error) => console.warn('Season result sync error:', error));
   }
 
-  save();
+  markHomeMorningStartupPhase('matchups-ready');
+  const saved = save(); // preserve the original daily save path and safeguards
+  markHomeMorningStartupPhase('simulation-finished', { saved });
 }
 
 function getHistoryDateKey(g){
@@ -4893,6 +5154,22 @@ playerBEffects: effectsById[pair.playerBId] ?? null
   return true;
 }
 
+// Today can have finished NPC matchups before the YOUR matchup is created
+// (season slate materialization runs independently after Home paints).
+// Treat a partially materialized day as INCOMPLETE, not as the whole slate.
+function homeDailyMatchupsReady(dayKey) {
+  const todayRows = (Array.isArray(state.matchups) ? state.matchups : [])
+    .filter(m => m && getMatchupDateKeyLocal(m) === dayKey);
+  if (!todayRows.length) return false;
+  const scheduledDay = (Array.isArray(state.schedule) ? state.schedule : [])
+    .find(day => day && String(day.date || day.dateKey || '') === dayKey);
+  const plannedUserPair = (Array.isArray(scheduledDay?.matchups) ? scheduledDay.matchups : [])
+    .some(m => m && (m.playerAId === 'YOU' || m.playerBId === 'YOU'));
+  if (!plannedUserPair) return true; // genuinely unscheduled/bye, preserve old behavior
+  return todayRows.some(m => (m.playerAId === 'YOU' || m.playerBId === 'YOU')
+    && hasRecordedMatchupScore(m));
+}
+
 function maybeAutoSimToday(){
   const now = new Date();
   const todayKey = getGameDayKey(now);
@@ -4903,11 +5180,7 @@ function maybeAutoSimToday(){
   state.gameHistory = state.gameHistory || [];
   state.matchups = state.matchups || [];
 
-  const hasTodayMatchup = state.matchups.some(m => {
-    const key = getMatchupDateKeyLocal(m);
-    return key === todayKey;
-  });
-  if (hasTodayMatchup) return false;
+  if (homeDailyMatchupsReady(todayKey)) return false;
 
   const hasTodayHistory = state.gameHistory.some(g => getHistoryDateKey(g) === todayKey);
   if (hasTodayHistory) {
@@ -4919,6 +5192,97 @@ function maybeAutoSimToday(){
   return true;
 }
 
+
+// Allow the iPhone to finish showing Home before its first 5 AM+ daily
+// simulation. Previously DOMContentLoaded generated every NPC, reconciled
+// Gold and performed a full protected save *inside* the boot gate, keeping
+// the splash visible and making a long task look like an app hang.
+// The same simulation, rules and protected save still run automatically.
+let homeMorningSimulationScheduled = false;
+function scheduleHomeDailySimulationAfterReveal() {
+  const now = new Date();
+  const dayKey = getGameDayKey(now);
+  if (homeMorningSimulationScheduled || now.getHours() < 5) return false;
+  if (!Array.isArray(state.players) || state.players.length === 0) return false;
+  if (homeDailyMatchupsReady(dayKey)) return false;
+
+  homeMorningSimulationScheduled = true;
+  markHomeMorningStartupPhase('scheduled', {
+    players: state.players.length,
+    historyRows: state.gameHistory?.length,
+    matchups: state.matchups?.length
+  });
+
+  const waitForReveal = () => {
+    const coordinator = window.__tpMobileBootCoordinator;
+    const revealed = coordinator
+      ? coordinator.isRevealed()
+      : (window.__tpBootViewFinished || !document.documentElement.classList.contains('tp-boot-pending'));
+    if (!revealed || document.hidden) {
+      setTimeout(waitForReveal, 250);
+      return;
+    }
+
+    // An actual paint, not merely a microtask, must separate opening Home
+    // from CPU-heavy daily scoring and its non-optional protected persistence.
+    requestAnimationFrame(() => {
+      setTimeout(async () => {
+        if (document.hidden) { setTimeout(waitForReveal, 250); return; }
+        try {
+          // Season interest is explicitly approved or skipped BEFORE any
+          // opening-day game scores, Greed boosts, or Gold thefts are settled.
+          // The Home screen has already painted before showing the dialog.
+          // If the interest module failed to load on a season's first day,
+          // do not settle opening-day games from pre-interest Gold balances.
+          const nowForSeason = new Date();
+          const isInterestBoundary = nowForSeason.getFullYear() >= 2027
+            && nowForSeason.getDate() === 1 && nowForSeason.getMonth() % 2 === 0;
+          if (isInterestBoundary && !window.TaskPointsGoldSeasonInterest?.ensureSeasonDecision) {
+            markHomeMorningStartupPhase('interest-module-unavailable');
+            console.error('TaskPoints season interest module was not loaded; daily games were not generated.');
+            return;
+          }
+          if (window.TaskPointsGoldSeasonInterest?.seasonStartOn?.(nowForSeason)) {
+            const outcome = await window.TaskPointsGoldSeasonInterest.ensureSeasonDecision();
+            if (outcome?.status === 'unavailable') {
+              markHomeMorningStartupPhase('interest-decision-unavailable');
+              return; // never simulate from an unverified season-opening wallet
+            }
+            // Read the authoritative post-decision snapshot. Do not generate
+            // games from the stale Gold balances held by the original Home boot.
+            storageCache.raw = null;
+            storageCache.parsed = null;
+            state = normalizeState(load());
+            markCompletionsDirty();
+          }
+          const runSimulation = () => {
+            const generated = maybeAutoSimToday();
+            if (!generated) return;
+            state = syncStateWithMatchups(state);
+            markCompletionsDirty();
+            scheduleRender(renderAll);
+            // The matchup has a separate refresh timer. Show today's result
+            // as soon as the simulation finishes.
+            refreshHomeMatchupAfterSimulation();
+            markHomeLifecycleBaseline();
+          };
+          if (window.TaskPointsCore?.usesIsolatedTaskScoring?.()) {
+            await TaskPointsCore.runWithVerifiedTaskScoring(runSimulation);
+          } else {
+            runSimulation();
+          }
+        } catch (error) {
+          markHomeMorningStartupPhase('simulation-error');
+          console.error('TaskPoints first-of-day simulation failed; saved data was preserved.', error);
+        } finally {
+          homeMorningSimulationScheduled = false;
+        }
+      }, 0);
+    });
+  };
+  setTimeout(waitForReveal, 0);
+  return true;
+}
 
 function normalizeState(s) {
   const src = (s && typeof s === "object") ? s : {};
@@ -5622,6 +5986,15 @@ function todaysPointsTotal(){
   return todayPoints;
 }
 
+function refreshHomeMatchupAfterSimulation() {
+  const matchupKey = getGameDayKey(new Date());
+  const { dailyTotals } = getDerived().agg;
+  const { todayPoints: matchupPoints } = deriveTodayWithInertia(dailyTotals, matchupKey);
+  if (typeof window.renderTodaysMatchup === 'function') {
+    window.renderTodaysMatchup(matchupKey, matchupPoints);
+  }
+}
+
 function startOpponentDripTicker(){
   function tick(){
     const todayK = todayKey();
@@ -5769,9 +6142,14 @@ state = cleanupLiveDiffHistory(state);
       renderTodaysMatchup(matchupKey, matchupPoints);
       renderYesterdaysResult(dailyTotals, inertiaLookup);
       bindYesterdayRecentResultsDropdown();
+      bindHomePersonalGoldLedgerDropdown();
       if (yesterdayRecentResultsOpen) {
         renderYesterdayRecentResultsDropdown();
         scheduleYesterdayRecentResultsPosition();
+      }
+      if (homePersonalGoldLedgerOpen) {
+        refreshHomePersonalGoldLedgerDropdown();
+        scheduleHomePersonalGoldLedgerPosition();
       }
       renderMatchupStreakPanel();
 
@@ -6486,6 +6864,59 @@ function scheduleHomeSeasonMaterializationAfterFirstPaint(todayKeyStr = getGameD
   return true;
 }
 
+// The confirmed June-2026 repair is still applied in memory during every
+// authoritative load. Only its full compressed *persistence* is postponed:
+// triggering a multi-second full save while decoding Home made the first
+// morning launch look frozen. Check fresh authoritative bytes after paint,
+// so an ordinary daily save or later user edit cannot be overwritten.
+let homeHistoricalRepairPersistenceScheduled = false;
+function scheduleHomeHistoricalRepairPersistenceAfterFirstPaint() {
+  if (homeHistoricalRepairPersistenceScheduled) return false;
+  if (typeof TaskPointsCore?.repairConfirmedJune2026LifetimeHistory !== 'function'
+    || typeof TaskPointsCore?.readTaskPointsStoredState !== 'function'
+    || typeof TaskPointsCore?.mergeAndSaveState !== 'function') return false;
+
+  homeHistoricalRepairPersistenceScheduled = true;
+  const retryMs = 2500;
+  const requiredQuietMs = 12000;
+  const run = () => {
+    const idle = TaskPointsCore.getStorageMaintenanceIdleStatus?.();
+    if (document.hidden || homeMorningSimulationScheduled || (
+      idle && (idle.pageLeaving || idle.activeEditor
+        || Number(idle.navigationQuietForMs || 0) > 0
+        || Number(idle.lastInteractionAgoMs || 0) < requiredQuietMs)
+    )) {
+      setTimeout(run, retryMs);
+      return;
+    }
+
+    try {
+      // Re-read *current* durable state, never persist a stale startup copy.
+      const latest = TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY);
+      if (!latest) return;
+      const repaired = TaskPointsCore.repairConfirmedJune2026LifetimeHistory(latest);
+      if (!repaired?.changed) return; // already saved by normal daily simulation
+      const saved = TaskPointsCore.mergeAndSaveState(repaired.state, {
+        storageKey: STORAGE_KEY,
+        savePath: 'june-2026-lifetime-history-repair'
+      });
+      if (saved?.skipped || saved?.blocked || saved?.blockedByQuotaCircuit) {
+        console.warn('June history repair persistence deferred by storage protection; in-memory correction retained.');
+      }
+    } catch (error) {
+      // No clearing, reset or fallback overwrite: protected data stays intact.
+      console.warn('Deferred June history repair could not be persisted; retry on next launch.', error);
+    }
+  };
+
+  if (window.TaskPointsHomeIdleQueue?.enqueue) {
+    window.TaskPointsHomeIdleQueue.enqueue('home-june-history-repair', run, { delayMs: 18000 });
+  } else {
+    setTimeout(run, 18000);
+  }
+  return true;
+}
+
 function renderTodaysMatchup(todayKeyStr, yourScore){
   const oppNameEl = $('matchupOpponent');
   const oppScoreEl= $('matchupOpponentScore');
@@ -6789,6 +7220,7 @@ function closeYesterdayRecentResultsDropdown() {
 }
 
 function openYesterdayRecentResultsDropdown() {
+  closeHomePersonalGoldLedgerDropdown();
   const panel = $('yesterdayResultsPanel');
   const dropdown = ensureYesterdayRecentResultsDropdown();
   if (!panel || !dropdown) return;
@@ -6836,6 +7268,368 @@ function bindYesterdayRecentResultsDropdown() {
 
   yesterdayRecentResultsBound = true;
 }
+
+
+/* HOME_PERSONAL_GOLD_LEDGER_BEGIN */
+// Only read the durable Gold ledger shown by gold_ledger.html. Never create,
+// reconcile, mutate or persist transactions from the Home pop-down.
+const HOME_GOLD_LEDGER_PAGE_SIZE = 5;
+let homePersonalGoldLedgerBound = false;
+let homePersonalGoldLedgerOpen = false;
+let homePersonalGoldLedgerPositionFrame = 0;
+let homePersonalGoldLedgerRows = [];
+let homePersonalGoldLedgerShown = HOME_GOLD_LEDGER_PAGE_SIZE;
+let homePersonalGoldLedgerAuditMessage = '';
+
+function getHomePersonalGoldLedgerSource() {
+  try {
+    const source = window.TaskPointsGreedGoldEconomy?.getGoldLedgerViewState?.();
+    if (source && typeof source === 'object') return source;
+  } catch (error) {
+    console.warn('Read-only personal Gold history unavailable', error);
+  }
+  return state || {};
+}
+
+function buildHomePersonalGoldLedgerRows(candidateState, playerId = 'YOU') {
+  const ledger = Array.isArray(candidateState?.goldLedger) ? candidateState.goldLedger : [];
+  const official = ledger.filter(row => row && String(row.playerId || '') === playerId);
+  // Older winning margins were consolidated into the official opening
+  // balance. Keep those historical wins visible *alongside* later transactions
+  // instead of hiding them as soon as the first theft/interest entry appears.
+  // Historical entries remain display-only and never affect the Gold balance.
+  const historical = official.length && !candidateState?.goldEconomy?.launchDateKey
+    ? [] : buildHomePersonalHistoricalGoldRows(candidateState, playerId);
+  // Read-only consistency check. Some previous live scores may have been
+  // settled before the day finished. Compare saved debit entries against the
+  // final recorded score; do not delete, reverse, or add any Gold transactions.
+  const hasDebits = official.some(row => row.type === 'matchup_theft'
+    && Number(row.amount) < 0 && row.matchupId);
+  let matchupsById = null;
+  if (hasDebits) {
+    matchupsById = new Map();
+    const all = [
+      ...(Array.isArray(candidateState?.matchups) ? candidateState.matchups : []),
+      ...(Array.isArray(candidateState?.currentSeason?.tournamentMatchupResults)
+        ? candidateState.currentSeason.tournamentMatchupResults : []),
+      ...(Array.isArray(candidateState?.seasonHistory)
+        ? candidateState.seasonHistory.flatMap(season =>
+            Array.isArray(season?.tournamentMatchupResults)
+              ? season.tournamentMatchupResults : []) : [])
+    ];
+    for (const match of all) {
+      const id = String(match?.id || match?.matchupId || '');
+      if (id && !matchupsById.has(id)) matchupsById.set(id, match);
+    }
+  }
+  const reviewed = official.map(row => {
+    if (row.type !== 'matchup_theft' || !(Number(row.amount) < 0)) return row;
+    const match = matchupsById?.get(String(row.matchupId || ''));
+    if (!match) return row;
+    const isA = String(match.playerAId || '') === playerId;
+    const isB = String(match.playerBId || '') === playerId;
+    if (!isA && !isB) return row;
+    const a = match.scoreA == null || match.scoreA === '' ? NaN : Number(match.scoreA);
+    const b = match.scoreB == null || match.scoreB === '' ? NaN : Number(match.scoreB);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return row;
+    if ((isA ? a - b : b - a) > 0) return { ...row, __homeGoldResultConflict: true };
+    return row;
+  });
+  return [...reviewed, ...historical].sort((a, b) =>
+    String(b.createdAtISO || b.dateKey || '').localeCompare(String(a.createdAtISO || a.dateKey || ''))
+    || String(b.id || '').localeCompare(String(a.id || ''))
+  );
+}
+
+function buildHomePersonalHistoricalGoldRows(candidateState, playerId = 'YOU') {
+  // Before the official ledger, Gold from winning margins was recorded as
+  // matchup results, then folded into one opening balance. Show these only
+  // when there are NO real personal transactions, clearly labeled historical.
+  const api = window.TaskPointsGreedGoldEconomy;
+  const matches = typeof api?.collectCompleteMatchups === 'function'
+    ? api.collectCompleteMatchups(candidateState)
+    : (Array.isArray(candidateState?.matchups) ? candidateState.matchups : []);
+  const launch = String(candidateState?.goldEconomy?.launchDateKey || '').slice(0, 10);
+  const today = getGameDayKey(new Date());
+  const seen = new Set(), rows = [];
+  for (let i = 0; i < matches.length; i++) {
+    const m = matches[i];
+    if (!m || m.completed === false || m.result === 'pending') continue;
+    const date = String(m.dateKey || m.date || m.dateISO || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < '2026-07-01'
+      || (launch && date >= launch) || date >= today) continue;
+    const isA = String(m.playerAId || '') === playerId;
+    const isB = String(m.playerBId || '') === playerId;
+    if (!isA && !isB) continue;
+    const a = m.scoreA == null || m.scoreA === '' ? NaN : Number(m.scoreA);
+    const b = m.scoreB == null || m.scoreB === '' ? NaN : Number(m.scoreB);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+    const margin = isA ? a - b : b - a;
+    if (margin <= 0) continue;
+    const opponentId = isA ? m.playerBId : m.playerAId;
+    const id = String(m.id || m.matchupId || date + ':' + opponentId + ':' + i);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    rows.push({
+      id: 'historical:' + id, playerId, opponentId, dateKey: date,
+      type: 'historical_matchup_margin',
+      createdAtISO: String(m.completedAtISO || m.finalizedAtISO || m.createdAtISO || date),
+      amount: Math.round((margin / 10 + Number.EPSILON) * 10) / 10,
+      __homeHistoricalGold: true
+    });
+  }
+  return rows.sort((a, b) =>
+    String(b.createdAtISO || b.dateKey || '').localeCompare(String(a.createdAtISO || a.dateKey || ''))
+    || String(b.id || '').localeCompare(String(a.id || ''))
+  );
+}
+
+// Audit missing *records* only; do not fabricate credits, balances, or
+// ledger transactions from completed games.
+function getHomePersonalMissingGoldCreditNotice(candidateState, playerId = 'YOU') {
+  const launch = String(candidateState?.goldEconomy?.launchDateKey || '').slice(0, 10);
+  if (Number(candidateState?.goldEconomy?.version) !== 1 || !/^\d{4}-\d{2}-\d{2}$/.test(launch)) return '';
+  const today = getGameDayKey(new Date());
+  const credited = new Set((Array.isArray(candidateState?.goldLedger) ? candidateState.goldLedger : [])
+    .filter(row => row?.type === 'matchup_margin' && String(row.playerId || '') === playerId
+      && Number(row.amount) > 0)
+    .map(row => String(row.matchupId || ''))
+    .filter(Boolean));
+  const rows = [
+    ...(Array.isArray(candidateState?.matchups) ? candidateState.matchups : []),
+    ...(Array.isArray(candidateState?.currentSeason?.tournamentMatchupResults)
+      ? candidateState.currentSeason.tournamentMatchupResults : []),
+    ...(Array.isArray(candidateState?.seasonHistory)
+      ? candidateState.seasonHistory.flatMap(season =>
+          Array.isArray(season?.tournamentMatchupResults) ? season.tournamentMatchupResults : []) : [])
+  ];
+  const checked = new Set();
+  let missing = 0;
+  for (const m of rows) {
+    if (!m || m.completed === false || m.result === 'pending') continue;
+    const id = String(m.id || m.matchupId || '');
+    const date = String(m.dateKey || m.date || m.dateISO || '').slice(0, 10);
+    if (!id || !/^\d{4}-\d{2}-\d{2}$/.test(date) || date <= launch
+      || date >= today || checked.has(id + '|' + date)) continue;
+    checked.add(id + '|' + date);
+    if (credited.has(id)) continue;
+    const aIsYou = String(m.playerAId || '') === playerId;
+    const bIsYou = String(m.playerBId || '') === playerId;
+    if (!aIsYou && !bIsYou) continue;
+    const rawA = m.scoreA ?? m.playerAScore, rawB = m.scoreB ?? m.playerBScore;
+    if (rawA == null || rawA === '' || rawB == null || rawB === '') continue;
+    const a = Number(rawA), b = Number(rawB);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+    if ((aIsYou ? a - b : b - a) > 0) missing += 1;
+  }
+  if (!missing) return '';
+  return missing + ' recorded win' + (missing === 1 ? '' : 's')
+    + ' without a matching Gold margin-credit entry. This is a read-only warning; your balance was not changed.';
+}
+
+function homePersonalGoldTransactionLabel(row, playerName) {
+  const opponent = row?.opponentId ? playerName(row.opponentId) : '';
+  if (row?.__homeGoldResultConflict) {
+    return 'Review Gold debit: recorded win' + (opponent ? ' vs ' + opponent : '');
+  }
+  switch (row?.type) {
+    case 'opening_balance': return 'Opening balance';
+    case 'historical_matchup_margin': return opponent ? 'Historical win vs ' + opponent : 'Historical win margin';
+    case 'matchup_margin': return opponent ? 'Win margin vs ' + opponent : 'Matchup win margin';
+    case 'matchup_theft': return Number(row.amount) < 0
+      ? 'Stolen by ' + (opponent || 'opponent')
+      : 'Stole from ' + (opponent || 'opponent');
+    case 'champion_bonus': return 'Championship bonus';
+    case 'season_interest': return 'Season interest';
+    case 'manual_adjustment': {
+      const mode = { add: 'Gold added', subtract: 'Gold removed', set: 'Balance adjusted' }[row?.meta?.mode] || 'Manual adjustment';
+      const note = String(row?.meta?.note || '').trim();
+      return note ? mode + ': ' + note : mode;
+    }
+    default: return String(row?.type || 'Gold transaction').replace(/_/g, ' ');
+  }
+}
+
+function buildHomePersonalGoldLedgerHtml(rows, shown = HOME_GOLD_LEDGER_PAGE_SIZE, playerName = getPlayerNameById, auditMessage = '') {
+  const auditNote = auditMessage
+    ? '<div class="home-gold-ledger-review-note">' + escapeHtml(auditMessage) + '</div>'
+    : '';
+  if (!rows.length) return auditNote + '<div class="yesterday-recent-result-empty">No Gold transactions recorded yet.</div>';
+  const list = rows.slice(0, shown).map(row => {
+    const rawAmount = Number(row.amount);
+    const amount = Number.isFinite(rawAmount) ? Math.round((rawAmount + Number.EPSILON) * 10) / 10 : null;
+    const color = amount === null ? '' : amount < 0 ? 'is-debit' : amount > 0 ? 'is-credit' : '';
+    const amountText = amount === null ? '—' : (amount > 0 ? '+' : '') + amount.toFixed(1);
+    const balance = row.balanceAfter != null && row.balanceAfter !== ''
+      && Number.isFinite(Number(row.balanceAfter))
+      ? 'Balance: ' + Number(row.balanceAfter).toFixed(1) : '';
+    const date = formatRecentMatchupDate(row.dateKey || row.createdAtISO);
+    const description = homePersonalGoldTransactionLabel(row, playerName);
+    return [
+      '<div class="home-gold-ledger-row" role="listitem">',
+      '<div class="home-gold-ledger-date">' + escapeHtml(date) + '</div>',
+      '<div class="home-gold-ledger-main">',
+      '<div class="home-gold-ledger-description" title="' + escapeHtml(description) + '">' + escapeHtml(description) + '</div>',
+      balance ? '<div class="home-gold-ledger-balance">' + escapeHtml(balance) + '</div>' : '',
+      row.__homeGoldResultConflict
+        ? '<div class="home-gold-ledger-review">This saved debit conflicts with the recorded win. Your Gold has not been changed.</div>'
+        : '',
+      '</div>',
+      '<div class="home-gold-ledger-amount ' + color + '">' + escapeHtml(amountText) + '</div>',
+      '</div>'
+    ].join('');
+  }).join('');
+  const next = shown < rows.length
+    ? '<button type="button" class="home-gold-ledger-see-more" data-home-gold-see-more>See more</button>'
+    : '';
+  const historicalNote = rows.some(row => row.__homeHistoricalGold)
+    ? '<div class="home-gold-ledger-history-note">Historical wins were already included in your opening balance. They are not separate transactions or extra Gold.</div>'
+    : '';
+  return auditNote + historicalNote + list + next;
+}
+
+function ensureHomePersonalGoldLedgerDropdown() {
+  let dropdown = $('homeYourGoldLedgerDropdown');
+  if (dropdown) return dropdown;
+  dropdown = document.createElement('div');
+  dropdown.id = 'homeYourGoldLedgerDropdown';
+  dropdown.className = 'yesterday-recent-results-dropdown home-gold-ledger-dropdown';
+  dropdown.setAttribute('role', 'region');
+  dropdown.setAttribute('aria-label', 'Your Gold transactions');
+  dropdown.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(dropdown);
+  return dropdown;
+}
+
+function renderHomePersonalGoldLedgerDropdown() {
+  const dropdown = ensureHomePersonalGoldLedgerDropdown();
+  const previousScroll = dropdown.scrollTop;
+  dropdown.innerHTML = buildHomePersonalGoldLedgerHtml(
+    homePersonalGoldLedgerRows, homePersonalGoldLedgerShown,
+    getPlayerNameById, homePersonalGoldLedgerAuditMessage
+  );
+  dropdown.scrollTop = previousScroll;
+}
+
+function refreshHomePersonalGoldLedgerDropdown() {
+  if (!homePersonalGoldLedgerOpen) return;
+  const snapshot = getHomePersonalGoldLedgerSource();
+  homePersonalGoldLedgerRows = buildHomePersonalGoldLedgerRows(snapshot);
+  homePersonalGoldLedgerAuditMessage = getHomePersonalMissingGoldCreditNotice(snapshot);
+  renderHomePersonalGoldLedgerDropdown();
+}
+
+function positionHomePersonalGoldLedgerDropdown() {
+  if (!homePersonalGoldLedgerOpen) return;
+  const trigger = $('homeYourGoldLedgerTrigger');
+  const dropdown = $('homeYourGoldLedgerDropdown');
+  const card = trigger?.closest('.home-scoreboard-card');
+  if (!trigger || !dropdown || !card) return;
+  const rect = trigger.getBoundingClientRect();
+  const cardRect = card.getBoundingClientRect();
+  const toolbarHeightRaw = getComputedStyle(document.documentElement).getPropertyValue('--tp-toolbar-height');
+  const toolbarHeight = Number.parseFloat(toolbarHeightRaw) || 88;
+  const width = Math.min(340, Math.max(rect.width, window.innerWidth - 24));
+  const left = Math.min(Math.max(12, rect.left), Math.max(12, window.innerWidth - width - 12));
+  const availableHeight = Math.max(92, window.innerHeight - cardRect.bottom - toolbarHeight - 18);
+  dropdown.style.left = Math.round(left) + 'px';
+  dropdown.style.top = Math.round(cardRect.bottom) + 'px';
+  dropdown.style.width = Math.round(width) + 'px';
+  dropdown.style.maxHeight = Math.round(availableHeight) + 'px';
+}
+
+function scheduleHomePersonalGoldLedgerPosition() {
+  if (!homePersonalGoldLedgerOpen || homePersonalGoldLedgerPositionFrame) return;
+  homePersonalGoldLedgerPositionFrame = requestAnimationFrame(() => {
+    homePersonalGoldLedgerPositionFrame = 0;
+    positionHomePersonalGoldLedgerDropdown();
+  });
+}
+
+function closeHomePersonalGoldLedgerDropdown() {
+  homePersonalGoldLedgerOpen = false;
+  const trigger = $('homeYourGoldLedgerTrigger');
+  const dropdown = $('homeYourGoldLedgerDropdown');
+  if (trigger) {
+    trigger.classList.remove('is-gold-ledger-open');
+    trigger.setAttribute('aria-expanded', 'false');
+  }
+  if (dropdown) {
+    dropdown.classList.remove('is-open');
+    dropdown.setAttribute('aria-hidden', 'true');
+  }
+}
+
+function openHomePersonalGoldLedgerDropdown() {
+  const trigger = $('homeYourGoldLedgerTrigger');
+  if (!trigger) return;
+  closeYesterdayRecentResultsDropdown();
+  homePersonalGoldLedgerShown = HOME_GOLD_LEDGER_PAGE_SIZE;
+  const snapshot = getHomePersonalGoldLedgerSource();
+  homePersonalGoldLedgerRows = buildHomePersonalGoldLedgerRows(snapshot);
+  homePersonalGoldLedgerAuditMessage = getHomePersonalMissingGoldCreditNotice(snapshot);
+  const dropdown = ensureHomePersonalGoldLedgerDropdown();
+  dropdown.scrollTop = 0;
+  renderHomePersonalGoldLedgerDropdown();
+  homePersonalGoldLedgerOpen = true;
+  trigger.classList.add('is-gold-ledger-open');
+  trigger.setAttribute('aria-expanded', 'true');
+  dropdown.setAttribute('aria-hidden', 'false');
+  positionHomePersonalGoldLedgerDropdown();
+  requestAnimationFrame(() => {
+    if (homePersonalGoldLedgerOpen) dropdown.classList.add('is-open');
+  });
+}
+
+function toggleHomePersonalGoldLedgerDropdown() {
+  if (homePersonalGoldLedgerOpen) closeHomePersonalGoldLedgerDropdown();
+  else openHomePersonalGoldLedgerDropdown();
+}
+
+function bindHomePersonalGoldLedgerDropdown() {
+  if (homePersonalGoldLedgerBound) return;
+  const trigger = $('homeYourGoldLedgerTrigger');
+  if (!trigger) return;
+  const dropdown = ensureHomePersonalGoldLedgerDropdown();
+  trigger.addEventListener('click', () => toggleHomePersonalGoldLedgerDropdown());
+  trigger.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    toggleHomePersonalGoldLedgerDropdown();
+  });
+  dropdown.addEventListener('click', event => {
+    const more = event.target.closest('[data-home-gold-see-more]');
+    if (!more) {
+      closeHomePersonalGoldLedgerDropdown();
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const previousHeight = dropdown.scrollHeight;
+    homePersonalGoldLedgerShown = Math.min(
+      homePersonalGoldLedgerRows.length, homePersonalGoldLedgerShown + HOME_GOLD_LEDGER_PAGE_SIZE
+    );
+    renderHomePersonalGoldLedgerDropdown();
+    dropdown.scrollTop += Math.max(0, dropdown.scrollHeight - previousHeight);
+    dropdown.querySelector('[data-home-gold-see-more]')?.focus({ preventScroll: true });
+  });
+  document.addEventListener('click', event => {
+    if (!homePersonalGoldLedgerOpen) return;
+    if (!trigger.contains(event.target) && !dropdown.contains(event.target)) {
+      closeHomePersonalGoldLedgerDropdown();
+    }
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !homePersonalGoldLedgerOpen) return;
+    closeHomePersonalGoldLedgerDropdown();
+    trigger.focus();
+  });
+  window.addEventListener('resize', scheduleHomePersonalGoldLedgerPosition, { passive: true });
+  window.addEventListener('orientationchange', scheduleHomePersonalGoldLedgerPosition);
+  window.addEventListener('scroll', scheduleHomePersonalGoldLedgerPosition, { passive: true });
+  homePersonalGoldLedgerBound = true;
+}
+/* HOME_PERSONAL_GOLD_LEDGER_END */
 
 function computeCurrentYouStreak(){
   const rows = getCompletedYouMatchupsForStats();
@@ -11577,6 +12371,22 @@ function formatHomeWorkHours(value) {
   return Number(value.toFixed(2)).toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
+// Read-only estimate of net take-home pay short of 40 logged hours.
+// A running shortfall is not final lost pay until the workweek is finished.
+// Missing wage or tax settings are unknown, not automatically 0.
+function calculateHomeMissedTakeHome(remainingHours, hourlyWage, takeHomeTaxPercent) {
+  if (hourlyWage == null || hourlyWage === ''
+    || takeHomeTaxPercent == null || takeHomeTaxPercent === '') return null;
+  const hours = Number(remainingHours);
+  const wage = Number(hourlyWage);
+  const taxPercent = Number(takeHomeTaxPercent);
+  if (!Number.isFinite(hours) || !Number.isFinite(wage) || !Number.isFinite(taxPercent)
+    || hours < 0 || wage < 0 || taxPercent < 0 || taxPercent > 100) return null;
+  const value = hours * wage * (1 - taxPercent / 100);
+  if (!Number.isFinite(value)) return null;
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
 function renderHomeWorkHours() {
   const now = new Date();
   // Visibility is strictly presentational. Sunday hours still count toward
@@ -11592,7 +12402,20 @@ function renderHomeWorkHours() {
   const trackEl = $('homeWorkHoursProgressTrack');
   const statusEl = $('homeWorkHoursStatus');
   const averageEl = $('homeWorkHoursAverage');
+  const missedEl = $('homeWorkMissedTakeHome');
   const summary = calculateHomeWeeklyWorkHours(getDerived().workEntries, now);
+  if (missedEl) {
+    const payState = typeof state === 'undefined' ? null : state;
+    const missedPay = typeof calculateHomeMissedTakeHome === 'function'
+      ? calculateHomeMissedTakeHome(summary.remaining, payState?.hourlyWage, payState?.takeHomeTaxPercent)
+      : null;
+    missedEl.textContent = missedPay === null ? '—' : missedPay.toLocaleString('en-US', {
+      style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2
+    });
+    missedEl.setAttribute('aria-label', missedPay === null
+      ? 'Missed take-home estimate unavailable; enter hourly wage and tax withholding in Settings'
+      : 'Estimated missed take-home pay this week: ' + missedEl.textContent);
+  }
   const dateOptions = { month: 'short', day: 'numeric' };
   const startText = summary.weekStart.toLocaleDateString(undefined, dateOptions);
   const endText = summary.weekEnd.toLocaleDateString(undefined, dateOptions);
@@ -13979,15 +14802,23 @@ function applyPostponeToTask(task, today){
   return true;
 }
 
-function postponeTasks(tasks, today){
+function postponeTasks(tasks, today, bulk = false){
   if (!tasks.length) return true;
   try {
     if (TaskPointsCore?.journalTaskUpdates) {
+      let changedCount = 0;
       const latest = TaskPointsCore.journalTaskUpdates(tasks.map(task => task.id),
-        draft => applyPostponeToTask(draft, today));
+        draft => {
+          if (!applyPostponeToTask(draft, today)) return false;
+          changedCount += 1;
+          return true;
+        });
       for (const [index, task] of state.tasks.entries()) {
         const saved = latest.get(String(task.id));
         if (saved) state.tasks[index] = saved;
+      }
+      if (bulk && changedCount) {
+        try { window.TaskPointsPerf?.mark?.('taskAction.postponeAllDurable', { count: changedCount }); } catch (_) {}
       }
     } else {
       const selected = new Set(tasks);
@@ -14022,7 +14853,7 @@ function homeSchedulingBasis(id) {
 async function runHomeTaskSchedule(owner, kind, day, bases, legacyTasks = [], date) {
   try {
     const result = await owner.commitSchedule(kind,day,bases,legacyTasks.map(row=>row.id),date,
-      () => typeof TaskPointsCore?.journalTaskUpdates === 'function' && postponeTasks(legacyTasks,day));
+      () => typeof TaskPointsCore?.journalTaskUpdates === 'function' && postponeTasks(legacyTasks,day,kind === 'postpone-all'));
     if (result?.confirmedDurable) window.updateCriticalTasksIsland?.();
   } catch (error) { alert(error.message); }
 }
@@ -14059,7 +14890,7 @@ function postponeAllOverdueTasks(){
     alert('The V2 overdue list could not be verified.');
     return;
   }
-  postponeTasks(overdue, today);
+  postponeTasks(overdue, today, true);
 }
 const pendingHomeTaskStatuses = new Set();
 function changeOwnedHomeTaskStatus(id, operation, rendered){
@@ -15831,15 +16662,14 @@ try {
 updateWeekToggleButtons();
 updateFlexDayToggleButton();
 
-// Preserve first-load daily initialization without re-reading storage.
+// Paint the saved Home state before running the expensive daily simulation.
+scheduleHomeDailySimulationAfterReveal();
 if (window.TaskPointsCore?.usesIsolatedTaskScoring?.()) {
   await TaskPointsCore.runWithVerifiedTaskScoring(() => {
-    maybeAutoSimToday();
     state = syncStateWithMatchups(state);
   });
   replayHomeTodayCleanup();
 } else {
-  maybeAutoSimToday();
   state = syncStateWithMatchups(state);
 }
 markHomeLifecycleBaseline();
@@ -15854,6 +16684,7 @@ renderFlexActions();
 scheduleRender(renderAll);
 startHomeWorkHoursWeekRollover();
 scheduleHomeSeasonMaterializationAfterFirstPaint();
+scheduleHomeHistoricalRepairPersistenceAfterFirstPaint();
 scheduleInitialHomeLiveDiffCapture();
 
 (async () => {
@@ -15881,14 +16712,10 @@ function refreshMainPageFromStorage() {
   // revision number is unchanged or completion count happens to match.
   markCompletionsDirty();
 
-  const autoSimRan = maybeAutoSimToday();
-
-  if (autoSimRan) {
-    storageCache.raw = null;
-    storageCache.parsed = null;
-    state = normalizeState(load());
-    markCompletionsDirty();
-  }
+  // A sleeping iPhone returning on a new day must also avoid blocking the
+  // page lifecycle with the complete Gold/scoring/save pass. The same
+  // protected simulation now runs once Home is visible and responsive.
+  scheduleHomeDailySimulationAfterReveal();
 
   state = syncStateWithMatchups(state);
   markCompletionsDirty();
@@ -15931,6 +16758,18 @@ function refreshMainPageIfChanged(reason = 'lifecycle') {
 }
 
 let hasCompletedInitialPageShow = false;
+
+// Refresh Gold displays after the commissioner decides whether to apply
+// season-start interest. The pending daily simulation stays scheduled and
+// will use the confirmed saved snapshot before generating any new games.
+window.addEventListener('taskpoints:season-gold-interest-recorded', () => {
+  storageCache.raw = null;
+  storageCache.parsed = null;
+  state = normalizeState(load());
+  markCompletionsDirty();
+  scheduleRender(renderAll);
+  markHomeLifecycleBaseline();
+});
 
 window.addEventListener('pageshow', (event) => {
   if (!hasCompletedInitialPageShow) {

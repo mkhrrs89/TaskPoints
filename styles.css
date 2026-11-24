@@ -85,6 +85,16 @@ body {
   padding-top: max(16px, calc(env(safe-area-inset-top, 0px) + 10px));
 }
 
+/* Home only: restore the clear landing space for the fixed critical-task
+   and undated-reminder alert islands between the logo and rank line.
+   Keep the islands fixed and move the rank line + scoreboard as a unit.
+   Desktop and other pages retain their original header spacing. */
+@media (max-width: 767px) {
+  #appRoot > header:has(+ #homeTopCardStack) {
+    padding-bottom: 48px;
+  }
+}
+
 @media (min-width: 768px) {
   #appRoot {
     padding-top: 16px;
@@ -772,6 +782,114 @@ body {
     transform: none;
     clip-path: none;
   }
+}
+
+
+/* Home: the left player's Gold ledger shares Yesterday's pop-down animation. */
+.home-gold-ledger-trigger {
+  position: relative;
+  cursor: pointer;
+  border-radius: 8px;
+  -webkit-tap-highlight-color: transparent;
+}
+.home-gold-ledger-trigger:focus-visible {
+  outline: 2px solid rgba(94, 234, 212, 0.82);
+  outline-offset: 3px;
+}
+.home-gold-ledger-trigger.is-gold-ledger-open {
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.20);
+}
+.home-gold-ledger-trigger #matchupYourGold::after {
+  content: " ▾";
+  font-size: 0.8em;
+  color: #c5d6d7;
+  vertical-align: 0.08em;
+}
+.home-gold-ledger-trigger.is-gold-ledger-open #matchupYourGold::after {
+  content: " ▴";
+}
+.home-gold-ledger-dropdown { min-width: 0; }
+.home-gold-ledger-review-note {
+  padding: 9px 12px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: #fbbf24;
+  border-bottom: 1px solid rgba(71, 85, 105, 0.5);
+}
+.home-gold-ledger-history-note {
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(71, 85, 105, 0.5);
+  color: #cbd5e1;
+  font-size: 10px;
+  line-height: 1.45;
+}
+.home-gold-ledger-row {
+  display: grid;
+  grid-template-columns: 49px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  padding: 10px 12px;
+  min-height: 51px;
+  border-bottom: 1px solid rgba(71, 85, 105, 0.5);
+}
+.home-gold-ledger-date {
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.home-gold-ledger-main { min-width: 0; }
+.home-gold-ledger-description {
+  font-size: 11px;
+  font-weight: 750;
+  color: #e5e7eb;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.home-gold-ledger-review {
+  margin-top: 3px;
+  color: #fbbf24;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.3;
+  white-space: normal;
+}
+.home-gold-ledger-balance {
+  margin-top: 2px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: #94a3b8;
+}
+.home-gold-ledger-amount {
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.home-gold-ledger-amount.is-credit { color: #5eead4; }
+.home-gold-ledger-amount.is-debit { color: #fca5a5; }
+.home-gold-ledger-see-more {
+  display: block;
+  width: 100%;
+  padding: 11px 12px;
+  min-height: 42px;
+  border: 0;
+  background: rgba(30, 75, 77, 0.36);
+  color: #8be4cf;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+  cursor: pointer;
+}
+.home-gold-ledger-see-more:hover,
+.home-gold-ledger-see-more:focus-visible {
+  background: rgba(45, 111, 113, 0.50);
+  outline: 2px solid rgba(94, 234, 212, 0.55);
+  outline-offset: -2px;
 }
 
 .yesterdayResultsPanel .yesterdayWinner,
@@ -1885,6 +2003,15 @@ body{
 
 .toolbar{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:flex-end}
 .header-nav{align-items:center;}
+
+/* The bottom pull-up toolbar is the only app navigation on mobile.
+   Hide the retired upper navigation before first paint. toolbar.js removes
+   those mobile nodes after parsing; desktop links remain available. */
+@media (max-width: 767px) {
+  header .header-nav {
+    display: none !important;
+  }
+}
 .nav-btn{display:inline-flex;align-items:center;gap:6px;}
 .nav-btn.active,
 .dropdown-toggle.active{
@@ -2892,12 +3019,19 @@ header,
 }
 .habitDay.off{background:transparent}
 
-/* A genuinely spent streak freeze: a missed, scoreless day stays visually distinct. */
+/* Spent Streak Freeze: match the completed-week brushed metal, with a
+   distinct silver border even when the tile sits inside a steel week. */
 .habitDay.off.streak-freeze-used{
-  background: #ffffff !important;
-  color: #000000 !important;
+  background:
+    var(--tp-brushed-overlay),
+    var(--tp-brushed-base) !important;
+  color: #f8fafc !important;
   font-weight: 800 !important;
-  border-color: #ffffff !important;
+  border: 2px solid rgba(222, 235, 242, 0.96) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25),
+    0 0 0 1px rgba(21, 31, 37, 0.70) !important;
 }
 
 /* Make sure the bubble can hold overlays */
@@ -5592,13 +5726,19 @@ metal background attached only to the day-bubble row.
 
 .home-work-hours-totals {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) minmax(0, 0.85fr);
+  gap: clamp(5px, 1.6vw, 12px);
   margin-bottom: 12px;
 }
 
 .home-work-hours-total { min-width: 0; }
+.home-work-hours-missed { text-align: center; }
 .home-work-hours-remaining { text-align: right; }
+.home-work-hours-missed-value {
+  /* All three values share .home-work-hours-number typography. Only keep
+     the currency value on one line within the center column. */
+  white-space: nowrap;
+}
 .home-work-hours-caption {
   display: block;
   margin-bottom: 2px;
@@ -5665,6 +5805,11 @@ metal background attached only to the day-bubble row.
   .home-work-hours-card { padding: 13px 14px 12px; }
   .home-work-hours-number { font-size: 2.1rem; }
   .home-work-hours-unit { font-size: 0.74rem; }
+  /* Prevent "32.45 hrs left" wrapping on iPhone and nudge only its value left. */
+  .home-work-hours-remaining > div {
+    white-space: nowrap;
+    transform: translateX(-6px);
+  }
   .home-work-hours-heading { margin-bottom: 9px; }
 }
 

@@ -60,6 +60,9 @@
     .gold-manual-preview { color:#fdba74; font-weight:700; font-variant-numeric:tabular-nums; padding:10px 0; min-height:42px; }
     .gold-manual-status { font-size:13px; color:#86efac; min-height:18px; }
     .gold-manual-status.gold-manual-error { color:#fca5a5; }
+    .gold-recalc-results p { margin:0 0 8px; line-height:1.5; }
+    .gold-recalc-results .gold-table-wrap { max-height:360px; overflow:auto; }
+    .gold-recalc-results .gold-table { width:100%; }
     .gold-manual-actions { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
     .gold-manual-actions button:disabled { opacity:.45; cursor:not-allowed; }
     /* Standalone iPhones render underneath the status bar with viewport-fit=cover.
@@ -201,6 +204,7 @@
               Player
               <select id="goldManualPlayer" class="gold-manual-input" required>
                 <option value="">Choose a player</option>
+                <option value="YOU">You (My Gold)</option>
               </select>
             </label>
             <label class="gold-manual-field" for="goldManualMode">
@@ -230,6 +234,23 @@
         </div>
       </details>
 
+      <details id="goldRecalcSection" class="gold-card p-4 sm:p-5 gold-fold">
+        <summary class="gold-fold-summary">
+          <h2 class="text-lg font-bold">Gold Recalculation</h2>
+          <span class="gold-fold-chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="gold-fold-content">
+          <p class="text-sm gold-muted mb-3">Recalculate all completed Gold-economy matchups from launch through yesterday using the final saved scores. Every player is included, and existing transactions are preserved. Today's unfinished matches are excluded.</p>
+          <div class="gold-manual-actions mb-3">
+            <button type="button" id="goldRecalcPreviewButton" class="btn btn-teal btn-toolbar">Preview Recalculation</button>
+            <button type="button" id="goldRecalcApplyButton" class="btn btn-teal btn-toolbar" disabled>Confirm &amp; Save Corrections</button>
+          </div>
+          <div id="goldRecalcResults" class="gold-recalc-results text-sm space-y-3" aria-live="polite"></div>
+          <p id="goldRecalcStatus" class="gold-manual-status mt-3" role="status" aria-live="polite">Preview first. Nothing changes until you confirm.</p>
+          <p class="text-xs gold-muted mt-2">This replays Gold accounting only; it does not re-simulate historical NPC scores, and any correction is recorded separately without deleting old transactions. Export a current backup before applying.</p>
+        </div>
+      </details>
+
       <details id="goldTransactionsSection" class="gold-card p-4 sm:p-5 gold-fold" open>
         <summary class="gold-fold-summary">
           <h2 class="text-lg font-bold">Transactions</h2>
@@ -247,6 +268,8 @@
               <option value="matchup_theft">Gold Theft</option>
               <option value="champion_bonus">Champion Bonus</option>
               <option value="manual_adjustment">Manual Adjustment</option>
+              <option value="season_interest">Season Interest</option>
+              <option value="gold_recalculation_adjustment">Gold Recalculation</option>
             </select>
           </div>
         </div>
@@ -335,7 +358,9 @@
       matchup_margin: 'Matchup Margin',
       matchup_theft: 'Gold Theft',
       champion_bonus: 'Champion Bonus',
-      manual_adjustment: 'Manual Adjustment'
+      manual_adjustment: 'Manual Adjustment',
+      season_interest: 'Season Interest',
+      gold_recalculation_adjustment: 'Gold Recalculation'
     }[type] || type || 'Transaction');
 
     function formatLedgerDate(value) {
@@ -355,6 +380,17 @@
         const mode = { add: 'Gold added', subtract: 'Gold removed', set: 'Balance set' }[row.meta?.mode] || 'Manual change';
         const note = String(row.meta?.note || '').trim();
         return mode + (note ? ': ' + note : '.');
+      }
+      if (row.type === 'gold_recalculation_adjustment') {
+        const meta = row.meta || {};
+        return 'Historical replay through ' + String(meta.throughDateKey || '')
+          + ' · ' + Number(meta.oldBalance || 0).toFixed(1) + ' → '
+          + Number(meta.correctedBalance || 0).toFixed(1) + ' Gold.';
+      }
+      if (row.type === 'season_interest') {
+        const rate = Number(row.meta?.interestRatePercent);
+        return 'Season ' + String(row.meta?.seasonStartDateKey || row.seasonId || row.dateKey || '')
+          + (Number.isFinite(rate) ? ' · ' + rate + '% interest.' : ' · interest.');
       }
       if (row.type === 'champion_bonus') return `Season championship bonus${row.seasonId ? ` · ${row.seasonId}` : ''}.`;
       if (row.type === 'matchup_margin') {
@@ -470,6 +506,7 @@
     });
   })();
   </script>
-  <script src="gold_manual_adjustment.js?v=20261108-manual-gold-1"></script>
+  <script src="gold_manual_adjustment.js?v=20261117-you-wallet-2"></script>
+  <script src="gold_recalculation.js?v=20261117-replay-1"></script>
 </body>
 </html>

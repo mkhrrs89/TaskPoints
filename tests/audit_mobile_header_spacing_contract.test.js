@@ -33,6 +33,6 @@ test('Audit calculations, export/import and mobile navigation stay intact', () =
   ]) {
     assert.ok(audit.includes(marker), marker + ' must be preserved');
   }
-  assert.match(audit, /bindPress\('runAuditBtn', runAudit\)/);
+  assert.match(audit, /bindPress\('runAuditBtn', \(\) => runAudit\(\{ userInitiated: true \}\)\)/);
   assert.match(audit, /runAudit\(\);\s*\}\);/);
 });

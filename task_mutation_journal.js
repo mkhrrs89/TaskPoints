@@ -402,7 +402,13 @@
     // saved is the exact successfully written normalized journal; avoid
     // immediately re-reading and deep-cloning all pending rows just to
     // schedule an idle compaction. persistPending() still reloads at execution.
-    scheduleCompaction('mutation', saved);
+    try { scheduleCompaction('mutation', saved); }
+    catch (error) {
+      compactionScheduled = false;
+      // The exact journal bytes are already durable. A timer failure must
+      // not tell the foreground caller that its edit was never committed.
+      console.warn('Task mutation saved; idle compaction was not scheduled.', error);
+    }
     // Observe successful live V1 Task interactions on preview hosts only.
     // The V2 preview side runs after deep idle, never before the synchronous
     // journal write or before the UI can show the saved Task.
@@ -415,6 +421,9 @@
   // Prepare a single logical edit from the latest durable versions of the
   // selected tasks. No caller-owned Task or unrelated completion is mutated.
   function journalTaskUpdates(ids, prepare) {
+    if (!Array.isArray(ids) || !ids.length) throw new TypeError('Task update batch requires a non-empty ID array.');
+    if (ids.some(id => !((typeof id === 'string' && id) || Number.isFinite(id))) || typeof prepare !== 'function')
+      throw new TypeError('Task update batch requires valid Task IDs and a synchronous prepare callback.');
     const current = assertJournalWritable();
     const snapshotRaw = storage.getItem(STORAGE_KEY);
     if (snapshotRaw !== null && (typeof snapshotRaw !== 'string' || !snapshotRaw))

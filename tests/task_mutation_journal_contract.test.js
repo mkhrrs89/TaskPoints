@@ -1317,6 +1317,99 @@ test('quota failure during a multi-row batch leaves neither row persisted or ack
   assert.deepEqual(Array.from(pending.record.completionUpserts,row=>row.id),['previous']);
 });
 
+test('bulk postpone writes all tasks once, preserves other pending changes, and replays on load', () => {
+  const baseline = {
+    tasks: [
+      {id:'t1',title:'Overdue A',dueDateISO:'2026-11-18',postponedDays:0},
+      {id:'t2',title:'Overdue B',dueDateISO:'2026-11-20',postponedDays:2},
+      {id:'t3',title:'Future',dueDateISO:'2026-11-26'}
+    ],
+    completions: []
+  };
+  const h = makeHarness({[STORAGE_KEY]:JSON.stringify(baseline)});
+  h.core.journalTaskMutation({completionUpsert:{id:'new',taskId:'t3',points:3,completedAtISO:'2026-11-22T12:00:00Z'}});
+  let journalWrites = 0;
+  const originalSet = h.storage.setItem.bind(h.storage);
+  h.storage.setItem = (key,value) => {
+    if (key === JOURNAL_KEY) journalWrites++;
+    return originalSet(key,value);
+  };
+  h.core.assertTaskMutationJournalWritable();
+  h.core.journalTaskUpdates(['t1','t2'], row => {
+    Object.assign(row,{dueDateISO:'2026-11-22',postponedDays:4,updatedAtISO:'2026-11-22T14:00:00Z'});
+    return true;
+  });
+  assert.equal(journalWrites,1,'batch must use exactly one durable storage write');
+  assert.equal(h.getSaveCalls(),0,'no full-state compression on tap');
+  const journal = JSON.parse(h.storage.getItem(JOURNAL_KEY));
+  assert.equal(journal.tasks.length,2);
+  assert.equal(journal.completionUpserts.length,1,'must preserve pending completion changes');
+  const replayed = h.core.loadAppState().state;
+  assert.equal(replayed.tasks[0].dueDateISO,'2026-11-22');
+  assert.equal(replayed.tasks[1].postponedDays,4);
+  assert.equal(replayed.tasks[2].dueDateISO,'2026-11-26');
+  assert.equal(replayed.completions[0].id,'new');
+  assert.equal(h.core.flushPendingTaskMutations(),true,'existing verified compaction must support batches');
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+  const persisted = JSON.parse(h.storage.getItem(STORAGE_KEY));
+  assert.equal(persisted.tasks[0].dueDateISO,'2026-11-22');
+  assert.equal(persisted.tasks[1].postponedDays,4);
+  assert.equal(persisted.completions[0].id,'new');
+});
+
+test('bulk task journal rejects malformed/locked/wrong-shape writes without changing storage', () => {
+  const h = makeHarness();
+  const postpone = task => { task.dueDateISO='2026-11-22'; return true; };
+  assert.throws(() => h.core.journalTaskUpdates([],postpone),/non-empty/);
+  assert.throws(() => h.core.journalTaskUpdates(['t1',null],postpone),/valid Task IDs/);
+  const before = h.storage.getItem(STORAGE_KEY);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+  const raw = '{bad-json';
+  h.storage.setItem(JOURNAL_KEY,raw);
+  assert.throws(() => h.core.journalTaskUpdates(['t1'],postpone),/malformed and was preserved/);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),raw);
+  assert.equal(h.storage.getItem(STORAGE_KEY),before);
+
+  const locked = makeHarness();
+  locked.context.TaskPointsRecoveryJournalWriteLockGuard = {
+    readLock() { return { owner: 'another-recovery-page' }; },
+    pageMayWrite() { return false; }
+  };
+  assert.throws(() => locked.core.journalTaskUpdates(['t1'],postpone), /paused task changes/);
+  assert.equal(locked.storage.getItem(JOURNAL_KEY), null, 'recovery lock must block journal batch writes');
+});
+
+test('bulk task journal throws on storage failure without a partial durable batch', () => {
+  const h = makeHarness({[STORAGE_KEY]: JSON.stringify({tasks:[{id:'t1'},{id:'t2'}]})});
+  const set = h.storage.setItem.bind(h.storage);
+  h.storage.setItem = (key,value) => {
+    if(key === JOURNAL_KEY) throw Error('QuotaExceededError');
+    return set(key,value);
+  };
+  assert.throws(() => h.core.journalTaskUpdates(['t1','t2'], task=>{
+    task.dueDateISO='2026-11-22';
+    return true;
+  }),/QuotaExceededError/);
+  assert.equal(h.storage.getItem(JOURNAL_KEY),null);
+  assert.equal(h.getSaveCalls(),0);
+});
+
+test('bulk Task rows stay acknowledged and eligible for compaction when the idle timer fails',()=>{
+  const h = makeHarness({[STORAGE_KEY]: JSON.stringify({tasks:[{id:'t1'},{id:'t2'}]})});
+  const timer = h.context.setTimeout;
+  h.context.setTimeout = () => { throw Error('idle timer unavailable'); };
+  const saved=h.core.journalTaskUpdates(['t1','t2'],task=>{
+    task.dueDateISO='2026-11-22';
+    return true;
+  });
+  assert.equal(saved.size,2);
+  assert.equal(h.core.readPendingTaskMutations().record.tasks.length,2);
+  assert.equal(h.core.getTaskMutationJournalStatus().journalWritesVerified,1);
+  h.context.setTimeout=timer;
+  assert.equal(h.core.schedulePendingTaskMutationCompaction(),true);
+  assert.equal(h.core.flushPendingTaskMutations(),true);
+});
+
 test('task completion deletion replays and verified compaction clears the journal', () => {
   const h = makeHarness();
   const task = { id: 't1', title: 'Task', status: 'trashed', counts: 0 };
