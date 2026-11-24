@@ -20325,6 +20325,7 @@
   const OWNED_POINTS_EDIT = 'home-task-points-edit';
   const OWNED_DUE_EDIT = 'home-task-due-date-edit';
   const OWNED_REPEAT_EDIT = 'home-task-repeat-edit';
+  const OWNED_SCHEDULE = 'home-task-schedule';
   function isOwnedEditorOperation(operation) {
     return [OWNED_TITLE_EDIT, OWNED_CLASSIFICATION_EDIT, OWNED_POINTS_EDIT, OWNED_DUE_EDIT, OWNED_REPEAT_EDIT].includes(operation);
   }
@@ -20338,6 +20339,42 @@
     if (typeof key !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(key) || key.startsWith('0000-')) return NaN;
     const date = new Date(key + 'T00:00:00Z');
     return Number.isFinite(date.getTime()) && date.toISOString().slice(0,10) === key ? date.getTime() : NaN;
+  }
+  function shiftOwnedDueDate(before, next, at, previous = before.dueDateISO, original = next || previous) {
+    const after = {...before,dueDateISO:next,updatedAtISO:at};
+    if (!after.originalDueDateISO && original) after.originalDueDateISO = original;
+    const delta = (taskDueDateMillis(next) - taskDueDateMillis(previous)) / 86400000;
+    if (delta > 0) after.postponedDays = (Number(before.postponedDays) || 0) + delta;
+    return after;
+  }
+  function ownedScheduleChoice(input) {
+    const {kind,day,zone,date} = input || {};
+    const kinds = ['postpone','postpone-all','snooze-one','snooze-week','pick-date','swipe-date'];
+    if (!kinds.includes(kind) || !Number.isFinite(taskDueDateMillis(day)) || typeof zone !== 'string' || !zone
+      || (['pick-date','swipe-date'].includes(kind) ? !Number.isFinite(taskDueDateMillis(date)) : date !== undefined))
+      throw new Error('invalid_owned_schedule_choice');
+    return {kind,day,zone,...(date !== undefined ? {date} : {})};
+  }
+  function ownedScheduleResult(before, choice, at) {
+    const {kind,day,date} = ownedScheduleChoice(choice);
+    const previous = before.dueDateISO;
+    if (core.normalizeTask(before).status !== 'active' || before.hidden || before.completedAtISO || before.deletedAt || before.deletedAtISO)
+      throw new Error('owned_schedule_task_not_active');
+    if (previous && !Number.isFinite(taskDueDateMillis(previous))) throw new Error('owned_schedule_existing_date_unreadable');
+    if (kind === 'postpone' || kind === 'postpone-all') {
+      if (!previous || previous >= day) throw new Error('owned_schedule_task_not_overdue');
+      return shiftOwnedDueDate(before,day,at,previous,previous);
+    }
+    if (kind === 'snooze-one' || kind === 'snooze-week') {
+      const days = kind === 'snooze-one' ? 1 : 7;
+      if (days === 1 && !previous) return before; // V1 +1 Day leaves undated Tasks unchanged.
+      const base = previous || day;
+      const next = new Date(taskDueDateMillis(base) + days * 86400000).toISOString().slice(0,10);
+      if (!Number.isFinite(taskDueDateMillis(next))) throw new Error('invalid_owned_schedule_choice');
+      return shiftOwnedDueDate(before,next,at,base,days === 1 ? previous : next);
+    }
+    if (kind === 'swipe-date' && previous === date) return before;
+    return shiftOwnedDueDate(before,date,at);
   }
   function validOwnedRepeatSettings(settings) {
     if (!settings || typeof settings !== 'object' || Array.isArray(settings)
@@ -20383,13 +20420,9 @@
       }
     }
     if (Object.hasOwn(fields,'dueDateISO')) {
-      const previous = before.dueDateISO;
-      const next = fields.dueDateISO;
-      if (!after.originalDueDateISO && (next || previous)) after.originalDueDateISO = next || previous;
       // These are calendar keys. Count days without advancing an instant
       // across a daylight-saving boundary or tying receipt replay to a zone.
-      const delta = (taskDueDateMillis(next) - taskDueDateMillis(previous)) / 86400000;
-      if (delta > 0) after.postponedDays = (Number(before.postponedDays) || 0) + delta;
+      return shiftOwnedDueDate(after,fields.dueDateISO,updatedAtISO,before.dueDateISO);
     }
     return after;
   }
@@ -20579,6 +20612,16 @@
           expected.delete(r.taskId);
           continue;
         }
+      } else if (r.intent.operation === OWNED_SCHEDULE) {
+        const choice = ownedScheduleChoice(r.intent.choice);
+        const at = Date.parse(r.committedAtISO);
+        const [actionId,taskId] = r.intent.actionId.split(':');
+        const after = ownedScheduleResult(old.value,choice,r.committedAtISO);
+        if (!core.isIsolatedCreatedTaskId('v2-task-'+actionId) || r.intent.actionId !== actionId+':'+r.taskId || taskId !== r.taskId
+          || !Number.isFinite(at) || new Date(at).toISOString() !== r.committedAtISO || after === old.value
+          || stableJson(choice) !== stableJson(r.intent.choice) || stableJson(r.intent.expectedTask) !== stableJson(old.value)
+          || stableJson(after) !== stableJson(r.after))
+          throw new Error('owned_schedule_receipt_conflict');
       } else if (!supportsOwnedTaskOperation(r.intent.operation,meta.homeTaskId)
         || core.normalizeTask(old.value).status === 'trashed'
         || stableJson(r.intent.expectedTask)!==stableJson(old.value)) {
@@ -20959,6 +21002,77 @@
       return {confirmedDurable:true,authority:'v2-isolated-task',replayed,receipt:clone(saved),task:clone(latest.value),taskRevision:latest.ownerRevision,generation:verified.meta.generation};
     }finally{db.close();}
   }
+
+  async function commitIsolatedTaskScheduling(input, {replayOnly = false} = {}) {
+    const fixture = ownedTaskContext();
+    if (fixture.completionWrite !== true || fixture.completionControls !== true)
+      throw new Error('isolated_task_schedule_not_selected');
+    const {actionId,generation,bases} = input || {};
+    const choice = ownedScheduleChoice(input?.choice);
+    if (!fixture.homeTaskId || !core.isIsolatedCreatedTaskId('v2-task-'+actionId) || typeof generation !== 'string'
+      || !Array.isArray(bases) || !bases.length || (choice.kind !== 'postpone-all' && bases.length !== 1)
+      || bases.some(row => !row || typeof row.taskId !== 'string' || row.expectedTask?.id !== row.taskId
+        || !Number.isSafeInteger(row.expectedRevision) || row.expectedRevision < 0)
+      || new Set(bases.map(row=>row.taskId)).size !== bases.length)
+      throw new Error('invalid_owned_schedule_intent');
+    const intents = bases.map(({taskId,expectedRevision,expectedTask})=>({
+      actionId:actionId+':'+taskId,operation:OWNED_SCHEDULE,taskId,generation,
+      expectedRevision,expectedTask:clone(expectedTask),choice
+    }));
+    const marker = global.localStorage.getItem(OWNED_TASK_FIXTURE);
+    function verify(meta,rows,receipts,completions) {
+      const snapshot = verifyOwnedSnapshot(ownedTaskContext(),meta,rows,receipts,completions);
+      if (snapshot.sourceDrift || meta.generation !== generation || meta.fixtureId !== fixture.id
+        || marker !== global.localStorage.getItem(OWNED_TASK_FIXTURE)) throw new Error('owned_schedule_source_conflict');
+      ownedScoringSource(fixture,marker,meta,snapshot.completionRewards,snapshot.ownedIds);
+      return snapshot;
+    }
+    function existing(snapshot) {
+      const group = snapshot.journal.filter(row=>row.intent.actionId.startsWith(actionId+':'));
+      if (!group.length) return null;
+      const receipts = intents.map(intent=>group.find(row=>row.id==='isolated-task-action:'+intent.actionId));
+      if (group.length !== intents.length
+        || receipts.some((row,i)=>row?.type !== 'isolated-task-update' || stableJson(row.intent) !== stableJson(intents[i])))
+        throw new Error('owned_schedule_receipt_conflict');
+      return receipts;
+    }
+    const db = await openOwnedTasks();
+    try {
+      const tx = db.transaction(OWNED_TASK_STORES,replayOnly ? 'readonly' : 'readwrite',{durability:'strict'});
+      const result = await withOwnedRecords(tx, (meta,rows,receipts,completions) => {
+        const snapshot = verify(meta,rows,receipts,completions);
+        const previous = existing(snapshot);
+        if (previous) return {receipts:previous,replayed:true};
+        if (replayOnly) return {notCommitted:true};
+        if (meta.mode !== 'owned') throw new Error('rollback_frozen_no_task_writes');
+        if (choice.day !== core.todayKey() || choice.zone !== localCompletionTimeZone()) throw new Error('owned_schedule_day_or_zone_changed');
+        const at = nowIso();
+        let revision = meta.revision;
+        const saved = [];
+        for (const intent of intents) {
+          const row = rows.find(row=>row.id===intent.taskId);
+          if (snapshot.permanentIds.includes(intent.taskId)) throw new Error('owned_task_permanently_deleted');
+          if (!row || !snapshot.ownedIds.includes(intent.taskId) || row.ownerRevision !== intent.expectedRevision
+            || stableJson(row.value) !== stableJson(intent.expectedTask)) throw new Error('owned_task_stale_edit');
+          const after = ownedScheduleResult(row.value,choice,at);
+          if (after === row.value) return {unchanged:true};
+          const receipt = {id:'isolated-task-action:'+intent.actionId,type:'isolated-task-update',intent,
+            taskId:row.id,generation,revision:++revision,priorRevision:row.ownerRevision,before:row.value,after,committedAtISO:at};
+          tx.objectStore('tasks').put({...row,value:after,ownerRevision:revision});
+          tx.objectStore('mutations').add(receipt);
+          saved.push(receipt);
+        }
+        tx.objectStore('meta').put({...meta,revision});
+        return {receipts:saved,replayed:false};
+      });
+      if (!result.receipts) return result;
+      // Verify the exact receipts from a separate transaction after commit.
+      const verified = await withOwnedRecords(db.transaction(OWNED_TASK_STORES,'readonly'),
+        (...records)=>existing(verify(...records)));
+      if (stableJson(verified) !== stableJson(result.receipts)) throw new Error('owned_schedule_readback_unverified');
+      return {...result,confirmedDurable:true};
+    } finally { db.close(); }
+  }
   const OWNED_COMPLETION_ROLLBACK = 'taskpoints-isolated-task-completion-rollback-1';
   const ROLLBACK_HOLD = 'taskpoints_recovery_write_lock_v1';
 
@@ -21080,6 +21194,8 @@
     const fixture = ownedTaskContext();
     const marker = global.localStorage.getItem(OWNED_TASK_FIXTURE);
     const currentLegacySource = ownedLegacyEvidence();
+    if (currentLegacySource.some(([key])=>key === core.ISOLATED_TASK_SCHEDULE_PENDING_KEY))
+      throw new Error('rollback_pending_task_schedule_requires_review');
     if (fixture.completionRead !== true || fixture.homeTaskId !== 't1'
       || global.localStorage.getItem(OWNED_TASK_SCORING) !== fixture.id || meta.revision !== expectedRevision)
       throw new Error('rollback_completion_selection_conflict');
@@ -21200,12 +21316,16 @@
   async function prepareIsolatedTaskRollback(expectedRevision) {
     const db=await openOwnedTasks();
     try{
+      if (global.localStorage.getItem(core.ISOLATED_TASK_SCHEDULE_PENDING_KEY) !== null)
+        throw new Error('rollback_pending_task_schedule_requires_review');
       const prior=await readOwnedSnapshot(db, true);
       if(prior.sourceDrift)throw new Error('legacy_source_changed_preserved_reconciliation_required');
       if(prior.meta.scoringSeed !== undefined || prior.completionRows.length
         || ownedTaskContext().completionRead === true || global.localStorage.getItem(OWNED_TASK_SCORING) !== null)
         return await prepareCompletionRollback(db, prior, expectedRevision);
       const rollbackSource = ownedLegacyEvidence();
+      if (rollbackSource.some(([key])=>key === core.ISOLATED_TASK_SCHEDULE_PENDING_KEY))
+        throw new Error('rollback_pending_task_schedule_requires_review');
       if (prior.meta.homeTaskId) {
         // These ordinary readers can leave unreadable journal bytes unapplied.
         // A compatible snapshot must not quietly omit such pending evidence.
@@ -21278,6 +21398,7 @@
     prepareIsolatedTaskCompletion,
     commitIsolatedTaskCompletion,
     commitIsolatedOwnedTask,
+    commitIsolatedTaskScheduling,
     prepareIsolatedTaskRollback,
     restoreIsolatedTaskCompletionRollback,
     inspectStartupMeta,

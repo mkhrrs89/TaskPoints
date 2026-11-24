@@ -16,6 +16,7 @@
   let selected = false, verified = null, error = '', read = null;
   let repaint, pending = null, writing = null, editor = null;
   let createSelected = false, createPending = null;
+  let scheduleWriting = false, scheduleNotice = '';
   function createKeys() {
     const prefix = TaskPointsCore.ISOLATED_TASK_CREATE_PENDING_PREFIX;
     return Object.keys(localStorage).filter(key=>key.startsWith(prefix)).sort();
@@ -148,6 +149,89 @@
       expectedRevision: row.ownerRevision, expectedTask: structuredClone(row.value)};
   }
 
+  function pendingSchedule() {
+    return localStorage.getItem(TaskPointsCore.ISOLATED_TASK_SCHEDULE_PENDING_KEY) !== null;
+  }
+
+  async function runSchedule(request, applyLegacy) {
+    if (scheduleWriting) return;
+    scheduleWriting = true;
+    window.ownerScheduleOutcome = null;
+    scheduleNotice = '';
+    const key = TaskPointsCore.ISOLATED_TASK_SCHEDULE_PENDING_KEY;
+    try {
+      return await navigator.locks.request(key,{ifAvailable:true},async lock => {
+        if (!lock) throw Error('A scheduling action is already being checked in another Home tab.');
+        let raw = localStorage.getItem(key);
+        const isRetry = raw !== null;
+        if (!isRetry && !request) return;
+        const fixtureId = createFixture()?.id;
+        let intent, legacyIds;
+        if (isRetry) {
+          const saved = JSON.parse(raw);
+          ({intent,legacyIds} = saved || {});
+          if (saved?.fixtureId !== fixtureId || !intent?.choice || !Array.isArray(intent.bases) || !Array.isArray(legacyIds))
+            throw Error('An unreadable scheduling attempt was preserved.');
+          if (request && (intent.choice.kind !== request.choice.kind || intent.choice.date !== request.choice.date
+            || (request.choice.kind !== 'postpone-all' && intent.bases[0]?.taskId !== request.bases[0]?.taskId)))
+            throw Error('Check the pending schedule before starting a different action.');
+        } else {
+          const {bases,choice} = request;
+          ({legacyIds} = request);
+          if (!fixtureId || !bases.length || bases.some(row=>row.generation !== bases[0].generation))
+            throw Error('The selected V2 Tasks could not be verified.');
+          intent = {actionId:crypto.randomUUID(),generation:bases[0].generation,bases,choice};
+          raw = JSON.stringify({fixtureId,intent,legacyIds});
+          localStorage.setItem(key,raw);
+          if (localStorage.getItem(key) !== raw) throw Error('The scheduling retry could not be recorded.');
+        }
+        const commit = TaskPointsStateRuntimeV2.commitIsolatedTaskScheduling;
+        let result, recovered = isRetry;
+        try { result = await commit(intent,{replayOnly:!request}); }
+        catch (error) {
+          // Read the original receipt after a lost response. A clean read
+          // with no receipt does not authorize another write on its own.
+          result = await commit(intent,{replayOnly:true}).catch(()=>null);
+          if (!result?.confirmedDurable) throw error;
+          recovered = true;
+        }
+        if (!result.confirmedDurable && !result.unchanged && !(result.notCommitted && !request))
+          throw Error('The scheduling result could not be confirmed.');
+        if (read) await read;
+        await refresh();
+        if (result.confirmedDurable && (!verified || verified.sourceDrift
+          || !result.receipts.every(receipt=>verified.journal.some(row=>row.id===receipt.id))))
+          throw Error('The committed scheduling receipts could not be confirmed.');
+        // The legacy group uses its own journal only during the original
+        // confirmed run. After interruption, never reapply that group blindly.
+        if (localStorage.getItem(key) !== raw) throw Error('The pending scheduling evidence changed.');
+        const legacyReviewRequired = legacyIds.length > 0
+          && (recovered || intent.choice.day !== TaskPointsCore.todayKey() || !applyLegacy?.());
+        if (legacyReviewRequired) {
+          scheduleNotice = result.confirmedDurable
+            ? 'V2 dates were saved. Review the remaining overdue V1 Tasks before running Postpone all again.'
+            : 'The interrupted scheduling action did not commit in V2. Review the overdue list before trying again.';
+        } else if (!request) {
+          scheduleNotice = result.notCommitted ? 'The interrupted scheduling action did not commit. You can try again.'
+            : 'The previous scheduling action was verified.';
+        }
+        if (localStorage.getItem(key) !== raw) throw Error('The pending scheduling evidence changed.');
+        // Leave a partial outcome discoverable after restart until Home
+        // explicitly checks it. The V1 phase will never be replayed here.
+        if (!legacyReviewRequired || !request) {
+          localStorage.removeItem(key);
+          if (localStorage.getItem(key) !== null) throw Error('The scheduling outcome could not be cleared.');
+        }
+        window.ownerScheduleOutcome = {ok:!result.notCommitted,...result,legacyReviewRequired};
+        return result;
+      });
+    } catch (error) {
+      scheduleNotice = error.message;
+      window.ownerScheduleOutcome = {ok:false,error:error.message};
+      throw error;
+    } finally { scheduleWriting = false; repaint?.(); }
+  }
+
   async function commitTrash(intent) {
     window.ownerOutcome = null;
     try {
@@ -220,11 +304,23 @@
       'taskpoints_storage_guard_incident_v1', 'taskpoints_recovery_write_lock_v1',
       'taskpoints_recovery_attempt_lock_v1', 'taskpoints_emergency_recovery_hold_v1', 'taskpoints_phase5b_pending_changes_v1'
     ].includes(event.key))) refresh();
+    if (event.storageArea === localStorage && event.key === window.TaskPointsCore?.ISOLATED_TASK_SCHEDULE_PENDING_KEY) repaint?.();
   });
 
   window.TaskPointsOwnedTaskExperiment = Object.freeze({
     isEnabled, owns, displayOnly: true, refresh, taskView,
     usesTaskCreation, recoverTaskCreation, commitTaskCreation, finishTaskCreation,
+    currentScheduleBasis(id) {
+      if (!TaskPointsCore.usesIsolatedTaskDone(id)) throw Error('Verified V2 scheduling is unavailable.');
+      return currentIntent(id);
+    },
+    scheduleReady: () => Boolean(TaskPointsCore.usesIsolatedTaskDone() && verified && !verified.sourceDrift && verified.meta.mode === 'owned'),
+    pendingSchedule,
+    scheduleNotice: () => scheduleNotice,
+    recoverSchedule: () => runSchedule(null),
+    commitSchedule: (kind,day,bases,legacyIds=[],date,applyLegacy) => runSchedule({
+      bases,legacyIds,choice:{kind,day,zone:Intl.DateTimeFormat().resolvedOptions().timeZone,...(date !== undefined ? {date} : {})}
+    },applyLegacy),
     recentTrash() {
       if (!verified || verified.sourceDrift || verified.meta.mode !== 'owned' || !TaskPointsCore.usesIsolatedTaskDone()) return [];
       const now = Date.now();

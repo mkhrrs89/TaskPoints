@@ -545,16 +545,51 @@ setup. Both passed on focused reruns here and on `02ef827f`. The scoped run
 had 516 passes, 14 failures, and one TODO, with the same results and failure
 names on `02ef827f`. The existing intermittent Inbox issue remains tracked.
 
+## Home scheduling (M02 Package 2A)
+
+The real individual and bulk Postpone controls, both action-sheet snoozes,
+the action-sheet date prompt, and the swipe calendar use verified V2 dates
+for admitted synthetic Tasks. The experiment exposes the existing action
+sheet from the expanded owned card. Ordinary V1 Home has the same controls
+as before. Existing +1 Day and direct Due Date edits share the same Task
+revision and conflict with a schedule based on an older revision.
+
+Postpone takes an overdue date to the current local day. Snooze +1 leaves
+an undated Task unchanged. Snooze +7 uses the due date or today. Both
+date pickers leave the counter unchanged when moving a date earlier. For
+forward moves the counter uses calendar days, including across daylight
+saving changes. The swipe calendar acknowledges an unchanged date without
+writing a receipt. The V2 date prompt refuses impossible dates. An
+uncommitted request cannot run after its local day changes, and the
+existing time-zone holds still apply. Recurrence, earned rewards, and
+persisted Today membership and order are preserved.
+
+Bulk Postpone commits the complete V2 group and its receipts together. The
+unrelated V1 subset is written through the separate existing V1 journal
+after the V2 result is verified. After interruption or a V1 write failure,
+Home calls out the partial outcome. Checking the pending schedule verifies
+the original receipts without writing. A fresh Postpone all can then apply
+to the Tasks still overdue. Rollback refuses to freeze while the result needs
+review and retains the verified dates, postponement counters, earned history,
+and permanent-deletion evidence in the detached V1 checkpoint.
+
+All 10 scheduling tests passed. The existing full-Home suite passed all
+171 tests, and a focused lifecycle rerun passed all 42. All 19 component
+and 32 targeted checks passed. The broader scoped run had 527 passes,
+15 failures, and one TODO, matching `2f2e8119`, including the swipe
+stylesheet version assertion. A later scoped run had one additional Habit
+render timing failure. That check passed on focused reruns on both revisions.
+
 ### Remaining Task work for M02
 
 1. **Trash** — verified in the synthetic experiment. Restore and confirmed
    Delete Forever use the same deletion evidence, preserve linked rewards,
    and support detached rollback. Sealed V1 Trash rows meeting those conditions
    can be adopted for the selected synthetic Task. Ambiguous rows stay held.
-2. **Home and Archive** — migrate individual and bulk overdue Postpone,
-   the action-sheet snooze and date picker, swipe rescheduling, Hide,
-   Won't Do and recurring skips. Route Archive Un-Archive, Won't Do, and
-   Done through the corresponding verified operations.
+2. **Home and Archive** — Package 2A verifies individual and bulk overdue
+   Postpone, action-sheet Snooze +1 and +7 and date picking, and swipe
+   rescheduling in the synthetic experiment. Package 2B remains open for
+   Hide, Un-Archive, Won't Do, recurring skips, and Archive Done.
 3. **Week** — route Add Task and the existing +1 Day, Postpone, Won't Do,
    Done and Delete controls through the shared Task operations. Verify
    the selected-day and weekly recurrence rules of each control.

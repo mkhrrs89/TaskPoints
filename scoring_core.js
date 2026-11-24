@@ -8,6 +8,7 @@
   // loaded before selection or has no V2 adapter. Invalid bytes still reserve t1.
   const ISOLATED_TASK_FIXTURE_KEY = 'taskpoints_isolated_task_fixture_v1';
   const ISOLATED_TASK_CREATE_PENDING_PREFIX = 'taskpoints_isolated_task_create_pending_v1:';
+  const ISOLATED_TASK_SCHEDULE_PENDING_KEY = 'taskpoints_isolated_task_schedule_pending_v1';
   const ISOLATED_SCORING_KEY = 'taskpoints_isolated_task_scoring_read_v1';
   const ISOLATED_ROLLBACK_TOMBSTONES_KEY = 'taskpoints_isolated_rollback_tombstones_v1';
   const isolatedCompletionOrigin = ['localhost', '127.0.0.1'].includes(global.location?.hostname);
@@ -11255,6 +11256,7 @@ return Number(cappedScore.toFixed(1));
     ISOLATED_ROLLBACK_TOMBSTONES_KEY,
     filterIsolatedRollbackTaskJournal,
     ISOLATED_TASK_CREATE_PENDING_PREFIX,
+    ISOLATED_TASK_SCHEDULE_PENDING_KEY,
     projectIsolatedDoneTasks,
     isolatedTaskTrashDeletion,
     runIsolatedTaskTrash,

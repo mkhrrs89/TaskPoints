@@ -5059,3 +5059,408 @@ test('V2 permanent Trash refuses ambiguous V1 deletion provenance and pending co
   assert.equal(await page.evaluate(()=>TaskPointsCore.readPendingTaskMutations().raw),pending);
   assert.equal(await page.evaluate(async()=> (await indexedDB.databases()).some(db=>db.name===TaskPointsStateRuntimeV2.DB_NAME)),false);
 });
+
+const schedulePast='2026-11-16';
+const scheduleKind=row=>row.intent.operation==='home-task-schedule';
+const scheduleReceipts=async page=>(await owned(page)).journal.filter(scheduleKind);
+const pendingSchedule=page=>page.evaluate(()=>JSON.parse(localStorage.getItem(TaskPointsCore.ISOLATED_TASK_SCHEDULE_PENDING_KEY)));
+const checkSchedule=page=>page.getByRole('button',{name:'Check pending schedule'});
+const bulkPostpone=page=>page.getByRole('button',{name:'Postpone all',exact:true});
+const individualPostpone=(page,id='t1')=>taskCard(page,id).locator('[data-task-action="postpone"]:visible').first();
+const sheetAction=(page,action)=>page.locator(`#taskActionSheet [data-task-sheet-action="${action}"]`);
+const calendar=page=>page.locator('#taskRescheduleCalendar');
+
+async function showScheduleCard(page,id='t1'){
+  const card=taskCard(page,id);
+  const header=card.locator('xpath=ancestor::section[contains(@class,"task-date-group")][1]').locator('.task-date-group-header');
+  if(await header.getAttribute('aria-expanded')==='false') await header.click();
+  return card;
+}
+
+async function showTaskSheet(page,id='t1'){
+  const card=await showScheduleCard(page,id);
+  const body=card.locator(`[data-task-card-body="${id}"]`);
+  if(await body.getAttribute('aria-expanded')==='false')await body.press('Enter');
+  await card.getByRole('button',{name:'Task actions'}).click();
+  await page.locator('#taskActionSheet').waitFor();
+}
+
+async function swipeSchedule(page,id){
+  const card=await showScheduleCard(page,id);
+  await card.locator('.task-title').evaluate(node=>{
+    for(const [type,clientX] of [['pointerdown',50],['pointermove',150],['pointerup',175]]) {
+      node.dispatchEvent(new PointerEvent(type,{pointerType:'touch',isPrimary:true,bubbles:true,pointerId:17,clientX,clientY:40}));
+    }
+  });
+  await calendar(page).waitFor();
+}
+
+async function scheduleOutcome(page,click){
+  await page.evaluate(()=>{window.ownerScheduleOutcome=null;});
+  await click();
+  await page.waitForFunction(()=>window.ownerScheduleOutcome!==null);
+  return page.evaluate(()=>window.ownerScheduleOutcome);
+}
+
+async function setSchedulingDue(page,date){
+  await openRepeatEditor(page);
+  await dueField(page).fill(date);
+  const result=await submitTaskEdit(page);
+  assert.equal(result.ok,true,JSON.stringify(result));
+}
+
+async function mixedScheduling(t,context){
+  const f=await seedTrash(t,context,{create:true});
+  const {page}=f;
+  await page.setViewportSize({width:390,height:844});
+  await setSchedulingDue(page,schedulePast);
+  await putCreateForm(page,{title:'Synthetic scheduling owned peer',due:'2026-11-15',repeat:'weekly',points:'7.25'});
+  const id=await saveCreateForm(page);
+  await page.evaluate(day=>{
+    TaskPointsCore.journalTaskUpdates(['t2'],row=>{row.dueDateISO=day;return true;});
+    if(!TaskPointsCore.flushPendingTaskMutations())throw Error('Expected V1 setup compaction');
+  },schedulePast);
+  await page.reload();
+  await waitHome(page);
+  await bulkPostpone(page).waitFor();
+  return {...f,id};
+}
+
+test('V2 Home scheduling uses real Postpone, both snoozes, prompt and swipe, preserving recurrences, counters and Today data',async t=>{
+  const {page,context}=await seedTrash(t,undefined,{create:true,recurrence:{mode:'weekly'}});
+  await page.setViewportSize({width:390,height:844});
+  await setSchedulingDue(page,schedulePast);
+  const original=await trashedTask(page,'t1');
+  const before=await partOfState(page);
+  const history=await verifiedRewards(page);
+  const lists=JSON.stringify(cleanedTodayList);
+  await writeTodayFixture(page,lists);
+  const today=await openScoringPage(context,'today.html');
+  await today.setViewportSize({width:390,height:844});
+  await today.reload();
+  const week=await openScoringPage(context,'week.html');
+  const overdueWeekSlot=week.locator(`#weekGrid [data-day-key="${schedulePast}"] [data-task-id="t1"]`);
+  await overdueWeekSlot.waitFor();
+
+  await showScheduleCard(page);
+  const delayed=await scheduleOutcome(page,()=>individualPostpone(page).click());
+  assert.equal(delayed.ok,true,JSON.stringify(delayed));
+  assert.equal(delayed.receipts[0].after.dueDateISO,quietDate);
+  assert.deepEqual([delayed.receipts[0].after.originalDueDateISO,delayed.receipts[0].after.postponedDays],
+    [original.originalDueDateISO,original.postponedDays+2]);
+  await overdueWeekSlot.waitFor({state:'detached'});
+  await week.locator(`#weekGrid [data-day-key="${quietDate}"] [data-task-id="t1"]`).waitFor();
+  await todayTask(today,'t1').waitFor();
+
+  for(const [action,date] of [['bump','2026-11-19'],['bump7','2026-11-26']]){
+    await showTaskSheet(page);
+    const result=await scheduleOutcome(page,()=>sheetAction(page,action).click());
+    assert.equal(result.ok,true,JSON.stringify(result));
+    assert.equal(result.receipts[0].after.dueDateISO,date);
+  }
+  await showTaskSheet(page);
+  page.removeAllListeners('dialog');
+  page.on('dialog',dialog=>dialog.type()==='prompt' ? dialog.accept('2026-11-31') : dialog.dismiss());
+  const invalid=page.waitForEvent('dialog',{predicate:dialog=>dialog.type()==='alert'});
+  await sheetAction(page,'pick-date').click();
+  assert.match((await invalid).message(),/valid date/);
+  assert.equal((await scheduleReceipts(page)).length,3);
+
+  await showTaskSheet(page);
+  page.removeAllListeners('dialog');
+  page.on('dialog',async dialog=>{
+    assert.equal(dialog.defaultValue(),'2026-11-26');
+    await dialog.accept('2026-11-15');
+  });
+  const picked=await scheduleOutcome(page,()=>sheetAction(page,'pick-date').click());
+  assert.equal(picked.ok,true,JSON.stringify(picked));
+  assert.equal(picked.receipts[0].after.postponedDays,original.postponedDays+10);
+  page.removeAllListeners('dialog');
+  page.on('dialog',dialog=>dialog.dismiss());
+
+  // A V2-created row has no V1 Task for the gesture handler to consult.
+  await putCreateForm(page,{title:'Synthetic swipe target',due:quietDate,repeat:'daily',importance:'Critical',points:'2.5'});
+  const newId=await saveCreateForm(page);
+  const critical=today.locator('#criticalTasksIsland[data-active="1"]');
+  await critical.waitFor({state:'attached'});
+  await swipeSchedule(page,newId);
+  const same=await scheduleOutcome(page,()=>calendar(page).locator('[data-task-reschedule-action="today"]').click());
+  assert.equal(same.unchanged,true);
+  await calendar(page).waitFor({state:'hidden'});
+  await swipeSchedule(page,newId);
+  const swipe=await scheduleOutcome(page,()=>calendar(page).locator('[data-task-reschedule-action="tomorrow"]').click());
+  assert.equal(swipe.ok,true,JSON.stringify(swipe));
+  assert.equal(swipe.receipts[0].after.dueDateISO,'2026-11-19');
+  assert.equal(swipe.receipts[0].after.postponedDays,1);
+  await page.waitForFunction(()=>document.getElementById('taskRescheduleFeedback').textContent==='✓ Rescheduled!');
+  await critical.waitFor({state:'detached'});
+  await week.locator(`#weekGrid [data-day-key="2026-11-19"] [data-task-id="${newId}"]`).waitFor();
+  assert.equal(await today.evaluate(()=>localStorage.getItem(TaskPointsCore.ISOLATED_TODAY_LIST_KEY)),lists);
+  assert.deepEqual(await verifiedRewards(page),history);
+  assert.deepEqual(await partOfState(page),before);
+  assert.deepEqual((await trashedTask(page,'t1')).recurrence,original.recurrence);
+  assert.deepEqual((await scheduleReceipts(page)).map(row=>row.intent.choice.kind),
+    ['postpone','snooze-one','snooze-week','pick-date','swipe-date']);
+});
+
+test('V2 Home scheduling preserves the different original-date rules for undated Tasks',async t=>{
+  const {page}=await seedTrash(t,undefined,{create:true});
+  await putCreateForm(page,{title:'Synthetic undated snooze',points:'-1.25'});
+  const id=await saveCreateForm(page);
+  await showTaskSheet(page,id);
+  const skipped=await scheduleOutcome(page,()=>sheetAction(page,'bump').click());
+  assert.equal(skipped.unchanged,true);
+  assert.equal((await trashedTask(page,id)).dueDateISO,null);
+  assert.equal((await scheduleReceipts(page)).length,0);
+  assert.equal(await pendingSchedule(page),null);
+  await showTaskSheet(page,id);
+  const result=await scheduleOutcome(page,()=>sheetAction(page,'bump7').click());
+  assert.equal(result.ok,true,JSON.stringify(result));
+  const row=await trashedTask(page,id);
+  assert.deepEqual([row.dueDateISO,row.originalDueDateISO,row.postponedDays],['2026-11-25','2026-11-25',7]);
+});
+
+test('V2 Home scheduling bulk Postpone commits all owned Tasks and journals only the unrelated V1 subset',async t=>{
+  const {page,id}=await mixedScheduling(t);
+  const baselines=await Promise.all(['t1',id].map(task=>trashedTask(page,task)));
+  const legacyTask=await backingTask(page);
+  const history=await verifiedRewards(page);
+  const result=await scheduleOutcome(page,()=>bulkPostpone(page).click());
+  assert.equal(result.ok,true,JSON.stringify(result));
+  assert.equal(result.receipts.length,2);
+  assert.equal(new Set(result.receipts.map(row=>row.intent.actionId.split(':')[0])).size,1);
+  for(const receipt of result.receipts) {
+    const before=baselines.find(row=>row.id===receipt.taskId);
+    assert.equal(receipt.after.dueDateISO,quietDate);
+    assert.equal(receipt.after.originalDueDateISO,before.originalDueDateISO);
+    assert.equal(receipt.after.postponedDays,before.postponedDays+Number(quietDate.slice(-2))-Number(before.dueDateISO.slice(-2)));
+  }
+  const legacy=await page.evaluate(()=>{
+    const core=TaskPointsCore;
+    const state=core.applyPendingTaskMutations(core.readTaskPointsStoredState());
+    return state.tasks.map(task=>[task.id,task.dueDateISO,task.postponedDays]);
+  });
+  assert.equal(legacy.find(row=>row[0]==='t2')?.[1],quietDate);
+  assert.deepEqual(await backingTask(page),legacyTask);
+  assert.equal(await page.evaluate(()=>TaskPointsCore.readPendingTaskMutations().record.tasks.some(row=>row.id==='t1')),false);
+  await assertCreationOutsideV1(page,[id]);
+  assert.deepEqual(await verifiedRewards(page),history);
+  assert.equal(await pendingSchedule(page),null);
+});
+
+test('V2 Home scheduling bulk aborts both V2 rows on the second receipt failure and reuses the exact envelope after quota',async t=>{
+  const {page,id}=await mixedScheduling(t);
+  await page.evaluate(()=>{
+    const add=IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add=function(row,...args){
+      if(row?.intent?.operation==='home-task-schedule' && window.failSchedule && ++window.scheduleAdds===2)
+        throw new DOMException('Synthetic schedule quota','QuotaExceededError');
+      return add.call(this,row,...args);
+    };
+    window.failSchedule=true;
+    window.scheduleAdds=0;
+  });
+  const result=await scheduleOutcome(page,()=>bulkPostpone(page).click());
+  assert.match(result.error,/Synthetic schedule quota/);
+  const pending=await pendingSchedule(page);
+  assert.deepEqual(await scheduleReceipts(page),[]);
+  assert.equal((await trashedTask(page,'t1')).dueDateISO,schedulePast);
+  assert.equal((await trashedTask(page,id)).dueDateISO,'2026-11-15');
+  assert.equal((await partOfState(page)).task.dueDateISO,schedulePast);
+  await page.evaluate(()=>{window.failSchedule=false;});
+  const retry=await scheduleOutcome(page,()=>bulkPostpone(page).click());
+  assert.equal(retry.ok,true,JSON.stringify(retry));
+  assert.ok(retry.receipts.every(row=>row.intent.actionId.startsWith(pending.intent.actionId+':')));
+  await page.getByRole('status').filter({hasText:'Review the remaining overdue V1 Tasks'}).waitFor();
+  assert.equal((await partOfState(page)).task.dueDateISO,schedulePast);
+  assert.equal((await pendingSchedule(page)).intent.actionId,pending.intent.actionId);
+  const confirmed=await scheduleOutcome(page,()=>checkSchedule(page).click());
+  assert.deepEqual(confirmed.receipts,retry.receipts);
+  await bulkPostpone(page).click();
+  await page.waitForFunction(day=>{
+    const core=TaskPointsCore;
+    return core.applyPendingTaskMutations(core.readTaskPointsStoredState()).tasks.find(row=>row.id==='t2').dueDateISO===day;
+  },quietDate);
+  assert.equal((await scheduleReceipts(page)).length,2);
+});
+
+for(const phase of ['before commit','after commit']) test(
+  `V2 Home scheduling recovers interrupted mixed bulk ${phase} after Chromium restart without replaying V1`,async t=>{
+    const profile=await completionProfile(t);
+    const {page,id}=await mixedScheduling(t,profile.context);
+    await interruptOwnedWrite(page,phase);
+    await bulkPostpone(page).click();
+    await page.waitForFunction(()=>window.ownedInterruptionReached===true);
+    assert.notEqual(await page.evaluate(()=>window.ownerScheduleOutcome?.ok),true);
+    const saved=await pendingSchedule(page);
+    assert.deepEqual(saved.legacyIds,['t2']);
+    const reopened=await profile.restart();
+    const home=await openScoringPage(reopened,'index.html');
+    await home.setViewportSize({width:390,height:844});
+    await checkSchedule(home).waitFor();
+    const finished=phase==='after commit';
+    const rows=await scheduleReceipts(home);
+    assert.equal(rows.length,finished?2:0);
+    if(finished) assert.ok(rows.every(row=>row.intent.actionId.startsWith(saved.intent.actionId+':')));
+    assert.equal((await trashedTask(home,id)).dueDateISO,finished?quietDate:'2026-11-15');
+    assert.equal((await partOfState(home)).task.dueDateISO,schedulePast);
+    await assert.rejects(home.evaluate(rev=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(rev), (await owned(home)).meta.revision),
+      /rollback_pending_task_schedule_requires_review/);
+    const recovery=await scheduleOutcome(home,()=>checkSchedule(home).click());
+    assert.equal(recovery.ok,finished,JSON.stringify(recovery));
+    await home.getByRole('status').filter({hasText:finished?'Review the remaining overdue V1 Tasks':'did not commit'}).waitFor();
+    assert.equal(await pendingSchedule(home),null);
+    assert.deepEqual(await scheduleReceipts(home),rows);
+    assert.equal((await partOfState(home)).task.dueDateISO,schedulePast);
+    await bulkPostpone(home).click();
+    await home.waitForFunction(day=>{
+      const core=TaskPointsCore;
+      return core.applyPendingTaskMutations(core.readTaskPointsStoredState()).tasks.find(row=>row.id==='t2').dueDateISO===day;
+    },quietDate);
+    assert.equal((await scheduleReceipts(home)).length,2);
+  });
+
+test('V2 Home scheduling verifies lost responses and refuses a stale sheet, stale editor and competing Done',async t=>{
+  const {page,context}=await seedTrash(t,undefined,{recurrence:{mode:'daily'}});
+  const peer=await openScoringPage(context,'index.html');
+  const editor=await openScoringPage(context,'index.html');
+  await openRepeatEditor(editor);
+  await titleField(editor).fill('Synthetic competing editor');
+  await showTaskSheet(peer);
+  await showTaskSheet(page);
+  await page.evaluate(()=>{
+    const api=TaskPointsStateRuntimeV2, commit=api.commitIsolatedTaskScheduling;
+    api.commitIsolatedTaskScheduling=async (...args)=>{
+      const result=await commit(...args);
+      if(args[1]?.replayOnly===false && !window.lostSchedule) {
+        window.lostSchedule=result.receipts;
+        throw Error('Synthetic lost scheduling response');
+      }
+      return result;
+    };
+  });
+  const saved=await scheduleOutcome(page,()=>sheetAction(page,'bump7').click());
+  assert.equal(saved.ok,true,JSON.stringify(saved));
+  assert.equal(saved.replayed,true);
+  assert.deepEqual(saved.receipts,await page.evaluate(()=>window.lostSchedule));
+  assert.equal(saved.receipts[0].after.dueDateISO,'2026-11-25');
+  assert.equal(await pendingSchedule(page),null);
+  const staleSheet=await scheduleOutcome(peer,()=>sheetAction(peer,'bump').click());
+  assert.match(staleSheet.error,/owned_task_stale_edit/);
+  const staleEditor=await submitTaskEdit(editor);
+  assert.match(staleEditor.error,/owned_task_stale_edit/);
+  await scheduleOutcome(peer,()=>checkSchedule(peer).click());
+  assert.deepEqual(await scheduleReceipts(page),saved.receipts);
+
+  await setSchedulingDue(page,quietDate);
+  const today=await openScoringPage(context,'today.html');
+  await todayTask(today,'t1').waitFor();
+  const intent=await prepareCompletion(today,'today');
+  await showTaskSheet(page);
+  // Submit both requests with the same verified Task revision. Only one
+  // mutation can own that revision, and Done still earns at most one award.
+  const [schedule,done]=await Promise.all([
+    scheduleOutcome(page,()=>sheetAction(page,'bump').click()),
+    commitCompletion(today,intent).then(result=>({ok:true,result}),error=>({ok:false,error:error.message}))
+  ]);
+  assert.equal(Number(schedule.ok)+Number(done.ok),1,JSON.stringify({schedule,done}));
+  assert.match((schedule.ok?done:schedule).error,/stale|not_applicable/);
+  assert.equal((await completionReceipts(page)).length,Number(done.ok));
+  assert.equal((await scheduleReceipts(page)).length,1+Number(schedule.ok));
+});
+
+test('V2 Home scheduling refuses deleted IDs and restores scheduled metadata and rewards in fresh V1',async t=>{
+  const {page,context,legacyRewards}=await seedTrash(t,undefined,{create:true,recurrence:{mode:'daily'}});
+  await showTaskSheet(page);
+  const scheduled=await scheduleOutcome(page,()=>sheetAction(page,'bump7').click());
+  assert.equal(scheduled.ok,true,JSON.stringify(scheduled));
+  await putCreateForm(page,{title:'Synthetic tombstoned scheduling target',due:quietDate,repeat:'daily',points:'-2.75'});
+  const id=await saveCreateForm(page);
+  await taskCard(page,id).locator('[data-task-action="complete"]').click();
+  await page.waitForFunction(async id=>(await TaskPointsStateRuntimeV2.readIsolatedOwnedTasks()).journal.some(row=>row.taskId===id&&row.completion),id);
+  await taskCard(page,id).locator('button[aria-label="Done today"]').waitFor({state:'attached'});
+  await showTaskSheet(page,id);
+  const scheduledCreated=await scheduleOutcome(page,()=>sheetAction(page,'bump').click());
+  assert.equal(scheduledCreated.ok,true,JSON.stringify(scheduledCreated));
+  const stale=await page.evaluate(id=>({
+    actionId:crypto.randomUUID(),bases:[TaskPointsOwnedTaskExperiment.currentScheduleBasis(id)],
+    choice:{kind:'pick-date',day:TaskPointsCore.todayKey(),zone:Intl.DateTimeFormat().resolvedOptions().timeZone,date:'2026-11-23'}
+  }),id);
+  stale.generation=stale.bases[0].generation;
+  const {receipt:deletion}=await trashCommit(page,await deleteIntent(page,id));
+  const trash=await openScoringPage(context,'trash.html');
+  await trashCommit(trash,foreverIntent(deletion));
+  await trash.close();
+  await assert.rejects(page.evaluate(intent=>TaskPointsStateRuntimeV2.commitIsolatedTaskScheduling(intent),stale),/owned_task_permanently_deleted/);
+
+  const history=await verifiedRewards(page);
+  const before=await partOfState(page);
+  const revision=(await owned(page)).meta.revision;
+  const detached=await page.evaluate(revision=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(revision),revision);
+  assert.deepEqual(detached.permanentIds,[id]);
+  assert.deepEqual(detached.completions,history);
+  const fresh=await browser.newContext({serviceWorkers:'block',timezoneId:'America/New_York'});
+  t.after(()=>fresh.close());
+  await configureContext(fresh);
+  const loader=await rollbackLoader(fresh);
+  assert.deepEqual(await restoreCompletionCheckpoint(loader,detached),{verified:true,checksum:detached.checksum});
+  const v1=await openScoringPage(fresh,'index.html');
+  await taskCard(v1,'t1').waitFor();
+  const restored=await backingTask(v1);
+  assert.deepEqual(restored,scheduled.receipts[0].after);
+  assert.deepEqual(await canonicalCompletions(v1),[...legacyRewards,...history]);
+  assert.equal(await taskCard(v1,id).count(),0);
+  await saveOrdinaryHome(v1);
+  assert.deepEqual(await canonicalCompletions(v1),[...legacyRewards,...history]);
+  assert.deepEqual(await partOfState(v1),{...before,unknownTask:restored.unknownTask});
+});
+
+test('V2 Home scheduling reports a separate V1 journal failure and leaves its subset safe to retry',async t=>{
+  const {page}=await mixedScheduling(t);
+  await page.evaluate(()=>{
+    const core=TaskPointsCore, write=core.journalTaskUpdates;
+    core.journalTaskUpdates=(...args)=>{
+      core.journalTaskUpdates=write;
+      throw new DOMException('Synthetic V1 bulk journal quota','QuotaExceededError');
+    };
+  });
+  const result=await scheduleOutcome(page,()=>bulkPostpone(page).click());
+  assert.equal(result.confirmedDurable,true);
+  assert.equal(result.legacyReviewRequired,true);
+  assert.equal((await scheduleReceipts(page)).length,2);
+  assert.equal((await partOfState(page)).task.dueDateISO,schedulePast);
+  await page.getByRole('status').filter({hasText:'Review the remaining overdue V1 Tasks'}).waitFor();
+  await page.reload();
+  await waitHome(page);
+  const review=await scheduleOutcome(page,()=>checkSchedule(page).click());
+  assert.deepEqual(review.receipts,result.receipts);
+  await bulkPostpone(page).click();
+  await page.waitForFunction(day=>{
+    const core=TaskPointsCore;
+    return core.applyPendingTaskMutations(core.readTaskPointsStoredState()).tasks.find(row=>row.id==='t2').dueDateISO===day;
+  },quietDate);
+  assert.deepEqual(await scheduleReceipts(page),result.receipts);
+});
+
+test('V2 Home scheduling counts calendar days through DST and refuses an uncommitted request from the prior local day',async t=>{
+  const {page}=await seedTrash(t,undefined,{recurrence:{mode:'weekly'}});
+  await setSchedulingDue(page,'2026-03-06');
+  await page.clock.setFixedTime(new Date('2026-03-08T16:00:00.000Z'));
+  await page.reload();
+  await waitHome(page);
+  await showScheduleCard(page);
+  const result=await scheduleOutcome(page,()=>individualPostpone(page).click());
+  assert.equal(result.ok,true,JSON.stringify(result));
+  const [receipt]=result.receipts;
+  assert.equal(receipt.after.dueDateISO,'2026-03-08');
+  assert.equal(receipt.after.postponedDays,receipt.before.postponedDays+2);
+  assert.deepEqual(receipt.after.recurrence,receipt.before.recurrence);
+  const stale=await page.evaluate(()=>{
+    const basis=TaskPointsOwnedTaskExperiment.currentScheduleBasis('t1');
+    return {actionId:crypto.randomUUID(),generation:basis.generation,bases:[basis],
+      choice:{kind:'snooze-one',day:'2026-03-07',zone:Intl.DateTimeFormat().resolvedOptions().timeZone}};
+  });
+  await assert.rejects(page.evaluate(intent=>TaskPointsStateRuntimeV2.commitIsolatedTaskScheduling(intent),stale),
+    /owned_schedule_day_or_zone_changed/);
+  assert.deepEqual(await scheduleReceipts(page),[receipt]);
+});

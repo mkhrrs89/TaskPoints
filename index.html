@@ -11212,6 +11212,20 @@ function renderTasks(stateInput = null){
       notice.textContent = message;
       container.appendChild(notice);
     }
+    if (owner.scheduleNotice()) {
+      const notice = document.createElement('p');
+      notice.setAttribute('role', 'status');
+      notice.textContent = owner.scheduleNotice();
+      container.appendChild(notice);
+    }
+    if (owner.pendingSchedule()) {
+      const review = document.createElement('button');
+      review.type = 'button';
+      review.className = 'btn btn-ghost';
+      review.textContent = 'Check pending schedule';
+      review.addEventListener('click', () => owner.recoverSchedule().catch(error => alert(error.message)));
+      container.appendChild(review);
+    }
   }
   const active=taskView.tasks.filter(t=>!t.completedAtISO && !t.hidden && !isTaskTrashed(t) && getTaskStatus(t)!=='wontdo');
   if(!active.length){ empty.classList.remove('hidden'); } else empty.classList.add('hidden');
@@ -11451,6 +11465,7 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
               <button class="btn btn-ghost btn-task" data-task-action="edit" data-task-id="${t.id}">Edit</button>
               <button class="btn btn-ghost btn-task" data-task-action="hide" data-task-id="${t.id}">Hide</button>
               <button class="btn btn-delete btn-task" data-task-action="delete" data-task-id="${t.id}">Delete</button>
+              ${ownedDisplay && owner.owns(t.id) && window.TaskPointsCore?.usesIsolatedTaskDone?.(t.id) ? `<button class="btn btn-ghost btn-task" data-task-action="more" data-task-id="${t.id}">Task actions</button>` : ''}
             </div>
           </div>`;
         body.appendChild(card);
@@ -11708,12 +11723,18 @@ function getTaskActionSheetFocusable(){
 function updateTaskActionSheetVisibility(){
   const sheet = $('taskActionSheet');
   if (!sheet) return;
-  sheet.querySelectorAll('[data-task-sheet-action]').forEach(btn => btn.classList.remove('hidden'));
+  sheet.querySelectorAll('[data-task-sheet-action]').forEach(btn => {
+    btn.classList.remove('hidden');
+    btn.disabled = Boolean(window.TaskPointsOwnedTaskExperiment && taskActionSheetSchedule
+      && ['hide','wont-do'].includes(btn.dataset.taskSheetAction));
+  });
 }
 
 function openTaskActionSheet(id, trigger){
   const sheet = $('taskActionSheet');
   if (!sheet) return;
+  try { taskActionSheetSchedule = homeSchedulingBasis(id); }
+  catch (error) { alert(error.message); return; }
   taskActionSheetTaskId = id;
   taskActionSheetTrigger = trigger || null;
   updateTaskActionSheetVisibility();
@@ -11726,12 +11747,15 @@ function openTaskActionSheet(id, trigger){
   }, 0);
 }
 
+let taskActionSheetSchedule = null;
+
 function closeTaskActionSheet(){
   const sheet = $('taskActionSheet');
   if (!sheet) return;
   sheet.classList.add('hidden');
   sheet.setAttribute('aria-hidden', 'true');
   taskActionSheetTaskId = null;
+  taskActionSheetSchedule = null;
   if (taskActionSheetTrigger && typeof taskActionSheetTrigger.focus === 'function') {
     taskActionSheetTrigger.focus();
   }
@@ -11739,6 +11763,10 @@ function closeTaskActionSheet(){
 }
 
 function snoozeTaskDays(id, days){
+  if (window.TaskPointsCore?.getLegacyTaskCompletionHold?.(id)) {
+    alert('Reopen Task actions to verify the schedule.');
+    return;
+  }
   const t = state.tasks.find(x => x.id === id);
   if (!t || !Number.isFinite(days)) return;
   const oldDue = t.dueDateISO || todayKey();
@@ -11752,7 +11780,23 @@ function snoozeTaskDays(id, days){
   window.updateCriticalTasksIsland?.();
 }
 
-function pickTaskDate(id){
+function pickTaskDate(id, schedule){
+  if (schedule === undefined) {
+    try { schedule = homeSchedulingBasis(id); }
+    catch (error) { alert(error.message); return; }
+  }
+  if (schedule) {
+    const initial = schedule.basis.expectedTask.dueDateISO || todayKey();
+    const val = prompt('Pick due date (YYYY-MM-DD)', initial);
+    if (val === null) return;
+    const next = (val || '').trim();
+    if (!isTaskRescheduleDateKey(next)) return alert('Please enter a valid date as YYYY-MM-DD.');
+    return runHomeTaskSchedule(schedule.owner,'pick-date',todayKey(),[schedule.basis],[],next);
+  }
+  if (window.TaskPointsCore?.getLegacyTaskCompletionHold?.(id)) {
+    alert('Reopen Task actions to verify the schedule.');
+    return;
+  }
   const t = state.tasks.find(x => x.id === id);
   if (!t) return;
   const initial = t.dueDateISO || todayKey();
@@ -11785,6 +11829,7 @@ let taskRescheduleDisplayMonth = null;
 let taskRescheduleReturnFocus = null;
 let taskReschedulePending = false;
 let taskRescheduleRevision = 0;
+let taskRescheduleSchedule = null;
 let taskRescheduleFeedbackTimer = null;
 const TASK_RESCHEDULE_CONFIRMATION_MS = 360;
 
@@ -11877,7 +11922,7 @@ function renderTaskRescheduleCalendar() {
   if (!overlay || !month) return;
   const year = month.getFullYear();
   const monthIndex = month.getMonth();
-  const currentTask = state.tasks.find(task => task?.id === taskRescheduleTaskId);
+  const currentTask = taskRescheduleSchedule?.basis.expectedTask || state.tasks.find(task => task?.id === taskRescheduleTaskId);
   const selected = currentTask?.dueDateISO || '';
   const firstWeekday = new Date(year, monthIndex, 1).getDay();
   const numberOfDays = new Date(year, monthIndex + 1, 0).getDate();
@@ -11901,10 +11946,14 @@ function renderTaskRescheduleCalendar() {
 
 function openTaskRescheduleCalendar(id) {
   if (taskReschedulePending) return false;
-  const task = state.tasks.find(item => item?.id === id);
+  let schedule;
+  try { schedule = homeSchedulingBasis(id); }
+  catch (error) { alert(error.message); return false; }
+  const task = schedule?.basis.expectedTask || state.tasks.find(item => item?.id === id);
   if (!task || task.completedAtISO || task.hidden || isTaskTrashed(task)
     || getTaskStatus(task) === 'wontdo') return false;
   taskRescheduleTaskId = id;
+  taskRescheduleSchedule = schedule;
   const initial = isTaskRescheduleDateKey(task.dueDateISO) ? task.dueDateISO : todayKey();
   const dueDate = fromKey(initial);
   taskRescheduleDisplayMonth = new Date(dueDate.getFullYear(), dueDate.getMonth(), 1);
@@ -11938,6 +11987,7 @@ function closeTaskRescheduleCalendar(force = false) {
     overlay.dataset.stage = 'idle';
   }
   taskRescheduleTaskId = null;
+  taskRescheduleSchedule = null;
   taskRescheduleDisplayMonth = null;
   if (taskRescheduleReturnFocus?.isConnected) taskRescheduleReturnFocus.focus?.();
   taskRescheduleReturnFocus = null;
@@ -11993,6 +12043,12 @@ function queueTaskRescheduleAfterPaint(callback) {
 
 function applyTaskRescheduleDate(newDateKey) {
   if (taskReschedulePending || !isTaskRescheduleDateKey(newDateKey) || !taskRescheduleTaskId) return false;
+  if (taskRescheduleSchedule) return applyOwnedTaskRescheduleDate(newDateKey);
+  if (window.TaskPointsCore?.getLegacyTaskCompletionHold?.(taskRescheduleTaskId)) {
+    closeTaskRescheduleCalendar();
+    alert('Reopen the calendar to verify the schedule.');
+    return false;
+  }
   const task = state.tasks.find(item => item?.id === taskRescheduleTaskId);
   if (!task || task.completedAtISO || task.hidden || isTaskTrashed(task)
     || getTaskStatus(task) === 'wontdo') {
@@ -12017,6 +12073,12 @@ function applyTaskRescheduleDate(newDateKey) {
 
   queueTaskRescheduleAfterPaint(() => {
     if (revision !== taskRescheduleRevision || taskRescheduleTaskId !== taskId) return;
+    if (window.TaskPointsCore?.getLegacyTaskCompletionHold?.(taskId)) {
+      taskReschedulePending = false;
+      setTaskRescheduleFeedback(newDateKey, 'error');
+      alert('Reopen the calendar to verify the schedule.');
+      return;
+    }
     const liveTask = state.tasks.find(item => item?.id === taskId);
     if (!liveTask || liveTask.completedAtISO || liveTask.hidden || isTaskTrashed(liveTask)
       || getTaskStatus(liveTask) === 'wontdo') {
@@ -12059,6 +12121,31 @@ function applyTaskRescheduleDate(newDateKey) {
     }, TASK_RESCHEDULE_CONFIRMATION_MS);
   });
   return true; // Accepted date tap; persistence completes after the feedback paints.
+}
+
+function applyOwnedTaskRescheduleDate(newDateKey) {
+  const {owner,basis} = taskRescheduleSchedule;
+  const revision = ++taskRescheduleRevision;
+  const day = todayKey();
+  taskReschedulePending = true;
+  setTaskRescheduleFeedback(newDateKey, 'saving');
+  queueTaskRescheduleAfterPaint(async () => {
+    if (revision !== taskRescheduleRevision) return;
+    try {
+      const result = await owner.commitSchedule('swipe-date',day,[basis],[],newDateKey);
+      if (!result?.confirmedDurable && !result?.unchanged) throw Error('The new due date could not be verified.');
+      setTaskRescheduleFeedback(newDateKey, result.unchanged ? 'unchanged' : 'saved');
+      window.updateCriticalTasksIsland?.();
+      taskRescheduleFeedbackTimer = setTimeout(() => {
+        if (revision === taskRescheduleRevision) closeTaskRescheduleCalendar(true);
+      }, TASK_RESCHEDULE_CONFIRMATION_MS);
+    } catch (error) {
+      taskReschedulePending = false;
+      setTaskRescheduleFeedback(newDateKey, 'error');
+      alert(error.message);
+    }
+  });
+  return true;
 }
 
 // Mobile-only left-swipe gesture. This opens the SAME confirmation and Trash
@@ -12111,7 +12198,9 @@ function installMobileTaskSwipeDelete(list) {
     if (!card || !list.contains(card)) return;
     const id = card.dataset.taskId;
     if (!id || editingTaskId === id) return;
-    if (!Array.isArray(state?.tasks) || !state.tasks.some(t =>
+    const owner = window.TaskPointsOwnedTaskExperiment;
+    const tasks = owner?.displayOnly && owner.isEnabled() && owner.owns(id) ? owner.taskView(state).tasks : state?.tasks;
+    if (!Array.isArray(tasks) || !tasks.some(t =>
       t?.id === id && !t.completedAtISO && !t.hidden && !isTaskTrashed(t)
     )) return;
     gesture = {
@@ -12241,7 +12330,7 @@ function initTaskListDelegation(){
     const id = btn.getAttribute('data-task-id');
     if (!action) return;
     if (window.TaskPointsCore?.isIsolatedCreatedTaskId?.(id) && ownedHomeTaskEditor(id)
-      && ['postpone','wont-do','hide'].includes(action)) {
+      && ['wont-do','hide'].includes(action)) {
       alert('This action is available after a verified rollback to V1.');
       return;
     }
@@ -12346,16 +12435,27 @@ function initTaskListDelegation(){
         return;
       }
       const actionBtn = e.target.closest('[data-task-sheet-action]');
-      if (!actionBtn || !taskActionSheetTaskId) return;
+      if (!actionBtn || actionBtn.disabled || !taskActionSheetTaskId) return;
       const action = actionBtn.getAttribute('data-task-sheet-action');
       const targetId = taskActionSheetTaskId;
+      const schedule = taskActionSheetSchedule;
       closeTaskActionSheet();
       if (!targetId) return;
+      if (!schedule && ['bump','bump7','pick-date'].includes(action) && window.TaskPointsCore?.getLegacyTaskCompletionHold?.(targetId)) {
+        alert('Reopen Task actions to verify the schedule.');
+        return;
+      }
       switch (action) {
         case 'edit': editTask(targetId); break;
-        case 'bump': bumpTaskOneDay(targetId); break;
-        case 'bump7': snoozeTaskDays(targetId, 7); break;
-        case 'pick-date': pickTaskDate(targetId); break;
+        case 'bump':
+          if (schedule) runHomeTaskSchedule(schedule.owner,'snooze-one',todayKey(),[schedule.basis]);
+          else bumpTaskOneDay(targetId);
+          break;
+        case 'bump7':
+          if (schedule) runHomeTaskSchedule(schedule.owner,'snooze-week',todayKey(),[schedule.basis]);
+          else snoozeTaskDays(targetId, 7);
+          break;
+        case 'pick-date': pickTaskDate(targetId, schedule); break;
         case 'hide': hideTask(targetId); break;
         case 'wont-do': wontDoMain(targetId); break;
         case 'delete': deleteTask(targetId); break;
@@ -13888,7 +13988,7 @@ function applyPostponeToTask(task, today){
 }
 
 function postponeTasks(tasks, today){
-  if (!tasks.length) return;
+  if (!tasks.length) return true;
   try {
     if (TaskPointsCore?.journalTaskUpdates) {
       const latest = TaskPointsCore.journalTaskUpdates(tasks.map(task => task.id),
@@ -13913,19 +14013,60 @@ function postponeTasks(tasks, today){
   } catch (error) {
     console.warn('Task postponement was not confirmed.', error);
     alert(error?.message || 'Could not save the new due date. Please try again.');
-    return;
+    return false;
   }
   renderTasks(state);
+  return true;
+}
+
+function homeSchedulingBasis(id) {
+  const owner = ownedHomeTaskEditor(id);
+  if (owner) return {owner,basis:owner.currentScheduleBasis(id)};
+  if (window.TaskPointsCore?.getLegacyTaskCompletionHold?.(id))
+    throw Error('The V2 scheduling state is unavailable. Review this Task in the experimental Home.');
+  return null;
+}
+
+async function runHomeTaskSchedule(owner, kind, day, bases, legacyTasks = [], date) {
+  try {
+    const result = await owner.commitSchedule(kind,day,bases,legacyTasks.map(row=>row.id),date,
+      () => typeof TaskPointsCore?.journalTaskUpdates === 'function' && postponeTasks(legacyTasks,day));
+    if (result?.confirmedDurable) window.updateCriticalTasksIsland?.();
+  } catch (error) { alert(error.message); }
 }
 
 function postponeTask(id){
+  let schedule;
+  try { schedule = homeSchedulingBasis(id); }
+  catch (error) { alert(error.message); return; }
+  if (schedule) return runHomeTaskSchedule(schedule.owner,'postpone',todayKey(),[schedule.basis]);
   const task = state.tasks.find(row => row.id === id);
   if (task) postponeTasks([task], todayKey());
 }
 
 function postponeAllOverdueTasks(){
   const today = todayKey();
-  const overdue = state.tasks.filter(task => canPostponeTask(task, today));
+  const owner = globalThis.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true ? ownedHomeTaskEditor('t1') : null;
+  if (owner && !owner.scheduleReady()) {
+    alert('The V2 overdue list could not be verified.');
+    return;
+  }
+  const view = owner ? owner.taskView(state) : state;
+  const overdue = view.tasks.filter(task => canPostponeTask(task, today));
+  if (owner) {
+    const owned = overdue.filter(row=>owner.owns(row.id));
+    const legacy = overdue.filter(row=>!owner.owns(row.id));
+    if (owned.length) return runHomeTaskSchedule(owner,'postpone-all',today,
+      owned.map(row=>owner.currentScheduleBasis(row.id)),legacy);
+    if (owner.pendingSchedule()) {
+      alert('Check the pending schedule before postponing more Tasks.');
+      return;
+    }
+  }
+  if (overdue.some(row=>TaskPointsCore?.getLegacyTaskCompletionHold?.(row.id))) {
+    alert('The V2 overdue list could not be verified.');
+    return;
+  }
   postponeTasks(overdue, today);
 }
 function wontDoMain(id){
