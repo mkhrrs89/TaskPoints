@@ -25,6 +25,7 @@ function functionSource(name) {
 
 function buildHomepageHelpers() {
   const context = vm.createContext({
+    window: { TaskPointsGreedGoldEconomy: null },
     Map,
     Number,
     Math,
@@ -43,11 +44,19 @@ function buildHomepageHelpers() {
     ${seasonStart[0]}
     ${functionSource('getHomeScoreboardDateKey')}
     ${functionSource('getHomepageRankValue')}
+    ${functionSource('getHomeHistoricalMarginGoldForReference')}
     ${functionSource('getHomepageGoldValue')}
     ${functionSource('formatHomepageGold')}
     globalThis.setState = (nextState) => { state = nextState; };
     globalThis.helpers = { getHomepageRankValue, getHomepageGoldValue, formatHomepageGold };
   `, context);
+  // Legacy historical margins and today's wallet are separate calculations.
+  context.window.TaskPointsGreedGoldEconomy = {
+    legacyGoldForPlayer: (_state, playerId) => context.getHomeHistoricalMarginGoldForReference(playerId),
+    getGoldLedgerViewState: () => null,
+    goldBalance: (source, playerId) => Math.round(10 * (source.goldLedger || [])
+      .filter(row => row.playerId === playerId).reduce((sum,row) => sum + Number(row.amount || 0), 0)) / 10
+  };
   return context;
 }
 
@@ -99,14 +108,29 @@ test('Home scoreboard rank and Gold helpers use read-only completed Season 2 res
   assert.equal(helpers.formatHomepageGold(null), 'Gold: —');
   assert.equal(JSON.stringify(state), before, 'Gold is derived without persisting state');
 
-  const goldHelper = functionSource('getHomepageGoldValue');
-  assert.match(goldHelper, /key < HOME_SCOREBOARD_SEASON_TWO_START/);
-  assert.match(goldHelper, /key >= today/);
-  assert.doesNotMatch(goldHelper, /localStorage|save\s*\(/);
+  const legacyGoldHelper = functionSource('getHomeHistoricalMarginGoldForReference');
+  assert.match(legacyGoldHelper, /key < HOME_SCOREBOARD_SEASON_TWO_START/);
+  assert.match(legacyGoldHelper, /key >= today/);
+  const walletGoldHelper = functionSource('getHomepageGoldValue');
+  assert.match(walletGoldHelper, /goldApi\.goldBalance\(snapshot, playerId\)/);
+  assert.doesNotMatch(walletGoldHelper, /localStorage|save\s*\(/);
   assert.match(html, /getHomepageRankValue\('YOU'\)/);
   assert.match(html, /formatHomepageGold\('YOU'\)/);
   assert.match(html, /getPlayerRecordText|getYourRecordText/);
   assert.match(html, /formatPpdLine/);
   assert.match(html, /formatHeadToHeadRecord/);
   assert.match(html, /setPlayerColorSwatches/);
+});
+
+test('Home Gold displays a stable wallet balance and never flashes historical Gold', () => {
+  const context=buildHomepageHelpers();
+  context.setState({goldEconomy:{version:1},goldLedger:[
+    {playerId:'YOU',amount:120},{playerId:'YOU',amount:-60}],
+    matchups:[{dateKey:'2026-07-05',playerAId:'YOU',playerBId:'CHESTER',scoreA:1000,scoreB:0}]
+  });
+  assert.equal(context.helpers.getHomepageGoldValue('YOU'),60);
+  assert.equal(context.helpers.formatHomepageGold('YOU'),'Gold: 60.0');
+  context.window.TaskPointsGreedGoldEconomy=null;
+  assert.equal(context.helpers.getHomepageGoldValue('YOU'),null);
+  assert.equal(context.helpers.formatHomepageGold('YOU'),'Gold: —');
 });
