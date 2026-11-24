@@ -1284,6 +1284,11 @@ Nothing visible on the page is built here. === -->
       <span class="home-work-hours-caption">Logged</span>
       <div><span id="homeWorkHoursLogged" class="home-work-hours-number">0</span><span class="home-work-hours-unit"> hrs</span></div>
     </div>
+    <div class="home-work-hours-total home-work-hours-missed"
+      title="Estimated take-home pay short of a 40-hour week, assuming no more hours are logged">
+      <span class="home-work-hours-caption">Missed take-home</span>
+      <div id="homeWorkMissedTakeHome" class="home-work-hours-missed-value" aria-live="polite">—</div>
+    </div>
     <div class="home-work-hours-total home-work-hours-remaining">
       <span class="home-work-hours-caption">Until 40</span>
       <div><span id="homeWorkHoursRemaining" class="home-work-hours-number">40</span><span class="home-work-hours-unit"> hrs left</span></div>
@@ -12191,6 +12196,22 @@ function formatHomeWorkHours(value) {
   return Number(value.toFixed(2)).toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
+// Read-only estimate of net take-home pay short of 40 logged hours.
+// A running shortfall is not final lost pay until the workweek is finished.
+// Missing wage or tax settings are unknown, not automatically 0.
+function calculateHomeMissedTakeHome(remainingHours, hourlyWage, takeHomeTaxPercent) {
+  if (hourlyWage == null || hourlyWage === ''
+    || takeHomeTaxPercent == null || takeHomeTaxPercent === '') return null;
+  const hours = Number(remainingHours);
+  const wage = Number(hourlyWage);
+  const taxPercent = Number(takeHomeTaxPercent);
+  if (!Number.isFinite(hours) || !Number.isFinite(wage) || !Number.isFinite(taxPercent)
+    || hours < 0 || wage < 0 || taxPercent < 0 || taxPercent > 100) return null;
+  const value = hours * wage * (1 - taxPercent / 100);
+  if (!Number.isFinite(value)) return null;
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
 function renderHomeWorkHours() {
   const now = new Date();
   // Visibility is strictly presentational. Sunday hours still count toward
@@ -12206,7 +12227,20 @@ function renderHomeWorkHours() {
   const trackEl = $('homeWorkHoursProgressTrack');
   const statusEl = $('homeWorkHoursStatus');
   const averageEl = $('homeWorkHoursAverage');
+  const missedEl = $('homeWorkMissedTakeHome');
   const summary = calculateHomeWeeklyWorkHours(getDerived().workEntries, now);
+  if (missedEl) {
+    const payState = typeof state === 'undefined' ? null : state;
+    const missedPay = typeof calculateHomeMissedTakeHome === 'function'
+      ? calculateHomeMissedTakeHome(summary.remaining, payState?.hourlyWage, payState?.takeHomeTaxPercent)
+      : null;
+    missedEl.textContent = missedPay === null ? '—' : missedPay.toLocaleString('en-US', {
+      style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2
+    });
+    missedEl.setAttribute('aria-label', missedPay === null
+      ? 'Missed take-home estimate unavailable; enter hourly wage and tax withholding in Settings'
+      : 'Estimated missed take-home pay this week: ' + missedEl.textContent);
+  }
   const dateOptions = { month: 'short', day: 'numeric' };
   const startText = summary.weekStart.toLocaleDateString(undefined, dateOptions);
   const endText = summary.weekEnd.toLocaleDateString(undefined, dateOptions);
