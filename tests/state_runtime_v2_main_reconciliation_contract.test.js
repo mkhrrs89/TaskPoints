@@ -31,8 +31,7 @@ test('Main Home capabilities coexist with V2 foreground-write and idle protectio
     'data-field="time-of-day"',
     'timeOfDayColors',
     'timeOfDayGroups',
-    'SCORE_TREND_START_DATE',
-    'persistConfirmedHistoricalRepairs: true'
+    'SCORE_TREND_START_DATE'
   ]) assert.ok(home.includes(feature), `Main capability missing: ${feature}`);
   for (const guard of [
     "save('home-live-diff-capture');",
@@ -56,6 +55,16 @@ test('Main Home capabilities coexist with V2 foreground-write and idle protectio
   assert.match(liveDiff, /save\('home-live-diff-capture'\)/);
     assert.match(home, /const enteredLiveDiffPanel = nextIndex === 3 && homeGraphPanelIndex !== 3/);
   assert.match(home, /id="habitPts" class="input" style="width:100%;min-width:0"/);
+  // Main moved expensive repair persistence after the first paint. Assert
+  // the same repair still runs on the current durable state via the writer.
+  assert.match(home, /scheduleHomeHistoricalRepairPersistenceAfterFirstPaint\(\);/);
+  const repair = home.slice(home.indexOf('function scheduleHomeHistoricalRepairPersistenceAfterFirstPaint('),
+    home.indexOf('function renderTodaysMatchup('));
+  assert.match(repair, /const latest = TaskPointsCore\.readTaskPointsStoredState\(STORAGE_KEY\)/);
+  assert.match(repair, /TaskPointsCore\.repairConfirmedJune2026LifetimeHistory\(latest\)/);
+  assert.match(repair, /if \(!repaired\?\.changed\) return/);
+  assert.match(repair, /TaskPointsCore\.mergeAndSaveState\(repaired\.state,/);
+  assert.match(repair, /delayMs: 18000/);
 });
 
 test('V2 core retains historical repair, taper, prepared serialization, and journal timestamps', () => {

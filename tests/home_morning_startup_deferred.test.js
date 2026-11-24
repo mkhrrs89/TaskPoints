@@ -154,8 +154,10 @@ test('a legitimate user bye is not treated as a missing matchup', () => {
 });
 
 test('fresh launches and waking an overnight app both use the same nonblocking scheduler', () => {
-  const startup = home.slice(home.indexOf("document.addEventListener('DOMContentLoaded', () => {"),
-    home.indexOf("console.log('TaskPoints main state summary:'"));
+  const beforeSummary = home.slice(0, home.indexOf("console.log('TaskPoints main state summary:'"));
+  const startupHandler = Array.from(beforeSummary.matchAll(/document\.addEventListener\('DOMContentLoaded', (?:async )?\(\) => \{/g)).at(-1);
+  assert.ok(startupHandler, 'Home startup handler is registered before its summary');
+  const startup = beforeSummary.slice(startupHandler.index);
   assert.ok(startup.includes('scheduleHomeDailySimulationAfterReveal();'));
   assert.ok(!startup.includes('\nmaybeAutoSimToday();'),
     'synchronous simulation must never run inside the boot lifecycle handler');
