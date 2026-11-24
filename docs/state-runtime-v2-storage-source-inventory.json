@@ -12,6 +12,7 @@
     "audit_gold_integrity.js",
     "audit_habit_vice_scoring_dates.js",
     "audit_integrity.js",
+    "audit_run_habit_completion.js",
     "audit_same_day_reconciliation.js",
     "audit_selected_day_breakdown.js",
     "daily_sources.html",
@@ -30,6 +31,8 @@
     "gold_ledger.html",
     "gold_ledger_integrity.js",
     "gold_manual_adjustment.js",
+    "gold_recalculation.js",
+    "gold_season_interest.js",
     "gold_theft_top50_notifications.js",
     "greed_gold_economy.js",
     "habit_completion_backup_recovery.js",
@@ -60,6 +63,7 @@
     "home_streak_bonus_consistency.js",
     "home_targeted_render_control.js",
     "home_yesterday_result_consistency.js",
+    "hourly_wage_settings.js",
     "inbox.html",
     "inbox_count_badge.js",
     "index.html",
@@ -159,6 +163,7 @@
     "task_create_fast_path.js",
     "task_delete_fast_path.js",
     "task_mutation_journal.js",
+    "tax_withholding_settings.js",
     "today.html",
     "toolbar.js",
     "tournament.html",
@@ -184,6 +189,7 @@
     "audit_gold_integrity.js",
     "audit_habit_vice_scoring_dates.js",
     "audit_integrity.js",
+    "audit_run_habit_completion.js",
     "audit_same_day_reconciliation.js",
     "audit_selected_day_breakdown.js",
     "daily_sources.html",
@@ -202,6 +208,8 @@
     "gold_ledger.html",
     "gold_ledger_integrity.js",
     "gold_manual_adjustment.js",
+    "gold_recalculation.js",
+    "gold_season_interest.js",
     "gold_theft_top50_notifications.js",
     "greed_gold_economy.js",
     "habit_completion_backup_recovery.js",
@@ -232,6 +240,7 @@
     "home_streak_bonus_consistency.js",
     "home_targeted_render_control.js",
     "home_yesterday_result_consistency.js",
+    "hourly_wage_settings.js",
     "inbox.html",
     "inbox_count_badge.js",
     "index.html",
@@ -331,6 +340,7 @@
     "task_create_fast_path.js",
     "task_delete_fast_path.js",
     "task_mutation_journal.js",
+    "tax_withholding_settings.js",
     "today.html",
     "toolbar.js",
     "tournament.html",
@@ -1223,6 +1233,48 @@
       "family": "core",
       "role": "Score alias alignment reads legacy primary snapshot",
       "evidencePath": "you_score_alias_alignment.js"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "current snapshot read and verified through protected save",
+      "evidencePath": "gold_recalculation.js"
+    },
+    {
+      "key": "taskpoints_emergency_recovery_hold_v1",
+      "family": "recovery",
+      "role": "active recovery hold checked before a Gold save",
+      "evidencePath": "gold_recalculation.js"
+    },
+    {
+      "key": "taskpoints_v1",
+      "family": "core",
+      "role": "current snapshot read and verified through protected save",
+      "evidencePath": "gold_season_interest.js"
+    },
+    {
+      "key": "taskpoints_emergency_recovery_hold_v1",
+      "family": "recovery",
+      "role": "active recovery hold checked before a Gold save",
+      "evidencePath": "gold_season_interest.js"
+    },
+    {
+      "key": "tp_home_morning_startup_trace_v1",
+      "family": "session",
+      "role": "bounded Home first-of-day diagnostic timing history",
+      "evidencePath": "index.html"
+    },
+    {
+      "key": "tp_home_boot_script_timing_v1",
+      "family": "session",
+      "role": "bounded mobile boot script replay timing diagnostics",
+      "evidencePath": "mobile_boot_gate.js"
+    },
+    {
+      "key": "tp_home_boot_timing_v1",
+      "family": "session",
+      "role": "bounded overall mobile Home startup timing diagnostics",
+      "evidencePath": "mobile_boot_gate.js"
     }
   ],
   "dbEvidence": [
@@ -1984,6 +2036,41 @@
       "auditPass": "m01-final-root-source-pass",
       "fencingStatus": "not_proven",
       "ownerStatus": "awaiting_full_callgraph"
+    },
+    {
+      "path": "audit_run_habit_completion.js",
+      "family": "habits",
+      "kind": "live UI",
+      "description": "Audit completion writes and verifies the daily Habit delta through the existing journal.",
+      "anchor": "core.writePendingHabitDelta(delta);"
+    },
+    {
+      "path": "gold_recalculation.js",
+      "family": "game",
+      "kind": "live UI",
+      "description": "Gold recalculation checks the current V1 snapshot and recovery hold before saving adjustments.",
+      "anchor": "latest.core.saveValidatedSnapshot(candidate,"
+    },
+    {
+      "path": "gold_season_interest.js",
+      "family": "game",
+      "kind": "live UI",
+      "description": "Season-opening interest saves a verified decision and ledger evidence through the V1 snapshot writer.",
+      "anchor": "latest.core.saveValidatedSnapshot(candidate,"
+    },
+    {
+      "path": "hourly_wage_settings.js",
+      "family": "settings",
+      "kind": "live UI",
+      "description": "Hourly wage uses the ordinary settings snapshot writer and verifies readback.",
+      "anchor": "core.saveAppState({ hourlyWage: parsed.amount }"
+    },
+    {
+      "path": "tax_withholding_settings.js",
+      "family": "settings",
+      "kind": "live UI",
+      "description": "Take-home tax withholding uses the ordinary settings snapshot writer and verifies readback.",
+      "anchor": "core.saveAppState({ takeHomeTaxPercent: parsed.percent }"
     }
   ],
   "reviewedSourceEvidence": [
@@ -2914,6 +3001,36 @@
       "anchor": "installTaskPointsYouScoreAliasAlignment(global)",
       "auditPass": "m01-final-root-source-pass",
       "ownerVerification": "unverified"
+    },
+    {
+      "path": "audit_run_habit_completion.js",
+      "family": "habits",
+      "behavior": "entrypoint",
+      "anchor": "core.writePendingHabitDelta(delta);"
+    },
+    {
+      "path": "gold_recalculation.js",
+      "family": "game",
+      "behavior": "entrypoint",
+      "anchor": "latest.core.saveValidatedSnapshot(candidate,"
+    },
+    {
+      "path": "gold_season_interest.js",
+      "family": "game",
+      "behavior": "entrypoint",
+      "anchor": "latest.core.saveValidatedSnapshot(candidate,"
+    },
+    {
+      "path": "hourly_wage_settings.js",
+      "family": "settings",
+      "behavior": "entrypoint",
+      "anchor": "core.saveAppState({ hourlyWage: parsed.amount }"
+    },
+    {
+      "path": "tax_withholding_settings.js",
+      "family": "settings",
+      "behavior": "entrypoint",
+      "anchor": "core.saveAppState({ takeHomeTaxPercent: parsed.percent }"
     }
   ],
   "writerOwnershipAudit": {
@@ -2922,7 +3039,7 @@
     "firstPassRootInspectionComplete": true,
     "productionWritersFenced": false,
     "sourceFilesEnumerated": 170,
-    "sourceFilesInspected": 170,
+    "sourceFilesInspected": 175,
     "unresolvedPassConditions": [
       "Resolve each direct and indirect live writer to authoritative V2 owner or explicitly retained auxiliary storage",
       "Enumerate dynamic storage aliases, complete schema fields and nested non-root scripts",
@@ -2930,7 +3047,7 @@
       "Verify interrupted, quota-failed, restart, import, reset, export and recovery paths against live authority",
       "Validate off-device recovery and physical iPhone Safari before production promotion"
     ],
-    "proposedOwnerAssignments": 78,
+    "proposedOwnerAssignments": 83,
     "verifiedOwnerAssignments": 0,
     "requiredClosure": "Complete per-key and per-writer ownership, live admission + generation fencing, export/import/restore and real device tests before M01 can verify",
     "behaviorRehearsedWriterRoutes": 78,
@@ -3962,6 +4079,56 @@
       "evidenceStatus": "not_verified",
       "authorityStatus": "v1_authoritative_or_auxiliary",
       "cutoverPermission": false
+    },
+    {
+      "path": "audit_run_habit_completion.js",
+      "anchor": "core.writePendingHabitDelta(delta);",
+      "family": "habits",
+      "proposedOwner": "V2 Habit completion journal",
+      "requiredEvidence": "Verify Audit auto-run and manual credit share generation fencing and compaction without double rewards.",
+      "evidenceStatus": "not_verified",
+      "cutoverPermission": false,
+      "authorityStatus": "v1_authoritative_or_auxiliary"
+    },
+    {
+      "path": "gold_recalculation.js",
+      "anchor": "latest.core.saveValidatedSnapshot(candidate,",
+      "family": "game",
+      "proposedOwner": "V2 Gold ledger and season settlement",
+      "requiredEvidence": "Verify stable Gold evidence, recovery admission, exactly-once settlement, and rollback.",
+      "evidenceStatus": "not_verified",
+      "cutoverPermission": false,
+      "authorityStatus": "v1_authoritative_or_auxiliary"
+    },
+    {
+      "path": "gold_season_interest.js",
+      "anchor": "latest.core.saveValidatedSnapshot(candidate,",
+      "family": "game",
+      "proposedOwner": "V2 Gold ledger and season settlement",
+      "requiredEvidence": "Verify stable Gold evidence, recovery admission, exactly-once settlement, and rollback.",
+      "evidenceStatus": "not_verified",
+      "cutoverPermission": false,
+      "authorityStatus": "v1_authoritative_or_auxiliary"
+    },
+    {
+      "path": "hourly_wage_settings.js",
+      "anchor": "core.saveAppState({ hourlyWage: parsed.amount }",
+      "family": "settings",
+      "proposedOwner": "V2 Settings snapshot writer",
+      "requiredEvidence": "Verify input validation, verified reads, lossless exports and stale writer exclusion.",
+      "evidenceStatus": "not_verified",
+      "cutoverPermission": false,
+      "authorityStatus": "v1_authoritative_or_auxiliary"
+    },
+    {
+      "path": "tax_withholding_settings.js",
+      "anchor": "core.saveAppState({ takeHomeTaxPercent: parsed.percent }",
+      "family": "settings",
+      "proposedOwner": "V2 Settings snapshot writer",
+      "requiredEvidence": "Verify input validation, verified reads, lossless exports and stale writer exclusion.",
+      "evidenceStatus": "not_verified",
+      "cutoverPermission": false,
+      "authorityStatus": "v1_authoritative_or_auxiliary"
     }
   ],
   "writerBehaviorWitnesses": [
