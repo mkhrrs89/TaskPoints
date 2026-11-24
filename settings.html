@@ -161,8 +161,8 @@
       <details class="glass space-y-3" id="hourlyWageSettingsSection">
         <summary class="flex items-center justify-between gap-3 flex-wrap cursor-pointer">
           <div>
-            <div class="text-lg font-semibold">Hourly Wage</div>
-            <div class="muted text-sm">Store your current hourly pay rate.</div>
+            <div class="text-lg font-semibold">Hourly Wage &amp; Tax Withholding</div>
+            <div class="muted text-sm">Store your hourly wage and the percentage withheld for taxes.</div>
           </div>
         </summary>
         <form id="hourlyWageForm" class="space-y-3 pt-4">
@@ -175,6 +175,17 @@
           </div>
           <p id="hourlyWageExplanation" class="muted text-xs">Saved in TaskPoints and included in standard backups. Leave blank and save to clear it. This does not change Work Hours points.</p>
           <div id="hourlyWageStatus" class="muted text-xs" role="status" aria-live="polite"></div>
+        </form>
+        <form id="takeHomeTaxPercentForm" class="space-y-3 pt-4 mt-4" aria-label="Tax withholding">
+          <label for="takeHomeTaxPercentInput" class="block text-sm font-semibold">Tax withheld before take-home pay (%)</label>
+          <div class="flex flex-wrap gap-2 items-center">
+            <input id="takeHomeTaxPercentInput" type="number" inputmode="decimal" min="0" max="100" step="0.01"
+              placeholder="20.00" class="input" style="max-width:155px" aria-describedby="takeHomeTaxPercentExplanation" />
+            <span aria-hidden="true" class="text-lg">%</span>
+            <button id="takeHomeTaxPercentSaveBtn" type="submit" class="btn btn-teal btn-toolbar nav-btn">Save Tax Rate</button>
+          </div>
+          <p id="takeHomeTaxPercentExplanation" class="muted text-xs">Enter the percent of gross pay withheld for taxes before take-home pay. Leave blank and save to clear. This is a saved setting only; it doesn't affect points or track other deductions.</p>
+          <div id="takeHomeTaxPercentStatus" class="muted text-xs" role="status" aria-live="polite"></div>
         </form>
       </details>
 
@@ -5296,5 +5307,6 @@ return;
   })();
   </script>
   <script src="hourly_wage_settings.js?v=20261121-1"></script>
+  <script src="tax_withholding_settings.js?v=20261124-1"></script>
 </body>
 </html>
