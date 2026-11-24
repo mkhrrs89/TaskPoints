@@ -462,6 +462,38 @@ previously intermittent Inbox display check. The component suite passed
 The broader scoped run had 472 passes, 14 failures, and one TODO. The
 same 14 failures and TODO reproduced on `7fc91190`.
 
+## Home Delete and Undo
+
+The Home Delete controls still ask for confirmation. In a synthetic fixture
+with V2 completion controls enabled, a confirmed deletion writes the Trash
+state, the prior Task, the revision, and the receipt in one transaction.
+Undo uses the exact deletion receipt and the original 4.5-second window.
+Both operations keep the Task ID and all earned history. A reload can
+recover a verified receipt and show any time remaining. A newer deletion
+is protected from an earlier Undo, even if the earlier Undo was successful
+and its original receipt is replayed.
+
+Home, Today, Critical Tasks, Week, and Trash display the verified state.
+The Today reconciler removes only references to the trashed Task on the
+current day. A still-due Task returns to the Today view after Undo.
+The rollback checkpoint preserves the exact source Today bytes and
+includes any needed cleanup for the detached V1 copy. Unreadable Today
+data is preserved and blocks an affected rollback. The fresh V1 copy
+keeps trashed Tasks in Trash and restored Tasks at their original IDs.
+
+The separate Trash Restore and Delete Forever controls remain available
+for ordinary V1 Tasks. For experimental V2-owned Tasks they require
+verified rollback. Metric-derived reward refusals, time-zone checks,
+the installed iPhone handoff, and old-client safety gates still apply.
+
+All 11 Delete and Undo browser tests passed. The existing full-Home
+suite passed 142 of 143. One malformed-Inbox rollback assertion caught
+a background backup diagnostics change. Two focused Inbox tests passed
+on rerun, and the same rollback assertion passed in a focused run on
+`30d95a13`. All 19 component and 32 targeted legacy and tracker
+checks passed. The broader scoped suite had 484 passes, 14 failures,
+and one TODO, matching the results on `30d95a13`.
+
 ## How the integration works
 
 - The loopback harness selects a seed Task and checks the fixture marker

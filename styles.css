@@ -3579,6 +3579,15 @@ metal background attached only to the day-bubble row.
       color: #fff;
       box-shadow: 0 10px 30px rgba(80, 10, 20, .45);
     }
+    .points-toast[data-owned-trash]{
+      opacity:1;
+      transform:none;
+      animation:none;
+      transition:opacity 220ms ease;
+    }
+    .points-toast[data-owned-trash] button{
+      pointer-events:auto;
+    }
     @keyframes pointsToastInOut{
       0%{
         opacity:0;

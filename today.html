@@ -743,7 +743,7 @@ const habits = getActiveHabits().filter(h => {
         // Tasks (kept visible even if recurring + moved due date after completion)
         for (const taskId of visibleTaskIds) {
           const t = tasks.find(x => x && x.id === taskId);
-          if (!t) continue;
+          if (!t || (ownedScoring && (t.status==='trashed' || t.deletedAtISO))) continue;
 
           let done = hasTaskCompletionToday(taskId, dayKey) || (t.completedAtISO && dateKeyFromISO(t.completedAtISO) === dayKey);
           let sub = (t.points != null) ? `${Number(t.points || 0)} pts` : '';

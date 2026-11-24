@@ -44,7 +44,10 @@ const STORAGE_KEY = 'taskpoints_v1';
 let appState = { tasks: [] };
 
 function loadState() {
-  if (window.TaskPointsCore?.loadAppState) return TaskPointsCore.loadAppState().state;
+  if (window.TaskPointsCore?.loadAppState) {
+    return (TaskPointsCore.usesIsolatedTaskScoring?.()
+      ? TaskPointsCore.loadAppState({syncDerived:false,persistSync:false}) : TaskPointsCore.loadAppState()).state;
+  }
   const raw = localStorage.getItem(STORAGE_KEY);
   try { return raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) : { tasks: [] }; } catch { return { tasks: [] }; }
 }
@@ -66,7 +69,14 @@ function fmt(iso) {
   return d.toLocaleString();
 }
 
+function holdOwnedTrashAction(id) {
+  if (!window.TaskPointsCore?.getLegacyTaskCompletionHold?.(id)) return false;
+  alert('For this V2 Task, use Home Undo while available or restore it after verified rollback to V1.');
+  return true;
+}
+
 function restoreTask(id) {
+  if (holdOwnedTrashAction(id)) return;
   const task = appState.tasks.find(t => t && t.id === id);
   if (!task) return;
   const now = new Date().toISOString();
@@ -81,6 +91,7 @@ function restoreTask(id) {
 }
 
 function deleteForever(id) {
+  if (holdOwnedTrashAction(id)) return;
   if (!confirm('Delete forever? This cannot be undone.')) return;
   appState.tasks = (Array.isArray(appState.tasks) ? appState.tasks : []).filter(t => t && t.id !== id);
   saveState(appState);
@@ -90,7 +101,8 @@ function deleteForever(id) {
 function render() {
   const listEl = document.getElementById('trashList');
   const emptyEl = document.getElementById('empty');
-  const tasks = (Array.isArray(appState.tasks) ? appState.tasks : [])
+  const legacyTasks = Array.isArray(appState.tasks) ? appState.tasks : [];
+  const tasks = (window.TaskPointsCore?.projectIsolatedDoneTasks?.(legacyTasks) ?? legacyTasks)
     .filter(t => t && (t.status === 'trashed' || t.deletedAtISO))
     .sort((a, b) => (new Date(b.deletedAtISO || b.deletedAt || 0)).getTime() - (new Date(a.deletedAtISO || a.deletedAt || 0)).getTime());
 
@@ -126,6 +138,7 @@ document.addEventListener('click', (e) => {
 
 appState = loadState();
 render();
+window.TaskPointsCore?.watchIsolatedTaskDone?.(render);
 </script>
 </body>
 </html>

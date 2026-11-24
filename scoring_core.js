@@ -75,7 +75,7 @@
 
   function isolatedTaskDonePage() {
     return isolatedCompletionPage && global.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true
-      && /^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups|week)\.html$/.test(global.location.pathname);
+      && /^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups|week|trash)\.html$/.test(global.location.pathname);
   }
 
   function usesIsolatedTaskDone(taskId = 't1') {
@@ -218,6 +218,20 @@
     return value;
   }
 
+  function removeIsolatedTodayTask(list, day, taskId) {
+    const orderKey = 'task:'+taskId;
+    if (list.tasksByDay?.[day]) list.tasksByDay[day] = list.tasksByDay[day].filter(id=>id!==taskId);
+    if (list.orderByDay?.[day]) list.orderByDay[day] = list.orderByDay[day].filter(key=>key!==orderKey);
+    if (day === list.dayKey) {
+      if (list.taskIds) list.taskIds = list.taskIds.filter(id=>id!==taskId);
+      if (list.order) list.order = list.order.filter(key=>key!==orderKey);
+    }
+  }
+
+  function removeIsolatedTodayTrash(list, tasks, day = todayKey()) {
+    for (const task of tasks) if (task.status === 'trashed') removeIsolatedTodayTask(list,day,task.id);
+  }
+
   async function reconcileIsolatedTodayList(edit, expectedRaw) {
     if (!usesIsolatedTaskScoring()) throw new Error('Isolated Today reconciliation is inactive.');
     const locks = global.navigator?.locks;
@@ -232,15 +246,9 @@
       if (edit) edit(list, structuredClone(proof.completions));
 
       for (const {taskId, completedAtISO} of proof.completions) {
-        const day = dateKey(completedAtISO);
-        const orderKey = 'task:'+taskId;
-        if (list.tasksByDay?.[day]) list.tasksByDay[day] = list.tasksByDay[day].filter(id=>id!==taskId);
-        if (list.orderByDay?.[day]) list.orderByDay[day] = list.orderByDay[day].filter(key=>key!==orderKey);
-        if (day === list.dayKey) {
-          if (list.taskIds) list.taskIds = list.taskIds.filter(id=>id!==taskId);
-          if (list.order) list.order = list.order.filter(key=>key!==orderKey);
-        }
+        removeIsolatedTodayTask(list,dateKey(completedAtISO),taskId);
       }
+      removeIsolatedTodayTrash(list,proof.tasks);
 
       const candidate = JSON.stringify(list);
       parseIsolatedTodayList(candidate);
@@ -11174,6 +11182,8 @@ return Number(cappedScore.toFixed(1));
     readScoringCompletions,
     parseIsolatedTodayList,
     reconcileIsolatedTodayList,
+    removeIsolatedTodayTrash,
+    ISOLATED_TODAY_LIST_KEY: TODAY_LIST_KEY,
     runWithVerifiedTaskScoring,
     verifiedScoringSaveOptions,
     serializeTaskPointsStoredState,

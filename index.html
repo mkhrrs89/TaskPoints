@@ -11135,21 +11135,37 @@ function restoreTaskFromTrash(task){
   return true;
 }
 
-function showTrashToast(taskId){
+const shownOwnedTrashToasts = new Set();
+const ownedTrashWriting = new Set();
+
+function showTrashToast(taskId, deletion = null){
   const container = document.getElementById('pointsToastContainer');
   if (!container) return;
   const toastEl = document.createElement('div');
   toastEl.className = 'points-toast';
   toastEl.innerHTML = `<span>Moved to Trash</span> <button class="btn btn-ghost text-xs px-2 py-1" type="button">Undo</button>`;
+  if (deletion) toastEl.dataset.ownedTrash = deletion.id;
   const undoBtn = toastEl.querySelector('button');
   let closed = false;
   const close = () => {
     if (closed) return;
     closed = true;
+    if (deletion) undoBtn.disabled = true;
     toastEl.style.opacity = '0';
     setTimeout(() => toastEl.remove(), 220);
   };
   undoBtn?.addEventListener('click', () => {
+    if (deletion) {
+      const owner = ownedHomeTaskEditor(taskId);
+      if (closed || undoBtn.disabled) return;
+      if (!owner) return alert('Verified Undo is paused.');
+      undoBtn.disabled = true;
+      owner.undoTrash(deletion).then(close).catch(error => {
+        if (!closed) undoBtn.disabled = false;
+        alert(error.message);
+      });
+      return;
+    }
     const t = state.tasks.find(x => x.id === taskId);
     if (TaskPointsCore?.journalTaskMutation && !assertTaskActionMutationWritable()) return;
     if (restoreTaskFromTrash(t)) {
@@ -11164,7 +11180,9 @@ function showTrashToast(taskId){
     close();
   });
   container.appendChild(toastEl);
-  setTimeout(close, 4500);
+  const remaining = deletion
+    ? Date.parse(deletion.committedAtISO) + TaskPointsStateRuntimeV2.OWNED_TRASH_UNDO_MS - Date.now() : 4500;
+  setTimeout(close, Math.max(remaining,0));
 }
 
 function renderTasks(stateInput = null){
@@ -11178,6 +11196,15 @@ function renderTasks(stateInput = null){
   // saves (including background saves) still receive only the V1 backing state.
   const taskView = ownedDisplay ? owner.taskView(state) : state;
   if (ownedDisplay) {
+    const recentTrash = owner.recentTrash?.() ?? [];
+    for (const toast of document.querySelectorAll('[data-owned-trash]')) {
+      if (!recentTrash.some(deletion=>deletion.id===toast.dataset.ownedTrash)) toast.remove();
+    }
+    for (const deletion of recentTrash) {
+      if (shownOwnedTrashToasts.has(deletion.id)) continue;
+      shownOwnedTrashToasts.add(deletion.id);
+      showTrashToast(deletion.taskId,deletion);
+    }
     const message = owner.onRender(() => renderTasks(state));
     if (message) {
       const notice = document.createElement('p');
@@ -12214,7 +12241,7 @@ function initTaskListDelegation(){
     const id = btn.getAttribute('data-task-id');
     if (!action) return;
     if (window.TaskPointsCore?.isIsolatedCreatedTaskId?.(id) && ownedHomeTaskEditor(id)
-      && ['postpone','wont-do','hide','delete','task-delete'].includes(action)) {
+      && ['postpone','wont-do','hide'].includes(action)) {
       alert('This action is available after a verified rollback to V1.');
       return;
     }
@@ -14234,6 +14261,23 @@ function hideTask(id){
 }
 
 function deleteTask(id){
+  const owner = ownedHomeTaskEditor(id);
+  if (owner || window.TaskPointsCore?.getLegacyTaskCompletionHold?.(id)) {
+    if (ownedTrashWriting.has(id)) return;
+    try {
+      const intent = owner?.taskTrashIntent(id);
+      if (!intent) throw Error('Verified Trash is paused.');
+      if (!confirm('Move this task to Trash?')) return;
+      ownedTrashWriting.add(id);
+      return owner.moveToTrash(intent).then(() => {
+        if (editingTaskId === id) {
+          editingTaskId = null;
+          owner.endTaskEdit();
+        }
+        renderTasks();
+      }).catch(error=>alert(error.message)).finally(()=>ownedTrashWriting.delete(id));
+    } catch (error) { alert(error.message); return; }
+  }
   if(!confirm('Move this task to Trash?')) return;
   const t = state.tasks.find(x => x.id === id);
   // V2 Task edits can still be pending in the durable mutation journal.

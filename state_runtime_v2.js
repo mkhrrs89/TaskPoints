@@ -20159,7 +20159,7 @@
     for (const key of ['taskpoints_recovery_write_lock_v1','taskpoints_recovery_attempt_lock_v1','taskpoints_emergency_recovery_hold_v1'])
       if (global.localStorage.getItem(key) !== null) throw new Error('recovery_evidence_blocks_task_write');
     if (fixture.homeTaskId !== undefined && (typeof fixture.homeTaskId !== 'string' || !fixture.homeTaskId
-      || (scoringRead ? !/^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups|week)\.html$/.test(global.location.pathname)
+      || (scoringRead ? !/^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups|week|trash)\.html$/.test(global.location.pathname)
         : global.location.pathname !== '/experiments/v2-home-plus-one-day/full/index.html')
       || global.localStorage.getItem('taskpoints_storage_guard_incident_v1') !== null))
       throw new Error('owned_home_task_context_or_recovery_conflict');
@@ -20367,6 +20367,37 @@
   }
 
   const OWNED_TASK_DONE = 'isolated-task-completion';
+  const OWNED_TASK_TRASH = 'isolated-task-trash';
+  const OWNED_TRASH_UNDO_MS = 4500;
+
+  function ownedTrashIntent(input) {
+    const {operation, taskId, generation, expectedRevision, deletionId} = input || {};
+    const undo = operation === 'home-undo-trash';
+    if ((!undo && operation !== 'home-move-to-trash') || (taskId !== 't1' && !core.isIsolatedCreatedTaskId(taskId))
+      || typeof generation !== 'string' || !generation || !Number.isSafeInteger(expectedRevision)
+      || expectedRevision < 0 || (undo ? typeof deletionId !== 'string' || !deletionId : deletionId !== undefined))
+      throw new Error('invalid_owned_trash_intent');
+    const actionId = operation+'-'+taskId+'-'+expectedRevision;
+    return {actionId, operation, taskId, generation, expectedRevision, ...(undo ? {deletionId} : {})};
+  }
+
+  function ownedTrashResult(before, intent, at, deletion) {
+    const time = Date.parse(at);
+    if (!Number.isFinite(time) || new Date(time).toISOString() !== at)
+      throw new Error('invalid_owned_trash_timestamp');
+    const status = core.normalizeTask(before).status;
+    if (intent.operation === 'home-move-to-trash') {
+      if (status === 'trashed') throw new Error('owned_task_already_trashed');
+      const prevStatus = before.prevStatus || status;
+      if (!['active','done','hidden','wontdo'].includes(prevStatus)) throw new Error('invalid_owned_trash_status');
+      return {...before, prevStatus, status:'trashed', deletedAtISO:at, deletedAt:at, deletedFrom:'TasksScreen', updatedAtISO:at};
+    }
+    if (!deletion || deletion.id !== intent.deletionId || deletion.revision !== intent.expectedRevision || status !== 'trashed')
+      throw new Error('owned_task_undo_stale');
+    const elapsed = time - Date.parse(deletion.committedAtISO);
+    if (elapsed < 0 || elapsed >= OWNED_TRASH_UNDO_MS) throw new Error('owned_task_undo_expired');
+    return {...before, status:before.prevStatus, prevStatus:null, deletedAtISO:null, deletedAt:null, deletedFrom:null, updatedAtISO:at};
+  }
   const OWNED_TASK_STORES = ['tasks','mutations','meta','completions'];
   function localCompletionTimeZone() {
     const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -20432,7 +20463,7 @@
   }
 
   function ownedTaskJournal(receipts) {
-    return receipts.filter(r=>['isolated-task-update',OWNED_TASK_DONE,OWNED_TASK_CREATE].includes(r.type))
+    return receipts.filter(r=>['isolated-task-update',OWNED_TASK_DONE,OWNED_TASK_CREATE,OWNED_TASK_TRASH].includes(r.type))
       .sort((a,b)=>a.revision-b.revision);
   }
 
@@ -20464,6 +20495,7 @@
     // receipts. No authority is inferred from a snapshot, revision number or flag.
     const expected=new Map(meta.baseline.tasks.map((t,legacyIndex)=>[t.id,{value:t,revision:0,legacyIndex}]));
     const ownedIds = new Set(meta.homeTaskId ? [meta.homeTaskId] : []);
+    const deletions = new Map();
     for(const r of journal){
       const old=expected.get(r.taskId);
       if (r.type === OWNED_TASK_CREATE) {
@@ -20492,7 +20524,16 @@
         const {after,completion} = ownedCompletionResult(old.value,r.intent,r.committedAtISO);
         if (stableJson([after,completion]) !== stableJson([r.after,r.completion]))
           throw new Error('owned_completion_receipt_conflict');
+      } else if (r.type === OWNED_TASK_TRASH) {
+        if (fixture.completionWrite !== true || !ownedIds.has(r.taskId)
+          || stableJson(r.intent) !== stableJson(ownedTrashIntent(r.intent)))
+          throw new Error('owned_task_trash_receipt_conflict');
+        const after = ownedTrashResult(old.value,r.intent,r.committedAtISO,deletions.get(r.taskId));
+        if (stableJson(r.after) !== stableJson(after)) throw new Error('owned_task_trash_receipt_conflict');
+        if (r.intent.operation === 'home-move-to-trash') deletions.set(r.taskId,r);
+        else deletions.delete(r.taskId);
       } else if (!supportsOwnedTaskOperation(r.intent.operation,meta.homeTaskId)
+        || core.normalizeTask(old.value).status === 'trashed'
         || stableJson(r.intent.expectedTask)!==stableJson(old.value)) {
         throw new Error('owned_task_journal_conflict');
       }
@@ -20503,7 +20544,7 @@
       return !entry || row.ownerGeneration!==meta.generation || row.ownerRevision!==entry.revision
         || row.legacyIndex!==entry.legacyIndex || stableJson(row.value)!==stableJson(entry.value);
     })) throw new Error('owned_task_row_receipt_mismatch');
-    const snapshot = {meta,rows,journal,completionRows,ownedIds:[...ownedIds],
+    const snapshot = {meta,rows,journal,completionRows,ownedIds:[...ownedIds],deletions:[...deletions.values()],
       sourceDrift:ownedTaskSourceConflict(meta) || !ownedCreatedSourceIsClean(ownedIds)};
     if (fixture.completionWrite === true) snapshot.completionRewards = verifyOwnedScoringRows(snapshot);
     return snapshot;
@@ -20743,6 +20784,49 @@
     } finally { db.close(); }
   }
 
+  async function commitIsolatedOwnedTaskTrash(input) {
+    const fixture = ownedTaskContext();
+    if (fixture.completionWrite !== true || fixture.completionControls !== true)
+      throw new Error('isolated_task_trash_not_selected');
+    const marker = global.localStorage.getItem(OWNED_TASK_FIXTURE);
+    const intent = ownedTrashIntent(input), id = 'isolated-task-action:'+intent.actionId;
+    const db = await openOwnedTasks();
+    try {
+      const tx = db.transaction(OWNED_TASK_STORES,'readwrite',{durability:'strict'});
+      const {receipt,replayed} = await withOwnedRecords(tx, (meta,rows,receipts,completionRows) => {
+        const context = ownedTaskContext();
+        const snapshot = verifyOwnedSnapshot(context,meta,rows,receipts,completionRows);
+        if (context.completionControls !== true || meta.generation !== intent.generation)
+          throw new Error('owned_task_generation_conflict');
+        if (!snapshot.ownedIds.includes(intent.taskId)) throw new Error('task_outside_home_ownership');
+        ownedScoringSource(fixture,marker,meta,snapshot.completionRewards,snapshot.ownedIds);
+        const previous = receipts.find(row=>row.id===id);
+        if (previous) {
+          if (previous.type !== OWNED_TASK_TRASH || stableJson(previous.intent)!==stableJson(intent))
+            throw new Error('owned_task_action_id_conflict');
+          return {receipt:previous,replayed:true};
+        }
+        if (meta.mode !== 'owned') throw new Error('rollback_frozen_no_task_writes');
+        const row = rows.find(row=>row.id===intent.taskId);
+        if (row.ownerRevision !== intent.expectedRevision) throw new Error('owned_task_stale_edit');
+        const committedAtISO = nowIso(), revision = meta.revision+1;
+        const deletion = snapshot.deletions.find(receipt=>receipt.taskId===row.id);
+        const after = ownedTrashResult(row.value,intent,committedAtISO,deletion);
+        const receipt = {id,type:OWNED_TASK_TRASH,intent,taskId:row.id,generation:meta.generation,
+          revision,priorRevision:row.ownerRevision,before:row.value,after,committedAtISO};
+        tx.objectStore('tasks').put({...row,value:after,ownerRevision:revision});
+        tx.objectStore('mutations').add(receipt);
+        tx.objectStore('meta').put({...meta,revision});
+        return {receipt,replayed:false};
+      });
+      const verified = await readOwnedSnapshot(db);
+      const saved = verified.journal.find(row=>row.id===id);
+      ownedScoringSource(fixture,marker,verified.meta,verified.completionRewards,verified.ownedIds);
+      if (!saved || stableJson(saved)!==stableJson(receipt)) throw new Error('owned_task_trash_readback_unverified');
+      return {confirmedDurable:true,replayed,receipt:clone(saved)};
+    } finally { db.close(); }
+  }
+
   async function commitIsolatedOwnedTask(input) {
     const fixture=ownedTaskContext();
     if(!input || typeof input.actionId!=='string'||!input.actionId||input.actionId.length>128
@@ -20780,6 +20864,7 @@
           }
           if(meta.mode!=='owned')return stop('rollback_frozen_no_task_writes');
           if(!row||row.ownerGeneration!==meta.generation||row.ownerRevision!==intent.expectedRevision||stableJson(row.value)!==stableJson(intent.expectedTask))return stop('owned_task_stale_edit');
+          if (core.normalizeTask(row.value).status === 'trashed') return stop('owned_task_already_trashed');
           let next;
           if (editorOperation) {
             const changes = ownedEditorFields(intent);
@@ -20940,11 +21025,21 @@
     const tasks = rows.filter(row=>prior.ownedIds.includes(row.id)).sort((a,b)=>a.legacyIndex-b.legacyIndex).map(row=>row.value);
     const effective = rollbackLegacyState();
     const pending = core.readPendingTaskMutations().record;
-    const canonical = core.parseTaskPointsStorageJson(new Map(currentLegacySource).get(core.STORAGE_KEY));
+    const legacyEntries = new Map(currentLegacySource);
+    const canonical = core.parseTaskPointsStorageJson(legacyEntries.get(core.STORAGE_KEY));
     if (meta.taskCreate && currentLegacySource.some(([key])=>key.startsWith(core.ISOLATED_TASK_CREATE_PENDING_PREFIX)))
       throw new Error('rollback_pending_task_create_requires_recovery');
     const snapshot = replaceOwnedRollbackRows(canonical, meta.homeTaskId, tasks, rewards, pending);
     const expected = replaceOwnedRollbackRows(effective, meta.homeTaskId, tasks, rewards, pending);
+    const todayRaw = legacyEntries.get(core.ISOLATED_TODAY_LIST_KEY);
+    let todayAfterTrash;
+    if (todayRaw !== undefined && prior.deletions.length) {
+      const list = core.parseIsolatedTodayList(todayRaw);
+      const original = JSON.stringify(list);
+      core.removeIsolatedTodayTrash(list,tasks);
+      const candidate = JSON.stringify(list);
+      if (candidate !== original) todayAfterTrash = candidate;
+    }
     const raw = core.serializeTaskPointsStoredState(snapshot);
     if (stableJson(core.parseTaskPointsStorageJson(raw)) !== stableJson(snapshot))
       throw new Error('rollback_snapshot_roundtrip_unverified');
@@ -20952,6 +21047,7 @@
     const payload = rollbackJsonValue({format:OWNED_COMPLETION_ROLLBACK, generation:meta.generation, revision:meta.revision,
       snapshot, raw, expected, databases, currentLegacySource, originalSource:meta.source,
       receipts:journal, completions:rewards, v2Frozen:true,
+      ...(todayAfterTrash !== undefined ? {todayAfterTrash} : {}),
       ...(meta.completionTimeZone ? {completionTimeZone:meta.completionTimeZone} : {})});
     const checksum = await previewRecoveryFingerprint(payload);
     if (stableJson(databases) !== stableJson(await captureRollbackDatabases()))
@@ -20989,7 +21085,8 @@
         || stableJson(core.parseTaskPointsStorageJson(payload.raw)) !== stableJson(payload.snapshot))
         throw new Error('rollback_detached_checkpoint_unverified');
       const entries = payload.currentLegacySource.filter(([key]) => key !== OWNED_TASK_SCORING)
-        .map(([key, value]) => [key, key === core.STORAGE_KEY ? payload.raw : value]);
+        .map(([key, value]) => [key, key === core.STORAGE_KEY ? payload.raw
+          : key === core.ISOLATED_TODAY_LIST_KEY ? (payload.todayAfterTrash ?? value) : value]);
       const hold = JSON.stringify({active:true, retainUntilManualRecovery:true, token:checksum});
       if (storage.length) throw new Error('rollback_fresh_profile_required');
       storage.setItem(ROLLBACK_HOLD, hold);
@@ -21102,6 +21199,8 @@
     readIsolatedOwnedTasks,
     readIsolatedTaskScoring,
     commitIsolatedOwnedTaskCreation,
+    commitIsolatedOwnedTaskTrash,
+    OWNED_TRASH_UNDO_MS,
     prepareIsolatedTaskCompletion,
     commitIsolatedTaskCompletion,
     commitIsolatedOwnedTask,
