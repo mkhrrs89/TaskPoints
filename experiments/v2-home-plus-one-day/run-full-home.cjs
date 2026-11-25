@@ -1467,6 +1467,19 @@ function completionWriteEvidence(page){
   });
 }
 
+async function settleRollbackSourceMirror(page){
+  await page.evaluate(async()=>{
+    const core=TaskPointsCore;
+    // A cold Home can still have an idle backfill that has not queued its
+    // mirror yet. Complete it before taking a byte-for-byte source baseline.
+    core.queuePhase5CVerifiedSecondaryWrite();
+    await core.flushPhase5CVerifiedSecondaryWrites();
+    const mirror=core.getPhase5CVerifiedSecondaryStatus();
+    if(!mirror.mirrorsCurrentSave||mirror.pendingWrite)
+      throw Error('Expected the source mirror to be current before rollback: '+mirror.lastStatus);
+  });
+}
+
 async function prepareCompletionBoundary(t,context){
   const f=await fixture(t,context),{page}=f;
   await page.clock.setFixedTime(new Date(quietDate+'T17:00:00Z'));
@@ -1794,10 +1807,9 @@ for(const [fault,refusal] of [
   ['interrupted freeze',/indexeddb_transaction_aborted/]
 ])test(`completion rollback refuses ${fault} without changing the source or freezing V2`,async t=>{
   const {page}=await seedScoringReads(t);
+  await settleRollbackSourceMirror(page);
   const evidence=await page.evaluate(async({fault,ownedRewards})=>{
     const core=TaskPointsCore,runtime=TaskPointsStateRuntimeV2;
-    // Finish the genuine startup mirror before comparing all source bytes.
-    await core.flushPhase5CVerifiedSecondaryWrites();
     const db=await new Promise((resolve,reject)=>{
       const request=indexedDB.open(runtime.DB_NAME);
       request.onsuccess=()=>resolve(request.result);
@@ -1848,6 +1860,7 @@ for(const [fault,refusal] of [
 
 for(const phase of ['before','after'])test(`detached import interruption ${phase} the canonical write is quarantined and never changes the source`,async t=>{
   const {page}=await seedScoringReads(t);
+  await settleRollbackSourceMirror(page);
   const checkpoint=await page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(0));
   const source=await completionWriteEvidence(page);
   const profile=fs.mkdtempSync(path.join(os.tmpdir(),'tp-interrupted-rollback-'));
