@@ -255,6 +255,7 @@
           <button data-week-nav="next" class="btn btn-ghost btn-toolbar">Next →</button>
         </div>
       </div>
+      <button id="weekCheckSchedule" class="btn btn-ghost hidden" type="button">Check pending schedule</button>
       <div class="week-grid-scrollbar" id="weekGridScrollTop" aria-hidden="true">
         <div class="week-grid-scrollbar-inner" id="weekGridScrollTopInner"></div>
       </div>
@@ -494,7 +495,10 @@ function load() {
 let state = load();
 let currentBaseDate = new Date();
 
-syncDerivedPointsIfNeeded();
+if (window.TaskPointsCore?.usesIsolatedTaskScoring?.()) {
+  TaskPointsCore.runWithVerifiedTaskScoring(syncDerivedPointsIfNeeded)
+    .catch(error=>console.warn('Week scoring update refused:',error.message));
+} else syncDerivedPointsIfNeeded();
 
   function normalizeHexColor(value) {
     if (!value) return null;
@@ -1176,6 +1180,9 @@ function renderWeekTasks(baseDate){
   const tasks = window.TaskPointsCore?.projectIsolatedDoneTasks?.(state.tasks) ?? state.tasks;
   const days=weekDays(baseDate);
   const grid=$('weekGrid'); grid.innerHTML='';
+  const owner = window.TaskPointsOwnedTaskExperiment;
+  const weekControls = window.TaskPointsCore?.usesIsolatedWeekTaskActions?.();
+  $('weekCheckSchedule').classList.toggle('hidden',!weekControls || !owner?.pendingSchedule());
   const todayK = todayKey();
   days.forEach(d=>{
     const col=document.createElement('div'); col.className='slot';
@@ -1183,6 +1190,7 @@ function renderWeekTasks(baseDate){
     col.innerHTML=`<div class="text-xs text-zinc-400 mb-2 font-semibold">${d.label}</div>`;
     const list = tasks.filter(t=>!t.completedAtISO && t.status!=='trashed' && t.status!=='wontdo' && !t.deletedAtISO && t.dueDateISO===d.key);
     list.forEach(t=>{
+      const verified = weekControls && TaskPointsCore.isolatedTaskDoneView(t.id);
       const overdue = t.dueDateISO && t.dueDateISO < todayK;
       const postponeDays = Number(t.postponedDays) || 0;
       const showPostponePill = postponeDays > 0 && !!t.dueDateISO;
@@ -1218,7 +1226,7 @@ function renderWeekTasks(baseDate){
             <div class="task-title leading-snug break-words">${escapeHtml(t.title)}</div>
             <div class="flex items-center gap-2 flex-shrink-0">
               ${importanceBadge}
-              <button class="btn btn-ghost btn-icon btn-icon-delete" onclick="deleteTask('${t.id}')" title="Delete task" aria-label="Delete task">✕</button>
+              <button class="btn btn-ghost btn-icon btn-icon-delete" data-week-task-action="delete" title="Delete task" aria-label="Delete task">✕</button>
             </div>
           </div>
           <div class="flex items-center gap-2 flex-wrap text-[10px] text-zinc-200">
@@ -1227,12 +1235,19 @@ function renderWeekTasks(baseDate){
             ${pointsLabel}
             ${tagsHtml}
             <div class="task-inline-actions ml-auto">
-              <button class="btn btn-ghost" onclick="addOneDay('${t.id}')">+1 day</button>
-              <button class="btn btn-teal" onclick="completeTask('${t.id}')" title="Done">✓</button>
+              <button class="btn btn-ghost" data-week-task-action="bump">+1 day</button>
+              <button class="btn btn-teal" data-week-task-action="done" title="Done">✓</button>
+              ${verified ? '<button class="btn btn-ghost" data-week-task-action="decline">Won’t do</button>' : ''}
             </div>
           </div>
-          ${overdue ? `<div class="flex gap-1 flex-wrap mt-1"><button class="btn btn-warn" onclick="postponeTask('${t.id}')">Postpone</button></div>` : ''}
+          ${overdue ? '<div class="flex gap-1 flex-wrap mt-1"><button class="btn btn-warn" data-week-task-action="postpone">Postpone</button></div>' : ''}
         </div>`;
+      const actions = {
+        delete:()=>deleteTask(t.id,verified), bump:()=>addOneDay(t.id,verified), done:()=>completeTask(t.id,verified),
+        decline:()=>wontDo(t.id,d.key,verified), postpone:()=>postponeTask(t.id,verified)
+      };
+      for (const button of div.querySelectorAll('[data-week-task-action]'))
+        button.addEventListener('click',actions[button.dataset.weekTaskAction]);
       col.appendChild(div);
     });
     grid.appendChild(col);
@@ -1248,13 +1263,43 @@ function renderWeekTasks(baseDate){
     }
   });
 }
-function holdOwnedWeekTask(id) {
+const weekTaskWrites = new Set();
+
+function reconcileWeekTodayList() {
+  return TaskPointsCore.reconcileIsolatedTodayList()
+    .catch(error=>console.warn('Today list reconciliation paused:',error.message));
+}
+
+async function refreshVerifiedWeek() {
+  const ready = await TaskPointsCore.refreshIsolatedTaskScoring(true);
+  invalidatePageStateCache();
+  renderAll(currentBaseDate);
+  window.updateCriticalTasksIsland?.();
+  if (ready) await reconcileWeekTodayList();
+}
+
+function runOwnedWeekAction(id, rendered, action, errorText = error=>error.message) {
   if (!window.TaskPointsCore?.getLegacyTaskCompletionHold?.(id)) return false;
-  alert('This Week action is paused for the V2-owned Task.');
+  if (!TaskPointsCore.usesIsolatedWeekTaskActions(id) || !rendered) {
+    alert('This Week action is paused for the V2-owned Task.');
+    return true;
+  }
+  if (weekTaskWrites.has(id)) return true;
+  weekTaskWrites.add(id);
+  Promise.resolve().then(()=>action(rendered)).catch(error=>alert(errorText(error)))
+    .finally(async()=>{
+      try { await refreshVerifiedWeek(); }
+      finally { weekTaskWrites.delete(id); }
+    }).catch(error=>console.warn('Verified Week refresh paused:',error.message));
   return true;
 }
-function postponeTask(id){
-  if (holdOwnedWeekTask(id)) return;
+
+function commitWeekSchedule(kind, {basis,task}) {
+  return window.TaskPointsOwnedTaskExperiment.commitSchedule(kind,todayKey(),[{...basis,expectedTask:task}]);
+}
+
+function postponeTask(id, rendered){
+  if (runOwnedWeekAction(id,rendered,selection=>commitWeekSchedule('week-postpone',selection))) return;
   let st=load(); const t=st.tasks.find(x=>x.id===id); if(!t || !t.dueDateISO) return;
   const oldDue = t.dueDateISO;
   t.dueDateISO = todayKey();
@@ -1263,8 +1308,11 @@ function postponeTask(id){
 
   state=st; renderAll(currentBaseDate);
 }
-function wontDo(id, dayKey){
-  if (holdOwnedWeekTask(id)) return;
+function wontDo(id, dayKey, rendered){
+  if (runOwnedWeekAction(id,rendered,({basis,task})=>{
+    if ((task.recurrence?.mode || 'none') === 'none' && !confirm('Won’t do this task? It will be removed.')) return;
+    return TaskPointsCore.runIsolatedTaskTrash({...basis,operation:'week-decline',day:todayKey(),selectedDay:dayKey});
+  })) return;
   let st=load(); const t=st.tasks.find(x=>x.id===id); if(!t) return;
   const mode=(t.recurrence && t.recurrence.mode)||'none';
   if(mode==='none'){
@@ -1287,8 +1335,8 @@ renderAll(currentBaseDate);
 
 }
 
-function addOneDay(id){
-  if (holdOwnedWeekTask(id)) return;
+function addOneDay(id, rendered){
+  if (runOwnedWeekAction(id,rendered,selection=>commitWeekSchedule('week-plus-one-day',selection))) return;
   let st = load();
   const t = st.tasks.find(x => x.id === id);
   if(!t) return;
@@ -1305,8 +1353,11 @@ function addOneDay(id){
   renderAll(currentBaseDate);
 }
 
-function deleteTask(id){
-  if (holdOwnedWeekTask(id)) return;
+function deleteTask(id, rendered){
+  if (runOwnedWeekAction(id,rendered,({basis})=>{
+    if (!confirm('Move this task to Trash?')) return;
+    return TaskPointsCore.runIsolatedTaskTrash({...basis,operation:'week-move-to-trash'});
+  })) return;
   let st = load();
   const t = st.tasks.find(x => x.id === id);
   if(!t) return;
@@ -1323,8 +1374,9 @@ function deleteTask(id){
   renderAll(currentBaseDate);
 }
 
-function completeTask(id){
-  if (holdOwnedWeekTask(id)) return;
+function completeTask(id, rendered){
+  if (runOwnedWeekAction(id,rendered,({basis})=>TaskPointsCore.runIsolatedTaskDone(id,'week',null,basis),
+    window.TaskPointsCore?.isolatedTaskDoneError)) return;
   let st = load();
   const t = st.tasks.find(x => x.id === id);
   if(!t) return;
@@ -1586,6 +1638,17 @@ function syncCustomRepeatUI(repeatSelectEl) {
   else row.classList.add('hidden');
 }
 
+let weekAddWriting = false;
+function syncWeekAddForm(pending, writing = false) {
+  const button = $('addBtn');
+  button.disabled = writing;
+  button.textContent = pending ? 'Retry Add Task' : 'Add Task';
+  button.setAttribute('aria-busy',String(writing));
+  $('addTaskModalBody').querySelectorAll('input, select, .addTaskTodayBtn').forEach(control=>{
+    control.disabled = pending || writing;
+  });
+}
+
 function openAddTaskModal() {
   const modal = $("addTaskModal");
   if (!modal) return;
@@ -1597,6 +1660,29 @@ function openAddTaskModal() {
 
   const rep = $("repeatInput");
   syncCustomRepeatUI(rep);
+  const owner = window.TaskPointsOwnedTaskExperiment;
+  if (window.TaskPointsCore?.usesIsolatedWeekTaskActions?.() && owner?.usesTaskCreation() && !weekAddWriting) {
+    try {
+      const pending = owner.recoverTaskCreation();
+      if (pending) {
+        $('titleInput').value = pending.title;
+        $('importanceInput').value = pending.importance;
+        $('dueDateInput').value = pending.dueDateISO || '';
+        $('pointsInput').value = pending.points;
+        $('tagsInput').value = pending.tags.join(', ');
+        rep.value = pending.recurrence.mode === 'everyWeekday' ? 'weekdays' : pending.recurrence.mode;
+        if (rep.value === 'custom') {
+          $('repeatCustomCount').value = pending.recurrence.customCount;
+          $('repeatCustomUnit').value = pending.recurrence.customUnit;
+        }
+        syncCustomRepeatUI(rep);
+      }
+      syncWeekAddForm(Boolean(pending));
+    } catch (error) {
+      syncWeekAddForm(true,true);
+      alert(error.message);
+    }
+  }
 }
 
 function closeAddTaskModal() {
@@ -1625,6 +1711,26 @@ function clearAddTaskForm(){
   if (repeatCustomRow) repeatCustomRow.classList.add('hidden');
 }
 
+async function addOwnedWeekTask(owner, fields) {
+  if (weekAddWriting || $('addBtn').disabled) return;
+  weekAddWriting = true;
+  syncWeekAddForm(true,true);
+  try {
+    const result = await owner.commitTaskCreation(fields);
+    if (!result?.confirmedDurable) throw Error('The saved Task could not be verified.');
+    await owner.finishTaskCreation();
+    clearAddTaskForm();
+    syncWeekAddForm(false);
+    closeAddTaskModal();
+    await refreshVerifiedWeek();
+  } catch (error) {
+    let pending = true;
+    try { pending = Boolean(owner.recoverTaskCreation()); } catch (_) {}
+    syncWeekAddForm(pending);
+    alert('Add Task could not be confirmed. '+error.message);
+  } finally { weekAddWriting = false; }
+}
+
 function addTask(){
   const title = $('titleInput').value.trim();
   if(!title) return alert('Enter a task name');
@@ -1648,16 +1754,23 @@ function addTask(){
     rec.customUnit = unit;
   }
 
-  const dueDate = $('dueDateInput').value || null;
+  const due = $('dueDateInput');
+  const fields = {title,importance:$('importanceInput').value,dueDateISO:due.value || null,
+    points:Number($('pointsInput').value)||0,recurrence:rec,tags};
+  if (window.TaskPointsCore?.getLegacyTaskCompletionHold?.('t1')) {
+    const owner = window.TaskPointsOwnedTaskExperiment;
+    if (!TaskPointsCore.usesIsolatedWeekTaskActions() || !owner?.usesTaskCreation())
+      return alert('Week Add Task is paused for the V2 experiment.');
+    // The existing option label uses the shared scheduler's weekday mode.
+    if (mode === 'weekdays') rec.mode = 'everyWeekday';
+    if (due.validity.badInput || (fields.dueDateISO && !/^\d{4}-/.test(fields.dueDateISO)))
+      return alert('Enter a valid four-digit due date or clear the field.');
+    return addOwnedWeekTask(owner,fields);
+  }
   const task = {
     id: crypto.randomUUID(),
-    title,
-    importance: $('importanceInput').value,
-    dueDateISO: dueDate,
-    originalDueDateISO: dueDate,
-    points: Number($('pointsInput').value)||0,
-    recurrence: rec,
-    tags,
+    ...fields,
+    originalDueDateISO: fields.dueDateISO,
     skipDates: [],
     hidden: false,
     completedAtISO: null,
@@ -1702,9 +1815,24 @@ document.querySelectorAll('[data-week-nav]').forEach(btn => {
 });
 
 document.addEventListener('DOMContentLoaded', () => {
-  window.TaskPointsCore?.watchIsolatedTaskDone?.(()=>{
+  window.TaskPointsCore?.watchIsolatedTaskDone?.(ready=>{
+    if (window.TaskPointsCore?.usesIsolatedWeekTaskActions?.()) invalidatePageStateCache();
     renderWeekTasks(currentBaseDate);
     window.updateCriticalTasksIsland?.();
+    if (ready && TaskPointsCore.usesIsolatedWeekTaskActions()) return reconcileWeekTodayList();
+  });
+  $('weekCheckSchedule').addEventListener('click',async()=>{
+    if (!window.TaskPointsCore?.usesIsolatedWeekTaskActions?.()) return;
+    const owner = window.TaskPointsOwnedTaskExperiment;
+    try {
+      await owner.recoverSchedule();
+      await refreshVerifiedWeek();
+      if (owner.scheduleNotice()) alert(owner.scheduleNotice());
+    } catch (error) { alert(error.message); }
+  });
+  window.addEventListener('storage',event=>{
+    if (window.TaskPointsCore?.usesIsolatedWeekTaskActions?.() && event.key === TaskPointsCore.ISOLATED_TASK_SCHEDULE_PENDING_KEY)
+      renderWeekTasks(currentBaseDate);
   });
   $('openAddTaskBtn')?.addEventListener('click', openAddTaskModal);
   $('addBtn')?.addEventListener('click', addTask);

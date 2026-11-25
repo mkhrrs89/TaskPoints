@@ -91,6 +91,12 @@
     } catch (_) { return false; }
   }
 
+  function usesIsolatedWeekTaskActions(taskId = 't1') {
+    if (!usesIsolatedTaskDone(taskId) || !global.location.pathname.endsWith('/week.html')) return false;
+    try { return JSON.parse(global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY)).weekControls === true; }
+    catch (_) { return false; }
+  }
+
   let isolatedDonePending = false;
   let checkIsolatedDoneView;
   function watchIsolatedTaskDone(onChange) {
@@ -255,22 +261,23 @@
     }
   }
 
-  function reconcileIsolatedTodayTaskMembership(list, tasks, permanentIds = [], statusReceipts = []) {
+  function reconcileIsolatedTodayTaskMembership(list, tasks, permanentIds = [], statusReceipts = [], weekChanges = []) {
     for (const task of tasks) if (task.status === 'trashed') removeIsolatedTodayTask(list,todayKey(),task.id);
     if (permanentIds.length) {
       const days = new Set([...Object.keys(list.tasksByDay || {}),...Object.keys(list.orderByDay || {}),list.dayKey]);
       for (const id of permanentIds) for (const day of days) removeIsolatedTodayTask(list,day,id);
     }
-    if (!statusReceipts.length) return;
+    if (!statusReceipts.length && !weekChanges.length) return;
     const latest = new Map(tasks.map(task=>[task.id,task]));
-    for (const {taskId,intent} of statusReceipts) {
-      if (intent.operation === 'archive-unarchive') continue;
+    const statusChanges = statusReceipts.filter(({intent})=>intent.operation !== 'archive-unarchive')
+      .map(({taskId,intent})=>({taskId,day:intent.selectedDay ?? intent.day}));
+    for (const {taskId,day} of [...statusChanges,...weekChanges]) {
       const task = latest.get(taskId);
       // Remove only the affected day's active membership. A later
       // unarchive or schedule can make this Task due again on that day.
       if (task && normalizeTask(task).status === 'active' && !task.hidden && !task.deletedAtISO && !task.deletedAt
-        && !task.completedAtISO && task.dueDateISO === intent.day) continue;
-      removeIsolatedTodayTask(list,intent.day,taskId);
+        && !task.completedAtISO && task.dueDateISO === day) continue;
+      removeIsolatedTodayTask(list,day,taskId);
     }
   }
 
@@ -290,7 +297,7 @@
       for (const {taskId, completedAtISO} of proof.completions) {
         removeIsolatedTodayTask(list,dateKey(completedAtISO),taskId);
       }
-      reconcileIsolatedTodayTaskMembership(list,proof.tasks,proof.permanentIds,proof.statusReceipts);
+      reconcileIsolatedTodayTaskMembership(list,proof.tasks,proof.permanentIds,proof.statusReceipts,proof.weekMembershipChanges);
 
       const candidate = JSON.stringify(list);
       parseIsolatedTodayList(candidate);
@@ -11494,6 +11501,7 @@ return Number(cappedScore.toFixed(1));
     isolatedTaskTrashDeletion,
     runIsolatedTaskTrash,
     usesIsolatedTaskDone,
+    usesIsolatedWeekTaskActions,
     watchIsolatedTaskDone,
     isolatedTaskDoneView,
     runIsolatedTaskDone,

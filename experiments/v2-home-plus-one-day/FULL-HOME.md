@@ -398,8 +398,8 @@ overdue dates, cleared dates, skipping weekends, month-end and
 leap-year rollover, resetting postponement, and closing a one-off
 Task. Already-earned dates, IDs, and points stay fixed. Home, Today,
 Critical Tasks, and the Week schedule show the verified Task. The
-Week view holds legacy actions for the owned Task so they cannot
-write against its projected row.
+Week view holds legacy writers for the owned Task so they cannot write
+against its projected row. Package 3 adds the verified Week actions.
 
 The Chromium profile restarts with the verified recurrence and
 date. A detached rollback restores the latest editor fields and
@@ -437,8 +437,8 @@ Home or Today. Home, Today, Critical Tasks, and Week read the verified row.
 The reward constraint is per Task and local day. Matchups and Game combine
 the verified rewards with unrelated V1 rewards. The detached checkpoint
 adds V2-created Tasks and their rewards to a fresh V1 profile exactly once.
-Home's remaining legacy actions and Week's write actions are held for created
-Tasks. Metric-derived rewards, time-zone changes, the real-data iPhone
+Legacy Task writers stay held for created Tasks. Package 3 adds the verified
+Week actions. Metric-derived rewards, time-zone changes, the real-data iPhone
 handoff, and old-client safeguards retain their existing restrictions.
 
 The browser test also exposed an existing Inbox writer that used Home's
@@ -621,7 +621,43 @@ checks passed. The scoped suite had 536 passes, 15 failures, and one TODO,
 with identical failure names and counts on `e4cab9e0`. The documented
 intermittent Habit, Inbox, and startup issues remain open.
 
-### Remaining Task work for M02
+### Package 3 · Week
+
+On the sealed synthetic Week fixture, the existing Add Task form commits
+through the shared creation receipt. Blank dates stay blank when browsing
+another week. The Today shortcut uses the actual local day. The Weekdays
+option saves the shared scheduler’s `everyWeekday` mode, as in Home.
+
+The Week card uses its rendered V2 revision for +1 Day, Postpone, Done,
+and Delete. +1 Day adds one calendar day to the due date. Postpone moves
+overdue Tasks to the actual local day and counts the days moved. Week Done
+earns points on the actual local day, even in another week. A recurring Task
+advances from its existing due date and clears postponements. A one-off sets
+the completion timestamp and preserves the original status field, matching
+Week’s legacy behavior. The existing legacy `weekdays` literal retains its
+old no-advance Done behavior if found in a sealed Task.
+
+Week had a Won’t Do handler but no rendered button. The synthetic Week card
+now calls that handler. A recurring skip records the selected column’s day
+and moves the due date to today without earning a reward. One-off decline
+keeps its confirmation and stays out of Trash. Week Delete records
+`WeekScreen` provenance and offers restoration through Trash.
+
+Today-list cleanup replays from verified receipts and preserves unrelated
+days, ordering, notes, and habits. It is separate from the IndexedDB write.
+The same completion-day key prevents competing Week, Home, and Today
+clicks from earning duplicate rewards. The existing metric reward and
+time-zone refusals still apply.
+
+All 13 Week cases passed both in isolation and in the full Chromium suite.
+The full suite had 204 passes, one failure, and two existing V1 Archive
+TODOs. The native startup test reported `localStorage:warming` instead of
+`indexeddb-native`. The same assertion failed on the exact `ff4816ae`
+baseline and passed in a focused rerun on this branch. Main regressions
+passed 371/371 and Chromium component tests passed 19/19. The V2 contracts
+had 1,356 passes, the same 22 failures as `ff4816ae`, and one existing TODO.
+
+### M02 Task packages
 
 1. **Trash** — verified in the synthetic experiment. Restore and confirmed
    Delete Forever use the same deletion evidence, preserve linked rewards,
@@ -631,9 +667,10 @@ intermittent Habit, Inbox, and startup issues remain open.
    covers individual and bulk overdue Postpone, action-sheet Snooze +1 and
    +7 and date picking, and swipe rescheduling. Package 2B covers Hide,
    Un-Archive, Home and Archive Won't Do, recurring skips, and Archive Done.
-3. **Week** — route Add Task and the existing +1 Day, Postpone, Won't Do,
-   Done and Delete controls through the shared Task operations. Verify
-   the selected-day and weekly recurrence rules of each control.
+3. **Week** — verified in the synthetic experiment. Add Task, +1 Day,
+   Postpone, Won’t Do, Done, and Delete use the shared transactions in the
+   sealed fixture. Week’s selected date, recurrence, reward day, and
+   deletion provenance are covered above.
 4. **Completion history** — migrate Log date edits and the linked
    completion-deletion/Trash transaction with correct historical
    totals. Resolve the existing metric-derived reward and time-zone

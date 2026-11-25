@@ -1628,14 +1628,17 @@ const unrelatedRewardRows=[
   {id:'synthetic-unrelated-current',taskId:'t2',title:'Synthetic unrelated reward',points:3,completedAtISO:quietDate+'T16:00:00Z'}
 ];
 
-async function seedScoringReads(t,context,{oneOff=false,write=false,controls=false,recurrence,dueDateISO,create=false}={}){
+async function seedScoringReads(t,context,{oneOff=false,write=false,controls=false,recurrence,dueDateISO,create=false,week=false}={}){
   const f=await prepareCompletionBoundary(t,context);
   const legacyRewards=write?[...unrelatedRewardRows]:[{...ownedRewards[0],points:5},...unrelatedRewardRows];
   const completionSeed=write?(oneOff?[]:ownedRewards.slice(1)):(oneOff?ownedRewards.slice(0,1):ownedRewards);
-  await f.page.evaluate(async({marker,completionSeed,legacyRewards,day,oneOff,write,controls,recurrence,dueDateISO,create})=>{
+  await f.page.evaluate(async({marker,completionSeed,legacyRewards,day,oneOff,write,controls,recurrence,dueDateISO,create,week})=>{
     const core=TaskPointsCore,snapshot=core.readTaskPointsStoredState();
     snapshot.completions=legacyRewards;
     if (create) snapshot.habits.find(row=>row.id==='h1').updatedAtISO=day+'T12:00:00Z';
+    if (week) Object.assign(snapshot.tasks.find(row=>row.id==='t2'),{
+      skipDates:[],tags:[],updatedAtISO:null,unknownWeekField:{keep:[0,null]}
+    });
     const task=snapshot.tasks.find(row=>row.id==='t1');
     task.recurrence=recurrence || {mode:oneOff?'none':'daily'};
     if(write)task.postponedDays=3;
@@ -1647,12 +1650,13 @@ async function seedScoringReads(t,context,{oneOff=false,write=false,controls=fal
       scoreA:8,scoreB:46,matchupType:'exhibition'});
     core.writeTaskPointsStoredState(snapshot);
     const fixture={id:crypto.randomUUID(),syntheticOnly:true,homeTaskId:'t1',completionRead:true,
-      ...(write?{completionWrite:true}:{}),...(controls?{completionControls:true}:{}),...(create?{taskCreate:true}:{}),phase:'prepared'};
+      ...(write?{completionWrite:true}:{}),...(controls?{completionControls:true}:{}),...(create?{taskCreate:true}:{}),
+      ...(week?{weekControls:true}:{}),phase:'prepared'};
     localStorage.setItem('taskpoints_isolated_task_scoring_read_v1',fixture.id);
     localStorage.setItem(marker,JSON.stringify(fixture));
     await TaskPointsStateRuntimeV2.initializeIsolatedTaskOwner(snapshot,{completionSeed});
     localStorage.setItem(marker,JSON.stringify({...fixture,phase:'sealed'}));
-  },{marker,completionSeed,legacyRewards,day:quietDate,oneOff,write,controls,recurrence,dueDateISO,create});
+  },{marker,completionSeed,legacyRewards,day:quietDate,oneOff,write,controls,recurrence,dueDateISO,create,week});
   await f.page.reload();
   if(oneOff&&!write)await f.page.waitForFunction(()=>TaskPointsHomeLiveState?.getState()?.tasks?.find(row=>row.id==='t1')?.status==='done');
   else await waitHome(f.page);
@@ -5949,4 +5953,535 @@ test('V2 status simultaneous real Archive Done clicks share one receipt and bloc
   await waitStatusCount(page,2);
   await assert.rejects(commitCompletion(page,await prepareCompletion(page,'home')),/owned_completion_already_awarded/);
   assert.deepEqual(await completionReceipts(page),[awards[0].receipt]);
+});
+
+const weekSlot = (page,day) => page.locator(`#weekGrid [data-day-key="${day}"]`);
+const weekCard = (page,day,id='t1') => weekSlot(page,day).locator(`[data-task-id="${id}"]`);
+const weekAction = (page,day,action,id='t1') => weekCard(page,day,id).locator(`[data-week-task-action="${action}"]`);
+const weekNav = (page,action) => page.locator(`#weekTasksSection [data-week-nav="${action}"]`).click();
+const withWeekActions = (t,context,options) => seedTrash(t,context,{create:true,week:true,...options});
+const weekReceipt = async (page,kind,taskId='t1') => {
+  const until=Date.now()+12000;
+  do {
+    const {journal}=await owned(page);
+    const receipt=journal.find(row=>row.taskId===taskId && (row.intent.choice?.kind===kind
+      || row.intent.operation===kind || row.intent.source===kind));
+    if(receipt)return receipt;
+    await new Promise(resolve=>setTimeout(resolve,30));
+  } while(Date.now()<until);
+  assert.fail('Expected a verified '+kind+' receipt for '+taskId);
+};
+const weekDialogs = page => {
+  const messages=[];
+  page.removeAllListeners('dialog');
+  page.on('dialog',async dialog=>{messages.push(dialog.message());await dialog.accept();});
+  return messages;
+};
+const weekTodayStore = (seed, days, taskId='t1') => {
+  const store=structuredClone(seed);
+  for (const day of days) {
+    store.tasksByDay[day]=[...(store.tasksByDay[day] || []),taskId];
+    store.orderByDay[day]=[...(store.orderByDay[day] || []),'task:'+taskId];
+  }
+  return store;
+};
+
+test('V2 Week +1 Day and Postpone use the visible due date and preserve history and unrelated Today ordering',async t=>{
+  const start='2026-11-14', bumped='2026-11-15';
+  const {page,context}=await withWeekActions(t,undefined,{dueDateISO:start});
+  const initial=await trashedTask(page,'t1'), rewards=await verifiedRewards(page);
+  const legacy=await backingTask(page);
+  const expected=structuredClone(cleanedTodayList);
+  const list=weekTodayStore(expected,[start,bumped,quietDate]);
+  const week=await openScoringPage(context,'week.html');
+  await weekNav(week,'prev');
+  const today=await openScoringPage(context,'today.html');
+  await writeTodayFixture(page,JSON.stringify(list));
+  await weekAction(week,start,'bump').click();
+  const bumpedReceipt=await weekReceipt(week,'week-plus-one-day');
+  assert.equal(bumpedReceipt.after.dueDateISO,bumped);
+  assert.equal(bumpedReceipt.after.postponedDays,initial.postponedDays+1);
+  await weekCard(week,bumped).waitFor();
+  expected.tasksByDay[start]=[];
+  expected.orderByDay[start]=[];
+  expected.tasksByDay[bumped]=list.tasksByDay[bumped];
+  expected.orderByDay[bumped]=list.orderByDay[bumped];
+  expected.tasksByDay[quietDate]=list.tasksByDay[quietDate];
+  expected.orderByDay[quietDate]=list.orderByDay[quietDate];
+  await page.waitForFunction(({day,expected})=>{
+    const raw=JSON.parse(localStorage.getItem('taskpoints_today_view_v1'));
+    return JSON.stringify([raw.tasksByDay[day],raw.orderByDay[day]])===JSON.stringify([expected.tasksByDay[day],expected.orderByDay[day]]);
+  },{day:start,expected});
+  await weekAction(week,bumped,'postpone').click();
+  const postponed=await weekReceipt(week,'week-postpone');
+  assert.deepEqual([postponed.before.dueDateISO,postponed.after.dueDateISO,postponed.after.postponedDays],
+    [bumped,quietDate,initial.postponedDays+4]);
+  assert.equal(postponed.after.originalDueDateISO,initial.originalDueDateISO);
+  assert.deepEqual(postponed.after.recurrence,initial.recurrence);
+  assert.deepEqual(postponed.after.unknownTask,initial.unknownTask);
+  await weekNav(week,'this');
+  await weekCard(week,quietDate).waitFor();
+  await waitDueView(page,quietDate);
+  await todayTask(today).waitFor();
+  assert.equal(await weekAction(week,quietDate,'postpone').count(),0);
+  expected.tasksByDay[bumped]=list.tasksByDay[bumped].filter(id=>id!=='t1');
+  expected.orderByDay[bumped]=list.orderByDay[bumped].filter(id=>id!=='task:t1');
+  await page.waitForFunction(expected=>{
+    const current=JSON.parse(localStorage.getItem('taskpoints_today_view_v1'));
+    return Object.keys(expected).every(key=>JSON.stringify(current[key])===JSON.stringify(expected[key]));
+  },expected);
+  assert.equal(await week.evaluate(()=>TaskPointsCore.reconcileIsolatedTodayList()),false);
+  assert.deepEqual(await backingTask(page),legacy);
+  assert.deepEqual(await verifiedRewards(page),rewards);
+});
+
+test('V2 Week Add Task preserves explicit and blank dates, resumes a lost response and allows separate same-name drafts',async t=>{
+  const profile=await completionProfile(t);
+  const {page,context}=await withWeekActions(t,profile.context);
+  const week=await openScoringPage(context,'week.html');
+  await weekNav(week,'next');
+  const future='2026-11-24';
+  await weekSlot(week,future).waitFor();
+  await putCreateForm(week,{title:'   '});
+  const alerts=weekDialogs(week);
+  await addButton(week).click();
+  assert.equal(alerts.at(-1),'Enter a task name');
+  assert.deepEqual(await createReceipts(page),[]);
+  assert.equal(await week.locator('#dueDateInput').inputValue(),'');
+  await week.locator('#titleInput').fill('Synthetic Week Task');
+  await week.locator('#dueDateInput').fill(future);
+  await week.locator('#pointsInput').fill('12.75');
+  await week.locator('#importanceInput').selectOption('Critical');
+  await week.locator('#repeatInput').selectOption('custom');
+  await week.locator('#repeatCustomCount').fill('2.9');
+  await week.locator('#repeatCustomUnit').selectOption('week');
+  await week.locator('#tagsInput').fill('one, ,two');
+  await week.evaluate(()=>{
+    const runtime=TaskPointsStateRuntimeV2, commit=runtime.commitIsolatedOwnedTaskCreation;
+    runtime.commitIsolatedOwnedTaskCreation=async(...args)=>{
+      const result=await commit(...args);
+      if(!window.lostWeekAdd){window.lostWeekAdd=true;throw Error('Synthetic lost Week Add reply');}
+      return result;
+    };
+    document.getElementById('addBtn').click();
+    document.getElementById('addBtn').click();
+  });
+  await week.getByRole('button',{name:'Retry Add Task'}).waitFor();
+  await week.waitForFunction(()=>!document.getElementById('addBtn').disabled);
+  const [first]=await createReceipts(page);
+  assert.ok(first.taskId.startsWith('v2-task-'));
+  assert.deepEqual(first.intent.fields,createDraft('Synthetic Week Task',{dueDateISO:future,points:12.75,importance:'Critical',
+    recurrence:{mode:'custom',customCount:2,customUnit:'week'},tags:['one','two']}));
+  assert.equal((await pendingCreates(week))[0][1].intent.taskId,first.taskId);
+  const reopened=await profile.restart();
+  const restoredWeek=await openScoringPage(reopened,'week.html');
+  await weekNav(restoredWeek,'next');
+  await weekCard(restoredWeek,future,first.taskId).waitFor();
+  await restoredWeek.locator('#openAddTaskBtn').click();
+  assert.equal(await restoredWeek.locator('#titleInput').inputValue(),first.after.title);
+  assert.equal(await restoredWeek.locator('#dueDateInput').inputValue(),future);
+  assert.equal(await restoredWeek.locator('#titleInput').isDisabled(),true);
+  assert.equal(await saveCreateForm(restoredWeek),first.taskId);
+  assert.deepEqual(await createReceipts(restoredWeek),[first]);
+  assert.deepEqual(await pendingCreates(restoredWeek),[]);
+  await putCreateForm(restoredWeek,{title:'Synthetic Week Task'});
+  assert.equal(await restoredWeek.locator('#dueDateInput').inputValue(),'');
+  const undated=await saveCreateForm(restoredWeek);
+  assert.notEqual(undated,first.taskId);
+  assert.equal((await createReceipts(restoredWeek))[1].after.dueDateISO,null);
+  await putCreateForm(restoredWeek,{title:'Synthetic Week Today Button',repeat:'weekdays',quickDue:'.addTaskTodayBtn'});
+  const todayId=await saveCreateForm(restoredWeek);
+  assert.deepEqual((await createReceipts(restoredWeek))[2].after.recurrence,{mode:'everyWeekday'});
+  await weekNav(restoredWeek,'this');
+  await weekCard(restoredWeek,quietDate,todayId).waitFor();
+  const today=await openScoringPage(reopened,'today.html');
+  await todayTask(today,todayId).waitFor();
+  const home=await openScoringPage(reopened,'index.html');
+  for (const id of [first.taskId,undated,todayId]) await taskCard(home,id).waitFor();
+  await assertCreationOutsideV1(home,[first.taskId,undated,todayId]);
+});
+
+test('V2 Week Done on a future column earns the latest points today, advances from the column and survives fresh V1 rollback',async t=>{
+  const profile=await completionProfile(t);
+  const due='2026-11-24', advanced='2026-12-08';
+  const {page,context,legacyRewards}=await withWeekActions(t,profile.context,{
+    dueDateISO:due,recurrence:{mode:'custom',customCount:2,customUnit:'week'}
+  });
+  const original=await partOfState(page), history=await verifiedRewards(page);
+  const week=await openScoringPage(context,'week.html');
+  await weekNav(week,'next');
+  await weekCard(week,due).waitFor();
+  await openRepeatEditor(page);
+  await pointsField(page).fill('12.75');
+  assert.equal((await submitTaskEdit(page)).points,12.75);
+  await weekCard(week,due).getByText('12.75 pts').waitFor();
+  const today=await openScoringPage(context,'today.html');
+  const list=weekTodayStore(cleanedTodayList,[quietDate,due]);
+  await writeTodayFixture(page,JSON.stringify(list));
+  await week.evaluate(()=>{
+    const api=TaskPointsStateRuntimeV2, commit=api.commitIsolatedTaskCompletion;
+    api.commitIsolatedTaskCompletion=async(intent)=>{
+      const result=await commit(intent);
+      window.lostWeekDone=result.receipt;
+      throw Error('Synthetic lost Week Done reply');
+    };
+    const button=document.querySelector('#weekGrid [data-task-id="t1"] [data-week-task-action="done"]');
+    button.click(); button.click();
+  });
+  const done=await weekReceipt(week,'week');
+  assert.deepEqual(done,await week.evaluate(()=>window.lostWeekDone));
+  assert.deepEqual([done.intent.day,done.completion.dateKey,done.completion.completedAtISO,done.completion.points],
+    [quietDate,quietDate,trashClock,12.75]);
+  assert.deepEqual([done.before.dueDateISO,done.after.dueDateISO,done.after.postponedDays],
+    [due,advanced,0]);
+  assert.deepEqual(done.after.recurrence,done.before.recurrence);
+  assert.deepEqual(await verifiedRewards(page),[...history,done.completion]);
+  assert.deepEqual(await canonicalCompletions(page),legacyRewards);
+  await assertCheckedOwnedTask(today);
+  await page.waitForFunction(()=>document.getElementById('todayScoreIslandValue')?.textContent==='15.8');
+  await waitDueView(page,advanced);
+  await page.waitForFunction(due=>{
+    const store=JSON.parse(localStorage.getItem('taskpoints_today_view_v1'));
+    return store.tasksByDay[due].length===0 && store.orderByDay[due].length===0;
+  },due);
+  assert.equal(await weekCard(week,due).count(),0);
+  const reopened=await profile.restart();
+  const weekAgain=await openScoringPage(reopened,'week.html');
+  for(let i=0;i<3;i++)await weekNav(weekAgain,'next');
+  await weekCard(weekAgain,advanced).waitFor();
+  const duplicate=await prepareCompletion(weekAgain,'week');
+  assert.deepEqual(await commitCompletion(weekAgain,duplicate),{confirmedDurable:true,replayed:true,receipt:done});
+  const game=await openScoringPage(reopened,'game.html');
+  await game.locator('#playersList .playerCard').first().waitFor();
+  assert.equal(await game.evaluate(async()=>{
+    if(!await TaskPointsCore.refreshIsolatedTaskScoring(true))throw Error('Game completion proof unavailable');
+    return computeTodayPoints();
+  }),15.8);
+  const matchups=await openScoringPage(reopened,'matchups.html');
+  const generate=matchups.locator('#matchupsChronological').getByRole('button',{name:'Generate retro matchups'}).first();
+  const header=generate.locator('xpath=ancestor::section[1]').locator('.matchup-collapsible-header').first();
+  if(await header.getAttribute('aria-expanded')==='false')await header.click();
+  await generate.click();
+  await matchups.waitForFunction(()=>{
+    const core=TaskPointsCore,raw=localStorage.getItem(core.STORAGE_KEY);
+    return core.parseTaskPointsStorageJson(raw).matchups.find(row=>row.id==='synthetic-owned-matchup')?.scoreA===15.75;
+  });
+  await matchups.reload();
+  assert.equal(await matchups.evaluate(()=>TaskPointsCore.readTaskPointsStoredState().matchups
+    .find(row=>row.id==='synthetic-owned-matchup')?.scoreA),15.75);
+  await matchups.close();await game.close();await weekAgain.close();
+  const home=await openScoringPage(reopened,'index.html');
+  await waitHome(home);await settleRollbackSourceMirror(home);
+  const revision=(await owned(home)).meta.revision;
+  const checkpoint=await home.evaluate(rev=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(rev),revision);
+  const fresh=await browser.newContext({serviceWorkers:'block',timezoneId:'America/New_York'});
+  t.after(()=>fresh.close());await configureContext(fresh);
+  const loader=await rollbackLoader(fresh);
+  assert.deepEqual(await restoreCompletionCheckpoint(loader,checkpoint),{verified:true,checksum:checkpoint.checksum});
+  const v1=await openScoringPage(fresh,'index.html');await waitHome(v1);
+  assert.deepEqual(await backingTask(v1),done.after);
+  assert.deepEqual(await canonicalCompletions(v1),[...legacyRewards,...history,done.completion]);
+  assert.equal((await scoresFromCore(v1)).totals[quietDate],15.75);
+  const after=await partOfState(v1);
+  for(const key of ['task','habit','inbox','flex','projects','notes','quarantine','image','unknownRaw','unknownTask'])
+    assert.deepEqual(after[key],original[key],key);
+});
+
+test('V2 Week Won’t Do uses the selected day for recurring Tasks and declines a one-off without a reward or Trash row',async t=>{
+  const future='2026-11-24';
+  const {page,context}=await withWeekActions(t,undefined,{dueDateISO:future,recurrence:{mode:'weekly'}});
+  const history=await verifiedRewards(page);
+  const week=await openScoringPage(context,'week.html');
+  const dialogs=weekDialogs(week);
+  await weekNav(week,'next');
+  await writeTodayFixture(page,JSON.stringify(weekTodayStore(cleanedTodayList,[future])));
+  await weekAction(week,future,'decline').click();
+  const skip=await weekReceipt(week,'week-decline');
+  assert.equal(skip.intent.selectedDay,future);
+  assert.equal(skip.intent.day,quietDate);
+  assert.deepEqual(skip.after.skipDates,[future]);
+  assert.equal(skip.after.dueDateISO,quietDate);
+  assert.equal(skip.after.originalDueDateISO,skip.before.originalDueDateISO);
+  assert.equal(skip.after.postponedDays,skip.before.postponedDays);
+  assert.deepEqual(skip.after.recurrence,skip.before.recurrence);
+  assert.deepEqual(dialogs,[]);
+  await page.waitForFunction(day=>JSON.parse(localStorage.getItem('taskpoints_today_view_v1')).tasksByDay[day].length===0,future);
+  await weekNav(week,'this');
+  await weekCard(week,quietDate).waitFor();
+  await putCreateForm(week,{title:'Synthetic Week Decline',due:quietDate});
+  const id=await saveCreateForm(week);
+  await weekAction(week,quietDate,'decline',id).click();
+  const declined=await weekReceipt(week,'week-decline',id);
+  assert.equal(dialogs.at(-1),'Won’t do this task? It will be removed.');
+  assert.deepEqual([declined.after.status,declined.after.deletedAtISO,declined.after.completedAtISO],['wontdo',null,null]);
+  await weekCard(week,quietDate,id).waitFor({state:'detached'});
+  const trash=await openScoringPage(context,'trash.html');
+  assert.equal(await trashListing(trash,'Synthetic Week Decline').count(),0);
+  assert.deepEqual(await verifiedRewards(page),history);
+  assert.deepEqual(await completionReceipts(page),[]);
+  await assertCreationOutsideV1(page,[id]);
+});
+
+test('V2 Week Delete keeps Week provenance, supports Trash Restore and preserves an earned one-off through permanent deletion and rollback',async t=>{
+  const {page,context,legacyRewards}=await withWeekActions(t);
+  const initialHistory=await verifiedRewards(page);
+  const week=await openScoringPage(context,'week.html');
+  const dialogs=weekDialogs(week);
+  await weekAction(week,quietDate,'delete').click();
+  const originalDelete=await weekReceipt(week,'week-move-to-trash');
+  assert.equal(dialogs.at(-1),'Move this task to Trash?');
+  assert.equal(originalDelete.after.deletedFrom,'WeekScreen');
+  assert.equal(originalDelete.after.prevStatus,'active');
+  await weekCard(week,quietDate).waitFor({state:'detached'});
+  const trash=await openScoringPage(context,'trash.html');
+  await trashListing(trash,'Synthetic V2 target').getByRole('button',{name:'Restore',exact:true}).click();
+  await weekReceipt(week,'trash-restore');
+  await weekCard(week,quietDate).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Undo',exact:true}).count(),0);
+
+  // The Week V1 card leaves an existing status unchanged on one-off Done.
+  await putCreateForm(week,{title:'Synthetic Week One-off',due:'2026-11-17',points:'-2.5'});
+  const oneOff=await saveCreateForm(week);
+  await weekAction(week,'2026-11-17','done',oneOff).click();
+  const complete=await weekReceipt(week,'week',oneOff);
+  assert.equal(complete.completion.points,-2.5);
+  assert.equal(complete.after.status,complete.before.status);
+  assert.equal(complete.after.completedAtISO,trashClock);
+  assert.equal(complete.after.dueDateISO,'2026-11-17');
+  await weekCard(week,'2026-11-17',oneOff).waitFor({state:'detached'});
+  const recurringTitle='Synthetic Week Permanent Target';
+  await putCreateForm(week,{title:recurringTitle,due:quietDate,repeat:'daily',points:'4.5'});
+  const retired=await saveCreateForm(week);
+  await weekAction(week,quietDate,'done',retired).click();
+  const earned=await weekReceipt(week,'week',retired);
+  assert.equal(earned.completion.points,4.5);
+  const next='2026-11-19';
+  await weekCard(week,next,retired).waitFor();
+  const stale=await week.evaluate(id=>{
+    const {task,basis}=TaskPointsCore.isolatedTaskDoneView(id);
+    return {actionId:crypto.randomUUID(),generation:basis.generation,bases:[{...basis,expectedTask:task}],
+      choice:{kind:'week-plus-one-day',day:TaskPointsCore.todayKey(),zone:Intl.DateTimeFormat().resolvedOptions().timeZone}};
+  },retired);
+  await weekAction(week,next,'delete',retired).click();
+  const retiredDelete=await weekReceipt(week,'week-move-to-trash',retired);
+  await trashListing(trash,recurringTitle).waitFor();
+  await trashCommit(trash,foreverIntent(retiredDelete));
+  await assert.rejects(week.evaluate(intent=>TaskPointsStateRuntimeV2.commitIsolatedTaskScheduling(intent),stale),/owned_task_permanently_deleted/);
+  await trash.close();await week.close();
+  const revision=(await owned(page)).meta.revision;
+  await settleRollbackSourceMirror(page);
+  const detached=await page.evaluate(rev=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(rev),revision);
+  assert.deepEqual(detached.permanentIds,[retired]);
+  const fresh=await browser.newContext({serviceWorkers:'block',timezoneId:'America/New_York'});
+  t.after(()=>fresh.close());await configureContext(fresh);
+  const loader=await rollbackLoader(fresh);
+  assert.deepEqual(await restoreCompletionCheckpoint(loader,detached),{verified:true,checksum:detached.checksum});
+  const v1=await openScoringPage(fresh,'index.html');
+  await editCard(v1).waitFor();
+  await v1.waitForFunction(()=>!homeMorningSimulationScheduled);
+  const tasks=await v1.evaluate(()=>TaskPointsCore.readTaskPointsStoredState().tasks);
+  assert.equal(tasks.some(row=>row.id===retired),false);
+  assert.deepEqual(tasks.filter(row=>row.id===oneOff),[complete.after]);
+  assert.deepEqual(await canonicalCompletions(v1),[...legacyRewards,...initialHistory,complete.completion,earned.completion]);
+});
+
+test('V2 Week, Home and Today Done clicks compete for the same single reward and refresh all three pages',async t=>{
+  const {page,context,legacyRewards}=await withWeekActions(t);
+  const week=await openScoringPage(context,'week.html');
+  const today=await openScoringPage(context,'today.html');
+  const list=weekTodayStore(cleanedTodayList,[quietDate]);
+  await writeTodayFixture(page,JSON.stringify(list));
+  await todayTask(today).waitFor();
+  for(const tab of [page,week,today])await tab.evaluate(()=>{
+    const api=TaskPointsStateRuntimeV2,commit=api.commitIsolatedTaskCompletion;
+    api.commitIsolatedTaskCompletion=intent=>new Promise(resolve=>{
+      window.releaseWeekRace=()=>resolve(commit(intent));
+    }).then(result=>{
+      window.weekRaceResult={ok:true,result};return result;
+    },error=>{
+      window.weekRaceResult={ok:false,error:error.message};throw error;
+    });
+  });
+  await Promise.all([
+    editCard(page).locator('[data-task-action="complete"]').click(),
+    weekAction(week,quietDate,'done').click(),
+    todayTask(today).locator('.today-check').click()
+  ]);
+  await Promise.all([page,week,today].map(tab=>tab.waitForFunction(()=>window.releaseWeekRace)));
+  await Promise.all([page,week,today].map(tab=>tab.evaluate(()=>{window.releaseWeekRace();})));
+  const results=await Promise.all([page,week,today].map(tab=>tab.waitForFunction(()=>window.weekRaceResult).then(h=>h.jsonValue())));
+  const winners=results.filter(result=>result.ok);
+  assert.equal(winners.length,1,JSON.stringify(results));
+  assert.ok(results.filter(result=>!result.ok).every(result=>result.error==='owned_completion_already_awarded'));
+  const [receipt]=await completionReceipts(page);
+  assert.deepEqual(receipt,winners[0].result.receipt);
+  assert.equal(receipt.completion.points,5);
+  await weekCard(week,'2026-11-19').waitFor();
+  await todayTask(today).and(today.locator('.is-done')).waitFor();
+  await page.waitForFunction(()=>document.getElementById('todayScoreIslandValue')?.textContent==='8.0');
+  await waitTodayBytes(page,JSON.stringify(cleanedTodayList));
+  assert.deepEqual(await canonicalCompletions(page),legacyRewards);
+});
+
+test('V2 Week scheduling refuses a newer Home edit and retries the same scheduling envelope after quota',async t=>{
+  const {page,context}=await withWeekActions(t);
+  const week=await openScoringPage(context,'week.html');
+  const dialogs=weekDialogs(week);
+  await weekAction(week,quietDate,'bump').waitFor();
+  await week.evaluate(()=>{
+    const api=TaskPointsStateRuntimeV2,commit=api.commitIsolatedTaskScheduling;
+    api.commitIsolatedTaskScheduling=async(intent,options)=>{
+      if(!options.replayOnly && !window.weekScheduleReleased){
+        await new Promise(resolve=>{window.releaseWeekSchedule=resolve;});
+        window.weekScheduleReleased=true;
+      }
+      return commit(intent,options);
+    };
+  });
+  await weekAction(week,quietDate,'bump').click();
+  await week.waitForFunction(()=>window.releaseWeekSchedule);
+  await openTaskEdit(page);
+  await titleField(page).fill('Synthetic newer Home title');
+  assert.equal((await submitTaskEdit(page)).ok,true);
+  await week.evaluate(()=>window.releaseWeekSchedule());
+  await week.waitForFunction(()=>window.ownerScheduleOutcome?.ok===false);
+  assert.match((await week.evaluate(()=>window.ownerScheduleOutcome)).error,/owned_task_stale_edit/);
+  assert.deepEqual(await scheduleReceipts(page),[]);
+  assert.equal((await trashedTask(page,'t1')).title,'Synthetic newer Home title');
+  await week.locator('#weekCheckSchedule').click();
+  await week.locator('#weekCheckSchedule').waitFor({state:'hidden'});
+  await weekCard(week,quietDate).getByText('Synthetic newer Home title').waitFor();
+  await week.evaluate(()=>{
+    const add=IDBObjectStore.prototype.add;
+    window.weekQuota=true;
+    IDBObjectStore.prototype.add=function(row,...args){
+      if(window.weekQuota && row?.intent?.choice?.kind==='week-plus-one-day')throw new DOMException('Synthetic Week quota','QuotaExceededError');
+      return add.call(this,row,...args);
+    };
+  });
+  await weekAction(week,quietDate,'bump').click();
+  await week.waitForFunction(()=>window.ownerScheduleOutcome?.error?.includes('Synthetic Week quota'));
+  const pending=await pendingSchedule(week);
+  assert.deepEqual(await scheduleReceipts(page),[]);
+  assert.equal((await trashedTask(page,'t1')).dueDateISO,quietDate);
+  await week.evaluate(()=>{window.weekQuota=false;});
+  await weekAction(week,quietDate,'bump').click();
+  const saved=await weekReceipt(week,'week-plus-one-day');
+  await weekCard(week,'2026-11-19').waitFor();
+  assert.equal(saved.intent.actionId,pending.intent.actionId+':t1');
+  assert.equal(saved.after.postponedDays,saved.before.postponedDays+1);
+  assert.deepEqual(await scheduleReceipts(page),[saved]);
+  assert.equal(await pendingSchedule(week),null);
+  assert.ok(dialogs.some(message=>message.includes('owned_task_stale_edit')));
+});
+
+for(const phase of ['before commit','after commit'])test(`V2 Week scheduling interruption ${phase} can be checked after Chromium restart`,async t=>{
+  const profile=await completionProfile(t);
+  const {context}=await withWeekActions(t,profile.context);
+  const week=await openScoringPage(context,'week.html');
+  await interruptOwnedWrite(week,phase);
+  await weekAction(week,quietDate,'bump').click();
+  await week.waitForFunction(()=>window.ownedInterruptionReached===true);
+  assert.notEqual(await week.evaluate(()=>window.ownerScheduleOutcome?.ok),true);
+  const saved=await pendingSchedule(week);
+  const reopened=await profile.restart();
+  const next=await openScoringPage(reopened,'week.html');
+  const dialogs=weekDialogs(next);
+  const committed=phase==='after commit';
+  await next.locator('#weekCheckSchedule').click();
+  await next.locator('#weekCheckSchedule').waitFor({state:'hidden'});
+  await weekCard(next,committed?'2026-11-19':quietDate).waitFor();
+  assert.ok(dialogs.some(message=>message.includes(committed?'verified':'did not commit')));
+  assert.equal(await pendingSchedule(next),null);
+  const evidence=await scheduleReceipts(next);
+  assert.equal(evidence.length,committed?1:0);
+  if(committed)assert.equal(evidence[0].intent.actionId,saved.intent.actionId+':t1');
+  else{
+    await weekAction(next,quietDate,'bump').click();
+    const receipt=await weekReceipt(next,'week-plus-one-day');
+    assert.notEqual(receipt.intent.actionId,saved.intent.actionId+':t1');
+    assert.equal(receipt.after.dueDateISO,'2026-11-19');
+  }
+  assert.equal((await scheduleReceipts(next)).length,1);
+});
+
+test('Week keeps the ordinary V1 controls and storage path when the experiment is disabled',async t=>{
+  const {context}=await fixture(t);
+  const week=await openScoringPage(context,'week.html');
+  const title='Synthetic ordinary Week Task';
+  await putCreateForm(week,{title,due:'2026-11-17',repeat:'weekly',points:'3.5'});
+  await addButton(week).click();
+  await week.locator('#addTaskModal').waitFor({state:'hidden'});
+  const initial=await week.evaluate(title=>{
+    const core=TaskPointsCore,raw=localStorage.getItem(core.STORAGE_KEY);
+    return core.parseTaskPointsStorageJson(raw).tasks.find(row=>row.title===title);
+  },title);
+  assert.ok(initial && !initial.id.startsWith('v2-task-'));
+  assert.equal(await weekAction(week,'2026-11-17','decline',initial.id).count(),0);
+  const id=initial.id;
+  await weekCard(week,'2026-11-17',id).getByRole('button',{name:'Postpone',exact:true}).click();
+  await weekCard(week,quietDate,id).waitFor();
+  await weekCard(week,quietDate,id).getByRole('button',{name:'+1 day',exact:true}).click();
+  await weekCard(week,'2026-11-19',id).waitFor();
+  await weekCard(week,'2026-11-19',id).getByTitle('Done').click();
+  await week.waitForFunction(id=>{
+    const core=TaskPointsCore,raw=localStorage.getItem(core.STORAGE_KEY);
+    return core.parseTaskPointsStorageJson(raw).completions.some(row=>row.taskId===id);
+  },id);
+  const [completed]=(await canonicalCompletions(week)).filter(row=>row.taskId===id);
+  assert.deepEqual([completed.points,completed.dateKey,completed.completedAtISO],[3.5,quietDate,trashClock]);
+  await weekNav(week,'next');
+  await weekCard(week,'2026-11-26',id).waitFor();
+  const alerts=weekDialogs(week);
+  await weekCard(week,'2026-11-26',id).getByRole('button',{name:'Delete task',exact:true}).click();
+  assert.equal(alerts.at(-1),'Move this task to Trash?');
+  const deleted=await week.evaluate(id=>{
+    const core=TaskPointsCore,raw=localStorage.getItem(core.STORAGE_KEY);
+    return core.parseTaskPointsStorageJson(raw).tasks.find(row=>row.id===id);
+  },id);
+  assert.deepEqual([deleted.status,deleted.deletedFrom],['trashed','WeekScreen']);
+  assert.deepEqual(await pendingCreates(week),[]);
+});
+
+test('V2 Week weekday Done advances a Friday occurrence to Monday and preserves a zero reward',async t=>{
+  const {page,context}=await withWeekActions(t);
+  const week=await openScoringPage(context,'week.html');
+  await weekNav(week,'prev');
+  const friday='2026-11-13';
+  await putCreateForm(week,{title:'Synthetic Weekday recurrence',due:friday,repeat:'weekdays',points:'0'});
+  const id=await saveCreateForm(week);
+  await weekAction(week,friday,'done',id).click();
+  const receipt=await weekReceipt(week,'week',id);
+  assert.deepEqual([receipt.completion.points,receipt.completion.dateKey,receipt.after.dueDateISO],
+    [0,quietDate,'2026-11-16']);
+  assert.deepEqual(receipt.after.recurrence,{mode:'everyWeekday'});
+  await weekNav(week,'this');
+  await weekCard(week,'2026-11-16',id).waitFor();
+  await assertCreationOutsideV1(page,[id]);
+});
+
+for(const fault of ['metric reward','time zone'])test(`V2 Week Done refuses ${fault} without changing the Task or awarding points`,async t=>{
+  const {page,context,legacyRewards}=await withWeekActions(t);
+  if(fault==='metric reward'){
+    await openTaskEdit(page);await titleField(page).fill('Mood Score (50)');
+    assert.equal((await submitTaskEdit(page)).ok,true);
+  }
+  const week=await openScoringPage(context,'week.html');
+  const alerts=weekDialogs(week);
+  await weekAction(week,quietDate,'done').waitFor();
+  const before=await owned(page);
+  if(fault==='time zone')await week.evaluate(()=>{
+    const DateTimeFormat=Intl.DateTimeFormat;
+    Intl.DateTimeFormat=(...args)=>{
+      const formatter=DateTimeFormat(...args),options=formatter.resolvedOptions();
+      formatter.resolvedOptions=()=>({...options,timeZone:'America/Chicago'});
+      return formatter;
+    };
+    document.querySelector('#weekGrid [data-task-id="t1"] [data-week-task-action="done"]').click();
+  });
+  else await weekAction(week,quietDate,'done').click();
+  await week.waitForFunction(()=>!weekTaskWrites.has('t1'));
+  assert.match(alerts.at(-1),fault==='metric reward'?/separate scoring rule/:/time zone/);
+  assert.deepEqual(await owned(page),before);
+  assert.deepEqual(await canonicalCompletions(page),legacyRewards);
 });

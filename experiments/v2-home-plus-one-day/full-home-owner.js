@@ -1,8 +1,8 @@
-/* Loaded by the synthetic full-Home harness on its dedicated loopback origin. */
+/* Loaded by the synthetic Home and Week harness on its dedicated loopback origin. */
 (() => {
   'use strict';
   if (!['localhost','127.0.0.1'].includes(location.hostname)
-    || location.pathname !== '/experiments/v2-home-plus-one-day/full/index.html'
+    || !/^\/experiments\/v2-home-plus-one-day\/full\/(index|week)\.html$/.test(location.pathname)
     || window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ !== true) return;
 
   const marker = 'taskpoints_isolated_task_fixture_v1';
