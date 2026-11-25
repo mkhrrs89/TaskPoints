@@ -1,0 +1,36 @@
+Existing V1 worker/startup checks; Node 22.23.5
+
+node --test tests/worker_versioned_core_bundle_contract.test.js tests/home_boot_splash_recovery.test.js tests/mobile_boot_recovery_notice.test.js
+
+ok 1 - startup watchdog reveals Home even if late bootstrap never runs
+ok 2 - tap-to-skip remains available after title finishes
+not ok 3 - slow HTML parse exposes recovery link when appRoot is unavailable
+ok 4 - after eleven seconds of stalled startup a visible, tappable Recovery link is outside the splash
+ok 5 - a rejected runtime shows Recovery instead of remaining on a silent loading splash
+ok 6 - successful initialization removes an earlier slow-startup notice
+ok 7 - unversioned scoring core redirects to the current fingerprinted bundle
+ok 8 - the versioned bundle is immutable and reused from the edge cache
+ok 9 - changing a bundled asset changes the public bundle version
+ok 10 - the fingerprint list covers every module assembled by the core worker
+ok 11 - the SCWM performance shim remains available for reference but is not part of runtime assembly
+# tests 11
+# pass 10
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 354.574346
+
+Independent temporary export of unchanged V2 base 44b7cc1e0b5b8acab3bfd80dd7e31a5f5ed93643:
+node --test tests/home_boot_splash_recovery.test.js
+ok 1 - startup watchdog reveals Home even if late bootstrap never runs
+ok 2 - tap-to-skip remains available after title finishes
+not ok 3 - slow HTML parse exposes recovery link when appRoot is unavailable
+# tests 3
+# pass 2
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+
+Both failures: source-text regex /id = 'tp-boot-wait-notice'/ does not match index.html. Source and existing test are unchanged. Full original failure logs dump index.html; this is a compact result extraction.
