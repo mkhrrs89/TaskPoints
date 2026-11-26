@@ -40,7 +40,7 @@ before(async()=>{
       const resolved=path.resolve(root,file);
       const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.svg':'image/svg+xml','.json':'application/json'}[path.extname(file)];
       if(!mime||!resolved.startsWith(root+path.sep)||file.startsWith('experiments/'))throw Error('Outside experiment');
-      const homeBundle=file==='scoring_core.js'&&['index.html','inbox.html','today.html','game.html','matchups.html','week.html','trash.html','archive.html'].some(page=>new URL(req.headers.referer||'http://localhost').pathname===prefix+page);
+      const homeBundle=file==='scoring_core.js'&&['index.html','inbox.html','today.html','game.html','matchups.html','week.html','trash.html','archive.html','log.html'].some(page=>new URL(req.headers.referer||'http://localhost').pathname===prefix+page);
       const content=homeBundle?bundle:fs.readFileSync(resolved);
       res.writeHead(200,{'Content-Type':mime,'Cache-Control':'no-store'});
       res.end(content);
@@ -1628,11 +1628,11 @@ const unrelatedRewardRows=[
   {id:'synthetic-unrelated-current',taskId:'t2',title:'Synthetic unrelated reward',points:3,completedAtISO:quietDate+'T16:00:00Z'}
 ];
 
-async function seedScoringReads(t,context,{oneOff=false,write=false,controls=false,recurrence,dueDateISO,create=false,week=false}={}){
+async function seedScoringReads(t,context,{oneOff=false,write=false,controls=false,recurrence,dueDateISO,create=false,week=false,log=false}={}){
   const f=await prepareCompletionBoundary(t,context);
   const legacyRewards=write?[...unrelatedRewardRows]:[{...ownedRewards[0],points:5},...unrelatedRewardRows];
   const completionSeed=write?(oneOff?[]:ownedRewards.slice(1)):(oneOff?ownedRewards.slice(0,1):ownedRewards);
-  await f.page.evaluate(async({marker,completionSeed,legacyRewards,day,oneOff,write,controls,recurrence,dueDateISO,create,week})=>{
+  await f.page.evaluate(async({marker,completionSeed,legacyRewards,day,oneOff,write,controls,recurrence,dueDateISO,create,week,log})=>{
     const core=TaskPointsCore,snapshot=core.readTaskPointsStoredState();
     snapshot.completions=legacyRewards;
     if (create) snapshot.habits.find(row=>row.id==='h1').updatedAtISO=day+'T12:00:00Z';
@@ -1651,12 +1651,12 @@ async function seedScoringReads(t,context,{oneOff=false,write=false,controls=fal
     core.writeTaskPointsStoredState(snapshot);
     const fixture={id:crypto.randomUUID(),syntheticOnly:true,homeTaskId:'t1',completionRead:true,
       ...(write?{completionWrite:true}:{}),...(controls?{completionControls:true}:{}),...(create?{taskCreate:true}:{}),
-      ...(week?{weekControls:true}:{}),phase:'prepared'};
+      ...(week?{weekControls:true}:{}),...(log?{logControls:true}:{}),phase:'prepared'};
     localStorage.setItem('taskpoints_isolated_task_scoring_read_v1',fixture.id);
     localStorage.setItem(marker,JSON.stringify(fixture));
     await TaskPointsStateRuntimeV2.initializeIsolatedTaskOwner(snapshot,{completionSeed});
     localStorage.setItem(marker,JSON.stringify({...fixture,phase:'sealed'}));
-  },{marker,completionSeed,legacyRewards,day:quietDate,oneOff,write,controls,recurrence,dueDateISO,create,week});
+  },{marker,completionSeed,legacyRewards,day:quietDate,oneOff,write,controls,recurrence,dueDateISO,create,week,log});
   await f.page.reload();
   if(oneOff&&!write)await f.page.waitForFunction(()=>TaskPointsHomeLiveState?.getState()?.tasks?.find(row=>row.id==='t1')?.status==='done');
   else await waitHome(f.page);
@@ -4762,17 +4762,18 @@ async function ordinaryLegacyTrash(t,source='TasksScreen'){
   return {page,context,reward};
 }
 
-async function adoptLegacyTrash(page){
-  return page.evaluate(async marker=>{
+async function adoptLegacyTrash(page,log=false){
+  return page.evaluate(async ({marker,log})=>{
     const core=TaskPointsCore,seed={id:crypto.randomUUID(),syntheticOnly:true,homeTaskId:'t1',
-      completionRead:true,completionWrite:true,completionControls:true,adoptLegacyTrash:true,phase:'prepared'};
+      completionRead:true,completionWrite:true,completionControls:true,adoptLegacyTrash:true,
+      ...(log?{logControls:true}:{}),phase:'prepared'};
     const baseline=core.readTaskPointsStoredState();
     localStorage.setItem('taskpoints_isolated_task_scoring_read_v1',seed.id);
     localStorage.setItem(marker,JSON.stringify(seed));
     const admitted=await TaskPointsStateRuntimeV2.initializeIsolatedTaskOwner(baseline);
     localStorage.setItem(marker,JSON.stringify({...seed,phase:'sealed'}));
     return admitted;
-  },marker);
+  },{marker,log});
 }
 
 test('V2 permanent Trash baseline uses ordinary V1 Delete Forever and keeps its linked reward and score',async t=>{
@@ -6484,4 +6485,378 @@ for(const fault of ['metric reward','time zone'])test(`V2 Week Done refuses ${fa
   assert.match(alerts.at(-1),fault==='metric reward'?/separate scoring rule/:/time zone/);
   assert.deepEqual(await owned(page),before);
   assert.deepEqual(await canonicalCompletions(page),legacyRewards);
+});
+
+const forLogHistory = (t,context,options) => seedScoringReads(t,context,{write:true,controls:true,create:true,log:true,...options});
+const logDateControl = (page,id) => page.locator(`#logList [data-edit-date-id="${id}"]`);
+const logDeleteControl = (page,id) => page.locator(`#logList [data-del-id="${id}"]`);
+const historyReceipts = async page => (await owned(page)).journal.filter(row=>row.type==='isolated-task-history');
+const canonicalSnapshot = page => page.evaluate(()=>{
+  const core=TaskPointsCore;
+  return core.parseTaskPointsStorageJson(localStorage.getItem(core.STORAGE_KEY));
+});
+
+async function answerLogDialog(page,control,type,answer) {
+  page.removeAllListeners('dialog');
+  const popup=page.waitForEvent('dialog');
+  const click=control.click();
+  const dialog=await popup;
+  try {
+    assert.equal(dialog.type(),type);
+    if(answer===null)await dialog.dismiss();else await dialog.accept(answer);
+  } catch(error) {await dialog.dismiss().catch(()=>{});throw error;}
+  await click;
+  return dialog.message();
+}
+const editLogDate = (page,id,day) => answerLogDialog(page,logDateControl(page,id),'prompt',day);
+const deleteLogEntry = (page,id) => answerLogDialog(page,logDeleteControl(page,id),'confirm');
+async function waitHistory(page,count) {
+  const until=Date.now()+12000;
+  do {
+    const rows=await historyReceipts(page);
+    if(rows.length===count)return rows;
+    await new Promise(resolve=>setTimeout(resolve,30));
+  } while(Date.now()<until);
+  assert.fail('Expected '+count+' verified Log history receipts');
+}
+async function restoreHistoryCheckpoint(t,home) {
+  await settleRollbackSourceMirror(home);
+  const revision=(await owned(home)).meta.revision;
+  const checkpoint=await home.evaluate(revision=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(revision),revision);
+  const fresh=await browser.newContext({serviceWorkers:'block',timezoneId:'America/New_York'});
+  t.after(()=>fresh.close());await configureContext(fresh);
+  const loader=await rollbackLoader(fresh);
+  assert.deepEqual(await restoreCompletionCheckpoint(loader,checkpoint),{verified:true,checksum:checkpoint.checksum});
+  return {checkpoint,fresh,loader};
+}
+
+test('Log V1 date edit retains two rewards on the same day and recurring deletion keeps the due date',async t=>{
+  const {page,context}=await fixture(t);
+  const first={...ownedRewards[1],points:-2.25,unknown:{fixture:true},dateKey:'2026-11-17'};
+  const second={...ownedRewards[0],points:12.75};
+  await page.evaluate(({first,second})=>{
+    const core=TaskPointsCore,snapshot=core.readTaskPointsStoredState();
+    snapshot.completions=[first,second];
+    Object.assign(snapshot.tasks.find(t=>t.id==='t1'),{recurrence:{mode:'weekly'},dueDateISO:'2026-11-25',counts:2});
+    core.writeTaskPointsStoredState(snapshot);
+  },{first,second});
+  await page.close();
+  const log=await openScoringPage(context,'log.html');
+  assert.match(await editLogDate(log,first.id,quietDate),/Edit completion date/);
+  const moved={...first,completedAtISO:'2026-11-18T17:00:00.000Z'};
+  const stored=await canonicalSnapshot(log);
+  assert.deepEqual(stored.completions,[moved,second]);
+  assert.equal(await log.evaluate(()=>TaskPointsCore.aggregateCompletionsByDate(state.completions,state).dailyTotals[TaskPointsCore.todayKey()]),10.5);
+  assert.equal(stored.tasks.find(t=>t.id==='t1').dueDateISO,'2026-11-25');
+  assert.match(await deleteLogEntry(log,first.id),/send its task to Trash/);
+  assert.equal(await log.evaluate(()=>TaskPointsCore.flushPendingTaskMutations()),true);
+  const after=await canonicalSnapshot(log),task=after.tasks.find(t=>t.id==='t1');
+  assert.deepEqual(after.completions,[second]);
+  assert.deepEqual([task.status,task.dueDateISO,task.counts,task.completedAtISO,task.hidden],['trashed','2026-11-25',1,null,false]);
+});
+
+test('V2 Log keeps colliding earned IDs, corrects their scoring across months and restores exact dates into fresh V1',async t=>{
+  const profile=await completionProfile(t);
+  const {page,context,legacyRewards}=await forLogHistory(t,profile.context);
+  const log=await openScoringPage(context,'log.html');
+  const today=await openScoringPage(context,'today.html');
+  await homeDoneButton(page).click();
+  const award=await weekReceipt(page,'home');
+  const historical=ownedRewards[1];
+  await logDateControl(log,award.completion.id).waitFor();
+  await editLogDate(log,historical.id,quietDate);
+  const [collision]=await waitHistory(page,1);
+  assert.deepEqual(collision.completionAfter,{...historical,completedAtISO:trashClock});
+  assert.deepEqual(collision.after,collision.before,'recurring dates stay intact');
+  await todayTask(today).locator('.today-sub').getByText('2.75 pts',{exact:true}).waitFor();
+  await page.waitForFunction(()=>document.getElementById('todayScoreIslandValue')?.textContent==='5.8');
+  assert.equal(await logDateControl(log,award.completion.id).count(),1);
+  assert.equal(await logDateControl(log,historical.id).count(),1);
+
+  // Keep Game history and the Gold ledger as recorded. Matchups use the
+  // ordinary verified score sync when their existing writer runs.
+  const before=await canonicalSnapshot(page);
+  const correctedDay='2026-10-30';
+  await editLogDate(log,award.completion.id,correctedDay);
+  const [,moved]=await waitHistory(page,2);
+  const edited={...award.completion,completedAtISO:correctedDay+'T16:00:00.000Z'};
+  assert.deepEqual(moved.completionAfter,edited);
+  assert.deepEqual(await canonicalCompletions(page),legacyRewards);
+  const after=await canonicalSnapshot(page);
+  for(const key of ['goldLedger','goldEconomy','gameHistory','unknownRoot'])
+    assert.deepEqual(after[key],before[key],key);
+  const expected={current:.75,corrected:5};
+  const scores=await log.evaluate(async ({correctedDay})=>{
+    const core=TaskPointsCore;
+    return core.runWithVerifiedTaskScoring(()=>{
+      const raw=core.readTaskPointsStoredState();
+      const completions=core.readScoringCompletions(raw.completions);
+      const totals=core.aggregateCompletionsByDate(completions,raw);
+      const season = {monthKey:'2026-10'};
+      return {current:totals.dailyTotals[core.todayKey()],corrected:totals.dailyTotals[correctedDay],
+        originInSeason:core.isSeasonDate(core.todayKey(),season),destinationRound:core.getSeasonRoundForDate(correctedDay,season)?.id,
+        october:totals.monthlyTotals['2026-10'],weeks:Object.values(totals.weeklyTotals).sort()};
+    });
+  },{correctedDay});
+  assert.deepEqual(scores,{...expected,october:5,weeks:[.75,5],originInSeason:false,destinationRound:'finals'});
+  const game=await openScoringPage(context,'game.html');
+  await game.locator('#playersList .playerCard').first().waitFor();
+  assert.equal(await game.evaluate(async()=>{
+    if(!await TaskPointsCore.refreshIsolatedTaskScoring(true))throw Error('Game completion proof unavailable');
+    return computeTodayPoints();
+  }),0.8);
+  const matchups=await openScoringPage(context,'matchups.html');
+  const generate=matchups.locator('#matchupsChronological').getByRole('button',{name:'Generate retro matchups'}).first();
+  const header=generate.locator('xpath=ancestor::section[1]').locator('.matchup-collapsible-header').first();
+  if(await header.getAttribute('aria-expanded')==='false')await header.click();
+  await generate.click();
+  await matchups.waitForFunction(()=>{
+    const core=TaskPointsCore,raw=localStorage.getItem(core.STORAGE_KEY);
+    return core.parseTaskPointsStorageJson(raw).matchups.find(row=>row.id==='synthetic-owned-matchup')?.scoreA===.75;
+  });
+  const reopened=await profile.restart();
+  const logAgain=await openScoringPage(reopened,'log.html');
+  await logDateControl(logAgain,edited.id).waitFor();
+  const canonical=await verifiedRewards(logAgain);
+  assert.deepEqual(canonical,[collision.completionAfter,ownedRewards[2],edited]);
+  await logAgain.close();
+  const home=await openScoringPage(reopened,'index.html');await waitHome(home);
+  const {fresh}=await restoreHistoryCheckpoint(t,home);
+  const v1=await openScoringPage(fresh,'index.html');await waitHome(v1);
+  assert.deepEqual(await canonicalCompletions(v1),[...legacyRewards,...canonical]);
+  assert.equal(await v1.evaluate(()=>save('log-history-v1-rollback',{immediateWrite:true,userInitiated:true})),true);
+  assert.deepEqual(await canonicalCompletions(v1),[...legacyRewards,...canonical]);
+  assert.equal((await scoresFromCore(v1)).totals[correctedDay],5);
+});
+
+test('V2 Log edits a sealed V1 historical reward, then moves its Task to Trash and tombstones the exact reward',async t=>{
+  const {page,context,reward}=await ordinaryLegacyTrash(t);
+  const raw=await canonicalCompletions(page);
+  await settleRollbackSourceMirror(page);
+  await adoptLegacyTrash(page,true);
+  await page.reload();
+  const log=await openScoringPage(context,'log.html');
+  await editLogDate(log,reward.id,'2026-09-10');
+  const [edited]=await waitHistory(page,1);
+  assert.deepEqual(edited.completionAfter,{...reward,completedAtISO:'2026-09-10T16:00:00.000Z'});
+  assert.equal((await trashedTask(page,'t1')).status,'trashed');
+  const trash=await openScoringPage(context,'trash.html');
+  await setTrashClock(trash,10000);
+  await restoreViaTrash(trash,'t1');
+  await page.waitForFunction(()=>TaskPointsOwnedTaskExperiment.taskView(TaskPointsHomeLiveState.getState()).tasks.find(row=>row.id==='t1')?.status==='active');
+  await log.waitForFunction(id=>TaskPointsCore.isolatedLogCompletionBasis(id)?.expectedRevision===2,reward.id);
+  assert.match(await deleteLogEntry(log,reward.id),/send its task to Trash/);
+  const rows=await waitHistory(page,2);
+  const receipt=rows[1];
+  assert.equal(receipt.intent.operation,'log-delete-completion');
+  assert.deepEqual(receipt.completionBefore,edited.completionAfter);
+  assert.equal(receipt.completionAfter,null);
+  assert.deepEqual([receipt.after.status,receipt.after.completedAtISO,receipt.after.hidden,receipt.after.dueDateISO],
+    ['trashed',null,false,receipt.before.dueDateISO]);
+  await logDateControl(log,reward.id).waitFor({state:'detached'});
+  await trashListing(trash,'Synthetic V2 target').waitFor();
+  assert.deepEqual(await verifiedRewards(page),[]);
+  assert.deepEqual(await canonicalCompletions(page),raw);
+  await log.close();await trash.close();
+  const {checkpoint,fresh}=await restoreHistoryCheckpoint(t,page);
+  assert.deepEqual(checkpoint.deletedCompletionIds,[reward.id]);
+  const v1=await openScoringPage(fresh,'index.html');
+  await v1.waitForFunction(()=>TaskPointsHomeLiveState.getState().tasks.find(row=>row.id==='t1')?.status==='trashed');
+  assert.equal((await canonicalCompletions(v1)).some(row=>row.id===reward.id),false);
+  assert.equal(await v1.evaluate(()=>save('log-deletion-after-V1-rollback',{immediateWrite:true,userInitiated:true})),true);
+  await assert.rejects(v1.evaluate(row=>{
+    const core=TaskPointsCore,state=core.readTaskPointsStoredState();
+    core.writeTaskPointsStoredState({...state,completions:[...state.completions,row]});
+  },reward),/Detached rollback forbids/);
+  await assert.rejects(v1.evaluate(row=>TaskPointsCore.journalTaskMutation({completionUpsert:row}),reward));
+  assert.equal((await canonicalCompletions(v1)).some(row=>row.id===reward.id),false);
+});
+
+const pauseLogAction = (page,method) => page.evaluate(method=>{
+  const runtime=TaskPointsStateRuntimeV2,commit=runtime[method];
+  runtime[method]=(...args)=>new Promise(resolve=>{
+    window.releaseHistoryAction=()=>resolve(commit(...args));
+  }).then(result=>{window.historyActionOutcome={ok:true,result};return result;},
+    error=>{window.historyActionOutcome={ok:false,error:error.message};throw error;});
+},method);
+const readHistoryOutcome = page => page.waitForFunction(()=>window.historyActionOutcome).then(handle=>handle.jsonValue());
+
+test('V2 Log competing date clicks use their rendered revision and only one correction commits',async t=>{
+  const {page,context}=await forLogHistory(t);
+  const peers=await Promise.all([1,2].map(()=>openScoringPage(context,'log.html')));
+  const id=ownedRewards[1].id;
+  await Promise.all(peers.map(tab=>pauseLogAction(tab,'commitIsolatedTaskHistory')));
+  await Promise.all(peers.map((tab,index)=>editLogDate(tab,id,index===0?'2026-10-30':'2026-09-15')));
+  await Promise.all(peers.map(tab=>tab.waitForFunction(()=>window.releaseHistoryAction)));
+  await Promise.all(peers.map(tab=>tab.evaluate(()=>{window.releaseHistoryAction();})));
+  const outcomes=await Promise.all(peers.map(readHistoryOutcome));
+  assert.equal(outcomes.filter(result=>result.ok).length,1);
+  assert.match(outcomes.find(result=>!result.ok).error,/owned_task_stale_edit/);
+  const [receipt]=await waitHistory(page,1);
+  assert.deepEqual(outcomes.find(result=>result.ok).result.receipt,receipt);
+  assert.equal(receipt.completionAfter.points,ownedRewards[1].points);
+  for(const tab of peers){
+    await tab.waitForFunction(({id,at})=>{
+      const button=document.querySelector(`[data-edit-date-id="${id}"]`);
+      return button?.closest('.row')?.firstElementChild.textContent===new Date(at).toLocaleString();
+    },{id,at:receipt.completionAfter.completedAtISO});
+  }
+});
+
+test('V2 Log deletion races real Home Done and cannot partially delete or award a reward',async t=>{
+  const {page,context,legacyRewards}=await forLogHistory(t);
+  const log=await openScoringPage(context,'log.html');
+  const id=ownedRewards[1].id;
+  await pauseLogAction(log,'commitIsolatedTaskHistory');
+  await pauseLogAction(page,'commitIsolatedTaskCompletion');
+  await Promise.all([deleteLogEntry(log,id),homeDoneButton(page).click()]);
+  await Promise.all([log,page].map(tab=>tab.waitForFunction(()=>window.releaseHistoryAction)));
+  await Promise.all([log,page].map(tab=>tab.evaluate(()=>{window.releaseHistoryAction();})));
+  const [deletion,award]=await Promise.all([readHistoryOutcome(log),readHistoryOutcome(page)]);
+  assert.equal(Number(deletion.ok)+Number(award.ok),1);
+  assert.match((deletion.ok?award:deletion).error,/owned_task_stale_edit/);
+  const rewards=await verifiedRewards(page);
+  assert.equal(rewards.some(row=>row.id===id),award.ok);
+  assert.equal(rewards.some(row=>row.taskId==='t1' && row.completedAtISO===trashClock),award.ok);
+  assert.equal((await trashedTask(page,'t1')).status==='trashed',deletion.ok);
+  assert.deepEqual(await canonicalCompletions(page),legacyRewards);
+});
+
+test('V2 Log quota leaves the Task and reward intact and a retry recovers the same durable deletion after a lost reply',async t=>{
+  const {page,context}=await forLogHistory(t);
+  const log=await openScoringPage(context,'log.html');
+  const id=ownedRewards[1].id;
+  const prior=await owned(page);
+  await log.evaluate(()=>{
+    const runtime=TaskPointsStateRuntimeV2,commit=runtime.commitIsolatedTaskHistory;
+    window.historyAttempts=[];
+    runtime.commitIsolatedTaskHistory=async intent=>{
+      historyAttempts.push(intent);
+      const result=await commit(intent);
+      window.lostHistoryReceipt=result.receipt;
+      throw Error('Synthetic lost Log response');
+    };
+    const add=IDBObjectStore.prototype.add;
+    window.failLogQuota=true;
+    IDBObjectStore.prototype.add=function(row,...args){
+      if(window.failLogQuota && row?.type==='isolated-task-history')throw new DOMException('Synthetic Log quota','QuotaExceededError');
+      return add.call(this,row,...args);
+    };
+  });
+  await deleteLogEntry(log,id);
+  await log.waitForFunction(id=>pendingOwnedHistory.get(id)?.writing===false,id);
+  assert.deepEqual(await owned(page),prior);
+  assert.equal((await verifiedRewards(page)).some(row=>row.id===id),true);
+  await log.evaluate(()=>{window.failLogQuota=false;});
+  await deleteLogEntry(log,id);
+  const [receipt]=await waitHistory(page,1);
+  await logDeleteControl(log,id).waitFor({state:'detached'});
+  const attempts=await log.evaluate(()=>historyAttempts);
+  assert.equal(attempts.length,2);
+  assert.deepEqual(attempts[0],attempts[1]);
+  assert.deepEqual(await log.evaluate(()=>lostHistoryReceipt),receipt);
+  await log.evaluate(()=>{delete window.lostHistoryReceipt;});
+  const replay=await log.evaluate(intent=>TaskPointsStateRuntimeV2.readIsolatedTaskScoring(proof=>proof.findHistoryReceipt(intent)),attempts[0]);
+  assert.deepEqual(replay,receipt);
+  assert.equal((await verifiedRewards(page)).some(row=>row.id===id),false);
+});
+
+for(const phase of ['before commit','after commit'])test(`V2 Log date edit interruption ${phase} recovers after Chromium restart`,async t=>{
+  const profile=await completionProfile(t);
+  const {context}=await forLogHistory(t,profile.context);
+  const log=await openScoringPage(context,'log.html');
+  const id=ownedRewards[1].id, day='2026-10-30';
+  await interruptOwnedWrite(log,phase);
+  await editLogDate(log,id,day);
+  await log.waitForFunction(()=>window.ownedInterruptionReached===true);
+  const restarted=await profile.restart();
+  const next=await openScoringPage(restarted,'log.html');
+  await logDateControl(next,id).waitFor();
+  const home=await openScoringPage(restarted,'index.html');await waitHome(home);
+  const previous=await historyReceipts(home);
+  const committed=phase==='after commit';
+  assert.equal(previous.length,committed?1:0);
+  const expected={...ownedRewards[1],completedAtISO:day+'T16:00:00.000Z'};
+  assert.deepEqual((await verifiedRewards(next)).find(row=>row.id===id),committed?expected:ownedRewards[1]);
+  await editLogDate(next,id,day);
+  await next.waitForFunction(id=>!pendingOwnedHistory.has(id),id);
+  const [receipt]=await waitHistory(home,1);
+  assert.deepEqual(receipt.completionAfter,expected);
+  if(committed)assert.deepEqual(receipt,previous[0]);
+  assert.equal((await verifiedRewards(next)).filter(row=>row.id===id).length,1);
+});
+
+test('V2 Log frees an original Done day after correction and preserves permanently deleted Task identity',async t=>{
+  const {page,context}=await forLogHistory(t);
+  const log=await openScoringPage(context,'log.html');
+  await homeDoneButton(page).click();
+  const original=await weekReceipt(page,'home');
+  await editLogDate(log,original.completion.id,'2026-10-30');
+  const [correction]=await waitHistory(page,1);
+  assert.equal(correction.completionAfter.id,original.completion.id);
+  await homeDoneButton(page).waitFor();
+  const next=await prepareCompletion(page,'home');
+  assert.notEqual(next.actionId,original.intent.actionId);
+  const {receipt:again}=await commitCompletion(page,next);
+  assert.equal(again.completion.points,original.completion.points);
+  assert.notEqual(again.completion.id,original.completion.id);
+  await assert.rejects(commitCompletion(page,{...next,actionId:'independent-repeat'}),/owned_completion_already_awarded/);
+  const {receipt:deletion}=await trashCommit(page,await deleteIntent(page,'t1'));
+  const trash=await openScoringPage(context,'trash.html');
+  await setTrashClock(trash,10000);
+  await trashCommit(trash,foreverIntent(deletion));
+  await log.waitForFunction(id=>TaskPointsCore.isolatedLogCompletionBasis(id)?.expectedRevision===5,again.completion.id);
+  await deleteLogEntry(log,again.completion.id);
+  const [,removed]=await waitHistory(page,2);
+  assert.equal(removed.before,null);
+  assert.equal(removed.after,null);
+  assert.deepEqual((await owned(page)).permanentIds,['t1']);
+  assert.equal((await verifiedRewards(log)).some(row=>row.id===original.completion.id),true);
+  assert.equal((await verifiedRewards(log)).some(row=>row.id===again.completion.id),false);
+});
+
+test('V2 Log keeps historical scoring held after a time-zone change and withholds stale owned rows',async t=>{
+  const {page,context}=await forLogHistory(t);
+  const log=await openScoringPage(context,'log.html');
+  const id=ownedRewards[1].id;
+  await logDateControl(log,id).waitFor();
+  const before=await owned(page);
+  const intent=await log.evaluate(id=>({
+    ...TaskPointsCore.isolatedLogCompletionBasis(id),actionId:crypto.randomUUID(),
+    operation:'log-edit-completion-date',completionId:id,day:'2026-10-30'
+  }),id);
+  await log.evaluate(()=>{
+    const Format=Intl.DateTimeFormat;
+    Intl.DateTimeFormat=(...args)=>{
+      const format=Format(...args),options=format.resolvedOptions();
+      format.resolvedOptions=()=>({...options,timeZone:'America/Chicago'});
+      return format;
+    };
+  });
+  await assert.rejects(log.evaluate(intent=>TaskPointsStateRuntimeV2.commitIsolatedTaskHistory(intent),intent),
+    /isolated_completion_time_zone_or_selection_changed/);
+  await logDateControl(log,id).waitFor({state:'detached'});
+  assert.deepEqual(await owned(page),before);
+});
+
+test('V2 Log refuses a corrupted deletion receipt and leaves its raw legacy evidence intact',async t=>{
+  const {page,context}=await forLogHistory(t);
+  const log=await openScoringPage(context,'log.html');
+  const id=ownedRewards[1].id;
+  await deleteLogEntry(log,id);
+  const [receipt]=await waitHistory(page,1);
+  const pending=await completionWriteEvidence(page);
+  await page.evaluate(receipt=>new Promise((resolve,reject)=>{
+    const request=indexedDB.open(TaskPointsStateRuntimeV2.DB_NAME);
+    request.onerror=()=>reject(request.error);
+    request.onsuccess=()=>{
+      const db=request.result,tx=db.transaction('mutations','readwrite');
+      tx.oncomplete=()=>{db.close();resolve();};tx.onabort=()=>{db.close();reject(tx.error);};
+      tx.objectStore('mutations').put({...receipt,completionBefore:{...receipt.completionBefore,points:999}});
+    };
+  }),receipt);
+  await assert.rejects(verifiedRewards(log),/owned_completion_history_receipt_conflict/);
+  await assert.rejects(page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(1)),/owned_completion_history_receipt_conflict/);
+  await logDateControl(log,ownedRewards[2].id).waitFor({state:'detached'});
+  assert.deepEqual(await completionWriteEvidence(page),pending);
 });

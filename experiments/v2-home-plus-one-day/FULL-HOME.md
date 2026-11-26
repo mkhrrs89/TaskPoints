@@ -657,6 +657,57 @@ baseline and passed in a focused rerun on this branch. Main regressions
 passed 371/371 and Chromium component tests passed 19/19. The V2 contracts
 had 1,356 passes, the same 22 failures as `ff4816ae`, and one existing TODO.
 
+### Package 4A · Completion history
+
+The sealed synthetic Log uses the same Task revision and scoring proof as
+Home, Today, and Week. Calendar edits keep the reward ID, original earned
+points, and all metadata. They set the timestamp to local noon and update a
+linked one-off Task’s completion timestamp. Recurring Tasks keep their next
+due date. A later edit can place two rewards for the same Task on one date,
+as V1 does. Both rewards count. Done still admits only one new award when
+the Task has no active reward for that local day.
+
+The Log deletion transaction removes one exact reward and moves its
+linked Task to Trash when the Task exists. The Task keeps its scheduled
+date, matching the V1 Log’s observed behavior. Other earned history and
+the Task’s original ID are preserved. A permanently deleted Task stays
+absent. Trash Restore can restore an eligible Task without restoring the
+deleted reward. A detached V1 rollback imports corrected dates once and
+carries durable completion tombstones through ordinary saves and journals.
+
+Daily, weekly, monthly, and season-date scoring read the corrected reward
+timestamps. The existing verified Matchups writer recalculates its totals.
+Log does not alter recorded Game history or rewrite the Gold ledger.
+The existing explicit Matchups result edit still owns retroactive Gold
+adjustments. Today list cleanup continues to replay separately from the
+IndexedDB transaction.
+
+All 11 Log cases passed in the focused and full Chromium runs. The full
+run had 215 passes, one Today setup timeout before quota injection, and
+the two existing Archive TODOs. The Today refusal group passed all five
+focused reruns on each revision. The exact `c697990e` full run had 204
+passes, one intermittent Week restart feedback failure, and the same
+Archive TODOs. Main regressions passed 371/371 and Chromium components
+passed 19/19. The scoped scoring, Gold, journal, and recovery run had
+139 passes and the same two failures as `c697990e`. The V2 contracts had
+1,356 passes, the same 22 failures, and one existing TODO.
+
+### Package 4B · Metric rewards and time zones
+
+- Record the verified metric input, its source identity, and the applicable
+  scoring settings in the transaction receipt. Reuse the V1 metric formulas
+  and daily bonuses, including calculations that depend on other entries
+  that day. Verify edits, recalculation, and deletion across the affected
+  days and score consumers. Test exactly-once rewards, preserved prior
+  metadata, and rollback for the supported metric types before lifting
+  the existing refusal.
+- Store the authoring IANA time zone, local calendar day, and timestamp as
+  verifiable receipt evidence. Replay dates and day reservations from that
+  evidence when the reader’s zone changes. Establish which local day owns
+  a reward after travel and verify retries, overlapping days, DST, and
+  rollback into V1 across zones. Keep history with ambiguous date or zone
+  evidence held until it can be verified.
+
 ### M02 Task packages
 
 1. **Trash** — verified in the synthetic experiment. Restore and confirmed
@@ -671,10 +722,9 @@ had 1,356 passes, the same 22 failures as `ff4816ae`, and one existing TODO.
    Postpone, Won’t Do, Done, and Delete use the shared transactions in the
    sealed fixture. Week’s selected date, recurrence, reward day, and
    deletion provenance are covered above.
-4. **Completion history** — migrate Log date edits and the linked
-   completion-deletion/Trash transaction with correct historical
-   totals. Resolve the existing metric-derived reward and time-zone
-   limits before claiming full behavior.
+4. **Completion history** — Package 4A is verified in synthetic storage
+   for Log date editing and linked completion-to-Trash deletion. Package 4B
+   covers the remaining metric-derived reward and time-zone limits.
 5. **Authority and acceptance** — verify the whole Task collection and
    pending Task journals, including Create/Delete fast paths, ordinary
    snapshot saves and raw fallbacks, idle compaction, history-merge

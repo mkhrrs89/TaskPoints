@@ -77,7 +77,7 @@
 
   function isolatedTaskDonePage() {
     return isolatedCompletionPage && global.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true
-      && /^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups|week|trash|archive)\.html$/.test(global.location.pathname);
+      && /^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups|week|trash|archive|log)\.html$/.test(global.location.pathname);
   }
 
   function usesIsolatedTaskDone(taskId = 't1') {
@@ -95,6 +95,15 @@
     if (!usesIsolatedTaskDone(taskId) || !global.location.pathname.endsWith('/week.html')) return false;
     try { return JSON.parse(global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY)).weekControls === true; }
     catch (_) { return false; }
+  }
+
+  function isolatedLogCompletionBasis(completionId) {
+    if (!global.location?.pathname.endsWith('/log.html') || !usesIsolatedTaskDone() || !verifiedCompletionRead) return null;
+    try {
+      if (JSON.parse(global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY)).logControls !== true) return null;
+      verifiedLegacyCompletions(verifiedCompletionRead);
+      return verifiedCompletionRead.historyBasis(completionId);
+    } catch (_) { return null; }
   }
 
   let isolatedDonePending = false;
@@ -297,7 +306,8 @@
       for (const {taskId, completedAtISO} of proof.completions) {
         removeIsolatedTodayTask(list,dateKey(completedAtISO),taskId);
       }
-      reconcileIsolatedTodayTaskMembership(list,proof.tasks,proof.permanentIds,proof.statusReceipts,proof.weekMembershipChanges);
+      reconcileIsolatedTodayTaskMembership(list,proof.tasks,proof.permanentIds,proof.statusReceipts,
+        [...(proof.weekMembershipChanges || []),...(proof.historyMembershipChanges || [])]);
 
       const candidate = JSON.stringify(list);
       parseIsolatedTodayList(candidate);
@@ -1190,9 +1200,12 @@ function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
     if (observedRollbackTombstones !== null && observedRollbackTombstones !== raw)
       throw new Error('Detached rollback tombstones changed.');
     const data = JSON.parse(raw);
-    if (!Array.isArray(data?.ids) || !data.ids.length || new Set(data.ids).size !== data.ids.length
+    const deleted = data?.deletedCompletionIds ?? [];
+    if (!Array.isArray(data?.ids) || !Array.isArray(deleted) || !(data.ids.length || deleted.length)
+      || new Set(data.ids).size !== data.ids.length || new Set(deleted).size !== deleted.length
+      || deleted.some(id=>typeof id!=='string'||!id)
       || data.ids.some(id=>id!=='t1' && !isIsolatedCreatedTaskId(id)) || !Array.isArray(data.rewards)
-      || data.rewards.some(row=>typeof row?.id!=='string' || !data.ids.includes(row.taskId))
+      || data.rewards.some(row=>typeof row?.id!=='string' || !data.ids.includes(row.taskId) || deleted.includes(row.id))
       || new Set(data.rewards.map(row=>row.id)).size!==data.rewards.length)
       throw new Error('Detached rollback tombstones are unreadable.');
     observedRollbackTombstones = raw;
@@ -1203,15 +1216,16 @@ function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
     if (!guard) return state;
     const tasks = Array.isArray(state?.tasks) ? state.tasks : [];
     const completions = Array.isArray(state?.completions) ? state.completions : [];
+    const deleted = new Set(guard.deletedCompletionIds || []);
     const linked = completions.filter(row=>guard.ids.includes(row?.taskId));
     const byId = new Map(guard.rewards.map(row=>[row.id,row]));
     if (completions.some(row=>byId.has(row?.id) && byId.get(row.id).taskId!==row.taskId))
       throw new Error('Detached rollback completion identity conflict.');
-    if (tasks.every(row=>!guard.ids.includes(row?.id))
+    if (tasks.every(row=>!guard.ids.includes(row?.id)) && !completions.some(row=>deleted.has(row?.id))
       && linked.length===byId.size && new Set(linked.map(row=>row.id)).size===byId.size
       && linked.every(row=>deepEqual(row,byId.get(row.id)))) return state;
     return {...state,tasks:tasks.filter(row=>!guard.ids.includes(row?.id)),
-      completions:[...completions.filter(row=>!guard.ids.includes(row?.taskId)),...guard.rewards]};
+      completions:[...completions.filter(row=>!guard.ids.includes(row?.taskId) && !deleted.has(row?.id)),...guard.rewards]};
   }
 
   function filterIsolatedRollbackTaskJournal(record) {
@@ -1219,6 +1233,7 @@ function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
     if (!guard) return record;
     const tasks = record.tasks.filter(row=>!guard.ids.includes(row.id));
     const completionUpserts = record.completionUpserts.filter(row=>!guard.ids.includes(row.taskId)
+      && !guard.deletedCompletionIds?.includes(row.id)
       && !guard.rewards.some(reward=>reward.id===row.id));
     const completionDeletes = record.completionDeletes.filter(id=>!guard.rewards.some(reward=>reward.id===id));
     return tasks.length===record.tasks.length && completionUpserts.length===record.completionUpserts.length
@@ -11502,6 +11517,7 @@ return Number(cappedScore.toFixed(1));
     runIsolatedTaskTrash,
     usesIsolatedTaskDone,
     usesIsolatedWeekTaskActions,
+    isolatedLogCompletionBasis,
     watchIsolatedTaskDone,
     isolatedTaskDoneView,
     runIsolatedTaskDone,

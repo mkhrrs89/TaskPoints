@@ -20164,7 +20164,7 @@
     for (const key of ['taskpoints_recovery_write_lock_v1','taskpoints_recovery_attempt_lock_v1','taskpoints_emergency_recovery_hold_v1'])
       if (global.localStorage.getItem(key) !== null) throw new Error('recovery_evidence_blocks_task_write');
     if (fixture.homeTaskId !== undefined && (typeof fixture.homeTaskId !== 'string' || !fixture.homeTaskId
-      || (scoringRead ? !/^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups|week|trash|archive)\.html$/.test(global.location.pathname)
+      || (scoringRead ? !/^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups|week|trash|archive|log)\.html$/.test(global.location.pathname)
         : global.location.pathname !== '/experiments/v2-home-plus-one-day/full/index.html')
       || global.localStorage.getItem('taskpoints_storage_guard_incident_v1') !== null))
       throw new Error('owned_home_task_context_or_recovery_conflict');
@@ -20300,6 +20300,8 @@
       throw new Error('isolated_completion_selection_unverified');
     if (fixture.weekControls === true && (fixture.completionWrite !== true || fixture.completionControls !== true))
       throw new Error('isolated_week_task_actions_not_selected');
+    if (fixture.logControls === true && (fixture.completionWrite !== true || fixture.completionControls !== true))
+      throw new Error('isolated_log_task_actions_not_selected');
     const completionTimeZone = fixture.completionWrite === true ? localCompletionTimeZone() : null;
     const generation=newResetGeneration('isolated-task');
     const adopted = sealedLegacyTrash(fixture,{homeTaskId,source,baseline,generation,homeTaskEvidence});
@@ -20326,6 +20328,7 @@
               ...(homeTaskId ? {homeTaskId,homeTaskEvidence} : {}), ...(scoringSeed ? {scoringSeed} : {}),
               ...(completionTimeZone ? {completionTimeZone} : {}), ...(fixture.taskCreate === true ? {taskCreate:true} : {}),
               ...(fixture.weekControls === true ? {weekControls:true} : {}),
+              ...(fixture.logControls === true ? {logControls:true} : {}),
               ...(adopted ? {adoptLegacyTrash:true} : {})});
           } catch(e) { failure=e; tx.abort(); }
         };
@@ -20448,6 +20451,7 @@
   }
 
   const OWNED_TASK_DONE = 'isolated-task-completion';
+  const OWNED_TASK_HISTORY = 'isolated-task-history';
   const OWNED_TASK_TRASH = 'isolated-task-trash';
   const OWNED_TASK_STATUS = 'isolated-task-status';
   const OWNED_TRASH_UNDO_MS = 4500;
@@ -20546,7 +20550,8 @@
     // The receipt is the tombstone. The live Task row is removed, while
     // the original value and linked completion rows remain as evidence.
     if (intent.operation === 'trash-delete-forever') return null;
-    return {...before, status:archiveDecline ? (before.prevStatus || 'active') : before.prevStatus,
+    return {...before, status:archiveDecline || deletion.intent?.operation === 'log-delete-completion'
+      ? (before.prevStatus || 'active') : before.prevStatus,
       prevStatus:null, deletedAtISO:null, deletedAt:null, deletedFrom:null, updatedAtISO:at};
   }
   const OWNED_TASK_STORES = ['tasks','mutations','meta','completions'];
@@ -20629,8 +20634,49 @@
     return {after,completion};
   }
 
+  function ownedHistoryIntent(input) {
+    const {actionId,operation,taskId,generation,expectedRevision,completionId,day} = input || {};
+    const edit = operation === 'log-edit-completion-date';
+    if (!core.isIsolatedCreatedTaskId('v2-task-'+actionId)
+      || (!edit && operation !== 'log-delete-completion')
+      || (taskId !== 't1' && !core.isIsolatedCreatedTaskId(taskId)) || typeof generation !== 'string' || !generation
+      || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0
+      || typeof completionId !== 'string' || !completionId
+      || (edit ? !/^\d{4}-\d{2}-\d{2}$/.test(day ?? '') : day !== undefined))
+      throw new Error('invalid_owned_history_intent');
+    return {actionId,operation,taskId,generation,expectedRevision,completionId,...(edit ? {day} : {})};
+  }
+
+  function ownedHistoryResult(task, prior, intent, at) {
+    if (!prior || prior.taskId !== intent.taskId || !Number.isFinite(Date.parse(prior.completedAtISO))
+      || !Number.isFinite(Date.parse(at)) || new Date(at).toISOString() !== at)
+      throw new Error('owned_completion_history_unverified');
+    if ((prior.source && prior.source !== 'task') || core.deriveCompletionPoints(prior,{scoringSettings:{}}))
+      throw new Error('owned_completion_requires_metric_scoring');
+    if (intent.operation === 'log-delete-completion') {
+      // V1 Log clears the completed marker and leaves the due date unchanged.
+      const after = task && {...task,status:'trashed',deletedAtISO:at,deletedAt:at,completedAtISO:null,hidden:false};
+      if (after && typeof task.counts === 'number') after.counts = Math.max(0,task.counts-1);
+      return {after,completionAfter:null};
+    }
+    const date = new Date(intent.day+'T12:00:00');
+    if (!Number.isFinite(date.getTime())) throw new Error('invalid_owned_history_date');
+    const completedAtISO = date.toISOString();
+    const after = task && (task.recurrence?.mode || 'none') === 'none' ? {...task,completedAtISO} : task;
+    return {after,completionAfter:{...prior,completedAtISO}};
+  }
+
+  function ownedHistoryMembershipChanges(journal) {
+    return journal.filter(row=>row.type===OWNED_TASK_HISTORY).flatMap(row=>{
+      const days = [core.dateKey(row.completionBefore.completedAtISO)];
+      if (row.completionAfter === null && Number.isFinite(taskDueDateMillis(row.before?.dueDateISO)))
+        days.push(row.before.dueDateISO);
+      return days.map(day=>({taskId:row.taskId,day}));
+    });
+  }
+
   function ownedTaskJournal(receipts) {
-    return receipts.filter(r=>['isolated-task-update',OWNED_TASK_DONE,OWNED_TASK_CREATE,OWNED_TASK_TRASH,OWNED_TASK_STATUS].includes(r.type))
+    return receipts.filter(r=>['isolated-task-update',OWNED_TASK_DONE,OWNED_TASK_CREATE,OWNED_TASK_TRASH,OWNED_TASK_STATUS,OWNED_TASK_HISTORY].includes(r.type))
       .sort((a,b)=>a.revision-b.revision);
   }
 
@@ -20652,6 +20698,7 @@
     if (typeof meta.generation!=='string'||!Array.isArray(meta.baseline?.tasks)||!Array.isArray(meta.source)
       || (meta.taskCreate === true) !== (fixture.taskCreate === true)
       || (meta.weekControls === true) !== (fixture.weekControls === true)
+      || (meta.logControls === true) !== (fixture.logControls === true)
       || (meta.adoptLegacyTrash === true) !== (fixture.adoptLegacyTrash === true)
       || new Set(meta.baseline.tasks.map(t=>t.id)).size !== meta.baseline.tasks.length)
       throw new Error('owned_task_rows_unverified');
@@ -20664,7 +20711,9 @@
     // receipts. No authority is inferred from a snapshot, revision number or flag.
     const expected=new Map(meta.baseline.tasks.map((t,legacyIndex)=>[t.id,{value:t,revision:0,legacyIndex}]));
     const ownedIds = new Set(meta.homeTaskId ? [meta.homeTaskId] : []);
-    const deletions = new Map(), permanentIds = new Set();
+    const deletions = new Map(), permanentIds = new Set(), retiredRevisions = new Map();
+    const ledger = meta.scoringSeed !== undefined && completionRows !== null ? ownedRewardLedger(meta) : null;
+    if (fixture.completionWrite === true && !ledger) throw new Error('isolated_completion_rows_unverified');
     const adoption = sealedLegacyTrash(fixture,meta);
     if (adoption) deletions.set(adoption.taskId,adoption);
     for(const r of journal){
@@ -20678,6 +20727,29 @@
           throw new Error('owned_task_create_receipt_conflict');
         ownedIds.add(r.taskId);
         expected.set(r.taskId,{value:r.after,revision:r.revision,legacyIndex:-r.revision});
+        continue;
+      }
+      if (r.type === OWNED_TASK_HISTORY) {
+        const intent = ownedHistoryIntent(r.intent);
+        const priorRevision = old?.revision ?? retiredRevisions.get(r.taskId);
+        const task = old?.value ?? null;
+        const prior = ledger?.rows.get(intent.completionId);
+        if (!meta.logControls || !ledger || !ownedIds.has(r.taskId) || priorRevision === undefined
+          || r.id !== 'isolated-task-action:'+intent.actionId || intent.generation !== r.generation || intent.taskId !== r.taskId
+          || intent.expectedRevision !== priorRevision || r.priorRevision !== priorRevision
+          || stableJson(r.intent) !== stableJson(intent) || stableJson(r.before) !== stableJson(task)
+          || !prior || stableJson(r.completionBefore) !== stableJson(prior.value))
+          throw new Error('owned_completion_history_receipt_conflict');
+        const {after,completionAfter} = ownedHistoryResult(task,prior.value,intent,r.committedAtISO);
+        if (stableJson([after,completionAfter]) !== stableJson([r.after,r.completionAfter]))
+          throw new Error('owned_completion_history_receipt_conflict');
+        updateOwnedRewardLedger(ledger,r);
+        if (!old) retiredRevisions.set(r.taskId,r.revision);
+        else {
+          expected.set(r.taskId,{...old,value:after,revision:r.revision});
+          if (completionAfter === null) deletions.set(r.taskId,r);
+          else if (deletions.has(r.taskId)) deletions.set(r.taskId,{...deletions.get(r.taskId),revision:r.revision});
+        }
         continue;
       }
       if(!old||r.id!=='isolated-task-action:'+r.intent?.actionId||r.intent?.taskId!==r.taskId
@@ -20697,6 +20769,7 @@
         const {after,completion} = ownedCompletionResult(old.value,r.intent,r.committedAtISO);
         if (stableJson([after,completion]) !== stableJson([r.after,r.completion]))
           throw new Error('owned_completion_receipt_conflict');
+        if (ledger) recordOwnedAward(ledger,r);
       } else if (r.type === OWNED_TASK_TRASH || r.type === OWNED_TASK_STATUS) {
         const statusChange = ownedStatusOperations.includes(r.intent.operation);
         if (fixture.completionWrite !== true || !ownedIds.has(r.taskId)
@@ -20711,6 +20784,7 @@
         else deletions.delete(r.taskId);
         if (after === null) {
           permanentIds.add(r.taskId);
+          retiredRevisions.set(r.taskId,r.revision);
           expected.delete(r.taskId);
           continue;
         }
@@ -20739,7 +20813,17 @@
     })) throw new Error('owned_task_row_receipt_mismatch');
     const snapshot = {meta,rows,journal,completionRows,ownedIds:[...ownedIds],deletions:[...deletions.values()],permanentIds:[...permanentIds],
       sourceDrift:ownedTaskSourceConflict(meta) || !ownedCreatedSourceIsClean(ownedIds)};
-    if (fixture.completionWrite === true) snapshot.completionRewards = verifyOwnedScoringRows(snapshot);
+    if (ledger) {
+      const expectedRows = new Map([...ledger.rows.values()].map(row=>[row.id,row]));
+      if (completionRows.length !== expectedRows.size || completionRows.some(row=>stableJson(row)!==stableJson(expectedRows.get(row.id))))
+        throw new Error('isolated_completion_rows_unverified');
+      snapshot.completionRewards = [...ledger.rows.values()].map(row=>row.value);
+      // Keep the immutable legacy comparison evidence and the active rewards
+      // separate. A date correction must not invalidate its sealed source.
+      Object.defineProperties(snapshot,{
+        completionOrigins:{value:[...ledger.origins.values()]}, rewardRows:{value:ledger.rows}, retiredRevisions:{value:retiredRevisions}
+      });
+    }
     return snapshot;
   }
   async function readIsolatedOwnedTasks() {
@@ -20749,28 +20833,39 @@
     try {const {completionRows: _unused,completionRewards: _rewards,...s}=await readOwnedSnapshot(db,week);return {...s,authority:'v2-isolated-task',tasks:s.rows.sort((a,b)=>a.legacyIndex-b.legacyIndex).map(r=>clone(r.value))};}
     finally{db.close();}
   }
-  function verifyOwnedScoringRows({meta, journal, completionRows}) {
+  function ownedRewardLedger(meta) {
     const seed = validateOwnedScoringSeed(meta.scoringSeed,meta.homeTaskEvidence,meta.homeTaskId,meta.adoptLegacyTrash === true);
-    const expected = new Map(seed.map(value=>{
-      const id = 'isolated-score:'+value.id;
-      return [id,{id,value,ownerGeneration:meta.generation}];
-    }));
-    const days = new Set(seed.map(row=>ownedCompletionKey({taskId:row.taskId,day:core.dateKey(row.completedAtISO)})));
-    const ids = new Set(seed.map(row=>row.id));
-    const rewards = [...seed];
-    for (const receipt of journal) if (receipt.type === OWNED_TASK_DONE) {
-      const {intent,completion} = receipt;
-      const id = ownedCompletionKey(intent);
-      if (days.has(id) || ids.has(completion.id)) throw new Error('owned_completion_duplicate_reward');
-      days.add(id);
-      ids.add(completion.id);
-      rewards.push(completion);
-      expected.set(id,{id,value:completion,receiptId:receipt.id,ownerRevision:receipt.revision,ownerGeneration:meta.generation});
-    }
-    if (completionRows?.length !== expected.size || completionRows.some(row=>stableJson(row)!==stableJson(expected.get(row.id)))) {
-      throw new Error('isolated_completion_rows_unverified');
-    }
-    return rewards;
+    const ledger = {origins:new Map(seed.map(row=>[row.id,row])),rows:new Map(),days:new Map()};
+    for (const value of seed) setOwnedRewardRow(ledger,value.id,{id:'isolated-score:'+value.id,value,ownerGeneration:meta.generation});
+    return ledger;
+  }
+  function recordOwnedAward(ledger, receipt) {
+    const {intent,completion} = receipt;
+    if (ledger.origins.has(completion.id) || ledger.days.has(ownedCompletionKey(intent)))
+      throw new Error('owned_completion_duplicate_reward');
+    ledger.origins.set(completion.id,completion);
+    setOwnedRewardRow(ledger,completion.id,ownedRewardRow(ownedCompletionKey(intent),completion,receipt));
+  }
+  function ownedRewardRow(id,value,receipt) {
+    return {id,value,receiptId:receipt.id,ownerRevision:receipt.revision,ownerGeneration:receipt.generation};
+  }
+  function updateOwnedRewardLedger(ledger, receipt) {
+    const id = receipt.intent.completionId;
+    setOwnedRewardRow(ledger,id,receipt.completionAfter === null ? null
+      : ownedRewardRow('isolated-score:'+id,receipt.completionAfter,receipt));
+  }
+  function setOwnedRewardRow(ledger,id,row) {
+    const adjust = (value,by) => {
+      const key = ownedCompletionKey({taskId:value.taskId,day:core.dateKey(value.completedAtISO)});
+      const count = (ledger.days.get(key) || 0) + by;
+      if (count) ledger.days.set(key,count);
+      else ledger.days.delete(key);
+    };
+    if (ledger.rows.has(id)) adjust(ledger.rows.get(id).value,-1);
+    if (row) {
+      ledger.rows.set(id,row);
+      adjust(row.value,1);
+    } else ledger.rows.delete(id);
   }
   function withOwnedRecords(tx, consume) {
     const done = transactionPromise(tx);
@@ -20810,8 +20905,16 @@
     core.readPendingHabitDeltas();
     const current = core.readTaskPointsStoredState();
     if (!Array.isArray(current?.completions)) throw new Error('isolated_completion_source_unreadable');
-    if (fixture.completionWrite === true)
-      verifyOwnedLegacyRewardEvidence(current, meta.homeTaskId, rewards, core.readPendingTaskMutations().record, ownedIds);
+    if (fixture.completionWrite === true) {
+      const journal = core.readPendingTaskMutations().record;
+      if (fixture.logControls === true) {
+        // A warm wrapped reader may lag a raw V1 save. Independently check
+        // every owned history ID, including deleted IDs, at the storage boundary.
+        const canonical = core.parseTaskPointsStorageJson(global.localStorage.getItem(core.STORAGE_KEY),null);
+        verifyOwnedLegacyRewardEvidence(canonical,meta.homeTaskId,rewards,journal,ownedIds);
+      }
+      verifyOwnedLegacyRewardEvidence(current,meta.homeTaskId,rewards,journal,ownedIds);
+    }
     return current.completions;
   }
 
@@ -20826,17 +20929,31 @@
       return await withOwnedRecords(tx, (meta,rows,receipts,completionRows) => {
         const snapshot = verifyOwnedSnapshot(ownedTaskContext(false,true),meta,rows,receipts,completionRows);
         if (snapshot.sourceDrift || meta.mode !== 'owned') throw new Error('isolated_completion_source_conflict');
-        const rewards = snapshot.completionRewards || verifyOwnedScoringRows(snapshot);
-        const assertCurrent = () => ownedScoringSource(fixture, marker, meta, rewards, snapshot.ownedIds);
+        const rewards = snapshot.completionRewards;
+        if (!rewards) throw new Error('isolated_completion_rows_unverified');
+        const assertCurrent = () => ownedScoringSource(fixture, marker, meta, snapshot.completionOrigins, snapshot.ownedIds);
         assertCurrent();
         const tasks = rows.filter(row=>snapshot.ownedIds.includes(row.id)).sort((a,b)=>a.legacyIndex-b.legacyIndex);
         const proof = {taskId:meta.homeTaskId,ownedIds:snapshot.ownedIds,tasks:tasks.map(row=>clone(row.value)),generation:meta.generation,
           revision:meta.revision,completions:clone(rewards),deletions:clone(snapshot.deletions),permanentIds:snapshot.permanentIds,assertCurrent,
           statusReceipts:clone(snapshot.journal.filter(row=>row.type===OWNED_TASK_STATUS)),
+          historyMembershipChanges:ownedHistoryMembershipChanges(snapshot.journal),
           weekMembershipChanges:snapshot.journal.flatMap(({intent,taskId,before})=>
             intent.source === 'week' || intent.choice?.kind.startsWith('week-') || intent.operation === 'week-move-to-trash'
               ? [{taskId,day:before.dueDateISO}] : []),
           taskRevision(taskId) { return tasks.find(row=>row.id===taskId)?.ownerRevision; },
+          historyBasis(completionId) {
+            const reward = snapshot.rewardRows.get(completionId)?.value;
+            if (!reward) return null;
+            const {taskId} = reward;
+            return {taskId,generation:meta.generation,
+              expectedRevision:tasks.find(row=>row.id===taskId)?.ownerRevision ?? snapshot.retiredRevisions.get(taskId)};
+          },
+          findHistoryReceipt(input) {
+            const intent = ownedHistoryIntent(input);
+            const receipt = snapshot.journal.find(row=>row.type===OWNED_TASK_HISTORY && row.intent.actionId===intent.actionId);
+            return receipt && stableJson(receipt.intent)===stableJson(intent) ? clone(receipt) : null;
+          },
           findReceipt(input) {
             const intent = completionIntent(input);
             const receipt = snapshot.journal.find(row=>row.type===OWNED_TASK_DONE
@@ -20874,13 +20991,14 @@
     const day = core.todayKey();
     const db = await openOwnedTasks(false,true);
     try {
-      const {meta, rows, journal, completionRewards, ownedIds} = await readOwnedSnapshot(db,true);
-      ownedScoringSource(fixture,marker,meta,completionRewards,ownedIds);
+      const {meta, rows, journal, completionOrigins, rewardRows, ownedIds} = await readOwnedSnapshot(db,true);
+      ownedScoringSource(fixture,marker,meta,completionOrigins,ownedIds);
       if (!ownedIds.includes(taskId)) throw new Error('task_outside_home_ownership');
       const row = rows.find(row=>row.id===taskId);
       if (!row) throw new Error('owned_task_permanently_deleted');
       const retry = journal.find(row=>row.type===OWNED_TASK_DONE && row.taskId===taskId
-        && row.intent.source===source && row.intent.day===day);
+        && row.intent.source===source && row.intent.day===day
+        && core.dateKey(rewardRows.get(row.completion.id)?.value?.completedAtISO)===day);
       if (retry) return clone(retry.intent);
       if (meta.mode !== 'owned') throw new Error('rollback_frozen_no_task_writes');
       if (renderedBasis && (renderedBasis.taskId !== taskId || renderedBasis.generation !== meta.generation
@@ -20908,7 +21026,7 @@
         if (meta.generation !== intent.generation) throw new Error('owned_task_generation_conflict');
         const rewards = snapshot.completionRewards;
         if (!snapshot.ownedIds.includes(intent.taskId)) throw new Error('task_outside_home_ownership');
-        const legacy = ownedScoringSource(fixture,marker,meta,rewards,snapshot.ownedIds);
+        const legacy = ownedScoringSource(fixture,marker,meta,snapshot.completionOrigins,snapshot.ownedIds);
         const previous = snapshot.journal.find(row=>row.id === id);
         if (previous) {
           if (previous.type !== OWNED_TASK_DONE || stableJson(previous.intent) !== stableJson(intent))
@@ -20940,10 +21058,68 @@
       // commit, including when the retry happens after later Task changes.
       const snapshot = await readOwnedSnapshot(db,true);
       const saved = snapshot.journal.find(row=>row.id === id);
-      ownedScoringSource(fixture,marker,snapshot.meta,snapshot.completionRewards,snapshot.ownedIds);
+      ownedScoringSource(fixture,marker,snapshot.meta,snapshot.completionOrigins,snapshot.ownedIds);
       if (!saved || stableJson(saved) !== stableJson(receipt))
         throw new Error('owned_completion_readback_unverified_retry_same_action');
       return {confirmedDurable:true,replayed,receipt:clone(saved)};
+    } finally { db.close(); }
+  }
+
+  function ownedLogContext() {
+    const fixture = ownedTaskContext(false,true);
+    if (global.location.pathname !== '/experiments/v2-home-plus-one-day/full/log.html'
+      || fixture.logControls !== true || fixture.completionControls !== true || fixture.completionWrite !== true)
+      throw new Error('isolated_log_task_actions_not_selected');
+    return fixture;
+  }
+
+  async function commitIsolatedTaskHistory(input) {
+    const fixture = ownedLogContext(), intent = ownedHistoryIntent(input);
+    const marker = global.localStorage.getItem(OWNED_TASK_FIXTURE);
+    const id = 'isolated-task-action:'+intent.actionId;
+    const db = await openOwnedTasks(false,true);
+    try {
+      const tx = db.transaction(OWNED_TASK_STORES,'readwrite',{durability:'strict'});
+      const result = await withOwnedRecords(tx, (meta,rows,receipts,completionRows) => {
+        const snapshot = verifyOwnedSnapshot(ownedLogContext(),meta,rows,receipts,completionRows);
+        if (meta.generation !== intent.generation || !snapshot.ownedIds.includes(intent.taskId))
+          throw new Error('owned_task_generation_conflict');
+        ownedScoringSource(fixture,marker,meta,snapshot.completionOrigins,snapshot.ownedIds);
+        const previous = receipts.find(row=>row.id===id);
+        if (previous) {
+          if (previous.type!==OWNED_TASK_HISTORY || stableJson(previous.intent)!==stableJson(intent))
+            throw new Error('owned_task_action_id_conflict');
+          return {receipt:previous,replayed:true};
+        }
+        if (meta.mode !== 'owned') throw new Error('rollback_frozen_no_task_writes');
+        const task = rows.find(row=>row.id===intent.taskId);
+        const priorRevision = task?.ownerRevision ?? snapshot.retiredRevisions.get(intent.taskId);
+        if (priorRevision !== intent.expectedRevision) throw new Error('owned_task_stale_edit');
+        const prior = snapshot.rewardRows.get(intent.completionId);
+        const before = task?.value ?? null, committedAtISO = nowIso();
+        const {after,completionAfter} = ownedHistoryResult(before,prior?.value,intent,committedAtISO);
+        if (stableJson(completionAfter)===stableJson(prior.value) && stableJson(after)===stableJson(before))
+          return {unchanged:true};
+        const revision = meta.revision+1;
+        const receipt = {id,type:OWNED_TASK_HISTORY,intent,taskId:intent.taskId,generation:meta.generation,
+          revision,priorRevision,before,after,completionBefore:prior.value,completionAfter,committedAtISO};
+        if (task) tx.objectStore('tasks').put({...task,value:after,ownerRevision:revision});
+        const completions = tx.objectStore('completions');
+        completions.delete(prior.id);
+        // Corrected history keeps its identity. Its storage key no longer
+        // reserves the original award day. Done checks active rewards by day
+        // before creating a new award, including days with corrected history.
+        if (completionAfter) completions.add(ownedRewardRow('isolated-score:'+completionAfter.id,completionAfter,receipt));
+        tx.objectStore('mutations').add(receipt);
+        tx.objectStore('meta').put({...meta,revision});
+        return {receipt,replayed:false};
+      });
+      if (result.unchanged) return result;
+      const verified = await readOwnedSnapshot(db,true);
+      ownedScoringSource(fixture,marker,verified.meta,verified.completionOrigins,verified.ownedIds);
+      const saved = verified.journal.find(row=>row.id===id);
+      if (!saved || stableJson(saved)!==stableJson(result.receipt)) throw new Error('owned_history_readback_unverified');
+      return {confirmedDurable:true,replayed:result.replayed,receipt:clone(saved)};
     } finally { db.close(); }
   }
 
@@ -20965,7 +21141,7 @@
         if (context.completionControls !== true || meta.generation !== intent.generation || meta.fixtureId !== fixture.id)
           throw new Error('owned_task_generation_conflict');
         if (snapshot.sourceDrift) throw new Error('legacy_source_changed_preserved_reconciliation_required');
-        ownedScoringSource(context,marker,meta,snapshot.completionRewards,snapshot.ownedIds);
+        ownedScoringSource(context,marker,meta,snapshot.completionOrigins,snapshot.ownedIds);
         const previous = receipts.find(row=>row.id === id);
         if (previous) {
           if (previous.type !== OWNED_TASK_CREATE || stableJson(previous.intent) !== stableJson(intent))
@@ -20994,7 +21170,7 @@
       const saved = verified.journal.find(row=>row.id === id);
       if (verified.sourceDrift || !saved || stableJson(saved) !== stableJson(receipt))
         throw new Error('owned_task_create_readback_unverified_retry_same_action');
-      ownedScoringSource(fixture,marker,verified.meta,verified.completionRewards,verified.ownedIds);
+      ownedScoringSource(fixture,marker,verified.meta,verified.completionOrigins,verified.ownedIds);
       return {confirmedDurable:true,replayed,receipt:clone(saved)};
     } finally { db.close(); }
   }
@@ -21020,7 +21196,7 @@
         if (context.completionControls !== true || meta.generation !== intent.generation)
           throw new Error('owned_task_generation_conflict');
         if (!snapshot.ownedIds.includes(intent.taskId)) throw new Error('task_outside_home_ownership');
-        ownedScoringSource(fixture,marker,meta,snapshot.completionRewards,snapshot.ownedIds);
+        ownedScoringSource(fixture,marker,meta,snapshot.completionOrigins,snapshot.ownedIds);
         const previous = receipts.find(row=>row.id===id);
         if (previous) {
           if (previous.type !== type || stableJson(previous.intent)!==stableJson(intent))
@@ -21045,7 +21221,7 @@
       });
       const verified = await readOwnedSnapshot(db,peerPage);
       const saved = verified.journal.find(row=>row.id===id);
-      ownedScoringSource(fixture,marker,verified.meta,verified.completionRewards,verified.ownedIds);
+      ownedScoringSource(fixture,marker,verified.meta,verified.completionOrigins,verified.ownedIds);
       if (!saved || stableJson(saved)!==stableJson(receipt)) throw new Error('owned_task_trash_readback_unverified');
       return {confirmedDurable:true,replayed,receipt:clone(saved)};
     } finally { db.close(); }
@@ -21150,7 +21326,7 @@
       const snapshot = verifyOwnedSnapshot(readContext(),meta,rows,receipts,completions);
       if (snapshot.sourceDrift || meta.generation !== generation || meta.fixtureId !== fixture.id
         || marker !== global.localStorage.getItem(OWNED_TASK_FIXTURE)) throw new Error('owned_schedule_source_conflict');
-      ownedScoringSource(fixture,marker,meta,snapshot.completionRewards,snapshot.ownedIds);
+      ownedScoringSource(fixture,marker,meta,snapshot.completionOrigins,snapshot.ownedIds);
       return snapshot;
     }
     function existing(snapshot) {
@@ -21237,12 +21413,13 @@
   }
 
   function replaceOwnedRollbackRows(state, taskId, tasks, rewards, journal, authority) {
-    const {ids,owned} = verifyOwnedLegacyRewardEvidence(state,taskId,rewards,journal,authority.ownedIds);
+    const {ids,owned} = verifyOwnedLegacyRewardEvidence(state,taskId,authority.completionOrigins,journal,authority.ownedIds);
+    const active = new Map(rewards.map(row=>[row.id,row]));
     const task = tasks.find(row=>row.id===taskId);
     return {...state, tasks:[...tasks.filter(row=>row.id!==taskId),
       ...state.tasks.filter(row=>!authority.permanentIds.includes(String(row.id)))
         .map(row => String(row.id) === taskId ? task : row)],
-      completions:[...state.completions.map(row => owned.get(row.id) || row),
+      completions:[...state.completions.flatMap(row => owned.has(row.id) ? (active.has(row.id) ? [active.get(row.id)] : []) : [row]),
         ...rewards.filter(row => !ids.has(row.id))]};
   }
 
@@ -21325,7 +21502,10 @@
     if (fixture.completionRead !== true || fixture.homeTaskId !== 't1'
       || global.localStorage.getItem(OWNED_TASK_SCORING) !== fixture.id || meta.revision !== expectedRevision)
       throw new Error('rollback_completion_selection_conflict');
-    const rewards = prior.completionRewards || verifyOwnedScoringRows(prior);
+    const rewards = prior.completionRewards;
+    if (!rewards) throw new Error('isolated_completion_rows_unverified');
+    const activeIds = new Set(rewards.map(row=>row.id));
+    const deletedCompletionIds = prior.completionOrigins.filter(row=>!activeIds.has(row.id)).map(row=>row.id);
     const tasks = rows.filter(row=>prior.ownedIds.includes(row.id)).sort((a,b)=>a.legacyIndex-b.legacyIndex).map(row=>row.value);
     const effective = rollbackLegacyState();
     const pending = core.readPendingTaskMutations().record;
@@ -21338,12 +21518,15 @@
     const todayRaw = legacyEntries.get(core.ISOLATED_TODAY_LIST_KEY);
     let todayAfterTrash;
     const statusReceipts = journal.filter(row=>row.type===OWNED_TASK_STATUS);
+    const historyChanges = ownedHistoryMembershipChanges(journal);
     const archiveCompletions = journal.filter(row=>row.type===OWNED_TASK_DONE && row.intent.source==='archive');
-    if (todayRaw !== undefined && (prior.deletions.length || prior.permanentIds.length || statusReceipts.length || archiveCompletions.length)) {
+    if (todayRaw !== undefined && (prior.deletions.length || prior.permanentIds.length || statusReceipts.length || archiveCompletions.length || historyChanges.length)) {
       const list = core.parseIsolatedTodayList(todayRaw);
       const original = JSON.stringify(list);
-      core.reconcileIsolatedTodayTaskMembership(list,tasks,prior.permanentIds,statusReceipts);
+      core.reconcileIsolatedTodayTaskMembership(list,tasks,prior.permanentIds,statusReceipts,historyChanges);
       for (const row of archiveCompletions) core.removeIsolatedTodayTask(list,row.intent.day,row.taskId);
+      if (historyChanges.length) for (const row of rewards)
+        core.removeIsolatedTodayTask(list,core.dateKey(row.completedAtISO),row.taskId);
       const candidate = JSON.stringify(list);
       if (candidate !== original) todayAfterTrash = candidate;
     }
@@ -21356,6 +21539,7 @@
       receipts:journal, completions:rewards, v2Frozen:true,
       ...(todayAfterTrash !== undefined ? {todayAfterTrash} : {}),
       ...(prior.permanentIds.length ? {permanentIds:prior.permanentIds} : {}),
+      ...(deletedCompletionIds.length ? {deletedCompletionIds} : {}),
       ...(meta.completionTimeZone ? {completionTimeZone:meta.completionTimeZone} : {})});
     const checksum = await previewRecoveryFingerprint(payload);
     if (stableJson(databases) !== stableJson(await captureRollbackDatabases()))
@@ -21395,14 +21579,17 @@
       const entries = payload.currentLegacySource.filter(([key]) => key !== OWNED_TASK_SCORING)
         .map(([key, value]) => [key, key === core.STORAGE_KEY ? payload.raw
           : key === core.ISOLATED_TODAY_LIST_KEY ? (payload.todayAfterTrash ?? value) : value]);
-      if (payload.permanentIds) {
-        const ids = payload.permanentIds;
-        if (!Array.isArray(ids) || !ids.length || new Set(ids).size !== ids.length
+      if (payload.permanentIds !== undefined || payload.deletedCompletionIds !== undefined) {
+        const ids = payload.permanentIds ?? [], deleted = payload.deletedCompletionIds ?? [];
+        if (!Array.isArray(ids) || !Array.isArray(deleted) || !(ids.length || deleted.length) || new Set(ids).size !== ids.length
           || ids.some(id=>id!=='t1' && !core.isIsolatedCreatedTaskId(id))
-          || payload.snapshot.tasks.some(row=>ids.includes(row.id)))
+          || new Set(deleted).size !== deleted.length || deleted.some(id=>typeof id!=='string'||!id)
+          || payload.snapshot.tasks.some(row=>ids.includes(row.id))
+          || payload.snapshot.completions.some(row=>deleted.includes(row.id)))
           throw new Error('rollback_permanent_deletion_unverified');
         entries.push([core.ISOLATED_ROLLBACK_TOMBSTONES_KEY,JSON.stringify({
-          ids,rewards:payload.completions.filter(row=>ids.includes(row.taskId))
+          ids,rewards:payload.completions.filter(row=>ids.includes(row.taskId)),
+          ...(deleted.length ? {deletedCompletionIds:deleted} : {})
         })]);
         entries.sort(([a],[b])=>a < b ? -1 : a > b ? 1 : 0);
       }
@@ -21521,6 +21708,7 @@
     initializeIsolatedTaskOwner,
     readIsolatedOwnedTasks,
     readIsolatedTaskScoring,
+    commitIsolatedTaskHistory,
     commitIsolatedOwnedTaskCreation,
     commitIsolatedOwnedTaskTrash,
     OWNED_TRASH_UNDO_MS,

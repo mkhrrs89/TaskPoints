@@ -726,8 +726,11 @@ const habits = getActiveHabits().filter(h => {
         if (ownedScoring) {
           try {
             for (const row of TaskPointsCore.readScoringCompletions(appState.completions)) {
-              if (TaskPointsCore.getLegacyTaskCompletionHold(row.taskId) && dateKeyFromISO(row.completedAtISO) === dayKey)
-                earned.set(row.taskId,row);
+              if (TaskPointsCore.getLegacyTaskCompletionHold(row.taskId) && dateKeyFromISO(row.completedAtISO) === dayKey) {
+                const rewards = earned.get(row.taskId) || [];
+                rewards.push(row);
+                earned.set(row.taskId,rewards);
+              }
             }
           } catch (_) {
             verified = false;
@@ -735,9 +738,9 @@ const habits = getActiveHabits().filter(h => {
         }
         const visibleTaskIds = new Set(todayStore.taskIds);
         const dismissedIds = new Set(Array.isArray(dismissed) ? dismissed : [dismissed]);
-        for (const reward of earned.values()) {
-          if (dismissedIds.has(reward.id)) visibleTaskIds.delete(reward.taskId);
-          else visibleTaskIds.add(reward.taskId);
+        for (const [taskId,rewards] of earned) {
+          if (rewards.every(row=>dismissedIds.has(row.id))) visibleTaskIds.delete(taskId);
+          else visibleTaskIds.add(taskId);
         }
 
         // Tasks (kept visible even if recurring + moved due date after completion)
@@ -748,10 +751,11 @@ const habits = getActiveHabits().filter(h => {
           let done = hasTaskCompletionToday(taskId, dayKey) || (t.completedAtISO && dateKeyFromISO(t.completedAtISO) === dayKey);
           let sub = (t.points != null) ? `${Number(t.points || 0)} pts` : '';
           if (ownedScoring && TaskPointsCore.getLegacyTaskCompletionHold(taskId)) {
-            const reward = earned.get(taskId);
+            const rewards = earned.get(taskId);
             const selected = writeFixture ? TaskPointsCore.isolatedTaskDoneView(taskId) : null;
-            done = Boolean(reward);
-            sub = verified ? (reward ? `${TaskPointsCore.pointsForCompletion(reward, appState)} pts`
+            const points = rewards?.reduce((total,row)=>total+TaskPointsCore.pointsForCompletion(row,appState),0);
+            done = Boolean(rewards);
+            sub = verified ? (rewards ? `${rewards.length === 1 ? points : TaskPointsCore.roundPoints(points,2)} pts`
               : selected ? `${selected.task.points} pts` : '')
               : 'Verified completion unavailable';
           }
