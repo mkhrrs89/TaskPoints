@@ -753,7 +753,7 @@ const habits = getActiveHabits().filter(h => {
           if (ownedScoring && TaskPointsCore.getLegacyTaskCompletionHold(taskId)) {
             const rewards = earned.get(taskId);
             const selected = writeFixture ? TaskPointsCore.isolatedTaskDoneView(taskId) : null;
-            const points = rewards?.reduce((total,row)=>total+TaskPointsCore.pointsForCompletion(row,appState),0);
+            const points = rewards?.reduce((total,row)=>total+TaskPointsCore.pointsForCompletion(row,TaskPointsCore.isolatedLiveScoringState?.(appState) ?? appState),0);
             done = Boolean(rewards);
             sub = verified ? (rewards ? `${rewards.length === 1 ? points : TaskPointsCore.roundPoints(points,2)} pts`
               : selected ? `${selected.task.points} pts` : '')

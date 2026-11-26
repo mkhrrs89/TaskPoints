@@ -100,9 +100,12 @@
   function isolatedLogCompletionBasis(completionId) {
     if (!global.location?.pathname.endsWith('/log.html') || !usesIsolatedTaskDone() || !verifiedCompletionRead) return null;
     try {
-      if (JSON.parse(global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY)).logControls !== true) return null;
+      const fixture = JSON.parse(global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY));
+      if (fixture.logControls !== true) return null;
       verifiedLegacyCompletions(verifiedCompletionRead);
-      return verifiedCompletionRead.historyBasis(completionId);
+      const basis = verifiedCompletionRead.historyBasis(completionId);
+      return basis && fixture.completionEvidence === true
+        ? {...basis, zone:Intl.DateTimeFormat().resolvedOptions().timeZone} : basis;
     } catch (_) { return null; }
   }
 
@@ -118,7 +121,8 @@
         const ready = usesIsolatedTaskDone() && await refreshIsolatedTaskScoring(true);
         const proof = ready && verifiedCompletionRead;
         const identity = proof
-          ? JSON.stringify([proof.generation, proof.revision, todayKey()])
+          ? JSON.stringify([proof.generation, proof.revision, todayKey(),
+            ...(proof.scoringSettings ? [Intl.DateTimeFormat().resolvedOptions().timeZone, proof.scoringSettings()] : [])])
           : null;
         if (!isolatedDonePending && identity !== shown) {
           await onChange(Boolean(proof));
@@ -233,6 +237,7 @@
     const messages = {
       isolated_completion_time_zone_or_selection_changed:'Verified completion is paused because the time zone or Task ownership changed.',
       owned_completion_requires_metric_scoring:'This Task uses a separate scoring rule and cannot be completed in the V2 experiment.',
+      owned_metric_source_changed:'The scoring settings or source records changed. Check them and tap Done again.',
       owned_task_stale_edit:'The Task changed before it could be completed. Review it and tap Done again.',
       owned_completion_day_changed:'The day changed before completion. Check the Task before trying again.'
     };
@@ -303,8 +308,8 @@
       const original = JSON.stringify(list);
       if (edit) edit(list, structuredClone(proof.completions));
 
-      for (const {taskId, completedAtISO} of proof.completions) {
-        removeIsolatedTodayTask(list,dateKey(completedAtISO),taskId);
+      for (const completion of proof.completions) {
+        removeIsolatedTodayTask(list,proof.completionMembershipDay(completion),completion.taskId);
       }
       reconcileIsolatedTodayTaskMembership(list,proof.tasks,proof.permanentIds,proof.statusReceipts,
         [...(proof.weekMembershipChanges || []),...(proof.historyMembershipChanges || [])]);
@@ -335,12 +340,22 @@
     return legacy;
   }
 
+  function isolatedLiveScoringState(state) {
+    if (!verifiedCompletionRead?.scoringSettings || !usesIsolatedTaskScoring()) return state;
+    return {...state,scoringSettings:verifiedCompletionRead.scoringSettings()};
+  }
+
+  function isolatedScoringSource(read) {
+    return JSON.stringify([read.assertCurrent(),read.scoringSettings?.(),
+      read.scoringSettings ? Intl.DateTimeFormat().resolvedOptions().timeZone : null]);
+  }
+
   async function runWithVerifiedTaskScoring(operation) {
     verifiedCompletionRead = null;
     let ran = false;
     try {
       return await global.TaskPointsStateRuntimeV2.readIsolatedTaskScoring(read => {
-        verifiedScoringWrite = {read,source:JSON.stringify(read.assertCurrent())};
+        verifiedScoringWrite = {read,source:isolatedScoringSource(read)};
         verifiedCompletionRead = read;
         ran = true;
         try { return operation(); }
@@ -375,7 +390,7 @@
       throw new Error('Scoring write requires freshly verified Task completions.');
     // Also check the legacy evidence at the point of storage replacement.
     readScoringCompletions(candidate.completions);
-    if (JSON.stringify(verifiedCompletionRead.assertCurrent()) !== verifiedScoringWrite.source)
+    if (isolatedScoringSource(verifiedCompletionRead) !== verifiedScoringWrite.source)
       throw new Error('Completion source changed before the scoring write.');
   }
 
@@ -9819,7 +9834,7 @@ function buildDailyBreakdowns(state){
   }
 
   function buildDaySnapshot(dateKeyStr, state){
-    const normalized = normalizeState(state || {});
+    const normalized = isolatedLiveScoringState(normalizeState(state || {}));
     const key = dateKey(dateKeyStr);
     const comps = readScoringCompletions(Array.isArray(normalized.completions) ? normalized.completions : []);
 
@@ -10054,7 +10069,7 @@ function buildDailyBreakdowns(state){
 
   function buildYouDayScoreMap(state, options = {}){
     // Invariant: options.normalized is only set when state already passed through normalizeState().
-    const normalized = options.normalized ? (state || {}) : normalizeState(state || {});
+    const normalized = isolatedLiveScoringState(options.normalized ? (state || {}) : normalizeState(state || {}));
     const perfEnabled = !!global.TP_DEBUG_PERF;
     const t0 = perfEnabled && global.performance && typeof global.performance.now === 'function'
       ? global.performance.now()
@@ -11523,6 +11538,7 @@ return Number(cappedScore.toFixed(1));
     runIsolatedTaskDone,
     isolatedTaskDoneError,
     usesIsolatedTaskScoring,
+    isolatedLiveScoringState,
     refreshIsolatedTaskScoring,
     readScoringCompletions,
     parseIsolatedTodayList,
@@ -11566,6 +11582,7 @@ return Number(cappedScore.toFixed(1));
     workHoursBonus,
     workPoints,
     classifyPersonalMetricCompletion,
+    parseCaloriesFromTitle,
     buildPersonalScoreHistoryRows,
     buildPersonalScoreHistoryCsv,
     roundPoints,

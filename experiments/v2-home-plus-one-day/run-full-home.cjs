@@ -1628,11 +1628,11 @@ const unrelatedRewardRows=[
   {id:'synthetic-unrelated-current',taskId:'t2',title:'Synthetic unrelated reward',points:3,completedAtISO:quietDate+'T16:00:00Z'}
 ];
 
-async function seedScoringReads(t,context,{oneOff=false,write=false,controls=false,recurrence,dueDateISO,create=false,week=false,log=false}={}){
+async function seedScoringReads(t,context,{oneOff=false,write=false,controls=false,recurrence,dueDateISO,create=false,week=false,log=false,completionEvidence=false}={}){
   const f=await prepareCompletionBoundary(t,context);
   const legacyRewards=write?[...unrelatedRewardRows]:[{...ownedRewards[0],points:5},...unrelatedRewardRows];
   const completionSeed=write?(oneOff?[]:ownedRewards.slice(1)):(oneOff?ownedRewards.slice(0,1):ownedRewards);
-  await f.page.evaluate(async({marker,completionSeed,legacyRewards,day,oneOff,write,controls,recurrence,dueDateISO,create,week,log})=>{
+  await f.page.evaluate(async({marker,completionSeed,legacyRewards,day,oneOff,write,controls,recurrence,dueDateISO,create,week,log,completionEvidence})=>{
     const core=TaskPointsCore,snapshot=core.readTaskPointsStoredState();
     snapshot.completions=legacyRewards;
     if (create) snapshot.habits.find(row=>row.id==='h1').updatedAtISO=day+'T12:00:00Z';
@@ -1651,12 +1651,12 @@ async function seedScoringReads(t,context,{oneOff=false,write=false,controls=fal
     core.writeTaskPointsStoredState(snapshot);
     const fixture={id:crypto.randomUUID(),syntheticOnly:true,homeTaskId:'t1',completionRead:true,
       ...(write?{completionWrite:true}:{}),...(controls?{completionControls:true}:{}),...(create?{taskCreate:true}:{}),
-      ...(week?{weekControls:true}:{}),...(log?{logControls:true}:{}),phase:'prepared'};
+      ...(week?{weekControls:true}:{}),...(log?{logControls:true}:{}),...(completionEvidence?{completionEvidence:true}:{}),phase:'prepared'};
     localStorage.setItem('taskpoints_isolated_task_scoring_read_v1',fixture.id);
     localStorage.setItem(marker,JSON.stringify(fixture));
     await TaskPointsStateRuntimeV2.initializeIsolatedTaskOwner(snapshot,{completionSeed});
     localStorage.setItem(marker,JSON.stringify({...fixture,phase:'sealed'}));
-  },{marker,completionSeed,legacyRewards,day:quietDate,oneOff,write,controls,recurrence,dueDateISO,create,week,log});
+  },{marker,completionSeed,legacyRewards,day:quietDate,oneOff,write,controls,recurrence,dueDateISO,create,week,log,completionEvidence});
   await f.page.reload();
   if(oneOff&&!write)await f.page.waitForFunction(()=>TaskPointsHomeLiveState?.getState()?.tasks?.find(row=>row.id==='t1')?.status==='done');
   else await waitHome(f.page);
@@ -2251,13 +2251,13 @@ const verifiedRewards=page=>page.evaluate(async()=> (await TaskPointsStateRuntim
 
 async function completionProfile(t){
   const profile=fs.mkdtempSync(path.join(os.tmpdir(),'tp-completion-transaction-'));
-  const launch=()=>chromium.launchPersistentContext(profile,{
-    executablePath:process.env.BOUNDARY_CHROMIUM_PATH||'/usr/bin/chromium',serviceWorkers:'block',timezoneId:'America/New_York'
+  const launch=(timezoneId='America/New_York')=>chromium.launchPersistentContext(profile,{
+    executablePath:process.env.BOUNDARY_CHROMIUM_PATH||'/usr/bin/chromium',serviceWorkers:'block',timezoneId
   });
   let context=await launch();
   t.after(async()=>{await context.close();fs.rmSync(profile,{recursive:true,force:true});});
-  return {context,async restart(){
-    await context.close();context=await launch();await configureContext(context);
+  return {context,async restart(timezoneId){
+    await context.close();context=await launch(timezoneId);await configureContext(context);
     return context;
   }};
 }
@@ -6859,4 +6859,323 @@ test('V2 Log refuses a corrupted deletion receipt and leaves its raw legacy evid
   await assert.rejects(page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(1)),/owned_completion_history_receipt_conflict/);
   await logDateControl(log,ownedRewards[2].id).waitFor({state:'detached'});
   assert.deepEqual(await completionWriteEvidence(page),pending);
+});
+
+const forCompletionEvidence = (t,context,options) => forLogHistory(t,context,{completionEvidence:true,week:true,...options});
+async function addMetricTask(page,title,due=quietDate) {
+  await putCreateForm(page,{title,due,points:'57.25',repeat:'daily'});
+  return saveCreateForm(page);
+}
+async function changeScoringSettings(page,formula,changes) {
+  await page.evaluate(({formula,changes})=>{
+    const core=TaskPointsCore,state=core.readTaskPointsStoredState();
+    state.scoringSettings={...state.scoringSettings,[formula]:{...state.scoringSettings[formula],...changes}};
+    const saved=core.saveAppState(state,{allowScoringSettingsOverwrite:true,immediateWrite:true});
+    if (!saved?.state) throw Error('Fixture scoring settings could not be saved');
+  },{formula,changes});
+}
+async function scoresForMetricEvidence(page) {
+  return page.evaluate(()=>TaskPointsCore.runWithVerifiedTaskScoring(()=>{
+    const core=TaskPointsCore,source=core.isolatedLiveScoringState(core.readTaskPointsStoredState());
+    const rows=core.readScoringCompletions(source.completions);
+    return {totals:core.aggregateCompletionsByDate(rows,source).dailyTotals,
+      live:rows.map(row=>[row.id,core.pointsForCompletion(row,source)])};
+  }));
+}
+
+test('V2 completion evidence uses the real Home, Today, Week and Archive controls and Log supports metric corrections and deletion',async t=>{
+  const {page,context,legacyRewards}=await forCompletionEvidence(t);
+  const sleep=await addMetricTask(page,'Sleep Score (85) — Rest 2');
+  const mood=await addMetricTask(page,'Mood Score (50)');
+  const calories=await addMetricTask(page,'Calories (2200)');
+  const work=await addMetricTask(page,'Work Score (80) — Hours 6');
+  assert.equal((await homeStatus(page,work,'hide')).ok,true);
+  const [today,week,archive]=await Promise.all(['today.html','week.html','archive.html'].map(file=>openScoringPage(context,file)));
+  await writeTodayFixture(page,JSON.stringify(weekTodayStore(cleanedTodayList,[quietDate],mood)));
+  await (await expandCreated(page,sleep)).locator('[data-task-action="complete"]').click();
+  const homeReceipt=await weekReceipt(page,'home',sleep);
+  await todayTask(today,mood).locator('.today-check').click();
+  const todayReceipt=await weekReceipt(page,'today',mood);
+  await weekAction(week,quietDate,'done',calories).click();
+  const weekDoneReceipt=await weekReceipt(page,'week',calories);
+  await archiveReady(archive,work);
+  await archiveControl(archive,work,'Done').click();
+  const archiveReceipt=await weekReceipt(page,'archive',work);
+  const receipts=[homeReceipt,todayReceipt,weekDoneReceipt,archiveReceipt];
+  assert.deepEqual(receipts.map(row=>row.intent.metric.formula),['sleep','mood','calories','work']);
+  for (const row of receipts) {
+    const v1=await page.evaluate(entry=>TaskPointsCore.deriveCompletionPoints(entry,TaskPointsCore.readTaskPointsStoredState()),row.completion);
+    assert.deepEqual(row.intent.metric.inputs,v1.inputs);
+    assert.equal(row.completion.points,v1.points);
+    assert.equal(row.intent.metric.points,v1.points);
+    assert.equal(row.calendar.day,quietDate);
+    assert.equal(row.after.dueDateISO,'2026-11-19');
+    assert.equal(row.after.postponedDays,0);
+  }
+  assert.equal(weekDoneReceipt.completion.dateKey,quietDate);
+  assert.equal(archiveReceipt.completion.source,'task');
+  assert.deepEqual(weekDoneReceipt.intent.metric.bonus,{before:0,after:2});
+  assert.deepEqual(await canonicalCompletions(page),legacyRewards);
+
+  await Promise.all([week,archive].map(tab=>tab.close()));
+  await todayTask(today,mood).getByText('50 pts',{exact:true}).waitFor();
+  await changeScoringSettings(page,'mood',{multiplier:2});
+  await todayTask(today,mood).getByText('100 pts',{exact:true}).waitFor();
+  assert.equal((await verifiedRewards(page)).find(row=>row.id===todayReceipt.completion.id).points,50);
+  await today.close();
+  await changeScoringSettings(page,'sleep',{baseMultiplier:2});
+  assert.equal((await canonicalSnapshot(page)).scoringSettings.sleep.baseMultiplier,2);
+  const live=await scoresForMetricEvidence(page);
+  const sleepId=homeReceipt.completion.id;
+  assert.notEqual(live.live.find(([id])=>id===sleepId)[1],homeReceipt.completion.points,JSON.stringify(live));
+  assert.deepEqual((await verifiedRewards(page)).find(row=>row.id===sleepId),homeReceipt.completion);
+  const log=await openScoringPage(context,'log.html');
+  const sleepEdit=log.locator(`#logList [data-edit-sleep-id="${sleepId}"]`);
+  log.removeAllListeners('dialog');
+  const answers=['75.5','-1.25'], prompts=[];
+  log.on('dialog',async dialog=>{
+    prompts.push(dialog.message());
+    if (dialog.type()==='prompt' && answers.length) await dialog.accept(answers.shift());
+    else await dialog.dismiss();
+  });
+  await sleepEdit.click();
+  const [correction]=await waitHistory(page,1);
+  assert.match(prompts[0],/Edit sleep score/);
+  assert.match(prompts[1],/Edit how rested/);
+  assert.equal(correction.intent.operation,'log-edit-sleep-score');
+  assert.deepEqual(correction.intent.metric.inputs,{score:75.5,rested:-1.25});
+  assert.deepEqual(correction.completionBefore,homeReceipt.completion);
+  assert.equal(correction.completionAfter.completedAtISO,homeReceipt.completion.completedAtISO);
+  assert.equal(correction.completionAfter.id,sleepId);
+  assert.deepEqual(correction.targetCalendar,homeReceipt.calendar);
+  const rawSleep=await page.evaluate(()=>TaskPointsCore.sleepPoints(75.5,-1.25,TaskPointsCore.readTaskPointsStoredState()));
+  assert.equal(correction.completionAfter.points,rawSleep);
+  assert.deepEqual((await completionReceipts(page)).find(row=>row.id===homeReceipt.id),homeReceipt);
+
+  const calorieId=weekDoneReceipt.completion.id;
+  assert.match(await editLogDate(log,calorieId,'2026-10-31'),/Edit completion date/);
+  const [,move]=await waitHistory(page,2);
+  assert.equal(move.completionAfter.points,weekDoneReceipt.completion.points);
+  assert.equal(move.targetCalendar.day,'2026-10-31');
+  const {totals}=await scoresForMetricEvidence(page);
+  assert.equal(totals['2026-10-31'],weekDoneReceipt.completion.points+2);
+  const game=await openScoringPage(context,'game.html');
+  await game.locator('#playersList .playerCard').first().waitFor();
+  assert.equal(await game.evaluate(()=>TaskPointsCore.runWithVerifiedTaskScoring(()=>computeTodayPoints())),
+    Number(totals[quietDate].toFixed(1)));
+  const matchups=await openScoringPage(context,'matchups.html');
+  const scoringErrors=[];
+  matchups.on('pageerror',error=>scoringErrors.push(error.message));
+  matchups.on('console',message=>{if (message.type()==='warning' || message.type()==='error') scoringErrors.push(message.text());});
+  const generate=matchups.locator('#matchupsChronological').getByRole('button',{name:'Generate retro matchups'}).first();
+  const header=generate.locator('xpath=ancestor::section[1]').locator('.matchup-collapsible-header').first();
+  if(await header.getAttribute('aria-expanded')==='false')await header.click();
+  await generate.click();
+  await matchups.waitForFunction(score=>TaskPointsCore.parseTaskPointsStorageJson(localStorage.getItem(TaskPointsCore.STORAGE_KEY)).matchups
+    .find(row=>row.id==='synthetic-owned-matchup')?.scoreA===score,totals[quietDate]).catch(async error=>{
+      const stored=(await canonicalSnapshot(matchups)).matchups.find(row=>row.id==='synthetic-owned-matchup');
+      throw new Error(JSON.stringify({expected:totals[quietDate],stored,scoringErrors}),{cause:error});
+    });
+  const beforeDelete=totals[quietDate];
+  assert.match(await deleteLogEntry(log,calorieId),/send its task to Trash/);
+  const [,,deletion]=await waitHistory(page,3);
+  assert.equal(deletion.after.status,'trashed');
+  assert.equal(deletion.completionAfter,null);
+  const after=await scoresForMetricEvidence(page);
+  assert.equal(after.totals['2026-10-31'],undefined);
+  assert.equal(after.totals[quietDate],beforeDelete);
+  assert.equal((await verifiedRewards(page)).filter(row=>row.id===calorieId).length,0);
+  assert.deepEqual(await canonicalCompletions(page),legacyRewards);
+});
+
+test('V2 completion evidence refuses changed metric settings and competing sources, records the calorie bonus once and rejects ambiguous inputs',async t=>{
+  const {page,context}=await forCompletionEvidence(t);
+  await openTaskEdit(page);await titleField(page).fill('Calories (2200)');
+  assert.equal((await submitTaskEdit(page)).ok,true);
+  const prepared=await prepareCompletion(page,'home');
+  await changeScoringSettings(page,'calories',{pointsPer100:2,logBonus:3});
+  await assert.rejects(commitCompletion(page,prepared),/owned_metric_source_changed/);
+  assert.equal((await completionReceipts(page)).length,0);
+  const next=await prepareCompletion(page,'home');
+  const dependency={id:'unrelated-calorie-input',taskId:'t2',title:'Calories (2350)',points:1,completedAtISO:quietDate+'T12:00:00.000Z'};
+  await page.evaluate(entry=>{
+    const core=TaskPointsCore,s=core.readTaskPointsStoredState();
+    s.completions.push(entry);
+    core.writeTaskPointsStoredState(s);
+  },dependency);
+  await assert.rejects(commitCompletion(page,next),/owned_metric_source_changed/);
+  const peer=await openScoringPage(context,'today.html');
+  const intents=await Promise.all([prepareCompletion(page,'home'),prepareCompletion(peer,'today')]);
+  const committed=await Promise.allSettled([commitCompletion(page,intents[0]),commitCompletion(peer,intents[1])]);
+  const [award]=await completionReceipts(page);
+  assert.equal(committed.filter(result=>result.status==='fulfilled').length,1);
+  assert.match(committed.find(result=>result.status==='rejected').reason.message,/owned_completion_already_awarded/);
+  assert.deepEqual(award.intent.metric.bonus,{before:3,after:3});
+  assert.deepEqual(award.intent.metric.dependencies,[{
+    id:dependency.id,title:dependency.title,completedAtISO:dependency.completedAtISO
+  }]);
+  assert.equal(award.completion.points,4);
+  assert.equal((await scoresForMetricEvidence(page)).totals[quietDate],11);
+  const replay=await commitCompletion(award.intent.source==='home'?page:peer,award.intent);
+  assert.deepEqual(replay,{confirmedDurable:true,replayed:true,receipt:award});
+
+  const ambiguous=await addMetricTask(page,'Calories');
+  await assert.rejects(page.evaluate(id=>TaskPointsStateRuntimeV2.prepareIsolatedTaskCompletion('home',id),ambiguous),
+    /owned_completion_requires_metric_scoring/);
+  assert.deepEqual(await completionReceipts(page),[award]);
+});
+
+async function openZonedPage(context,file,zone,iso) {
+  const page=await context.newPage();
+  page.setDefaultTimeout(12000);
+  page.on('dialog',dialog=>dialog.dismiss());
+  await page.clock.setFixedTime(new Date(iso));
+  await page.goto(origin+prefix+file);
+  assert.equal(await page.evaluate(()=>Intl.DateTimeFormat().resolvedOptions().timeZone),zone);
+  return page;
+}
+
+test('V2 completion evidence survives travel, lost responses and Chromium restart, and V1 rollback preserves timestamps and rewards',async t=>{
+  const profile=await completionProfile(t);
+  const {page}=await forCompletionEvidence(t,profile.context,{dueDateISO:quietDate});
+  await openTaskEdit(page);await titleField(page).fill('Mood Score (12.75)');
+  assert.equal((await submitTaskEdit(page)).ok,true);
+  const authorISO='2026-11-18T05:30:00.000Z';
+  await page.clock.setFixedTime(new Date(authorISO));
+  const draft=await prepareCompletion(page,'home');
+  const award=(await commitCompletion(page,draft)).receipt;
+  assert.deepEqual(award.calendar,{zone:'America/New_York',day:'2026-11-18',at:authorISO,
+    offsetMinutes:-300,wall:'2026-11-18T00:30:00'});
+  assert.equal(award.after.dueDateISO,'2026-11-19');
+  assert.equal(award.completion.points,12.75);
+  const reopened=await profile.restart('America/Los_Angeles');
+  const travel=await openZonedPage(reopened,'index.html','America/Los_Angeles',authorISO);
+  await waitHome(travel);
+  assert.deepEqual(await commitCompletion(travel,draft),{confirmedDurable:true,replayed:true,receipt:award});
+  const display=await travel.evaluate(entry=>({
+    day:TaskPointsCore.dateKey(entry.completedAtISO),today:TaskPointsCore.todayKey()
+  }),award.completion);
+  assert.deepEqual(display,{day:'2026-11-17',today:'2026-11-17'});
+  const overlap=await prepareCompletion(travel,'home');
+  assert.notEqual(overlap.actionId,draft.actionId);
+  await assert.rejects(commitCompletion(travel,overlap),/owned_completion_already_awarded/);
+  // The travel date has since caught up. The original reward now displays
+  // under yesterday but still occupies the authoring day's reservation.
+  await travel.clock.setFixedTime(new Date('2026-11-18T19:00:00.000Z'));
+  const overlappingAuthorDay=await prepareCompletion(travel,'home');
+  assert.equal(overlappingAuthorDay.day,'2026-11-18');
+  await assert.rejects(commitCompletion(travel,overlappingAuthorDay),/owned_completion_already_awarded/);
+  await travel.clock.setFixedTime(new Date(authorISO));
+
+  // An interrupted cleanup uses the author day after travel. A new selection
+  // under the travel date belongs to a different persisted list.
+  const listed=weekTodayStore(cleanedTodayList,['2026-11-17','2026-11-18']);
+  await writeTodayFixture(travel,JSON.stringify(listed));
+  await travel.evaluate(()=>TaskPointsCore.reconcileIsolatedTodayList());
+  const reconciled=await travel.evaluate(()=>JSON.parse(localStorage.getItem(TaskPointsCore.ISOLATED_TODAY_LIST_KEY)));
+  assert.ok(!reconciled.tasksByDay['2026-11-18'].includes('t1'));
+  // This fixture already includes a separate, seeded November 17 reward.
+  assert.ok(!reconciled.tasksByDay['2026-11-17'].includes('t1'));
+  assert.deepEqual(reconciled.notesByDay,listed.notesByDay);
+  assert.deepEqual(await completionReceipts(travel),[award]);
+
+  await settleRollbackSourceMirror(travel);
+  const checkpoint=await travel.evaluate(rev=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(rev),award.revision);
+  assert.equal(checkpoint.completionEvidenceVersion,1);
+  const fresh=await browser.newContext({serviceWorkers:'block',timezoneId:'Pacific/Honolulu'});
+  t.after(()=>fresh.close());
+  await configureContext(fresh);
+  const loader=await rollbackLoader(fresh);
+  assert.deepEqual(await restoreCompletionCheckpoint(loader,checkpoint),{verified:true,checksum:checkpoint.checksum});
+  const stored=await canonicalSnapshot(loader);
+  assert.deepEqual(stored.completions.filter(row=>row.id===award.completion.id),[award.completion]);
+  assert.deepEqual(stored.tasks.find(row=>row.id==='t1'),award.after);
+  const game=await openScoringPage(fresh,'game.html');
+  await game.clock.setFixedTime(new Date(authorISO));
+  await game.locator('#playersList .playerCard').first().waitFor();
+  const restored=await game.evaluate(id=>{
+    const core=TaskPointsCore,state=core.readTaskPointsStoredState(),row=state.completions.find(row=>row.id===id);
+    return {day:core.dateKey(row.completedAtISO),points:core.pointsForCompletion(row,state)};
+  },award.completion.id);
+  assert.deepEqual(restored,{day:'2026-11-17',points:award.completion.points});
+  assert.equal(await game.evaluate(()=>computeTodayPoints()),10.5);
+});
+
+test('V2 completion evidence verifies spring-forward and fall-back author offsets, midnight refusal and recurring dates',async t=>{
+  const {page}=await forCompletionEvidence(t,undefined,{dueDateISO:'2026-03-08'});
+  const samples=[
+    ['2026-03-08T06:59:59.000Z','2026-03-08T01:59:59',-300,'2026-03-08','2026-03-09'],
+    ['2026-03-08T07:00:00.000Z','2026-03-08T03:00:00',-240,'2026-03-08','2026-03-09'],
+    ['2026-11-01T05:30:00.000Z','2026-11-01T01:30:00',-240,'2026-11-01','2026-11-02'],
+    ['2026-11-01T06:30:00.000Z','2026-11-01T01:30:00',-300,'2026-11-01','2026-11-02']
+  ];
+  const ids=[];
+  for (let i=0;i<samples.length;i++) ids.push(await addMetricTask(page,'Synthetic DST task '+i,samples[i][3]));
+  const receipts=[];
+  for (const [i,[at,wall,offsetMinutes,day,next]] of samples.entries()) {
+    await page.clock.setFixedTime(new Date(at));
+    const intent=await page.evaluate(id=>TaskPointsStateRuntimeV2.prepareIsolatedTaskCompletion('home',id),ids[i]);
+    const {receipt}=await commitCompletion(page,intent);
+    assert.deepEqual(receipt.calendar,{zone:'America/New_York',day,at,offsetMinutes,wall});
+    assert.equal(receipt.after.dueDateISO,next);
+    receipts.push(receipt);
+  }
+  await page.clock.setFixedTime(new Date('2026-11-19T04:59:59.000Z'));
+  const uncommitted=await prepareCompletion(page,'home');
+  await page.clock.setFixedTime(new Date('2026-11-19T05:00:00.000Z'));
+  await assert.rejects(commitCompletion(page,uncommitted),/owned_completion_day_changed/);
+  assert.deepEqual(await completionReceipts(page),receipts);
+});
+
+test('V2 completion evidence allows intentional Log collisions, then refuses new awards and corrupt historical proof',async t=>{
+  const {page,context}=await forCompletionEvidence(t);
+  const award=(await commitCompletion(page,await prepareCompletion(page,'home'))).receipt;
+  const log=await openScoringPage(context,'log.html');
+  const historical=ownedRewards[1];
+  assert.match(await editLogDate(log,historical.id,quietDate),/Edit completion date/);
+  const [correction]=await waitHistory(page,1);
+  assert.equal(correction.completionAfter.id,historical.id);
+  assert.equal(correction.completionAfter.points,historical.points);
+  assert.equal(correction.targetCalendar.day,award.calendar.day);
+  const both=(await verifiedRewards(page)).filter(row=>[historical.id,award.completion.id].includes(row.id));
+  assert.equal(both.length,2);
+  assert.equal((await scoresForMetricEvidence(page)).totals[quietDate],3+award.completion.points+historical.points);
+  const today=await openScoringPage(context,'today.html');
+  await assert.rejects(commitCompletion(today,await prepareCompletion(today,'today')),/owned_completion_already_awarded/);
+
+  const original=await completionWriteEvidence(page);
+  await page.evaluate(receipt=>new Promise((resolve,reject)=>{
+    const request=indexedDB.open(TaskPointsStateRuntimeV2.DB_NAME);
+    request.onerror=()=>reject(request.error);
+    request.onsuccess=()=>{
+      const db=request.result,tx=db.transaction('mutations','readwrite');
+      tx.oncomplete=()=>{db.close();resolve();};tx.onabort=()=>{db.close();reject(tx.error);};
+      tx.objectStore('mutations').put({...receipt,calendar:{...receipt.calendar,offsetMinutes:0}});
+    };
+  }),award);
+  await assert.rejects(verifiedRewards(page),/isolated_completion_calendar_unverified/);
+  await assert.rejects(commitCompletion(page,award.intent),/isolated_completion_calendar_unverified/);
+  await assert.rejects(page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskRollback(2)),/isolated_completion_calendar_unverified/);
+  assert.deepEqual(await completionWriteEvidence(page),original);
+});
+
+test('V2 completion evidence refuses ambiguous and pending calorie inputs before any award',async t=>{
+  const {page}=await forCompletionEvidence(t);
+  const ambiguous=await addMetricTask(page,'Work Score (80) — Calories (2200)');
+  await assert.rejects(page.evaluate(id=>TaskPointsStateRuntimeV2.prepareIsolatedTaskCompletion('home',id),ambiguous),
+    /owned_completion_requires_metric_scoring/);
+  await openTaskEdit(page);await titleField(page).fill('Calories (2200)');
+  assert.equal((await submitTaskEdit(page)).ok,true);
+  await page.evaluate(day=>{
+    TaskPointsCore.journalTaskMutation({completionUpsert:{id:'pending-calorie-input',taskId:'t2',
+      title:'Calories (2350)',points:0.5,completedAtISO:day+'T12:00:00.000Z'}});
+  },quietDate);
+  try {
+    await assert.rejects(prepareCompletion(page,'home'),/owned_metric_dependencies_unverified/);
+  } finally {
+    assert.equal(await page.evaluate(()=>TaskPointsCore.flushPendingTaskMutations()),true);
+  }
+  const receipt=(await commitCompletion(page,await prepareCompletion(page,'home'))).receipt;
+  assert.deepEqual(receipt.intent.metric.bonus,{before:2,after:2});
+  assert.equal(receipt.intent.metric.dependencies[0].id,'pending-calorie-input');
 });

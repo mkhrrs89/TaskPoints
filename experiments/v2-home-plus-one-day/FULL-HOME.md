@@ -694,19 +694,63 @@ passed 19/19. The scoped scoring, Gold, journal, and recovery run had
 
 ### Package 4B · Metric rewards and time zones
 
-- Record the verified metric input, its source identity, and the applicable
-  scoring settings in the transaction receipt. Reuse the V1 metric formulas
-  and daily bonuses, including calculations that depend on other entries
-  that day. Verify edits, recalculation, and deletion across the affected
-  days and score consumers. Test exactly-once rewards, preserved prior
-  metadata, and rollback for the supported metric types before lifting
-  the existing refusal.
-- Store the authoring IANA time zone, local calendar day, and timestamp as
-  verifiable receipt evidence. Replay dates and day reservations from that
-  evidence when the reader’s zone changes. Establish which local day owns
-  a reward after travel and verify retries, overlapping days, DST, and
-  rollback into V1 across zones. Keep history with ambiguous date or zone
-  evidence held until it can be verified.
+The explicitly selected, sealed synthetic fixture can write versioned
+completion evidence. The real Home, Today, Week, and Archive Done controls
+use V1's Sleep Score, Work Score, Mood Score, and explicit Calories formulas.
+These use the existing Sleep divisor, multiplier, offset, rested multiplier,
+and bonus tiers; Work score and hours terms and bounds; Mood multiplier,
+offset, and clamps; and Calories target, points per 100, and clamps. The
+Cal Log Bonus is applied once per displayed day based on all eligible
+calorie entries. Inertia continues to be calculated from daily totals.
+
+The receipt records the Task and its revision, formula version, parsed inputs,
+applicable settings, earned result, and the calorie source IDs and values
+that determine the day's bonus. The transaction compares that evidence with
+the current source again before saving. Relevant pending calorie changes
+must compact before an award can proceed. V1 settings and V2 receipts use
+separate stores. The receipt saves the inputs verified at admission, and
+the IndexedDB transaction saves the Task, reward, and receipt together.
+
+Home, Today, Log, Game, and matchup calculations keep V1's live use of the
+current settings. An exact retry still returns the original earned result.
+An explicit Sleep Score correction in Log records a separate receipt and
+preserves the original entry identity and instant. A Log date correction
+preserves the stored reward, and deletion removes it and applies the
+existing linked-Task transition. The live calorie bonus follows the affected
+days after either operation.
+
+New receipts carry the authoring IANA zone, day, instant, and UTC offset.
+Replay checks the evidence in the recorded zone. New awards check both the
+recorded reward day and the current local view of existing rewards so travel
+cannot award the same Task twice on overlapping days. Explicit Log date
+corrections can still put two historical rewards on one day. Today-list
+cleanup uses the recorded day. V1 live scoring groups timestamps in the
+viewer's current local zone, including after cross-zone detached rollback.
+Rollback preserves stored timestamps, earned values, and Task dates.
+
+The previous holds remain for unversioned receipts after a zone change,
+ambiguous timestamps and historical metric inputs, and bare Calories titles
+whose legacy points field doubles as the calorie input. Standalone Home
+personal-metric editors and their Work/SCWM fast path still need shared
+admission when they target the same date and metric as an owned Task
+completion. In a separate disposable profile, Home Done saved an owned
+`Calories (2200)` reward. Saving `2100` through the same-day Home Calories
+score card then left the original reward in V2 and created a separate legacy
+record. That flow needs verified admission before the legacy write and an
+explicit edit of the original reward. Package 4B remains open for this
+overlap. The experimental opt-in remains confined to sealed synthetic
+fixtures.
+
+On `51541989`, the full lifecycle suite had 215 passes, one intermittent
+Today setup timeout before the Done click, and two existing Archive TODOs.
+All 216 existing lifecycle cases passed with the Package 4B code, with the
+same two TODOs. The exact Today case also passed on both focused reruns.
+An initial run of the new matchup test timed out reading a cached V1 snapshot.
+The assertion now checks the persisted snapshot directly, with the same
+expected score. All six new evidence tests passed on the final code, along
+with 19 Chromium component tests and 371 Main regressions. The scoped
+scoring, Gold, journal, recovery, and V2 contract groups passed 1,495 tests
+and reproduced the same 24 failures and one TODO as the pinned baseline.
 
 ### M02 Task packages
 
@@ -723,8 +767,10 @@ passed 19/19. The scoped scoring, Gold, journal, and recovery run had
    sealed fixture. Week’s selected date, recurrence, reward day, and
    deletion provenance are covered above.
 4. **Completion history** — Package 4A is verified in synthetic storage
-   for Log date editing and linked completion-to-Trash deletion. Package 4B
-   covers the remaining metric-derived reward and time-zone limits.
+   for Log date editing and linked completion-to-Trash deletion. Package 4B's
+   versioned Task completion, Log correction, bonus, time-zone replay, and
+   rollback cases are verified in the sealed synthetic fixture. The holds and
+   standalone metric overlap above remain open.
 5. **Authority and acceptance** — verify the whole Task collection and
    pending Task journals, including Create/Delete fast paths, ordinary
    snapshot saves and raw fallbacks, idle compaction, history-merge
@@ -732,6 +778,26 @@ passed 19/19. The scoped scoring, Gold, journal, and recovery run had
    Prove the controlled iPhone handoff and old-client protection before
    switching owners. Verify original behavior, durability before feedback,
    and lossless V1 fallback and rollback without duplicate rows or rewards.
+
+**Package 5 acceptance checklist**
+
+1. In synthetic storage, admit the full Task collection and its completion
+   history with one identifiable owner for each Task. Verify mixed legacy and
+   new records, tombstones, and unsupported records that need a hold.
+2. Exercise shared admission for every Task writer, including journal fast
+   paths, snapshot fallbacks, standalone metric writes that overlap owned
+   rewards, and idle compaction. Check interrupted writes, competing tabs,
+   receipt replay, readback before feedback, and current scoring.
+3. Exercise imports, reset, backup history merge, verified-secondary restore,
+   emergency restore, and detached V1 rollback for the entire synthetic
+   collection. Verify unrelated data and recovery bytes and refuse ambiguous
+   lineages without making destructive writes.
+4. Separately qualify the capture-only launch on the physical iPhone from
+   the existing Home Screen storage context. Establish a deliberate stop to
+   existing edit sessions, preserve pending work, and verify the transfer
+   package before starting the destination. Rehearse restoration and rollback
+   on isolated storage. Obtain explicit approval before real capture or
+   transfer, retiring the old-client requirement, or production activation.
 
 M02 remains Working. The official pass condition covers the full live
 Task writer family. See the [tracker](../../V2-PROGRESS-TRACKER.md)

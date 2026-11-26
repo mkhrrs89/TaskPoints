@@ -3841,7 +3841,7 @@ function computeYourRecord(){
 
 function getCompletionPoints(entry) {
   if (window.TaskPointsCore?.pointsForCompletion) {
-    return TaskPointsCore.pointsForCompletion(entry, state);
+    return TaskPointsCore.pointsForCompletion(entry, TaskPointsCore.isolatedLiveScoringState?.(state) ?? state);
   }
   const caloriesRaw = parseCaloriesFromTitle(entry?.title);
   if (Number.isFinite(caloriesRaw)) return caloriesToPoints(caloriesRaw);
@@ -5843,7 +5843,7 @@ function niceDate(d){
 
 function aggregateCompletionsByDate(completions){
   if (window.TaskPointsCore?.aggregateCompletionsByDate) {
-    return TaskPointsCore.aggregateCompletionsByDate(completions || [], state);
+    return TaskPointsCore.aggregateCompletionsByDate(completions || [], TaskPointsCore.isolatedLiveScoringState?.(state) ?? state);
   }
   const dailyTotals   = {};
   const weeklyTotals  = {};
@@ -7852,7 +7852,7 @@ if (titleStr.startsWith('Sleep Score (')) {
     return Number.isFinite(caloriesRaw);
   });
   const calLogBonus = window.TaskPointsCore?.computeCalLogBonusPoints
-    ? TaskPointsCore.computeCalLogBonusPoints(calorieEntries, state)
+    ? TaskPointsCore.computeCalLogBonusPoints(calorieEntries, TaskPointsCore.isolatedLiveScoringState?.(state) ?? state)
     : (() => {
         const configuredBonus = Number(state?.scoringSettings?.calories?.logBonus);
         const logBonus = Number.isFinite(configuredBonus) ? configuredBonus : 2;
