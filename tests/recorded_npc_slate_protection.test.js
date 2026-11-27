@@ -133,3 +133,11 @@ test('actual Gold settlement refuses replacement games and preserves the ledger'
   assert.equal(api.settleOneMatchup(state,legal),true);
   assert.equal(api.settleOneMatchup(state,legal),false);
 });
+
+
+test('unsettled legacy tournament placeholders remain repairable but settled ones cannot vanish',()=>{
+  const stale={...game(day+'_season_1_sweet_16_7_g5','A','B'),goldOutcome:undefined};
+  ctx.check({matchups:[stale]},{matchups:[]});
+  const settled={...stale,goldOutcome:{settled:true}};
+  assert.throws(()=>ctx.check({matchups:[settled]},{matchups:[]}),/protection blocked/);
+});

@@ -3667,8 +3667,16 @@ function shouldUseSeasonMatchupControl(state, dateKeyStr) {
   }
 
   function protectedNpcSlateGame(row, settledKeys = new Set()) {
-    return recordedNpcGame(row) && (row.goldOutcome?.settled === true ||
-      settledKeys.has(matchupStableIdentity(row)) || !isSeasonTournamentMatchup(row));
+    if (!recordedNpcGame(row)) return false;
+    if (row.goldOutcome?.settled === true || settledKeys.has(matchupStableIdentity(row))) return true;
+    // Some legacy tournament placeholders lack matchupType/seriesId, but
+    // use the old generated tournament ID ending in _g<number>. Leave the
+    // existing unreferenced-prior-round repair intact until a game is
+    // actually settled. Ordinary scored games remain frozen.
+    const id = String(row.id || row.matchupId || '');
+    const legacyTournament = /^\d{4}-\d{2}-\d{2}_.+_g\d+$/i.test(id)
+      && !id.includes('_exhibition_');
+    return !isSeasonTournamentMatchup(row) && !legacyTournament;
   }
 
   // Final save fence: a stale full snapshot must not erase a recorded NPC
