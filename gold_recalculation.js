@@ -63,6 +63,61 @@
     if(!starts)throw Error('Original opening balances are missing.');
     return {actual,opening,ids};
   }
+  // A missing ID alone is NOT evidence of a replaced game. Require the original
+  // settled, balanced award group and a complete one-to-one replacement slate.
+  function verifyReplacedGames(s, matches, missing, launch) {
+    const fail=(when)=>{throw Error('Historical Gold transaction lacks a final recorded game ('+when+'). Replacement evidence is incomplete; no changes made.');};
+    const rawIds=new Set(), settled=new Set(s.goldEconomy.settledMatchupKeys||[]);
+    const visit=(rows,history=false)=>(Array.isArray(rows)?rows:[]).forEach(r=>{
+      const id=str(history?r?.matchupId:(r?.id||r?.matchupId));
+      if(id)rawIds.add(id);
+    });
+    visit(s.matchups);visit(s.gameHistory,true);
+    for(const season of [s.currentSeason,...(Array.isArray(s.seasonHistory)?s.seasonHistory:[])])visit(season?.tournamentMatchupResults);
+    for(const slate of (Array.isArray(s.schedule)?s.schedule:[]))visit(slate?.matchups);
+    const groups=new Map(), days=new Map();
+    for(const e of missing){
+      const id=str(e.matchupId), when=dateKey(e);
+      if(!id||when<=launch||rawIds.has(id)||!settled.has('id:'+id))fail(when);
+      if(!groups.has(id))groups.set(id,[]);
+      groups.get(id).push(e);
+    }
+    for(const [id,rows] of groups){
+      const when=dateKey(rows[0]), margins=rows.filter(e=>e.type==='matchup_margin');
+      const theft=rows.filter(e=>e.type==='matchup_theft');
+      const m=margins[0], winner=str(m?.playerId), loser=str(m?.opponentId);
+      if(rows.some(e=>dateKey(e)!==when)||margins.length!==1||!winner||!loser||
+        winner===loser||winner==='YOU'||loser==='YOU'||tenth(m.amount)<=0)fail(when);
+      // Zero theft legitimately has no transfer rows. Otherwise require a full,
+      // reciprocal transfer with matching transfer ID and exact signed amounts.
+      if(theft.length){
+        const gain=theft.find(e=>tenth(e.amount)>0),loss=theft.find(e=>tenth(e.amount)<0);
+        if(theft.length!==2||!gain||!loss||!str(gain.transferId)||gain.transferId!==loss.transferId||
+          str(gain.playerId)!==winner||str(gain.opponentId)!==loser||
+          str(loss.playerId)!==loser||str(loss.opponentId)!==winner||
+          tenth(gain.amount)+tenth(loss.amount)!==0)fail(when);
+      }
+      if(!days.has(when))days.set(when,{players:new Set(),games:0,transactions:0});
+      const d=days.get(when);
+      if(d.players.has(winner)||d.players.has(loser))fail(when);
+      d.players.add(winner);d.players.add(loser);d.games++;d.transactions+=rows.length;
+    }
+    for(const [when,d] of days){
+      // Require an entire replacement slate, not an isolated missing game.
+      if(d.games<2)fail(when);
+      const surviving=new Set();
+      for(const m of matches.filter(m=>m.when===when)){
+        const a=d.players.has(m.a),b=d.players.has(m.b);
+        if(!a&&!b)continue;
+        if(!a||!b||surviving.has(m.a)||surviving.has(m.b)||!m.gameId||
+          !settled.has('id:'+m.gameId))fail(when);
+        surviving.add(m.a);surviving.add(m.b);
+      }
+      if(surviving.size!==d.players.size)fail(when);
+    }
+    return Array.from(days,([dateKey,d])=>({dateKey,games:d.games,transactions:d.transactions}))
+      .sort((a,b)=>a.dateKey.localeCompare(b.dateKey));
+  }
   function plan(s,options={}) {
     const until=throughDay(options.now||new Date()),launch=str(s?.goldEconomy?.launchDateKey);
     const inspected=checkLedger(s);
@@ -93,7 +148,7 @@
     }
     matches.sort((x,y)=>x.when.localeCompare(y.when)||x.stamp.localeCompare(y.stamp)||x.key.localeCompare(y.key));
     const validIds=new Set(matches.map(m=>m.gameId).filter(Boolean));
-    const events=[],frozen=[];
+    const events=[],frozen=[],missing=[];
     let external=0;
     s.goldLedger.forEach((e,i)=>{
       if(e.type==='opening_balance'||e.type===TYPE
@@ -102,8 +157,8 @@
       if(!dayOK(when))throw Error('Gold transaction has an invalid date.');
       if(e.type==='matchup_margin'||e.type==='matchup_theft'){
         if(when<=until){
-          if(when<launch||!validIds.has(str(e.matchupId)))
-            throw Error('Historical Gold transaction lacks a final recorded game ('+when+').');
+          if(when<launch)throw Error('Historical Gold transaction predates the Gold launch ('+when+').');
+          if(!validIds.has(str(e.matchupId)))missing.push(e);
         }else frozen.push(e);
       }else{
         external++;
@@ -111,6 +166,7 @@
           key:'0:'+String(i).padStart(8,'0'),entry:e});
       }
     });
+    const replacedDays=verifyReplacedGames(s,matches,missing,launch);
     for(const m of matches)events.push({when:m.when,stamp:m.stamp,key:'1:'+m.key,game:m});
     events.sort((a,b)=>a.when.localeCompare(b.when)||a.stamp.localeCompare(b.stamp)||a.key.localeCompare(b.key));
     const projected=new Map(inspected.opening);
@@ -140,6 +196,7 @@
       Math.abs(b.delta)-Math.abs(a.delta)||a.name.localeCompare(b.name));
     return {launch,until,changes,stats:{games:matches.length,incorrectResults:conflicting,
       affected:changes.length,frozenTransactions:frozen.length,externalTransactions:external,
+      replacedDays,orphanTransactions:missing.length,orphanGames:replacedDays.reduce((n,d)=>n+d.games,0),
       totalChange:money(changes.reduce((n,r)=>n+tenth(r.delta),0))}};
   }
   function preview(options={}) {
@@ -171,14 +228,16 @@
           dateKey:today,createdAtISO:timestamp,amount:row.delta,balanceAfter:money(balances.get(row.playerId)),
           meta:{reason:'historical_gold_replay',runId,launchDateKey:verified.launch,
             throughDateKey:verified.until,oldBalance:row.before,correctedBalance:row.after,
-            gamesReplayed:verified.stats.games}};
+            gamesReplayed:verified.stats.games,replacedDays:verified.stats.replacedDays,
+            orphanTransactions:verified.stats.orphanTransactions}};
       });
       const candidate={...latest.state,goldLedger:[...latest.state.goldLedger,...adjustments]};
       if(latest.storage.getItem(KEY)!==latest.raw)throw Error('Saved data changed. Preview again.');
       const answer=latest.core.saveValidatedSnapshot(candidate,{storageKey:KEY,immediateWrite:true,
-        savePath:'gold-recalculation',source:'gold-recalculation'});
+        savePath:'gold-recalculation',source:'gold-recalculation',
+        requireVerifiedRollingBackup:true});
       if(!answer||answer.blocked||answer.skipped||answer.blockedByQuotaCircuit||answer.ok===false)
-        throw Error('The protected save did not accept this correction.');
+        throw Error('The protected save did not accept this correction. '+str(answer?.reason));
       const raw=latest.storage.getItem(KEY);
       const saved=raw&&latest.core.parseTaskPointsStorageJson(raw,null);
       if(!saved||!Array.isArray(saved.goldLedger)
@@ -214,6 +273,9 @@
           ' · <strong>Wallets changed:</strong> '+t.affected+
           ' · <strong>Net Gold change:</strong> '+(t.totalChange>0?'+':'')+t.totalChange.toFixed(1)+'</p>'+
           '<p><strong>Your Gold:</strong> '+(you?(you.before.toFixed(1)+' → '+you.after.toFixed(1)):'No change')+'</p>'+
+          (t.orphanTransactions?'<p><strong>Replaced games:</strong> '+t.orphanGames+
+            ' · <strong>Unmatched historical transactions:</strong> '+t.orphanTransactions+
+            ' (original rows retained). '+t.replacedDays.map(d=>escape(d.dateKey)+': '+d.games+' games / '+d.transactions+' transactions').join('; ')+'</p>':'')+
           (t.frozenTransactions?'<p><strong>Unfinished-day caution:</strong> '+t.frozenTransactions+
             ' Gold entries from today or later are preserved unchanged; run another preview after the day ends.</p>':'')+
           (r.changes.length?'<div class="gold-table-wrap"><table class="gold-table"><thead><tr><th>Player</th><th>Current</th><th>Recalculated</th><th>Change</th></tr></thead><tbody>'+
@@ -230,7 +292,7 @@
       const r=shown.result, you=r.changes.find(x=>x.playerId==='YOU');
       const question='Apply '+r.changes.length+' Gold wallet correction(s) through '+r.until+'?\n'+
         (you?'Your Gold: '+you.before.toFixed(1)+' → '+you.after.toFixed(1)+'\n':'')+
-        'Original transactions will be kept. Have you exported a current backup?';
+        'Original transactions will be kept. A verified recovery snapshot is required before saving. Have you exported a current backup?';
       if(!global.confirm?.(question))return;
       saveBtn.disabled=true;
       try{

@@ -160,3 +160,51 @@ test('Gold Ledger exposes both stages, preserves manual adjustment and labels re
   assert.match(source,/saveValidatedSnapshot\(candidate/);
   assert.doesNotMatch(source,/loadAppState\(/);
 });
+
+function replacedSlate(){
+  const s=state(), when='2026-11-16';
+  for(const id of ['C','D','E','F']){
+    s.players.push({id,name:id,greed:100});
+    s.goldLedger.push({id:'open-'+id,type:'opening_balance',playerId:id,amount:100,balanceAfter:100,dateKey:s.goldEconomy.launchDateKey});
+  }
+  function settled(id,winner,loser,winBefore,loseBefore){
+    s.goldEconomy.settledMatchupKeys.push('id:'+id);
+    s.goldLedger.push(
+      {id:id+'-m',type:'matchup_margin',matchupId:id,playerId:winner,opponentId:loser,dateKey:when,amount:1,balanceAfter:winBefore+1},
+      {id:id+'-l',type:'matchup_theft',matchupId:id,transferId:id+'-t',playerId:loser,opponentId:winner,dateKey:when,amount:-10,balanceAfter:loseBefore-10},
+      {id:id+'-g',type:'matchup_theft',matchupId:id,transferId:id+'-t',playerId:winner,opponentId:loser,dateKey:when,amount:10,balanceAfter:winBefore+11});
+  }
+  settled('old1','C','D',100,100);settled('old2','E','F',100,100);
+  settled('new1','C','E',111,111);settled('new2','D','F',90,90);
+  for(const [id,a,b] of [['new1','C','E'],['new2','D','F']])
+    s.matchups.push({id,dateKey:when,playerAId:a,playerBId:b,scoreA:40,scoreB:30,playerAEffects:{greedRating:100}});
+  return s;
+}
+test('complete replacement slate replays only surviving games, preserves original rows and is repeat-safe',()=>{
+  const h=install(replacedSlate()),initial=h.getSaved(),p=h.api.preview();
+  assert.equal(p.stats.orphanGames,2);assert.equal(p.stats.orphanTransactions,6);
+  assert.deepEqual(clone(p.stats.replacedDays),[{dateKey:'2026-11-16',games:2,transactions:6}]);
+  assert.equal(p.changes.find(x=>x.playerId==='C').after,111);
+  assert.equal(p.changes.find(x=>x.playerId==='D').after,111);
+  assert.equal(p.changes.find(x=>x.playerId==='E').after,90);
+  assert.equal(p.changes.find(x=>x.playerId==='F').after,90);
+  assert.equal(h.getWrites(),0);
+  h.api.commit();
+  assert.deepEqual(h.getSaved().goldLedger.slice(0,initial.goldLedger.length),initial.goldLedger);
+  assert.equal(h.api.preview().changes.length,0);
+});
+test('incomplete replacement evidence and surviving partial IDs block without writing',()=>{
+  const s=replacedSlate();s.matchups=s.matchups.filter(x=>x.id!=='new2');
+  const h=install(s);assert.throws(()=>h.api.preview(),/Replacement evidence is incomplete/);assert.equal(h.getWrites(),0);
+  const t=replacedSlate();t.schedule=[{matchups:[{id:'old1'}]}];
+  const h2=install(t);assert.throws(()=>h2.api.preview(),/Replacement evidence is incomplete/);assert.equal(h2.getWrites(),0);
+  const u=replacedSlate();u.goldEconomy.settledMatchupKeys=u.goldEconomy.settledMatchupKeys.filter(x=>x!=='id:old1');
+  const h3=install(u);assert.throws(()=>h3.api.preview(),/Replacement evidence is incomplete/);assert.equal(h3.getWrites(),0);
+});
+test('Gold correction requires a verified pre-write recovery snapshot',()=>{
+  const h=install(replacedSlate(),{core:{saveValidatedSnapshot(candidate,options){
+    assert.equal(options.requireVerifiedRollingBackup,true);
+    return {blocked:true,reason:'Verified recovery snapshot could not be created.'};
+  }}});
+  h.api.preview();assert.throws(()=>h.api.commit(),/Verified recovery snapshot/);
+});

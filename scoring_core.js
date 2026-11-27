@@ -7473,12 +7473,13 @@ return { state: merged, storageKey };
   
   function storeRollingBackup(storageKey, options = {}) {
     const currentRaw = localStorage.getItem(storageKey);
-    if (!currentRaw) return;
+    if (!currentRaw) return false;
     let parsedCurrent = {};
     try {
-      parsedCurrent = parseTaskPointsStorageJson(currentRaw, {}) || {};
+      parsedCurrent = parseTaskPointsStorageJson(currentRaw, null);
+      if (!parsedCurrent || typeof parsedCurrent !== 'object') return false;
     } catch (e) {
-      return;
+      return false;
     }
     const backupRecord = {
       timestamp: new Date().toISOString(),
@@ -7494,9 +7495,14 @@ return { state: merged, storageKey };
           localStorage.setItem(BACKUP_SLOT_KEYS[i], prev);
         }
       }
-      localStorage.setItem(BACKUP_SLOT_KEYS[0], JSON.stringify(backupRecord));
+      const serialized = JSON.stringify(backupRecord);
+      localStorage.setItem(BACKUP_SLOT_KEYS[0], serialized);
+      return options.requireVerifiedRollingBackup !== true ||
+        (localStorage.getItem(BACKUP_SLOT_KEYS[0]) === serialized &&
+         localStorage.getItem(storageKey) === currentRaw);
     } catch (e) {
       console.warn('Failed to rotate TaskPoints backups.', e);
+      return false;
     }
   }
 
@@ -8098,7 +8104,10 @@ const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
       }
     }
 
-    storeRollingBackup(storageKey, options);
+    const backupVerified = storeRollingBackup(storageKey, options);
+    if (options.requireVerifiedRollingBackup === true && !backupVerified) {
+      return { state: storedState, blocked: true, reason: 'Verified recovery snapshot could not be created. No wallet corrections saved.', trimmed: false };
+    }
     return saveStateSnapshot(state, options);
   }
 
