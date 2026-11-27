@@ -4723,6 +4723,17 @@ for (const entry of state.gameHistory) {
   const id = String(entry.playerId || '');
   if (id && !todayHistoryByPlayer.has(id)) todayHistoryByPlayer.set(id, entry);
 }
+const recordedNpcScores = new Map();
+for (const row of state.matchups) {
+  if (getMatchupDateKeyLocal(row) !== todayKey || !hasRecordedMatchupScore(row)) continue;
+  for (const side of ['A', 'B']) {
+    const id = row['player' + side + 'Id'];
+    const raw = row['score' + side] ?? row['player' + side + 'Score'];
+    if (id && id !== 'YOU' && raw != null && raw !== '' && Number.isFinite(Number(raw))) {
+      recordedNpcScores.set(id, { score: Number(raw), effects: row['player' + side + 'Effects'] ?? null });
+    }
+  }
+}
 const scoreNpcParticipants = () => {
   // withGoldNpcScoringBatch performs its required reconciliation first.
   markHomeMorningStartupPhase('gold-preflight-finished');
@@ -4744,6 +4755,21 @@ const scoreNpcParticipants = () => {
   if (id === 'YOU') return;
   const player = playerMap.get(id);
   if (!player) return;
+  const recorded = recordedNpcScores.get(id);
+  if (recorded) {
+    // Finish only the missing scheduled games. Do not resimulate a recorded
+    // player or overwrite the original score/effect history on a retry.
+    scoresById[id] = recorded.score;
+    effectsById[id] = recorded.effects;
+    ensureOpponentDripSchedule(todayKey, id, recorded.score);
+    if (!todayHistoryByPlayer.has(String(id))) {
+      const historyRow = { id: makeId(), date: todayKey, playerId: id,
+        score: recorded.score, effects: recorded.effects };
+      state.gameHistory.push(historyRow);
+      todayHistoryByPlayer.set(String(id), historyRow);
+    }
+    return;
+  }
 
   const todaysPair = todaysPairs.find(pair =>
     pair && (pair.playerAId === id || pair.playerBId === id)
@@ -5116,11 +5142,16 @@ function homeDailyMatchupsReady(dayKey) {
   if (!todayRows.length) return false;
   const scheduledDay = (Array.isArray(state.schedule) ? state.schedule : [])
     .find(day => day && String(day.date || day.dateKey || '') === dayKey);
-  const plannedUserPair = (Array.isArray(scheduledDay?.matchups) ? scheduledDay.matchups : [])
-    .some(m => m && (m.playerAId === 'YOU' || m.playerBId === 'YOU'));
-  if (!plannedUserPair) return true; // genuinely unscheduled/bye, preserve old behavior
-  return todayRows.some(m => (m.playerAId === 'YOU' || m.playerBId === 'YOU')
-    && hasRecordedMatchupScore(m));
+  const planned = Array.isArray(scheduledDay?.matchups) ? scheduledDay.matchups.filter(Boolean) : [];
+  if (!planned.length) return true; // no authoritative remaining pairings; do not reroll a saved day
+  return planned.every(pair => todayRows.some(row => {
+    if (!hasRecordedMatchupScore(row)) return false;
+    const id = String(pair.id || pair.matchupId || '');
+    const rowId = String(row.id || row.matchupId || '');
+    if (id && rowId && id === rowId) return true;
+    return (pair.playerAId === row.playerAId && pair.playerBId === row.playerBId)
+      || (pair.playerAId === row.playerBId && pair.playerBId === row.playerAId);
+  }));
 }
 
 function refreshRecordedGamesBeforeDailySimulation(dayKey) {

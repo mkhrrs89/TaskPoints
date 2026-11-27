@@ -7,7 +7,7 @@ const goldSource=fs.readFileSync(path.join(__dirname,'../greed_gold_economy.js')
 const {buildGoldIntegrityChecks}=require('../audit_gold_integrity.js');
 const clone=x=>JSON.parse(JSON.stringify(x));
 const money=n=>Math.round((n+Number.EPSILON)*10)/10;
-const ids=['A','B','C','D','E','F'];
+const ids=['A','B','C','D','E','F','G','H','I','J'];
 
 function setup() {
  let persisted={
@@ -48,7 +48,7 @@ test('150 games over 30 days: Gold survives saves, restarts, and page edits with
  for(let d=0;d<30;d++){
    const day=new Date(Date.UTC(2026,10,6+d)).toISOString().slice(0,10);
    for(let k=0;k<5;k++){
-     const indexA=(d*3+k)%ids.length,indexB=(indexA+1+(k%4))%ids.length;
+     const indexA=(d+2*k)%ids.length,indexB=(indexA+1)%ids.length;
      const a=ids[indexA],b=ids[indexB],scoreA=45+(d*13+k*7)%31,scoreB=45+(d*17+k*11)%31;
      const match={id:'sim-'+d+'-'+k,dateKey:day,playerAId:a,playerBId:b,scoreA,scoreB};
      const state=h.load();state.matchups.push(match);

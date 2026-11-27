@@ -75,3 +75,61 @@ test('Home refreshes saved games before morning readiness; core and settlement g
   assert.match(coreSource,/frozenExhibitions\.concat\(generatedExhibitions\)/);
   assert.match(goldSource,/goldDailySlotConflict\(dailySlots, matchup\)/);
 });
+
+test('persisted orphan ledger entries protect both players even with no saved matchup rows',()=>{
+  const saved={matchups:[],goldLedger:[
+    {type:'matchup_margin',matchupId:'lost',playerId:'A',opponentId:'B',dateKey:day}
+  ]};
+  assert.throws(()=>ctx.check(saved,{matchups:[game('replacement','A','C')]}),/replacement game/);
+  assert.throws(()=>ctx.check(saved,{matchups:[game('replacement','C','B')]}),/replacement game/);
+  ctx.check(saved,{matchups:[game('legitimate','C','D')]});
+});
+
+test('archive duplicates do not override the current authoritative matchup row',()=>{
+  const original=game('original','A','B'),saved={matchups:[original]};
+  ctx.check(saved,{matchups:[original],seasonHistory:[
+    {tournamentMatchupResults:[{...original,scoreA:1}]}
+  ]});
+});
+
+test('Home readiness checks every known scheduled pair without rerolling completed games',()=>{
+  const original=game('original','A','B');
+  const missing={id:'missing',playerAId:'C',playerBId:'D'};
+  const h={state:{matchups:[original],schedule:[{date:day,matchups:[original,missing]}]},
+    getMatchupDateKeyLocal:row=>row.dateKey,hasRecordedMatchupScore:row=>Number.isFinite(row.scoreA)&&Number.isFinite(row.scoreB)};
+  vm.createContext(h);
+  vm.runInContext(extract(home,'homeDailyMatchupsReady')+'\nthis.ready=homeDailyMatchupsReady;',h);
+  assert.equal(h.ready(day),false);
+  h.state.matchups.push(game('missing','C','D'));
+  assert.equal(h.ready(day),true);
+  h.state.schedule=[];
+  assert.equal(h.ready(day),true,'unknown remaining schedule must not trigger a replacement slate');
+  assert.match(home,/const recorded = recordedNpcScores\.get\(id\)/);
+});
+
+test('actual Gold settlement refuses replacement games and preserves the ledger',()=>{
+  const state={players:[{id:'A',greed:50},{id:'B',greed:50},{id:'C',greed:50},{id:'D',greed:50}],
+    matchups:[],gameHistory:[],seasonHistory:[],
+    goldEconomy:{version:1,launchDateKey:'2026-11-05',settledMatchupKeys:[],
+      ignoredSameDayMatchupKeys:[],settledChampionKeys:[],ignoredChampionKeys:[]},
+    goldLedger:[]};
+  const runtime={TaskPointsCore:{STORAGE_KEY:'taskpoints_v1'},document:{readyState:'loading',addEventListener(){}},
+    localStorage:{getItem(){return null}},console:{warn(){},error(){},log(){}},
+    setTimeout(){},clearTimeout(){},Date,Math,JSON,Set,Map,Object,Array,String,Number,encodeURIComponent};
+  runtime.window=runtime;
+  vm.createContext(runtime);
+  vm.runInContext(goldSource,runtime);
+  const api=runtime.TaskPointsGreedGoldEconomy;
+  const original={...game('original','A','B'),goldOutcome:undefined};
+  state.matchups.push(original);
+  assert.equal(api.settleOneMatchup(state,original),true);
+  const saved=JSON.stringify(state.goldLedger);
+  const replacement={...game('replacement','A','C'),goldOutcome:undefined};
+  state.matchups=[replacement]; // reproduce an orphaned original
+  assert.equal(api.settleOneMatchup(state,replacement),false);
+  assert.equal(JSON.stringify(state.goldLedger),saved);
+  const legal={...game('legal','C','D'),goldOutcome:undefined};
+  state.matchups.push(legal);
+  assert.equal(api.settleOneMatchup(state,legal),true);
+  assert.equal(api.settleOneMatchup(state,legal),false);
+});

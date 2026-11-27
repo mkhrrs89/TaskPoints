@@ -3573,7 +3573,7 @@ function shouldUseSeasonMatchupControl(state, dateKeyStr) {
       .filter((id) => id && !used.has(id));
     if (exhibitionPool.length % 2 === 1) {
       errors.push(`Odd exhibition player pool (${exhibitionPool.length}) cannot be fully paired.`);
-      return { ok: false, dateKey: dateKeyStr, tournamentMatchups, exhibitionMatchups: [], allMatchups: tournamentMatchups, warnings, errors, updatedSeason: slateSeason };
+      return { ok: false, dateKey: dateKeyStr, tournamentMatchups, exhibitionMatchups: frozenExhibitions, allMatchups: tournamentMatchups.concat(frozenExhibitions), warnings, errors, updatedSeason: slateSeason };
     }
     const history = getJunePairingHistory(normalized, season, dateKeyStr);
     tournamentMatchups.forEach((matchup) => {
@@ -3591,7 +3591,7 @@ function shouldUseSeasonMatchupControl(state, dateKeyStr) {
     const generated = generateRandomNonRepeatPairs(exhibitionPool, history, { ...options, dateKey: dateKeyStr, random: slateRandom });
     warnings.push(...generated.warnings);
     errors.push(...generated.errors);
-    if (!generated.ok) return { ok: false, dateKey: dateKeyStr, tournamentMatchups, exhibitionMatchups: [], allMatchups: tournamentMatchups, warnings, errors, updatedSeason: slateSeason };
+    if (!generated.ok) return { ok: false, dateKey: dateKeyStr, tournamentMatchups, exhibitionMatchups: frozenExhibitions, allMatchups: tournamentMatchups.concat(frozenExhibitions), warnings, errors, updatedSeason: slateSeason };
 
     const generatedExhibitions = generated.pairs.map((pair, index) => ({
       id: `${dateKeyStr}_exhibition_${index + 1}_${pair.playerAId}_${pair.playerBId}`,
@@ -3679,7 +3679,7 @@ function shouldUseSeasonMatchupControl(state, dateKeyStr) {
     if (options.allowDestructiveOverwrite === true || options.allowGoldLedgerReset === true) return;
     const oldRows = Array.isArray(saved?.matchups) ? saved.matchups : [];
     const newRows = Array.isArray(candidate?.matchups) ? candidate.matchups : [];
-    if (!oldRows.length) return;
+    if (!oldRows.length && !(saved?.goldLedger || []).length) return;
     const settled = new Set(saved?.goldEconomy?.settledMatchupKeys || []);
     const collect = state => [
       ...(state?.matchups || []),
@@ -3687,12 +3687,19 @@ function shouldUseSeasonMatchupControl(state, dateKeyStr) {
       ...(state?.seasonHistory || []).flatMap(season => season?.tournamentMatchupResults || [])
     ];
     const oldIds = new Set(collect(saved).map(row => matchupStableIdentity(row)).filter(Boolean));
-    const incoming = new Map(collect(candidate).map(row => [matchupStableIdentity(row), row]));
+    const incoming = new Map();
+    for (const row of collect(candidate)) {
+      const id = matchupStableIdentity(row);
+      if (id && !incoming.has(id)) incoming.set(id, row);
+    }
     const protectedByPlayer = new Map();
     const slot = (row, player) => getStoredMatchupDateKey(row) + '|' + String(player);
     const explicitScoreEdit = options.savePath === 'matchups-edit-result';
     for (const row of oldRows) {
       if (!protectedNpcSlateGame(row, settled)) continue;
+      const launch = String(saved?.goldEconomy?.launchDateKey || '');
+      if (launch && getStoredMatchupDateKey(row) < launch
+        && row.goldOutcome?.settled !== true && !settled.has(matchupStableIdentity(row))) continue;
       const id = matchupStableIdentity(row);
       if (!id || !getStoredMatchupDateKey(row)) continue;
       const next = incoming.get(id);
@@ -3711,8 +3718,25 @@ function shouldUseSeasonMatchupControl(state, dateKeyStr) {
         protectedByPlayer.get(key).add(id);
       }
     }
+    // The ledger also reserves the original players when a game has already
+    // vanished. Never create a third set of games on a previously affected day.
+    for (const entry of (saved.goldLedger || [])) {
+      if (!['matchup_margin', 'matchup_theft'].includes(entry?.type) || !entry.matchupId) continue;
+      const day = getStoredMatchupDateKey(entry);
+      if (!day) continue;
+      const id = String(entry.matchupId).startsWith('fallback:')
+        ? String(entry.matchupId) : 'id:' + String(entry.matchupId);
+      for (const player of [entry.playerId, entry.opponentId]) {
+        if (!player) continue;
+        const key = day + '|' + String(player);
+        if (!protectedByPlayer.has(key)) protectedByPlayer.set(key, new Set());
+        protectedByPlayer.get(key).add(id);
+      }
+    }
     for (const row of newRows) {
-      if (!recordedNpcGame(row)) continue;
+      if (!row?.playerAId || !row?.playerBId
+        || finiteNumberValue(row.scoreA ?? row.playerAScore) == null
+        || finiteNumberValue(row.scoreB ?? row.playerBScore) == null) continue;
       const id = matchupStableIdentity(row);
       if (oldIds.has(id)) continue;
       if ([row.playerAId, row.playerBId].some(player => protectedByPlayer.has(slot(row, player)))) {
