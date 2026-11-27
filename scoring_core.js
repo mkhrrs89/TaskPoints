@@ -3394,8 +3394,10 @@ function shouldUseSeasonMatchupControl(state, dateKeyStr) {
 
     if (!tournamentPlayerIds.size) return { state: normalized, changed: false, removedCount: 0 };
 
+    const settledKeys = new Set(normalized.goldEconomy?.settledMatchupKeys || []);
     const isInvalidExhibition = (matchup) => {
       if (!matchup || matchupDateKey(matchup) !== targetDate || !isExhibitionMatchup(matchup)) return false;
+      if (protectedNpcSlateGame(matchup, settledKeys)) return false;
       return tournamentPlayerIds.has(String(matchup.playerAId || '')) || tournamentPlayerIds.has(String(matchup.playerBId || ''));
     };
 
@@ -3525,8 +3527,12 @@ function shouldUseSeasonMatchupControl(state, dateKeyStr) {
       .filter((series) => series && !isSeasonSeriesComplete(series) && series.playerAId && series.playerBId)
       .sort((a, b) => (Number(a.roundIndex) || 0) - (Number(b.roundIndex) || 0) || (Number(a.seriesIndex) || 0) - (Number(b.seriesIndex) || 0));
 
-    const used = new Set();
-    const tournamentMatchups = [];
+    const settledKeys = new Set(normalized.goldEconomy?.settledMatchupKeys || []);
+    const frozen = (normalized.matchups || []).filter(row =>
+      getStoredMatchupDateKey(row) === dateKeyStr && protectedNpcSlateGame(row, settledKeys));
+    const used = new Set(frozen.flatMap(row => [row.playerAId, row.playerBId]));
+    const tournamentMatchups = frozen.filter(isSeasonTournamentMatchup);
+    const frozenExhibitions = frozen.filter(row => !isSeasonTournamentMatchup(row));
     activeSeries.forEach((series) => {
       const playedCount = Array.isArray(series.gameResults) ? series.gameResults.length : 0;
       const roundGameNumber = getRoundScheduledGameNumberForDate(slateSeason, series.roundId, dateKeyStr);
@@ -3587,7 +3593,7 @@ function shouldUseSeasonMatchupControl(state, dateKeyStr) {
     errors.push(...generated.errors);
     if (!generated.ok) return { ok: false, dateKey: dateKeyStr, tournamentMatchups, exhibitionMatchups: [], allMatchups: tournamentMatchups, warnings, errors, updatedSeason: slateSeason };
 
-    const exhibitionMatchups = generated.pairs.map((pair, index) => ({
+    const generatedExhibitions = generated.pairs.map((pair, index) => ({
       id: `${dateKeyStr}_exhibition_${index + 1}_${pair.playerAId}_${pair.playerBId}`,
       date: dateKeyStr,
       dateKey: dateKeyStr,
@@ -3600,6 +3606,7 @@ function shouldUseSeasonMatchupControl(state, dateKeyStr) {
       seasonMatchupLabel: 'Exhibition'
     }));
 
+    const exhibitionMatchups = frozenExhibitions.concat(generatedExhibitions);
     const allMatchups = tournamentMatchups.concat(exhibitionMatchups);
     const sameDayPlayers = new Set();
     for (const matchup of allMatchups) {
@@ -3650,6 +3657,68 @@ function shouldUseSeasonMatchupControl(state, dateKeyStr) {
     if (value == null || value === '') return null;
     const number = Number(value);
     return Number.isFinite(number) ? number : null;
+  }
+
+  function recordedNpcGame(row) {
+    return Boolean(row?.playerAId && row?.playerBId &&
+      row.playerAId !== 'YOU' && row.playerBId !== 'YOU' &&
+      finiteNumberValue(row.scoreA ?? row.playerAScore) != null &&
+      finiteNumberValue(row.scoreB ?? row.playerBScore) != null);
+  }
+
+  function protectedNpcSlateGame(row, settledKeys = new Set()) {
+    return recordedNpcGame(row) && (row.goldOutcome?.settled === true ||
+      settledKeys.has(matchupStableIdentity(row)) || !isSeasonTournamentMatchup(row));
+  }
+
+  // Final save fence: a stale full snapshot must not erase a recorded NPC
+  // game, change its pairing, or add a different scored game for a player
+  // whose game was already saved. Explicit imports and score edits retain
+  // their existing semantics. Historical duplicates are not repaired here.
+  function assertRecordedNpcHistoryPreserved(saved, candidate, options = {}) {
+    if (options.allowDestructiveOverwrite === true || options.allowGoldLedgerReset === true) return;
+    const oldRows = Array.isArray(saved?.matchups) ? saved.matchups : [];
+    const newRows = Array.isArray(candidate?.matchups) ? candidate.matchups : [];
+    if (!oldRows.length) return;
+    const settled = new Set(saved?.goldEconomy?.settledMatchupKeys || []);
+    const collect = state => [
+      ...(state?.matchups || []),
+      ...(state?.currentSeason?.tournamentMatchupResults || []),
+      ...(state?.seasonHistory || []).flatMap(season => season?.tournamentMatchupResults || [])
+    ];
+    const oldIds = new Set(collect(saved).map(row => matchupStableIdentity(row)).filter(Boolean));
+    const incoming = new Map(collect(candidate).map(row => [matchupStableIdentity(row), row]));
+    const protectedByPlayer = new Map();
+    const slot = (row, player) => getStoredMatchupDateKey(row) + '|' + String(player);
+    const explicitScoreEdit = options.savePath === 'matchups-edit-result';
+    for (const row of oldRows) {
+      if (!protectedNpcSlateGame(row, settled)) continue;
+      const id = matchupStableIdentity(row);
+      if (!id || !getStoredMatchupDateKey(row)) continue;
+      const next = incoming.get(id);
+      if (!next || getStoredMatchupDateKey(next) !== getStoredMatchupDateKey(row)
+        || String(next.playerAId) !== String(row.playerAId)
+        || String(next.playerBId) !== String(row.playerBId)
+        || !recordedNpcGame(next)
+        || (!explicitScoreEdit &&
+          (finiteNumberValue(next.scoreA ?? next.playerAScore) !== finiteNumberValue(row.scoreA ?? row.playerAScore)
+          || finiteNumberValue(next.scoreB ?? next.playerBScore) !== finiteNumberValue(row.scoreB ?? row.playerBScore)))) {
+        throw new Error('Recorded NPC matchup protection blocked a stale or conflicting save (' + getStoredMatchupDateKey(row) + '). Reload before retrying.');
+      }
+      for (const player of [row.playerAId, row.playerBId]) {
+        const key = slot(row, player);
+        if (!protectedByPlayer.has(key)) protectedByPlayer.set(key, new Set());
+        protectedByPlayer.get(key).add(id);
+      }
+    }
+    for (const row of newRows) {
+      if (!recordedNpcGame(row)) continue;
+      const id = matchupStableIdentity(row);
+      if (oldIds.has(id)) continue;
+      if ([row.playerAId, row.playerBId].some(player => protectedByPlayer.has(slot(row, player)))) {
+        throw new Error('Recorded NPC matchup protection blocked a replacement game (' + getStoredMatchupDateKey(row) + '). Reload before retrying.');
+      }
+    }
   }
 
   function matchupStableIdentity(matchup, dateKeyStr = '') {
@@ -3996,6 +4065,7 @@ if (Number.isFinite(Number(simulated))) {
       return next;
     });
 
+    const settledKeys = new Set(normalized.goldEconomy?.settledMatchupKeys || []);
     let removedExhibitionCount = 0;
     let removedStaleSeasonCount = 0;
     const nextMatchups = [];
@@ -4008,8 +4078,9 @@ if (Number.isFinite(Number(simulated))) {
       const expected = expectedIds.has(id) || (seriesId && expectedSeriesIds.has(seriesId));
       const referenced = referencedIds.has(id) || referencedIds.has(String(existing?.matchupId || ''));
       const seasonLooking = type === 'tournament' || type === 'season' || Boolean(seriesId) || (seasonId && id.includes(`${seasonId}_`));
-      if (sameDay && seasonLooking && !expected && !referenced) { removedStaleSeasonCount += 1; changed = true; return; }
-      if (sameDay && type === 'exhibition') {
+      const frozen = protectedNpcSlateGame(existing, settledKeys);
+      if (sameDay && !frozen && seasonLooking && !expected && !referenced) { removedStaleSeasonCount += 1; changed = true; return; }
+      if (sameDay && !frozen && type === 'exhibition') {
         const hasTournamentPlayer = tournamentPlayers.has(String(existing.playerAId || '')) || tournamentPlayers.has(String(existing.playerBId || ''));
         if (!expected || hasTournamentPlayer) { removedExhibitionCount += 1; changed = true; return; }
       }
@@ -4026,6 +4097,7 @@ if (Number.isFinite(Number(simulated))) {
         index = nextMatchups.findIndex((existing) => getStoredMatchupDateKey(existing) === key && String(existing?.seriesId || existing?.seasonSeriesId || '') === sid);
       }
       if (index >= 0) {
+        if (protectedNpcSlateGame(nextMatchups[index], settledKeys)) return;
         const merged = isSeasonTournamentMatchup(next) ? mergeMaterializedSeasonMatchup(nextMatchups[index], next) : { ...nextMatchups[index], ...next, scoreA: Number.isFinite(Number(nextMatchups[index].scoreA)) ? nextMatchups[index].scoreA : next.scoreA, scoreB: Number.isFinite(Number(nextMatchups[index].scoreB)) ? nextMatchups[index].scoreB : next.scoreB };
         if (JSON.stringify(merged) !== JSON.stringify(nextMatchups[index])) changed = true;
         nextMatchups[index] = merged;
@@ -7569,6 +7641,7 @@ return { state: merged, storageKey };
         }
       }
     }
+    if (storageKey === STORAGE_KEY && latest) assertRecordedNpcHistoryPreserved(latest, next, options);
     return preserveAuthoritativeNotesBeforeSave(next, storageKey, options);
   }
 

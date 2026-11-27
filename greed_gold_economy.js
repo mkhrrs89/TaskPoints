@@ -467,6 +467,39 @@
     (Array.isArray(state?.schedule) ? state.schedule : []).forEach((day) => visit(day?.matchups));
   }
 
+  function goldDailySettlementSlots(state) {
+    const slots = new Map();
+    const add = (day, player, identity) => {
+      if (!day || !player || !identity) return;
+      const key = day + '|' + player;
+      if (!slots.has(key)) slots.set(key, new Set());
+      slots.get(key).add(identity);
+    };
+    for (const entry of (state.goldLedger || [])) {
+      if (!['matchup_margin', 'matchup_theft'].includes(entry?.type) || !entry.matchupId) continue;
+      const identity = String(entry.matchupId).startsWith('fallback:') ? String(entry.matchupId) : 'id:' + String(entry.matchupId);
+      add(rowDateKey(entry), String(entry.playerId || ''), identity);
+      add(rowDateKey(entry), String(entry.opponentId || ''), identity);
+    }
+    // Ties have no ledger rows, but still represent a played game.
+    const settled = new Set(state.goldEconomy?.settledMatchupKeys || []);
+    for (const row of (state.matchups || [])) {
+      const identity = matchupIdentity(row);
+      if (!settled.has(identity) && row?.goldOutcome?.settled !== true) continue;
+      add(rowDateKey(row), String(row.playerAId || ''), identity);
+      add(rowDateKey(row), String(row.playerBId || ''), identity);
+    }
+    return { slots, add };
+  }
+
+  function goldDailySlotConflict(index, matchup) {
+    const identity = matchupIdentity(matchup), day = rowDateKey(matchup);
+    return [matchup.playerAId, matchup.playerBId].some(player => {
+      const previous = index.slots.get(day + '|' + player);
+      return previous && !previous.has(identity);
+    });
+  }
+
   function settleOneMatchup(state, matchup) {
     const economy = state?.goldEconomy;
     if (!economy || Number(economy.version) !== ECONOMY_VERSION) return false;
@@ -475,6 +508,13 @@
     const batch = activeGoldReconciliationBatch?.state === state ? activeGoldReconciliationBatch : null;
     const settled = batch ? batch.settledKeys : new Set(Array.isArray(economy.settledMatchupKeys) ? economy.settledMatchupKeys : []);
     if (settled.has(identity)) return false;
+    // The daily slate assigns each player at most one game. A fresh ID
+    // cannot earn a second payout for a player already settled on this day.
+    const dailySlots = batch?.dailySlots || goldDailySettlementSlots(state);
+    if (goldDailySlotConflict(dailySlots, matchup)) {
+      console.warn('Blocked replacement matchup Gold settlement:', rowDateKey(matchup), identity);
+      return false;
+    }
     // A completed outcome without its index key must not be replayed: its
     // original Gold transactions may still exist. Audit before any repair.
     if (matchup.goldOutcome?.settled === true) return false;
@@ -517,6 +557,8 @@
       } else {
         economy.settledMatchupKeys = [...settled, identity];
       }
+      dailySlots.add(date, String(matchup.playerAId), identity);
+      dailySlots.add(date, String(matchup.playerBId), identity);
       applyGoldOutcomeToMatchingRows(state, identity, {
         settled: true,
         tie: true,
@@ -527,6 +569,8 @@
       return true;
     }
 
+    dailySlots.add(date, String(matchup.playerAId), identity);
+    dailySlots.add(date, String(matchup.playerBId), identity);
     const winnerPregameGold = goldBalance(state, result.winnerId);
     const loserPregameGold = goldBalance(state, result.loserId);
     const winnerGreed = effectiveTheftGreed(state, result.winnerId, matchup);
@@ -684,7 +728,7 @@
       register(state.currentSeason?.tournamentMatchupResults);
       (Array.isArray(state.seasonHistory) ? state.seasonHistory : []).forEach((season) => register(season?.tournamentMatchupResults));
       (Array.isArray(state.schedule) ? state.schedule : []).forEach((day) => register(day?.matchups));
-      activeGoldReconciliationBatch = { state, settledKeys, ledgerIds, balances, outcomeRows };
+      activeGoldReconciliationBatch = { state, settledKeys, ledgerIds, balances, outcomeRows, dailySlots: goldDailySettlementSlots(state) };
     }
     try {
       rows.forEach((row) => {

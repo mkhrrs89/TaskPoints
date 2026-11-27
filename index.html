@@ -5123,6 +5123,43 @@ function homeDailyMatchupsReady(dayKey) {
     && hasRecordedMatchupScore(m));
 }
 
+function refreshRecordedGamesBeforeDailySimulation(dayKey) {
+  if (typeof TaskPointsCore?.readTaskPointsStoredState !== 'function') return false;
+  const saved = TaskPointsCore.readTaskPointsStoredState(TaskPointsCore.STORAGE_KEY || STORAGE_KEY, null);
+  if (!saved || !Array.isArray(saved.matchups)) return false;
+  const recorded = saved.matchups.filter(row => getMatchupDateKeyLocal(row) === dayKey && hasRecordedMatchupScore(row));
+  if (!recorded.length) return false;
+  const current = (state.matchups || []).filter(row => getMatchupDateKeyLocal(row) === dayKey);
+  const idOf = row => String(row?.id || row?.matchupId || '');
+  const currentById = new Map(current.map(row => [idOf(row), row]));
+  const needsRefresh = recorded.some(row => {
+    const live = currentById.get(idOf(row));
+    return !live || !hasRecordedMatchupScore(live) ||
+      live.playerAId !== row.playerAId || live.playerBId !== row.playerBId;
+  });
+  if (!needsRefresh) return false;
+  const players = new Set(recorded.flatMap(row => [row.playerAId, row.playerBId]));
+  const recordedIds = new Set(recorded.map(idOf));
+  const extras = current.filter(row => !recordedIds.has(idOf(row)) &&
+    !players.has(row.playerAId) && !players.has(row.playerBId));
+  state.matchups = (state.matchups || []).filter(row => getMatchupDateKeyLocal(row) !== dayKey)
+    .concat(recorded, extras);
+  const history = (saved.gameHistory || []).filter(row => getHistoryDateKey(row) === dayKey);
+  const historyPlayers = new Set(history.map(row => row.playerId));
+  state.gameHistory = (state.gameHistory || []).filter(row =>
+    getHistoryDateKey(row) !== dayKey || !historyPlayers.has(row.playerId)).concat(history);
+  // The saved ledger remains authoritative. Adopt it only when the live
+  // ledger is a subset; never discard an unsaved independent transaction.
+  if (Array.isArray(saved.goldLedger) && saved.goldEconomy) {
+    const savedLedgerIds = new Set(saved.goldLedger.map(row => row.id));
+    if ((state.goldLedger || []).every(row => savedLedgerIds.has(row.id))) {
+      state.goldLedger = saved.goldLedger;
+      state.goldEconomy = saved.goldEconomy;
+    }
+  }
+  return true;
+}
+
 function maybeAutoSimToday(){
   const now = new Date();
   const todayKey = getGameDayKey(now);
@@ -5133,7 +5170,8 @@ function maybeAutoSimToday(){
   state.gameHistory = state.gameHistory || [];
   state.matchups = state.matchups || [];
 
-  if (homeDailyMatchupsReady(todayKey)) return false;
+  const refreshed = refreshRecordedGamesBeforeDailySimulation(todayKey);
+  if (homeDailyMatchupsReady(todayKey)) return refreshed;
 
   const hasTodayHistory = state.gameHistory.some(g => getHistoryDateKey(g) === todayKey);
   if (hasTodayHistory) {
