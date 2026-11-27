@@ -1865,6 +1865,8 @@ ${summaryWithNotes}`)) return;
       return Number.isFinite(num) ? num : null;
     }
 
+    let pendingMissingMetricEdit = null;
+
     function applyMissingScoreEntry() {
       const dateValue = document.getElementById("missingScoreDate")?.value;
       const type = document.getElementById("missingScoreType")?.value;
@@ -1886,7 +1888,7 @@ ${summaryWithNotes}`)) return;
         return;
       }
 
-      const state = loadSettingsState();
+      let state = loadSettingsState();
       if (!Array.isArray(state.completions)) state.completions = [];
       const whenISO = date.toISOString();
 
@@ -1901,6 +1903,7 @@ ${summaryWithNotes}`)) return;
       let title = "";
       let source = "metric";
       let extraFields = {};
+      let metricInput;
 
       if (type === "sleep") {
         const score = readNumberInput("missingSleepScore");
@@ -1918,6 +1921,7 @@ ${summaryWithNotes}`)) return;
         title = `Sleep Score (${score}) — Rest ${restedValue}`;
         label = "Sleep score";
         extraFields = { sleepRested: restedValue };
+        metricInput = {score,rested:restedValue};
       } else if (type === "work") {
         const score = readNumberInput("missingWorkScore");
         if (score == null) {
@@ -1935,6 +1939,7 @@ ${summaryWithNotes}`)) return;
         label = "Work score";
         source = "work";
         extraFields = { workHours: hoursValue };
+        metricInput = {score,hours:hoursValue};
       } else if (type === "calories") {
         const calories = readNumberInput("missingCaloriesValue");
         if (calories == null || calories < 0) {
@@ -1944,6 +1949,7 @@ ${summaryWithNotes}`)) return;
         points = TaskPointsCore.caloriesToPoints(calories, state);
         title = `Calories (${calories})`;
         label = "Calories";
+        metricInput = {calories,notTracked:false};
       } else if (type === "mood") {
         const score = readNumberInput("missingMoodScore");
         if (score == null || score < 0 || score > 10) {
@@ -1953,6 +1959,7 @@ ${summaryWithNotes}`)) return;
         points = TaskPointsCore.moodPoints(score, state);
         title = `Mood Score (${score})`;
         label = "Mood score";
+        metricInput = {score};
       } else if (type !== "flex") {
         setMissingScoreStatus("Select a valid metric to save.", "error");
         return;
@@ -1992,15 +1999,24 @@ ${summaryWithNotes}`)) return;
       } else {
         existing = findEntry(entryPrefixMap[type]);
       }
+      const writeLegacy = (verified) => {
+      if (verified) {
+        state = loadSettingsState();
+        existing = verified.entry ? state.completions.find(row=>row.id===verified.entry.id) : null;
+        if (verified.entry && !existing) throw new Error('owned_metric_selection_changed');
+      }
+      let savedId;
       if (existing) {
+        savedId = existing.id;
         existing.title = title;
         existing.points = points;
         existing.completedAtISO = whenISO;
         existing.source = source;
         Object.assign(existing, extraFields);
       } else {
+        savedId = crypto.randomUUID();
         state.completions.unshift({
-          id: crypto.randomUUID(),
+          id: savedId,
           title,
           points,
           completedAtISO: whenISO,
@@ -2018,6 +2034,13 @@ ${summaryWithNotes}`)) return;
       }
 
       saveSettingsState(nextState, { immediateWrite: true });
+      if (verified) {
+        TaskPointsCore.clearStateHotCache?.();
+        const saved = TaskPointsCore.readTaskPointsStoredState()?.completions.find(row=>row.id===savedId);
+        if (saved?.title!==title || saved.completedAtISO!==whenISO) throw new Error('owned_metric_result_unverified');
+      }
+      };
+      const showSaved = () => {
       setMissingScoreStatus(`${label} ${type === "flex" ? "added" : "saved"} for ${entryKey}.`, "success");
 
       if (type === "calories") {
@@ -2044,6 +2067,42 @@ ${summaryWithNotes}`)) return;
         const flexField = document.getElementById("missingFlexAction");
         if (flexField) flexField.value = "";
       }
+      };
+
+      if (!metricInput || !TaskPointsCore.usesIsolatedStandaloneMetrics?.()) {
+        writeLegacy();
+        showSaved();
+        return;
+      }
+
+      if (pendingMissingMetricEdit?.busy) return;
+      const request={formula:type,day:entryKey,time:'noon',zone:Intl.DateTimeFormat().resolvedOptions().timeZone};
+      const input=JSON.stringify([request,metricInput]);
+      const attempt=pendingMissingMetricEdit?.input===input ? pendingMissingMetricEdit
+        : {input,actionId:crypto.randomUUID()};
+      pendingMissingMetricEdit=attempt;
+      attempt.busy=true;
+      return (async()=>{
+        try {
+          const runtime=window.TaskPointsStateRuntimeV2;
+          attempt.selection ??= await runtime.inspectIsolatedStandaloneMetric(request);
+          const selection=attempt.selection;
+          if (selection.owned) {
+            const values=type==='calories' ? {...metricInput,
+              bonus:selection.entry.calLogBonusEnabled!==false && selection.entry.calLogBonusDisabled!==true
+                && selection.entry.caloriesNotTracked!==true} : metricInput;
+            const result=await TaskPointsCore.commitIsolatedMetricCorrection(selection,values,attempt);
+            if (!result.confirmedDurable && !result.unchanged) throw new Error('owned_metric_result_unverified');
+          } else {
+            await TaskPointsCore.runIsolatedLegacyMetricWrite(selection,writeLegacy);
+          }
+          pendingMissingMetricEdit=null;
+          showSaved();
+        } catch(error) {
+          if (['owned_metric_selection_changed','owned_task_stale_edit'].includes(error.message)) pendingMissingMetricEdit=null;
+          setMissingScoreStatus("The metric change could not be verified. Review the day and score before trying again.", "error");
+        } finally { attempt.busy=false; }
+      })();
     }
 
     function getHabitTagList(state) {

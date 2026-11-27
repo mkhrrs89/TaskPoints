@@ -40,7 +40,7 @@ before(async()=>{
       const resolved=path.resolve(root,file);
       const mime={'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.svg':'image/svg+xml','.json':'application/json'}[path.extname(file)];
       if(!mime||!resolved.startsWith(root+path.sep)||file.startsWith('experiments/'))throw Error('Outside experiment');
-      const homeBundle=file==='scoring_core.js'&&['index.html','inbox.html','today.html','game.html','matchups.html','week.html','trash.html','archive.html','log.html'].some(page=>new URL(req.headers.referer||'http://localhost').pathname===prefix+page);
+      const homeBundle=file==='scoring_core.js'&&['index.html','inbox.html','today.html','game.html','matchups.html','week.html','trash.html','archive.html','log.html','settings.html'].some(page=>new URL(req.headers.referer||'http://localhost').pathname===prefix+page);
       const content=homeBundle?bundle:fs.readFileSync(resolved);
       res.writeHead(200,{'Content-Type':mime,'Cache-Control':'no-store'});
       res.end(content);
@@ -1628,10 +1628,10 @@ const unrelatedRewardRows=[
   {id:'synthetic-unrelated-current',taskId:'t2',title:'Synthetic unrelated reward',points:3,completedAtISO:quietDate+'T16:00:00Z'}
 ];
 
-async function seedScoringReads(t,context,{oneOff=false,write=false,controls=false,recurrence,dueDateISO,create=false,week=false,log=false,completionEvidence=false}={}){
+async function seedScoringReads(t,context,{oneOff=false,write=false,controls=false,recurrence,dueDateISO,create=false,week=false,log=false,completionEvidence=false,observedHistory=[]}={}){
   const f=await prepareCompletionBoundary(t,context);
-  const legacyRewards=write?[...unrelatedRewardRows]:[{...ownedRewards[0],points:5},...unrelatedRewardRows];
-  const completionSeed=write?(oneOff?[]:ownedRewards.slice(1)):(oneOff?ownedRewards.slice(0,1):ownedRewards);
+  const legacyRewards=write?[...unrelatedRewardRows,...observedHistory]:[{...ownedRewards[0],points:5},...unrelatedRewardRows];
+  const completionSeed=write?[...(oneOff?[]:ownedRewards.slice(1)),...observedHistory]:(oneOff?ownedRewards.slice(0,1):ownedRewards);
   await f.page.evaluate(async({marker,completionSeed,legacyRewards,day,oneOff,write,controls,recurrence,dueDateISO,create,week,log,completionEvidence})=>{
     const core=TaskPointsCore,snapshot=core.readTaskPointsStoredState();
     snapshot.completions=legacyRewards;
@@ -7178,4 +7178,378 @@ test('V2 completion evidence refuses ambiguous and pending calorie inputs before
   const receipt=(await commitCompletion(page,await prepareCompletion(page,'home'))).receipt;
   assert.deepEqual(receipt.intent.metric.bonus,{before:2,after:2});
   assert.equal(receipt.intent.metric.dependencies[0].id,'pending-calorie-input');
+});
+
+test('V2 standalone Home Calories edits the existing Task reward without a duplicate',async t=>{
+  const {page,context,legacyRewards}=await forCompletionEvidence(t);
+  const peer=await openScoringPage(context,'index.html');
+  await waitHome(peer);
+  const task=await addMetricTask(page,'Calories (2200)');
+  await (await expandCreated(page,task)).locator('[data-task-action="complete"]').click();
+  const award=await weekReceipt(page,'home',task);
+  await peer.locator('[data-scorev2="calories"]').dispatchEvent('click');
+  await peer.locator('#caloriesEditInput').fill('2100');
+  await peer.locator('#caloriesEditSaveBtn').click();
+  await peer.locator('#caloriesEditModal').waitFor({state:'hidden'});
+  const legacy=await peer.evaluate(()=>TaskPointsCore.readTaskPointsStoredState().completions);
+  assert.deepEqual(legacy,legacyRewards);
+  const corrected=(await verifiedRewards(page)).filter(row=>row.taskId===task);
+  assert.deepEqual(corrected.map(({id,title,points})=>({id,title,points})),[
+    {id:award.completion.id,title:'Calories (2100)',points:3}
+  ]);
+});
+
+const standaloneInputs={
+  sleep:['#sleepEditScoreInput','#sleepEditRestedInput'],
+  work:['#workEditScoreInput','#workEditHoursInput'],
+  mood:['#moodEditScoreInput','#moodEditNotesInput'],
+  calories:['#caloriesEditInput']
+};
+async function openStandaloneEditor(page,formula,day) {
+  const control=day ? page.locator(`#scoreV2RecentGrid [data-cat="${formula}"][data-datekey="${day}"]`)
+    : page.locator(`[data-scorev2="${formula}"]`);
+  await control.waitFor({state:'attached'});
+  await control.dispatchEvent('click');
+  await page.locator(standaloneInputs[formula][0]).waitFor();
+}
+async function standaloneValues(page,formula,values) {
+  for (const [i,value] of values.entries()) await page.locator(standaloneInputs[formula][i]).fill(value);
+}
+const standaloneSave=(page,formula)=>page.locator(`#${formula}EditSaveBtn`).click();
+
+test('V2 standalone Sleep, Work and Mood correct Task rewards through the real mobile editors and survive fresh V1 rollback',async t=>{
+  const {page,context,legacyRewards}=await forCompletionEvidence(t);
+  const samples=[
+    ['sleep','Sleep Score (80)',['93.5','2.25'],'Sleep Score (93.5) — Rest 2.25',11.6],
+    ['work','Work Score (70) — Hours 5',['81.5','6.25'],'Work Score (81.5) — Hours 6.25',144],
+    ['mood','Mood Score (5)',['8.25','Synthetic note'],'Mood Score (8.25)',8.25]
+  ];
+  const awards=[];
+  for (const [formula,title] of samples) {
+    const id=await addMetricTask(page,title);
+    await (await expandCreated(page,id)).locator('[data-task-action="complete"]').click();
+    awards.push(await weekReceipt(page,'home',id));
+  }
+  const mobile=await openScoringPage(context,'index.html');
+  await mobile.setViewportSize({width:390,height:844});
+  await waitHome(mobile);
+  await mobile.waitForFunction(()=>TaskPointsWorkEntryFastPath?.getStatus().wrapped.includes('submitWorkEditModal'));
+  await mobile.addScriptTag({url:origin+'/scwm_interaction_fast_path.js'});
+  await mobile.waitForFunction(()=>TaskPointsScwmInteractionFastPath?.getStatus().installed);
+  for (const [index,[formula,,values,title,points]] of samples.entries()) {
+    const award=awards[index];
+    await openStandaloneEditor(mobile,formula);
+    await standaloneValues(mobile,formula,values);
+    await standaloneSave(mobile,formula);
+    await mobile.locator(standaloneInputs[formula][0]).waitFor({state:'hidden'});
+    const history=await waitHistory(page,index+1),receipt=history.at(-1);
+    assert.equal(receipt.intent.operation,'home-edit-metric-reward');
+    assert.equal(receipt.intent.request.formula,formula);
+    assert.equal(receipt.completionAfter.title,title);
+    assert.equal(receipt.completionAfter.id,award.completion.id);
+    assert.equal(receipt.completionAfter.points,points);
+    assert.equal(receipt.completionAfter.completedAtISO,award.completion.completedAtISO);
+    assert.deepEqual(receipt.after,receipt.before);
+  }
+  assert.equal((await waitHistory(page,3)).at(-1).completionAfter.moodNotes,'Synthetic note');
+  assert.deepEqual(await page.evaluate(()=>TaskPointsCore.readTaskPointsStoredState().completions),legacyRewards);
+  await mobile.close();
+  const {fresh,loader}=await restoreHistoryCheckpoint(t,page);
+  const actual=await canonicalSnapshot(loader);
+  for (const [formula,title,fields,expectedTitle,points] of samples) {
+    const [row,...duplicates]=actual.completions.filter(row=>row.title===expectedTitle);
+    assert.equal(duplicates.length,0,formula);
+    assert.equal(row.points,points,formula);
+  }
+  const game=await openScoringPage(fresh,'game.html');
+  await game.locator('#playersList .playerCard').first().waitFor();
+  assert.equal(await game.evaluate(()=>computeTodayPoints()),166.8);
+});
+
+test('V2 standalone Settings Missing Scores reuses the correction and leaves unrelated records independent',async t=>{
+  const {page,context}=await forCompletionEvidence(t);
+  const mood=await addMetricTask(page,'Mood Score (6)');
+  await (await expandCreated(page,mood)).locator('[data-task-action="complete"]').click();
+  const award=await weekReceipt(page,'home',mood);
+  const settings=await openScoringPage(context,'settings.html');
+  await settings.locator('#missingScoreDate').evaluate((node,day)=>{node.value=day;},quietDate);
+  await settings.locator('#missingScoreType').selectOption('mood',{force:true});
+  await settings.locator('#missingMoodScore').evaluate(node=>{node.value='8.5';});
+  await settings.locator('#missingScoreSaveBtn').dispatchEvent('click');
+  await settings.locator('#missingScoreStatus').getByText(/saved for/).waitFor({state:'attached'});
+  const [receipt]=await waitHistory(page,1);
+  assert.equal(receipt.completionAfter.id,award.completion.id);
+  assert.equal(receipt.completionAfter.points,8.5);
+  await settings.locator('#missingScoreType').selectOption('calories',{force:true});
+  await settings.locator('#missingCaloriesValue').evaluate(node=>{node.value='2300';});
+  await settings.locator('#missingScoreSaveBtn').dispatchEvent('click');
+  await settings.waitForFunction(()=>document.querySelector('#missingScoreStatus')?.textContent.includes('Calories saved'));
+  const independent=(await canonicalSnapshot(settings)).completions.find(row=>row.title==='Calories (2300)');
+  assert.ok(independent);
+  assert.equal(independent.taskId,undefined);
+  assert.equal((await historyReceipts(page)).length,1);
+
+  const task=await addMetricTask(page,'Calories (2200)');
+  await (await expandCreated(page,task)).locator('[data-task-action="complete"]').click();
+  const calories=await weekReceipt(page,'home',task);
+  await page.reload();await waitHome(page);
+  await openStandaloneEditor(page,'calories');
+  await standaloneValues(page,'calories',['2100']);
+  await standaloneSave(page,'calories');
+  await page.locator('#caloriesEditModal').waitFor({state:'hidden'});
+  const effective=await page.evaluate(()=>TaskPointsCore.readTaskPointsStoredState().completions);
+  assert.equal(effective.find(row=>row.id===independent.id).title,'Calories (2100)');
+  assert.deepEqual((await verifiedRewards(page)).find(row=>row.id===calories.completion.id),calories.completion);
+  assert.equal((await scoresForMetricEvidence(page)).totals[quietDate],18.5);
+});
+
+test('V2 standalone competing editors refuse stale selections before writing and preserve deletion and restart',async t=>{
+  const profile=await completionProfile(t);
+  const {page,context,legacyRewards}=await forCompletionEvidence(t,profile.context);
+  const peer=await openScoringPage(context,'index.html');
+  await waitHome(peer);
+  // This form was opened when there was no calorie entry.
+  await openStandaloneEditor(peer,'calories');
+  await standaloneValues(peer,'calories',['1900']);
+  const task=await addMetricTask(page,'Calories (2200)');
+  await (await expandCreated(page,task)).locator('[data-task-action="complete"]').click();
+  const award=await weekReceipt(page,'home',task);
+  const staleAlert=await answerLogDialog(peer,peer.locator('#caloriesEditSaveBtn'),'alert',null);
+  assert.match(staleAlert,/changed while the editor was open/i);
+  assert.deepEqual(await peer.evaluate(()=>TaskPointsCore.readTaskPointsStoredState().completions),legacyRewards);
+  await peer.locator('#caloriesEditCancelBtn').click();
+
+  await Promise.all([page,peer].map(tab=>openStandaloneEditor(tab,'calories')));
+  await standaloneValues(page,'calories',['2050']);
+  await standaloneValues(peer,'calories',['2100']);
+  await standaloneSave(page,'calories');
+  await page.locator('#caloriesEditModal').waitFor({state:'hidden'});
+  const [saved]=await waitHistory(page,1);
+  assert.deepEqual(saved.intent.metric.bonus,{before:2,after:2});
+  const conflict=await answerLogDialog(peer,peer.locator('#caloriesEditSaveBtn'),'alert',null);
+  assert.match(conflict,/changed while the editor was open|Task or reward changed/i);
+  assert.equal(await peer.locator('#caloriesEditInput').inputValue(),'2100');
+  await peer.locator('#caloriesEditCancelBtn').click();
+
+  await openStandaloneEditor(peer,'calories');
+  await standaloneValues(peer,'calories',['1900']);
+  const log=await openScoringPage(context,'log.html');
+  assert.match(await deleteLogEntry(log,award.completion.id),/send its task to Trash/);
+  const history=await waitHistory(page,2);
+  assert.equal(history.at(-1).completionAfter,null);
+  await assert.rejects(peer.evaluate(intent=>TaskPointsStateRuntimeV2.commitIsolatedTaskHistory(intent),
+    {...saved.intent,actionId:'0bf9f124-3b58-4a95-9819-848a18d1263e'}),/owned_task_stale_edit/);
+  assert.match(await answerLogDialog(peer,peer.locator('#caloriesEditSaveBtn'),'alert',null),/changed|verified/i);
+  const restarted=await profile.restart();
+  const home=await openScoringPage(restarted,'index.html');
+  assert.equal((await verifiedRewards(home)).filter(row=>row.id===award.completion.id).length,0);
+  assert.deepEqual(await historyReceipts(home),history);
+});
+
+test('V2 standalone calorie correction refuses changed settings and quota, then recovers the exact lost receipt',async t=>{
+  const {page,context}=await forCompletionEvidence(t);
+  const task=await addMetricTask(page,'Calories (2200)');
+  await (await expandCreated(page,task)).locator('[data-task-action="complete"]').click();
+  const award=await weekReceipt(page,'home',task);
+  const peer=await openScoringPage(context,'index.html');
+  await waitHome(peer);
+  const stale=await peer.evaluate(async()=>{
+    const api=TaskPointsStateRuntimeV2;
+    const selected=await api.inspectIsolatedStandaloneMetric({formula:'calories',day:'2026-11-18',
+      zone:'America/New_York',time:'noon'});
+    return api.prepareIsolatedStandaloneCorrection(selected,{calories:2050,notTracked:false,bonus:false},crypto.randomUUID());
+  });
+  await changeScoringSettings(page,'calories',{logBonus:3,pointsPer100:2});
+  await assert.rejects(peer.evaluate(intent=>TaskPointsStateRuntimeV2.commitIsolatedTaskHistory(intent),stale),
+    /owned_metric_source_changed/);
+  assert.deepEqual(await historyReceipts(page),[]);
+
+  await openStandaloneEditor(peer,'calories');
+  await standaloneValues(peer,'calories',['2100']);
+  await peer.locator('#caloriesEditBonusToggle').uncheck();
+  await peer.evaluate(()=>{
+    window.refuseMetricQuota=true;
+    const add=IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add=function(row){
+      if(window.refuseMetricQuota && row?.intent?.operation==='home-edit-metric-reward')
+        throw new DOMException('Synthetic metric quota','QuotaExceededError');
+      return add.apply(this,arguments);
+    };
+  });
+  assert.match(await answerLogDialog(peer,peer.locator('#caloriesEditSaveBtn'),'alert',null),/could not be verified/);
+  assert.equal(await peer.locator('#caloriesEditInput').inputValue(),'2100');
+  assert.deepEqual(await historyReceipts(page),[]);
+  assert.deepEqual((await verifiedRewards(peer)).find(row=>row.id===award.completion.id),award.completion);
+
+  await peer.evaluate(()=>{
+    window.refuseMetricQuota=false;
+    const api=TaskPointsStateRuntimeV2,commit=api.commitIsolatedTaskHistory;
+    api.commitIsolatedTaskHistory=async intent=>{
+      window.lastMetricResult=await commit(intent);
+      throw Error('Synthetic lost standalone metric response');
+    };
+  });
+  await standaloneSave(peer,'calories');
+  await peer.locator('#caloriesEditModal').waitFor({state:'hidden'});
+  const [receipt]=await waitHistory(page,1);
+  assert.deepEqual(receipt,await peer.evaluate(()=>lastMetricResult.receipt));
+  assert.equal(receipt.completionAfter.points,6);
+  assert.deepEqual(receipt.intent.metric.bonus,{before:3,after:0});
+  const exact=await page.evaluate(intent=>TaskPointsStateRuntimeV2.commitIsolatedTaskHistory(intent),receipt.intent);
+  assert.deepEqual(exact,{confirmedDurable:true,replayed:true,receipt});
+  assert.equal((await scoresForMetricEvidence(page)).totals[quietDate],9);
+  assert.equal((await verifiedRewards(page)).filter(row=>row.id===award.completion.id).length,1);
+});
+
+test('V2 standalone historical editors preserve explicit duplicates and refuse an ambiguous date-only selection',async t=>{
+  const {page,context}=await forCompletionEvidence(t);
+  const tasks=[];
+  for (const title of ['Mood Score (4)','Mood Score (5)']) {
+    const task=await addMetricTask(page,title);
+    await (await expandCreated(page,task)).locator('[data-task-action="complete"]').click();
+    tasks.push(await weekReceipt(page,'home',task));
+  }
+  const log=await openScoringPage(context,'log.html');
+  const day='2026-11-17';
+  for (const [index,award] of tasks.entries()) {
+    assert.match(await editLogDate(log,award.completion.id,day),/Edit completion date/);
+    await waitHistory(page,index+1);
+  }
+  const before=await verifiedRewards(page);
+  const cell=page.locator(`#scoreV2RecentGrid [data-cat="mood"][data-datekey="${day}"]`);
+  page.removeAllListeners('dialog');
+  const dialog=page.waitForEvent('dialog');
+  const click=cell.dispatchEvent('click');
+  const alert=await dialog;
+  assert.match(alert.message(),/More than one Task reward/);
+  await alert.dismiss();
+  await click;
+  assert.deepEqual(await verifiedRewards(page),before);
+
+  const result=await page.evaluate(async({id,day})=>{
+    const api=TaskPointsStateRuntimeV2;
+    const selection=await api.inspectIsolatedStandaloneMetric({id,formula:'mood',day,zone:'America/New_York',time:'keep'});
+    const intent=await api.prepareIsolatedStandaloneCorrection(selection,{score:9,notes:'Selected one'},crypto.randomUUID());
+    return api.commitIsolatedTaskHistory(intent);
+  },{id:tasks[0].completion.id,day});
+  assert.equal(result.receipt.completionAfter.id,tasks[0].completion.id);
+  assert.equal(result.receipt.completionAfter.points,9);
+  const after=await verifiedRewards(page);
+  assert.deepEqual(after.find(row=>row.id===tasks[1].completion.id),before.find(row=>row.id===tasks[1].completion.id));
+});
+
+test('V2 standalone cross-zone noon correction preserves the original award reservation and exact V1 rollback',async t=>{
+  const profile=await completionProfile(t);
+  const {page}=await forCompletionEvidence(t,profile.context);
+  const id=await addMetricTask(page,'Calories (2200)');
+  const at='2026-11-18T05:30:00.000Z';
+  await page.clock.setFixedTime(new Date(at));
+  const intent=await page.evaluate(id=>TaskPointsStateRuntimeV2.prepareIsolatedTaskCompletion('home',id),id);
+  const award=(await commitCompletion(page,intent)).receipt;
+  const reopened=await profile.restart('America/Los_Angeles');
+  const travel=await openZonedPage(reopened,'index.html','America/Los_Angeles',at);
+  await waitHome(travel);
+  await openStandaloneEditor(travel,'calories');
+  await standaloneValues(travel,'calories',['2100']);
+  await standaloneSave(travel,'calories');
+  await travel.locator('#caloriesEditModal').waitFor({state:'hidden'});
+  const [correction]=await waitHistory(travel,1);
+  assert.equal(correction.calendar.zone,'America/Los_Angeles');
+  assert.equal(correction.sourceDay,'2026-11-18');
+  assert.equal(correction.targetCalendar.day,'2026-11-17');
+  assert.equal(correction.completionAfter.completedAtISO,'2026-11-17T20:00:00.000Z');
+  assert.equal(correction.completionAfter.id,award.completion.id);
+  const list=weekTodayStore(cleanedTodayList,['2026-11-17','2026-11-18'],id);
+  await writeTodayFixture(travel,JSON.stringify(list));
+  await travel.evaluate(()=>TaskPointsCore.reconcileIsolatedTodayList());
+  const reconciled=await travel.evaluate(()=>JSON.parse(localStorage.getItem(TaskPointsCore.ISOLATED_TODAY_LIST_KEY)));
+  for (const day of ['2026-11-17','2026-11-18']) {
+    assert.ok(!reconciled.tasksByDay[day].includes(id));
+    assert.ok(!reconciled.orderByDay[day].includes('task:'+id));
+  }
+  assert.deepEqual(reconciled.notesByDay,list.notesByDay);
+  await travel.clock.setFixedTime(new Date('2026-11-18T19:00:00Z'));
+  const next=await travel.evaluate(id=>TaskPointsStateRuntimeV2.prepareIsolatedTaskCompletion('home',id),id);
+  await assert.rejects(commitCompletion(travel,next),/owned_completion_already_awarded/);
+  assert.deepEqual(await travel.evaluate(intent=>TaskPointsStateRuntimeV2.commitIsolatedTaskHistory(intent),correction.intent),
+    {confirmedDurable:true,replayed:true,receipt:correction});
+
+  const {loader}=await restoreHistoryCheckpoint(t,travel);
+  const stored=(await canonicalSnapshot(loader)).completions.filter(row=>row.id===award.completion.id);
+  assert.deepEqual(stored,[correction.completionAfter]);
+});
+
+test('V2 standalone corrections admit observed explicit legacy calories and hold bare points-only entries',async t=>{
+  const observed=[
+    {id:'explicit-v1-calories',taskId:'t1',title:'Calories',calories:2150,points:4.25,
+      source:'metric',completedAtISO:'2026-11-14T15:00:00Z',unknown:{annotation:'original'}},
+    {id:'ambiguous-v1-calories',taskId:'t1',title:'Calories',points:2200,
+      completedAtISO:'2026-11-15T15:00:00Z'}
+  ];
+  const {page}=await forCompletionEvidence(t,undefined,{observedHistory:observed});
+  await openStandaloneEditor(page,'calories','2026-11-14');
+  assert.equal(await page.locator('#caloriesEditInput').inputValue(),'2150');
+  await standaloneValues(page,'calories',['2050']);
+  await standaloneSave(page,'calories');
+  await page.locator('#caloriesEditModal').waitFor({state:'hidden'});
+  const [correction]=await waitHistory(page,1);
+  assert.deepEqual(correction.completionBefore,observed[0]);
+  assert.deepEqual(correction.completionAfter.unknown,observed[0].unknown);
+  assert.equal(correction.completionAfter.id,observed[0].id);
+  assert.equal(correction.completionAfter.points,3.5);
+  assert.equal(correction.sourceDay,'2026-11-14');
+  await openStandaloneEditor(page,'calories','2026-11-15');
+  await standaloneValues(page,'calories',['2000']);
+  assert.match(await answerLogDialog(page,page.locator('#caloriesEditSaveBtn'),'alert',null),/could not be verified/i);
+  assert.equal(await page.locator('#caloriesEditInput').inputValue(),'2000');
+  assert.deepEqual((await verifiedRewards(page)).find(row=>row.id===observed[1].id),observed[1]);
+  assert.deepEqual(await historyReceipts(page),[correction]);
+});
+
+test('V2 standalone signed Work corrections preserve V1 points and remain editable',async t=>{
+  const {page}=await forCompletionEvidence(t);
+  const id=await addMetricTask(page,'Work Score (70) — Hours 5');
+  await (await expandCreated(page,id)).locator('[data-task-action="complete"]').click();
+  const award=await weekReceipt(page,'home',id);
+  for (const [step,[score,points]] of [['-4.25',-4.25],['12',12]].entries()) {
+    await openStandaloneEditor(page,'work');
+    if (step) assert.equal(await page.locator('#workEditScoreInput').inputValue(),'-4.25');
+    await standaloneValues(page,'work',[score,'0']);
+    await standaloneSave(page,'work');
+    await page.locator('#workEditModal').waitFor({state:'hidden'});
+    const history=await waitHistory(page,step+1);
+    const receipt=history.at(-1);
+    assert.equal(receipt.completionAfter.id,award.completion.id);
+    assert.equal(receipt.completionAfter.points,points);
+    assert.equal(receipt.intent.metric.inputs.score,points);
+    assert.equal((await scoresForMetricEvidence(page)).live.find(([key])=>key===award.completion.id)[1],points);
+  }
+});
+
+test('V2 standalone concurrent legacy admissions keep one independent calorie entry',async t=>{
+  const {page,context}=await forCompletionEvidence(t);
+  const peer=await openScoringPage(context,'index.html');
+  await waitHome(peer);
+  const tabs=[page,peer], alerts=[];
+  for (const [index,tab] of tabs.entries()) {
+    tab.removeAllListeners('dialog');
+    tab.on('dialog',async dialog=>{alerts.push(dialog.message());await dialog.dismiss();});
+    await openStandaloneEditor(tab,'calories');
+    await standaloneValues(tab,'calories',[String(2100+index*100)]);
+  }
+  await Promise.all(tabs.map(tab=>standaloneSave(tab,'calories')));
+  await page.waitForFunction(()=>TaskPointsCore.readTaskPointsStoredState().completions.some(row=>row.title.startsWith('Calories (')));
+  await Promise.race(tabs.map(tab=>tab.locator('#caloriesEditModal').waitFor({state:'hidden'})));
+  const readEntries=tab=>tab.evaluate(()=>TaskPointsCore.readTaskPointsStoredState().completions
+    .filter(row=>row.title.startsWith('Calories (')));
+  // The refused editor stays open. Its proof read completes without a V1 write.
+  const deadline=Date.now()+12000;
+  while(!alerts.length && Date.now()<deadline) await new Promise(resolve=>setTimeout(resolve,30));
+  assert.equal(alerts.length,1);
+  assert.match(alerts[0],/changed while the editor was open/i);
+  const [entries,otherEntries]=await Promise.all(tabs.map(readEntries));
+  assert.deepEqual(entries,otherEntries);
+  assert.equal(entries.length,1);
+  assert.equal(entries[0].taskId,undefined);
+  assert.deepEqual(await historyReceipts(page),[]);
 });

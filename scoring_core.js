@@ -97,6 +97,39 @@
     catch (_) { return false; }
   }
 
+  let isolatedStandaloneMetricSelected = false;
+  function usesIsolatedStandaloneMetrics() {
+    if (!isolatedCompletionOrigin || !/\/(index|settings)\.html$/.test(global.location.pathname)) return false;
+    try {
+      const fixture = JSON.parse(global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY));
+      isolatedStandaloneMetricSelected ||= fixture?.completionEvidence === true
+        || (fixture === null && usesIsolatedTaskScoring());
+    } catch (_) { return isolatedStandaloneMetricSelected || usesIsolatedTaskScoring(); }
+    return isolatedStandaloneMetricSelected;
+  }
+
+  function runIsolatedLegacyMetricWrite(selection, operation, liveRows) {
+    if (selection.owned) throw new Error('owned_metric_selection_changed');
+    return global.TaskPointsStateRuntimeV2.inspectIsolatedStandaloneMetric(selection.request,
+      (verified,proof) => withVerifiedCompletionRead(proof,() => operation(verified)),selection,liveRows);
+  }
+
+  async function commitIsolatedMetricCorrection(selection, values, attempt) {
+    const runtime=global.TaskPointsStateRuntimeV2;
+    try {
+      attempt.intent ??= await runtime.prepareIsolatedStandaloneCorrection(selection,values,attempt.actionId);
+      try { return await runtime.commitIsolatedTaskHistory(attempt.intent); }
+      catch (error) {
+        const receipt=await runtime.readIsolatedTaskScoring(proof=>proof.findHistoryReceipt(attempt.intent)).catch(()=>null);
+        if (!receipt) throw error;
+        return {confirmedDurable:true,replayed:true,receipt};
+      }
+    } catch (error) {
+      if (error.message==='owned_metric_source_changed') delete attempt.intent;
+      throw error;
+    }
+  }
+
   function isolatedLogCompletionBasis(completionId) {
     if (!global.location?.pathname.endsWith('/log.html') || !usesIsolatedTaskDone() || !verifiedCompletionRead) return null;
     try {
@@ -309,7 +342,7 @@
       if (edit) edit(list, structuredClone(proof.completions));
 
       for (const completion of proof.completions) {
-        removeIsolatedTodayTask(list,proof.completionMembershipDay(completion),completion.taskId);
+        for (const day of proof.completionMembershipDays(completion)) removeIsolatedTodayTask(list,day,completion.taskId);
       }
       reconcileIsolatedTodayTaskMembership(list,proof.tasks,proof.permanentIds,proof.statusReceipts,
         [...(proof.weekMembershipChanges || []),...(proof.historyMembershipChanges || [])]);
@@ -350,16 +383,23 @@
       read.scoringSettings ? Intl.DateTimeFormat().resolvedOptions().timeZone : null]);
   }
 
+  function withVerifiedCompletionRead(read,operation) {
+    const previousWrite=verifiedScoringWrite;
+    verifiedScoringWrite={read,source:isolatedScoringSource(read)};
+    verifiedCompletionRead=read;
+    try { return operation(); }
+    finally { verifiedScoringWrite=previousWrite; }
+  }
+
   async function runWithVerifiedTaskScoring(operation) {
     verifiedCompletionRead = null;
     let ran = false;
     try {
       return await global.TaskPointsStateRuntimeV2.readIsolatedTaskScoring(read => {
-        verifiedScoringWrite = {read,source:isolatedScoringSource(read)};
-        verifiedCompletionRead = read;
-        ran = true;
-        try { return operation(); }
-        finally { verifiedScoringWrite = null; }
+        return withVerifiedCompletionRead(read,()=>{
+          ran = true;
+          return operation();
+        });
       });
     } catch (error) {
       if (ran) throw error;
@@ -11538,6 +11578,9 @@ return Number(cappedScore.toFixed(1));
     runIsolatedTaskDone,
     isolatedTaskDoneError,
     usesIsolatedTaskScoring,
+    usesIsolatedStandaloneMetrics,
+    runIsolatedLegacyMetricWrite,
+    commitIsolatedMetricCorrection,
     isolatedLiveScoringState,
     refreshIsolatedTaskScoring,
     readScoringCompletions,

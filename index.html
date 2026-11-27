@@ -2588,6 +2588,103 @@ function workPoints(score, hours = 0) {
   return score + workHoursBonus(hours);
 }
 
+const homeMetricEditorSelections = new WeakMap();
+const homeMetricPending = new WeakMap();
+let homeMetricLegacyAdmitted = false;
+
+function useHomeMetricOwnership() {
+  return window.TaskPointsCore?.usesIsolatedStandaloneMetrics?.() === true;
+}
+
+function homeMetricEditorError(error) {
+  const messages = {
+    owned_metric_selection_ambiguous:'More than one Task reward matches this metric and date. Open a specific history entry.',
+    owned_metric_selection_changed:'That metric entry changed while the editor was open. Reopen it before saving.',
+    owned_task_stale_edit:'That Task or reward changed. Reopen the metric editor before saving.',
+    owned_metric_source_changed:'Scoring settings or entries changed. Review the score and tap Save again.',
+    isolated_completion_time_zone_or_selection_changed:'Your time zone changed. Reopen the metric editor before saving.'
+  };
+  alert(messages[error?.message] || 'The metric change could not be verified. Your values have been kept in the editor.');
+}
+
+function homeMetricRequest(formula,entry,time,day) {
+  return {formula,day:day ?? dateKey(entry?.completedAtISO || new Date()),
+    zone:Intl.DateTimeFormat().resolvedOptions().timeZone,time,
+    ...(entry?.id && !entry.__tpDraft ? {id:entry.id} : {})};
+}
+
+async function openHomeMetricEntry(formula, entry, time, day, open) {
+  try {
+    const runtime=window.TaskPointsStateRuntimeV2;
+    const selection=await runtime.inspectIsolatedStandaloneMetric(homeMetricRequest(formula,entry,time,day));
+    // Keep the legacy writer's reference to the live row. The detached
+    // verified value is suitable for display and V2 corrections only.
+    const selected=selection.owned ? selection.entry
+      : selection.entry ? state.completions.find(row=>row.id===selection.entry.id)
+        : entry || ensureScoreEntryForDate(formula,selection.request.day);
+    if (!selected) throw Error('owned_metric_selection_changed');
+    homeMetricEditorSelections.set(selected,selection);
+    return open(selected);
+  } catch (error) { homeMetricEditorError(error); }
+}
+
+function runHomeMetricEdit({formula,entry,time,day,values,fastName,onOwned},writeLegacy) {
+  if (!useHomeMetricOwnership()) return writeLegacy();
+  return saveHomeMetric({formula,entry,time,day,values,fastName,onOwned},writeLegacy);
+}
+
+async function saveHomeMetric({formula,entry,time,day,values,fastName,onOwned},writeLegacy) {
+  const runtime=window.TaskPointsStateRuntimeV2;
+  let selection, pending;
+  try {
+    selection=entry && homeMetricEditorSelections.get(entry);
+    if (!selection) {
+      selection=await runtime.inspectIsolatedStandaloneMetric(homeMetricRequest(formula,entry,time,day));
+    }
+    if (selection.request.formula!==formula || selection.request.time!==time || (day && selection.request.day!==day))
+      throw Error('owned_metric_selection_changed');
+
+    if (!selection.owned) {
+      return TaskPointsCore.runIsolatedLegacyMetricWrite(selection,()=>{
+        homeMetricLegacyAdmitted=true;
+        try {
+          const fast=window.TaskPointsWorkEntryFastPath;
+          return fastName && fast?.runAdmittedMetricCommit
+            ? fast.runAdmittedMetricCommit(fastName,writeLegacy)!==false : writeLegacy()!==false;
+        } finally { homeMetricLegacyAdmitted=false; }
+      },()=>state.completions).catch(error=>{homeMetricEditorError(error);return false;});
+    }
+
+    pending=homeMetricPending.get(selection);
+    if (pending?.busy) return false;
+    const input=JSON.stringify(values);
+    if (!pending || pending.input!==input) {
+      pending={input,actionId:crypto.randomUUID()};
+      homeMetricPending.set(selection,pending);
+    }
+    pending.busy=true;
+    const result=await TaskPointsCore.commitIsolatedMetricCorrection(selection,values,pending);
+    if (!result.confirmedDurable && !result.unchanged) throw Error('owned_metric_result_unverified');
+    homeMetricPending.delete(selection);
+    if (result.receipt && !result.replayed) {
+      const {completionBefore,completionAfter,intent}=result.receipt;
+      const bonus=intent.metric.bonus;
+      toastPointsDeltaTodayAware(completionAfter.points+(bonus?.after ?? 0),
+        (Number(completionBefore.points) || 0)+(bonus?.before ?? 0),completionAfter);
+    }
+    onOwned?.();
+    await TaskPointsCore.refreshIsolatedTaskScoring(true);
+    markCompletionsDirty();
+    scheduleRender(renderAll);
+    return true;
+  } catch (error) {
+    homeMetricEditorError(error);
+    return false;
+  } finally {
+    if (pending) pending.busy=false;
+  }
+}
+
 function getTodaySleepEntry() {
   const today = new Date();
   const todayKey = dateKey(today);
@@ -2643,14 +2740,12 @@ async function editTodayCalories() {
   if (!entry) return alert("You haven't entered today's calories yet.");
 
   const current = entry.title.match(/\((\d+)\)/)?.[1] ?? '';
-  const result = await openCaloriesEditModal({
+  return openHomeCaloriesEditor({
     title: "Edit today's calories",
     currentCalories: current,
     currentBonusEnabled: isCalLogBonusEnabledForEntry(entry),
     currentNotTracked: caloriesNotTrackedForEntry(entry)
-  });
-
-  if (!result) return;
+  },entry,'noon',dateKey(new Date()),result=>{
 
   const caloriesNotTracked = result.caloriesNotTracked === true;
   const raw = caloriesNotTracked ? null : Number(result.calories);
@@ -2682,12 +2777,15 @@ async function editTodayCalories() {
 
   persistCaloriesEditFast(entry);
   scheduleRender(renderAll);
+  });
 }
 
 let sleepEditContext = null;
 
-function promptEditSleepEntry(entry) {
+function promptEditSleepEntry(entry, prepared = false) {
   if (!entry) return;
+  if (useHomeMetricOwnership() && !prepared)
+    return openHomeMetricEntry('sleep',entry,'keep',undefined,selected=>promptEditSleepEntry(selected,true));
 
   // These sibling dashboard editors share a z-index. Never leave the Mood
   // editor active underneath Sleep; retain each editor's regular close path.
@@ -2754,6 +2852,10 @@ function submitSleepEditModal() {
     return;
   }
 
+  const entry=sleepEditContext;
+  return runHomeMetricEdit({formula:'sleep',entry,time:'keep',values:{score:scoreVal,rested:restVal},
+    fastName:'submitSleepEditModal',onOwned:()=>{if (sleepEditContext===entry) closeSleepEditModal();}},()=>{
+if (sleepEditContext!==entry) throw Error('owned_metric_selection_changed');
 let target = resolveCompletionRef(sleepEditContext, "Sleep Score");
 if (!target) {
   const d = new Date(sleepEditContext.completedAtISO || new Date());
@@ -2788,6 +2890,7 @@ target.source = "metric";
   save();
   scheduleRender(renderAll);
   closeSleepEditModal();
+  });
 }
 
 let workEditContext = null;
@@ -2798,6 +2901,7 @@ let workEditOptions = null;
 // is not a reliable contract for retrieving it across script wrappers.
 window.TaskPointsWorkEntryAccess = {
   getState: () => state,
+  isAdmittedMetricWrite: () => homeMetricLegacyAdmitted,
   getEditedRow: (name) => {
     const entry = name === 'submitWorkEditModal'
       ? resolveCompletionRef(workEditContext, 'Work Score')
@@ -2808,8 +2912,11 @@ window.TaskPointsWorkEntryAccess = {
   }
 };
 
-function promptEditWorkEntry(entry, options = {}) {
+function promptEditWorkEntry(entry, options = {}, prepared = false) {
   if (!entry) return;
+  if (useHomeMetricOwnership() && !prepared)
+    return openHomeMetricEntry('work',entry,'noon',options.pinToToday ? dateKey(new Date()) : undefined,
+      selected=>promptEditWorkEntry(selected,options,true));
 
   workEditContext = entry;
   workEditOptions = options;
@@ -2889,6 +2996,10 @@ function submitWorkEditModal() {
     : d;
   const targetKey = dateKey(targetDate);
 
+  const entry=workEditContext;
+  return runHomeMetricEdit({formula:'work',entry,time:'noon',day:targetKey,values:{score:scoreVal,hours:safeHours},
+    fastName:'submitWorkEditModal',onOwned:()=>{if (workEditContext===entry) closeWorkEditModal();}},()=>{
+  if (workEditContext!==entry) throw Error('owned_metric_selection_changed');
   let target = resolveCompletionRef(workEditContext, "Work Score");
   if (!target) {
     target = (state.completions || []).find(c => {
@@ -2932,6 +3043,7 @@ function submitWorkEditModal() {
   }
   scheduleRender(renderAll);
   closeWorkEditModal();
+  });
 }
 
 function logHomeBootReadOnlySkip(pathName) {
@@ -3320,6 +3432,23 @@ function parseCaloriesFromTitle(title) {
   return Number.isFinite(raw) ? raw : null;
 }
 
+async function openHomeCaloriesEditor(options,entry,time,day,writeLegacy) {
+  if (!useHomeMetricOwnership()) {
+    const result=await openCaloriesEditModal(options);
+    if (result) return writeLegacy(result);
+    return;
+  }
+  return openHomeMetricEntry('calories',entry,time,day,selected=>openCaloriesEditModal({...options,
+    currentCalories:selected.__tpDraft ? options.currentCalories
+      : selected.calories ?? parseCaloriesFromTitle(selected.title) ?? '',
+    currentNotTracked:caloriesNotTrackedForEntry(selected),
+    currentBonusEnabled:isCalLogBonusEnabledForEntry(selected),
+    commit:result=>runHomeMetricEdit({formula:'calories',entry:selected,time,day,
+      values:{calories:result.calories,notTracked:result.caloriesNotTracked,bonus:result.calLogBonusEnabled}},
+    ()=>writeLegacy(result,selected))
+  }));
+}
+
 function openCaloriesEditModal(options = {}) {
   return new Promise((resolve) => {
     const modal = $('caloriesEditModal');
@@ -3332,11 +3461,13 @@ function openCaloriesEditModal(options = {}) {
     if (!modal || !input || !toggle || !skipToggle || !saveBtn || !cancelBtn) {
       const fallback = prompt(options.title || 'Edit calories:', String(options.currentCalories || ''));
       if (fallback === null) return resolve(null);
-      return resolve({
-        calories: fallback,
-        calLogBonusEnabled: options.currentBonusEnabled !== false,
-        caloriesNotTracked: false
-      });
+      const result={calories:fallback,calLogBonusEnabled:options.currentBonusEnabled!==false,caloriesNotTracked:false};
+      if (options.commit) {
+        result.calories=Number(fallback.trim());
+        if (!fallback.trim() || !Number.isFinite(result.calories) || result.calories<0) return resolve(null);
+        return Promise.resolve(options.commit(result)).then(resolve);
+      }
+      return resolve(result);
     }
 
     input.value = options.currentNotTracked ? '' : (options.currentCalories ?? '');
@@ -3370,7 +3501,9 @@ saveBtn.removeEventListener('click', onSave);
       document.removeEventListener('keydown', onKeydown);
     };
 
+    let writing=false;
     const onSave = () => {
+      if (writing) return;
       const caloriesNotTracked = skipToggle.checked === true;
       const entered = String(input.value || '').trim();
       const raw = caloriesNotTracked ? null : Number(entered);
@@ -3385,11 +3518,20 @@ saveBtn.removeEventListener('click', onSave);
         caloriesNotTracked
       };
 
+      if (options.commit) {
+        writing=true;
+        saveBtn.disabled=true;
+        Promise.resolve(options.commit(result)).then(saved=>{
+          if (saved) { cleanup(); resolve(saved); }
+        }).finally(()=>{writing=false;saveBtn.disabled=false;});
+        return;
+      }
       cleanup();
       resolve(result);
     };
 
     const onCancel = () => {
+      if (writing) return;
       cleanup();
       resolve(null);
     };
@@ -13331,6 +13473,7 @@ function saveSleepScore(){
   const key = dateKey(d);         // e.g. "2025-12-03"
   const whenISO = d.toISOString();
 
+  return runHomeMetricEdit({formula:'sleep',time:'noon',day:key,values:{score:raw,rested},fastName:'saveSleepScore'},()=>{
   // Look for an existing Sleep Score entry for this same day
   let existing = null;
   for (const c of state.completions) {
@@ -13372,6 +13515,7 @@ state.completions.unshift({
 
   save();
   scheduleRender(renderAll);  // refresh stats, history chips, etc.
+  });
 }
 
 function editTodaySleepScore() {
@@ -13409,6 +13553,7 @@ const impactPts = caloriesTotalImpactPoints(raw, calLogBonusEnabled, caloriesNot
   const key = dateKey(d);
   const whenISO = d.toISOString();
 
+  return runHomeMetricEdit({formula:'calories',time:'noon',day:key,values:{calories:raw,notTracked:caloriesNotTracked,bonus:calLogBonusEnabled},fastName:'saveCalories'},()=>{
   // 2) Look for an existing Calories entry for this same date
   let existing = null;
   for (const c of state.completions) {
@@ -13455,6 +13600,7 @@ if (existing) {
   
   save();
   scheduleRender(renderAll);
+  });
 }
 
 
@@ -13854,14 +14000,13 @@ if (calNum != null && !Number.isNaN(calNum)) {
 block.onclick = async () => {
   const target = entry;
 
-  const result = await openCaloriesEditModal({
+  return openHomeCaloriesEditor({
     title: "Edit calories for this day",
     currentCalories: caloriesNotTrackedForEntry(target) ? '' : cal,
     currentBonusEnabled: isCalLogBonusEnabledForEntry(target),
     currentNotTracked: caloriesNotTrackedForEntry(target)
-  });
-
-  if (!result) return;
+  },target,'keep',undefined,(result,selected)=>{
+  const target=selected ?? entry;
 
   const caloriesNotTracked = result.caloriesNotTracked === true;
   const raw = caloriesNotTracked ? null : Number(result.calories);
@@ -13887,6 +14032,7 @@ block.onclick = async () => {
   markCompletionsDirty();
   persistCaloriesEditFast(target);
   scheduleRender(renderAll);
+  });
 };
     container.appendChild(block);
   });
@@ -13932,6 +14078,7 @@ function saveWorkScore() {
   const key = dateKey(d);
   const whenISO = d.toISOString();
 
+  return runHomeMetricEdit({formula:'work',time:'noon',day:key,values:{score:raw,hours:safeHours},fastName:'saveWorkScore'},()=>{
   // Look for an existing Work Score entry for today
   let existing = null;
   for (const c of state.completions) {
@@ -13973,6 +14120,7 @@ function saveWorkScore() {
   const hoursInput = $('workHoursInput');
   if (hoursInput) hoursInput.value = "";
   scheduleRender(renderAll);
+  });
 }
 
 function renderWorkHistory() {
@@ -14225,7 +14373,11 @@ function getMoodNotesValue(entry) {
 
 let moodEditContext = null;
 
-function openMoodEditModal({ entry = null, score = '', notes = '', onSave = null } = {}) {
+function openMoodEditModal({ entry = null, score = '', notes = '', onSave = null, time = 'keep', today = false } = {}, prepared = false) {
+  if (useHomeMetricOwnership() && !prepared)
+    return openHomeMetricEntry('mood',entry,time,today ? dateKey(new Date()) : undefined,selected=>
+      openMoodEditModal({entry:selected,score:score==='' ? '' : getMoodScoreValue(selected),
+        notes:getMoodNotesValue(selected),onSave,time,today},true));
   const modal = $('moodEditModal');
   const scoreInput = $('moodEditScoreInput');
   const notesInput = $('moodEditNotesInput');
@@ -14234,7 +14386,7 @@ function openMoodEditModal({ entry = null, score = '', notes = '', onSave = null
   // Sleep is later in the DOM at the same z-index and can otherwise intercept
   // clicks on this editor after quick dashboard updates or overlapping taps.
   if (!$('sleepEditModal')?.classList.contains('hidden')) closeSleepEditModal();
-  moodEditContext = { entry, onSave };
+  moodEditContext = { entry, onSave, time, today };
 
   $('moodEditDateLabel').textContent = entry?.completedAtISO
     ? new Date(entry.completedAtISO).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })
@@ -14272,12 +14424,15 @@ function submitMoodEditModal() {
   if (!Number.isFinite(num)) return alert('Invalid mood score.');
 
   const notes = String(notesInput.value || '');
-  const { entry, onSave } = moodEditContext;
-  closeMoodEditModal();
-
-  if (typeof onSave === 'function') {
-    onSave({ score: num, notes, entry });
-  }
+  const context=moodEditContext;
+  const {entry,onSave,time,today}=context;
+  const close=()=>{if (moodEditContext===context) closeMoodEditModal();};
+  return runHomeMetricEdit({formula:'mood',entry,time,day:today ? dateKey(new Date()) : undefined,
+    values:{score:num,notes},fastName:'submitMoodEditModal',onOwned:close},()=>{
+    if (moodEditContext!==context) throw Error('owned_metric_selection_changed');
+    close();
+    if (typeof onSave === 'function') onSave({score:num,notes,entry});
+  });
 }
 
   function getTodayMoodEntry() {
@@ -14295,6 +14450,7 @@ function editTodayMood() {
   if (!entry) return alert("You haven't entered today's mood score yet.");
 
   openMoodEditModal({
+    time:'noon',today:true,
     entry,
     score: getMoodScoreValue(entry),
     notes: getMoodNotesValue(entry),
@@ -14336,6 +14492,7 @@ function saveMoodScore() {
     : (existing ? String(getMoodScoreValue(existing)) : '');
 
   openMoodEditModal({
+    time:'noon',today:true,
     entry: existing,
     score: initialScore,
     notes: getMoodNotesValue(existing),
@@ -14481,8 +14638,8 @@ block.onclick = () => {
     entry,
     score: getMoodScoreValue(entry),
     notes: getMoodNotesValue(entry),
-    onSave: ({ score, notes }) => {
-      const target = entry;
+    onSave: ({ score, notes, entry:liveEntry }) => {
+      const target = liveEntry ?? entry;
       const oldPts = Number(target.points) || 0;
       const newPts = moodPoints(score);
 
@@ -15820,10 +15977,20 @@ function renderScoreDashboardV2_Skeleton(){
   if (!mount) return;
 
   // Pull today's entries using your existing helpers
-  const sleepEntry = (typeof getTodaySleepEntry === "function") ? getTodaySleepEntry() : null;
-  const calEntry   = (typeof getTodayCaloriesEntry === "function") ? getTodayCaloriesEntry() : null;
-  const workEntry  = (typeof getTodayWorkEntry === "function") ? getTodayWorkEntry() : null;
-  const moodEntry  = (typeof getTodayMoodEntry === "function") ? getTodayMoodEntry() : null;
+  const ownedToday=(formula,legacy)=>{
+    if (legacy || !useHomeMetricOwnership()) return legacy;
+    try {
+      const rows=TaskPointsCore.readScoringCompletions(state.completions).filter(row=>
+        TaskPointsCore.getLegacyTaskCompletionHold(row.taskId)
+        && String(row.title).startsWith({sleep:'Sleep Score',work:'Work Score',mood:'Mood Score',calories:'Calories'}[formula])
+        && dateKey(row.completedAtISO)===dateKey(new Date()));
+      return rows.length===1 ? rows[0] : null;
+    } catch (_) { return null; }
+  };
+  const sleepEntry = ownedToday('sleep',getTodaySleepEntry());
+  const calEntry   = ownedToday('calories',getTodayCaloriesEntry());
+  const workEntry  = ownedToday('work',getTodayWorkEntry());
+  const moodEntry  = ownedToday('mood',getTodayMoodEntry());
 
   function fmtNum(n){
     if (!Number.isFinite(n)) return "";
@@ -15959,14 +16126,12 @@ if (key === "calories") {
   const target = e || ensureTodayScoreEntry("calories");
   const current = String(target?.title || "").match(/\((\d+)\)/)?.[1] ?? "";
 
-  const result = await openCaloriesEditModal({
+  return openHomeCaloriesEditor({
     title: "Edit today's calories",
     currentCalories: current,
     currentBonusEnabled: isCalLogBonusEnabledForEntry(target),
     currentNotTracked: caloriesNotTrackedForEntry(target)
-  });
-
-  if (!result) return;
+  },target,'noon',dateKey(new Date()),(result,selected)=>{
 
   const caloriesNotTracked = result.caloriesNotTracked === true;
   const raw = caloriesNotTracked ? null : Number(result.calories);
@@ -15980,7 +16145,7 @@ if (key === "calories") {
   const whenISO = d.toISOString();
 
   let existing = (typeof resolveCompletionRef === "function")
-    ? resolveCompletionRef(target, "Calories")
+    ? resolveCompletionRef(selected ?? target, "Calories")
     : null;
 
   if (!existing) {
@@ -16030,6 +16195,7 @@ if (key === "calories") {
     try { if (scoreV2RecentOpen) renderScoreV2RecentGrid(); } catch(e){}
   }, 50);
 
+  });
   return;
 }
 
@@ -16052,11 +16218,11 @@ function openTodayMoodScoreV2Editor() {
     entry,
     score: getMoodScoreValue(entry),
     notes: getMoodNotesValue(entry),
-    onSave: ({ score, notes }) => {
+    onSave: ({ score, notes, entry:liveEntry }) => {
       const d = new Date(entry?.completedAtISO || new Date());
       d.setHours(12, 0, 0, 0);
       const key = dateKey(d);
-      let target = resolveCompletionRef(entry, "Mood Score");
+      let target = resolveCompletionRef(liveEntry ?? entry, "Mood Score");
       if (!target) {
         target = (state.completions || []).find(c => {
           if (!c?.title?.startsWith("Mood Score")) return false;
@@ -16301,14 +16467,12 @@ if (cat === "work" && typeof promptEditWorkEntry === "function") {
 if (cat === "calories") {
   const current = String(entry?.title || "").match(/\((\d+)\)/)?.[1] || "";
 
-  const result = await openCaloriesEditModal({
+  return openHomeCaloriesEditor({
     title: "Edit calories for this day",
     currentCalories: current,
     currentBonusEnabled: isCalLogBonusEnabledForEntry(entry),
     currentNotTracked: caloriesNotTrackedForEntry(entry)
-  });
-
-  if (!result) return;
+  },entry,'noon',dk,(result,selected)=>{
 
   const caloriesNotTracked = result.caloriesNotTracked === true;
   const raw = caloriesNotTracked ? null : Number(result.calories);
@@ -16320,7 +16484,7 @@ if (cat === "calories") {
   d.setHours(12,0,0,0);
   const targetKey = dateKey(d);
 
-  let target = resolveCompletionRef(entry, "Calories");
+  let target = resolveCompletionRef(selected ?? entry, "Calories");
 
   if (!target) {
     target = (state.completions || []).find(c => {
@@ -16369,6 +16533,7 @@ if (cat === "calories") {
 try { if (scoreV2RecentOpen) renderScoreV2RecentGrid(); } catch(e){}
 try { renderScoreDashboardV2_Skeleton(); } catch(e){}
 
+  });
 return;
 
     }
@@ -16378,11 +16543,11 @@ return;
         entry,
         score: getMoodScoreValue(entry),
         notes: getMoodNotesValue(entry),
-        onSave: ({ score, notes }) => {
+        onSave: ({ score, notes, entry:liveEntry }) => {
           const d = new Date(entry?.completedAtISO || `${dk}T12:00:00`);
           d.setHours(12,0,0,0);
           const targetKey = dateKey(d);
-          let target = resolveCompletionRef(entry, "Mood Score");
+          let target = resolveCompletionRef(liveEntry ?? entry, "Mood Score");
           if (!target) {
             target = (state.completions || []).find(c => {
               if (!c?.title?.startsWith("Mood Score")) return false;

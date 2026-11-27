@@ -463,6 +463,9 @@
 
     originals[name] = fn;
     const wrappedCommit = function taskPointsWorkEntryFastCommit() {
+      // The Home editor admits synthetic metric writes before any legacy
+      // state changes. It re-enters this journal path inside that admission.
+      if (core.usesIsolatedStandaloneMetrics?.()) return fn.apply(this, arguments);
       if (!fastPathReady()) return fn.apply(this, arguments);
       return runFastCommit(name, fn, this, Array.from(arguments));
     };
@@ -524,6 +527,9 @@
     installed: true,
     version: VERSION,
     install,
+    runAdmittedMetricCommit(name, commit) {
+      return fastPathReady() ? runFastCommit(name,commit,global,[]) : commit();
+    },
     getStatus() {
       return {
         active: installed,

@@ -728,17 +728,29 @@ cleanup uses the recorded day. V1 live scoring groups timestamps in the
 viewer's current local zone, including after cross-zone detached rollback.
 Rollback preserves stored timestamps, earned values, and Task dates.
 
-The previous holds remain for unversioned receipts after a zone change,
-ambiguous timestamps and historical metric inputs, and bare Calories titles
-whose legacy points field doubles as the calorie input. Standalone Home
-personal-metric editors and their Work/SCWM fast path still need shared
-admission when they target the same date and metric as an owned Task
-completion. In a separate disposable profile, Home Done saved an owned
-`Calories (2200)` reward. Saving `2100` through the same-day Home Calories
-score card then left the original reward in V2 and created a separate legacy
-record. That flow needs verified admission before the legacy write and an
-explicit edit of the original reward. Package 4B remains open for this
-overlap. The experimental opt-in remains confined to sealed synthetic
+Home's Sleep, Work, Mood, and Calories editors and Settings' Missing Scores
+form verify the selected entry before writing. An owned entry uses the same
+completion history transaction as Log. It keeps its ID, Task relationship,
+source, and unrelated fields. Editors that write local noon still do so, with
+verified zone evidence. A value correction keeps the original award-day
+reservation. An intentional Log date edit can release that reservation.
+
+An exclusive IndexedDB admission orders unowned edits against each other
+and against V2 completion writes. It holds until the synchronous legacy
+save or Work journal finishes. The SCWM wrapper uses an immediate save
+inside that admission. Legacy storage and IndexedDB retain their own writes.
+A stale editor must reopen if a Task earned a reward, another tab changed the entry, or Log
+deleted the selected record while its form was open. Existing specific IDs
+and V1's existing first match preserve independent entries. Multiple owned
+matches without a specific ID stay held.
+
+At `457b01d5`, editing a same-day `Calories (2200)` Task reward to `2100` in
+Home created a second V1 record. The same test now verifies the original ID
+and the corrected value through V2, with the V1 history unchanged. A sealed
+V1 Calories row with an explicit amount can be corrected while preserving the
+original raw points as evidence. A bare points-only row, contradictory or
+ambiguous metric evidence, and unversioned receipts without cross-zone proof
+stay held. The experimental opt-in remains confined to sealed synthetic
 fixtures.
 
 On `51541989`, the full lifecycle suite had 215 passes, one intermittent
@@ -751,6 +763,15 @@ expected score. All six new evidence tests passed on the final code, along
 with 19 Chromium component tests and 371 Main regressions. The scoped
 scoring, Gold, journal, recovery, and V2 contract groups passed 1,495 tests
 and reproduced the same 24 failures and one TODO as the pinned baseline.
+
+Standalone-editor qualification used the exact `457b01d5` baseline. It had
+221 lifecycle passes, one Today fixture source change during setup, and two
+Archive TODOs. All 222 existing lifecycle cases passed with the editor change,
+with the same two TODOs. All 10 new editor tests, 19 Chromium component tests,
+and 371 Main regressions passed. The wider regression run had 1,791 passes,
+the same 25 failures as the baseline, and one existing TODO. Package 5 can
+begin with whole-collection synthetic authority. Physical iPhone and
+old-client qualification are still required for production handoff.
 
 ### M02 Task packages
 
@@ -767,10 +788,10 @@ and reproduced the same 24 failures and one TODO as the pinned baseline.
    sealed fixture. Week’s selected date, recurrence, reward day, and
    deletion provenance are covered above.
 4. **Completion history** — Package 4A is verified in synthetic storage
-   for Log date editing and linked completion-to-Trash deletion. Package 4B's
-   versioned Task completion, Log correction, bonus, time-zone replay, and
-   rollback cases are verified in the sealed synthetic fixture. The holds and
-   standalone metric overlap above remain open.
+   for Log date editing and linked completion-to-Trash deletion. Package 4B
+   is verified for supported records in the sealed synthetic fixture. It
+   covers versioned Task rewards, standalone metric corrections, daily bonuses,
+   cross-zone replay, and rollback. The unsupported records above stay held.
 5. **Authority and acceptance** — verify the whole Task collection and
    pending Task journals, including Create/Delete fast paths, ordinary
    snapshot saves and raw fallbacks, idle compaction, history-merge

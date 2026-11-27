@@ -20164,7 +20164,7 @@
     for (const key of ['taskpoints_recovery_write_lock_v1','taskpoints_recovery_attempt_lock_v1','taskpoints_emergency_recovery_hold_v1'])
       if (global.localStorage.getItem(key) !== null) throw new Error('recovery_evidence_blocks_task_write');
     if (fixture.homeTaskId !== undefined && (typeof fixture.homeTaskId !== 'string' || !fixture.homeTaskId
-      || (scoringRead ? !/^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups|week|trash|archive|log)\.html$/.test(global.location.pathname)
+      || (scoringRead ? !/^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups|week|trash|archive|log|settings)\.html$/.test(global.location.pathname)
         : global.location.pathname !== '/experiments/v2-home-plus-one-day/full/index.html')
       || global.localStorage.getItem('taskpoints_storage_guard_incident_v1') !== null))
       throw new Error('owned_home_task_context_or_recovery_conflict');
@@ -20271,7 +20271,8 @@
       || typeof row.id !== 'string' || !row.id || typeof row.title !== 'string'
       || !Number.isFinite(row.points) || typeof row.completedAtISO !== 'string'
       || !Number.isFinite(Date.parse(row.completedAtISO))
-      || (!adopted && Object.keys(row).some(key => !['id','taskId','title','points','completedAtISO','unknown'].includes(key))))
+      || (!adopted && Object.keys(row).some(key => !['id','taskId','title','points','completedAtISO','unknown'].includes(key))
+        && !(zone && evidence.completions.some(saved=>stableJson(saved)===stableJson(row)))))
       || new Set(rows.map(row => row.id)).size !== rows.length
       || (!adopted && new Set(rows.map(row => completionMembershipDay(row,undefined,zone))).size !== rows.length)
       || (adopted && stableJson(rows) !== stableJson(evidence.completions))
@@ -20607,6 +20608,11 @@
     return calendar?.day ?? (seedZone ? completionCalendar(completionInstant(row.completedAtISO),seedZone).day
       : core.dateKey(row.completedAtISO));
   }
+  function completionMembershipDays(row,ledger) {
+    const day=completionMembershipDay(row,ledger.calendars.get(row.id),ledger.zone);
+    const reserved=ledger.awardReservations.get(row.id)?.day;
+    return reserved && reserved!==day ? [day,reserved] : [day];
+  }
   function completionIntent(input) {
     const {actionId, taskId, generation, expectedRevision, source, day, zone, metric} = input || {};
     if (typeof actionId !== 'string' || !/^[\w-]{1,128}$/.test(actionId)
@@ -20679,18 +20685,21 @@
     if (new Set(dependencies.map(row=>row.id)).size!==dependencies.length) throw new Error('owned_metric_dependencies_unverified');
     return dependencies;
   }
-  function calculateOwnedMetric(entry,formula,settings,dependencies) {
+  function calculateOwnedMetric(entry,formula,settings,dependencies,prior,negativeWork) {
     const config={scoringSettings:{[formula]:settings}};
-    const result=core.deriveCompletionPoints(entry,config);
+    // V1's Work form accepts a negative score. Its title parser does not
+    // rederive that row, so V1 keeps the points computed by the form.
+    const result=negativeWork ? {formula,inputs:negativeWork,
+      points:core.workPoints(negativeWork.score,negativeWork.hours,config)} : core.deriveCompletionPoints(entry,config);
     if (result?.formula!==formula || !Number.isFinite(result.points)) throw new Error('owned_metric_result_unverified');
     const bonus = formula==='calories' ? {
-      before:core.computeCalLogBonusPoints(dependencies,config),
+      before:core.computeCalLogBonusPoints(prior ? [...dependencies,prior] : dependencies,config),
       after:core.computeCalLogBonusPoints([...dependencies,entry],config)
     } : null;
     return {inputs:result.inputs,points:result.points,bonus};
   }
-  function captureOwnedMetric(entry,previous,day,zone) {
-    const formula=ownedMetricFormula(entry);
+  function captureOwnedMetric(entry,previous,day,zone,prior,negativeWork) {
+    const formula=negativeWork ? 'work' : ownedMetricFormula(entry);
     if (!formula) return undefined;
     const storage=global.localStorage;
     // V1 can change outside this IndexedDB transaction. Take a checked
@@ -20715,22 +20724,22 @@
     }
     if (stableJson(before)!==stableJson(revision())) throw new Error('owned_metric_source_unverified');
     return {version:1,formula,settings,dependencies,sourceRevision:before[1],
-      ...calculateOwnedMetric(entry,formula,settings,dependencies)};
+      ...calculateOwnedMetric(entry,formula,settings,dependencies,prior,negativeWork)};
   }
-  function applyOwnedMetricReward(entry,evidence,calendar) {
+  function applyOwnedMetricReward(entry,evidence,calendar,prior,negativeWork) {
     if (!calendar) {
       if (evidence!==undefined || core.deriveCompletionPoints(entry,{scoringSettings:{}}))
         throw new Error('owned_completion_requires_metric_scoring');
       return;
     }
-    const formula=ownedMetricFormula(entry);
+    const formula=negativeWork ? 'work' : ownedMetricFormula(entry);
     if (!formula && evidence===undefined) return;
     if (!formula || evidence?.version!==1 || evidence.formula!==formula || !Array.isArray(evidence.dependencies)
       || (evidence.sourceRevision!==null && typeof evidence.sourceRevision!=='string'))
       throw new Error('owned_metric_result_unverified');
     const settings=ownedMetricSettings({[formula]:evidence.settings},formula);
     const dependencies=formula==='calories'?ownedCalorieInputs(evidence.dependencies,calendar.day,calendar.zone):[];
-    const result=calculateOwnedMetric(entry,formula,settings,dependencies);
+    const result=calculateOwnedMetric(entry,formula,settings,dependencies,prior,negativeWork);
     if (stableJson(evidence)!==stableJson({version:1,formula,settings,dependencies,sourceRevision:evidence.sourceRevision,...result}))
       throw new Error('owned_metric_result_unverified');
     entry.points=result.points;
@@ -20805,22 +20814,142 @@
       completedAtISO:at,...(archived ? {source:'task'} : {}),...(week ? {dateKey:intent.day} : {})};
   }
 
+  const OWNED_METRIC_PREFIXES = {sleep:'Sleep Score',work:'Work Score',mood:'Mood Score',calories:'Calories'};
+  const OWNED_METRIC_EDIT = 'home-edit-metric-reward';
+
+  function standaloneMetricRequest(input) {
+    const {formula,day,zone,id,time} = input || {};
+    if (!Object.hasOwn(OWNED_METRIC_PREFIXES,formula) || !Number.isFinite(taskDueDateMillis(day))
+      || typeof zone!=='string' || !zone || !['keep','noon'].includes(time)
+      || (id!==undefined && (typeof id!=='string' || !id)))
+      throw new Error('owned_metric_selection_unverified');
+    return {formula,day,zone,time,...(id!==undefined ? {id} : {})};
+  }
+
+  function standaloneMetricChange(input,formula) {
+    if (formula==='sleep' && Number.isFinite(input?.score) && input.score>=0 && input.score<=100 && Number.isFinite(input.rested))
+      return {score:input.score,rested:input.rested};
+    if (formula==='work' && Number.isFinite(input?.score) && Number.isFinite(input.hours) && input.hours>=0)
+      return {score:input.score,hours:input.hours};
+    if (formula==='mood' && Number.isFinite(input?.score) && (input.notes===undefined || typeof input.notes==='string'))
+      return {score:input.score,...(input.notes===undefined ? {} : {notes:input.notes})};
+    if (formula==='calories' && typeof input?.notTracked==='boolean' && typeof input.bonus==='boolean'
+      && (input.notTracked ? input.calories===null && !input.bonus : Number.isFinite(input.calories) && input.calories>=0))
+      return {calories:input.calories,notTracked:input.notTracked,bonus:input.bonus};
+    throw new Error('invalid_owned_metric_values');
+  }
+
+  function selectStandaloneMetric(request,legacy,rewards) {
+    const matches = row => String(row?.title || '').startsWith(OWNED_METRIC_PREFIXES[request.formula])
+      && completionCalendar(completionInstant(row.completedAtISO),request.zone).day===request.day;
+    if (request.id) {
+      const old=legacy.filter(row=>row?.id===request.id);
+      const current=rewards.filter(row=>row.id===request.id);
+      if (old.length+current.length!==1) throw new Error('owned_metric_selection_changed');
+      const entry=old[0] || current[0];
+      if (!matches(entry)) throw new Error('owned_metric_selection_changed');
+      return {entry,owned:current.length===1};
+    }
+    // A V1 lookup already selects its first matching row. Preserve that
+    // independent entry even if a Task has earned the same metric that day.
+    const entry=legacy.find(matches);
+    if (entry) return {entry,owned:false};
+    const candidates=rewards.filter(matches);
+    if (candidates.length>1) throw new Error('owned_metric_selection_ambiguous');
+    return {entry:candidates[0] || null,owned:candidates.length===1};
+  }
+
+  function explicitStoredMetric(entry,formula) {
+    // A sealed V1 row can provide the original values without claiming an
+    // authored receipt. A bare Calories title with only points is ambiguous.
+    if ((entry.source && !['task','metric','work'].includes(entry.source)) || entry.flexId || entry.habitId || entry.viceId) return false;
+    const classified=core.classifyPersonalMetricCompletion(entry);
+    if (formula==='work' && !classified && Number.isFinite(entry.workHours) && entry.workHours>=0
+      && /^Work Score \(-\d+(?:\.\d+)?\) — Hours /.test(entry.title)
+      && entry.title.endsWith(` — Hours ${entry.workHours}`)) return true;
+    if (classified?.type!==formula) return false;
+    if (formula==='calories' && Number.isFinite(core.parseCaloriesFromTitle(entry.title))
+      && Object.hasOwn(entry,'calories') && entry.calories!==core.parseCaloriesFromTitle(entry.title)) return false;
+    return (formula==='calories' && Number.isFinite(entry.calories) && entry.calories>=0)
+      || ownedMetricFormula(entry)===formula;
+  }
+
+  function hasExplicitStoredMetric(entry) {
+    const formula=core.classifyPersonalMetricCompletion(entry)?.type
+      ?? (String(entry.title).startsWith('Work Score') ? 'work' : null);
+    if (!formula) return false;
+    try { return explicitStoredMetric(entry,formula); }
+    catch (_) { return false; }
+  }
+
+  function correctedStandaloneMetric(prior,intent,calendar,priorCalendar) {
+    const {request,change} = intent;
+    if (!calendar || request.zone!==calendar.zone || (request.id && request.id!==prior.id)
+      || completionCalendar(completionInstant(prior.completedAtISO),request.zone).day!==request.day
+      || !explicitStoredMetric(prior,request.formula))
+      throw new Error('owned_metric_source_unverified');
+    const target=request.time==='noon' ? completionLocalNoon(request.day,request.zone) : priorCalendar;
+    const entry={...prior,completedAtISO:request.time==='noon' ? target.at : prior.completedAtISO};
+    switch (request.formula) {
+      case 'sleep':
+        Object.assign(entry,correctedOwnedSleep(entry,change));
+        break;
+      case 'work':
+        Object.assign(entry,{title:`Work Score (${change.score}) — Hours ${change.hours}`,workHours:change.hours});
+        break;
+      case 'mood':
+        entry.title=`Mood Score (${change.score})`;
+        if (change.notes!==undefined) entry.moodNotes=change.notes;
+        break;
+      case 'calories':
+        Object.assign(entry,{title:change.notTracked ? 'Calories (Not tracked)' : `Calories (${change.calories})`,
+          calories:change.calories,caloriesNotTracked:change.notTracked,calLogBonusEnabled:change.bonus,calLogBonusDisabled:!change.bonus});
+        break;
+    }
+    return {entry,target};
+  }
+
+  function standaloneMetricResult(prior,intent,calendar,priorCalendar) {
+    const {entry,target}=correctedStandaloneMetric(prior,intent,calendar,priorCalendar);
+    const {formula,day,zone}=intent.request;
+    const proofDay={day,zone};
+    const result=applyOwnedMetricReward(entry,intent.metric,proofDay,prior,negativeWorkCorrection(intent));
+    const settings={scoringSettings:{[formula]:intent.metric.settings}};
+    if (formula==='sleep' || formula==='work') {
+      const {score,rested,hours}=intent.change;
+      if (result.inputs.score!==score || (formula==='sleep' ? result.inputs.rested!==rested : result.inputs.hours!==hours))
+        throw new Error('owned_metric_result_unverified');
+      entry.points=formula==='sleep' ? core.sleepPoints(score,rested,settings) : core.workPoints(score,hours,settings);
+    } else if (formula==='mood' ? result.inputs.score!==intent.change.score
+      : intent.change.notTracked ? result.inputs.notTracked!==true : result.inputs.calories!==intent.change.calories) {
+      throw new Error('owned_metric_result_unverified');
+    }
+    return {entry,target};
+  }
+
+  function negativeWorkCorrection(intent) {
+    return intent.request.formula==='work' && intent.change.score<0 ? intent.change : undefined;
+  }
+
   function ownedHistoryIntent(input) {
-    const {actionId,operation,taskId,generation,expectedRevision,completionId,day,zone,sleep,metric} = input || {};
+    const {actionId,operation,taskId,generation,expectedRevision,completionId,day,zone,sleep,metric,request,change} = input || {};
     const edit = operation === 'log-edit-completion-date';
     const correctSleep = operation === 'log-edit-sleep-score';
+    const standalone=operation===OWNED_METRIC_EDIT;
     if (!core.isIsolatedCreatedTaskId('v2-task-'+actionId)
-      || (!edit && !correctSleep && operation !== 'log-delete-completion')
+      || (!edit && !correctSleep && !standalone && operation !== 'log-delete-completion')
       || (taskId !== 't1' && !core.isIsolatedCreatedTaskId(taskId)) || typeof generation !== 'string' || !generation
       || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0
       || typeof completionId !== 'string' || !completionId
       || (edit ? !/^\d{4}-\d{2}-\d{2}$/.test(day ?? '') : day !== undefined)
       || (correctSleep ? !Number.isFinite(sleep?.score) || sleep.score<0 || sleep.score>100 || !Number.isFinite(sleep.rested)
-        : sleep!==undefined || metric!==undefined)
+        : sleep!==undefined || (!standalone && metric!==undefined))
+      || (!standalone && (request!==undefined || change!==undefined))
       || (zone!==undefined && (typeof zone!=='string' || !zone)))
       throw new Error('invalid_owned_history_intent');
     return {actionId,operation,taskId,generation,expectedRevision,completionId,...(edit ? {day} : {}),...(zone!==undefined ? {zone} : {}),
-      ...(correctSleep ? {sleep:{score:sleep.score,rested:sleep.rested}} : {}),...(metric!==undefined ? {metric:clone(metric)} : {})};
+      ...(correctSleep ? {sleep:{score:sleep.score,rested:sleep.rested}} : {}),...(metric!==undefined ? {metric:clone(metric)} : {}),
+      ...(standalone ? {request:standaloneMetricRequest(request),change:standaloneMetricChange(change,request?.formula)} : {})};
   }
 
   function correctedOwnedSleep(prior,{score,rested}) {
@@ -20831,7 +20960,12 @@
     if (!prior || prior.taskId !== intent.taskId || !Number.isFinite(Date.parse(prior.completedAtISO))
       || !Number.isFinite(Date.parse(at)) || new Date(at).toISOString() !== at)
       throw new Error('owned_completion_history_unverified');
-    if ((prior.source && prior.source !== 'task') || (!metric && core.deriveCompletionPoints(prior,{scoringSettings:{}})))
+    if (intent.operation===OWNED_METRIC_EDIT) {
+      const {entry,target}=standaloneMetricResult(prior,intent,calendar,priorCalendar);
+      return {after:task,completionAfter:entry,target};
+    }
+    if ((prior.source && prior.source !== 'task' && !(metric && ['metric','work'].includes(prior.source)))
+      || (!metric && core.deriveCompletionPoints(prior,{scoringSettings:{}})))
       throw new Error('owned_completion_requires_metric_scoring');
     if (intent.operation==='log-edit-sleep-score') {
       if (!metric || !priorCalendar || ownedMetricFormula(prior)!=='sleep') throw new Error('owned_metric_source_unverified');
@@ -20858,7 +20992,7 @@
   }
 
   function ownedHistoryMembershipChanges(journal) {
-    return journal.filter(row=>row.type===OWNED_TASK_HISTORY && row.intent.operation!=='log-edit-sleep-score').flatMap(row=>{
+    return journal.filter(row=>row.type===OWNED_TASK_HISTORY && !['log-edit-sleep-score',OWNED_METRIC_EDIT].includes(row.intent.operation)).flatMap(row=>{
       const days = [row.sourceDay ?? core.dateKey(row.completionBefore.completedAtISO)];
       if (row.completionAfter === null && Number.isFinite(taskDueDateMillis(row.before?.dueDateISO)))
         days.push(row.before.dueDateISO);
@@ -20927,7 +21061,8 @@
         const priorRevision = old?.revision ?? retiredRevisions.get(r.taskId);
         const task = old?.value ?? null;
         const prior = ledger?.rows.get(intent.completionId);
-        if (!meta.logControls || !ledger || !ownedIds.has(r.taskId) || priorRevision === undefined
+        if ((intent.operation===OWNED_METRIC_EDIT ? !meta.completionEvidence : !meta.logControls)
+          || !ledger || !ownedIds.has(r.taskId) || priorRevision === undefined
           || r.id !== 'isolated-task-action:'+intent.actionId || intent.generation !== r.generation || intent.taskId !== r.taskId
           || intent.expectedRevision !== priorRevision || r.priorRevision !== priorRevision
           || stableJson(r.intent) !== stableJson(intent) || stableJson(r.before) !== stableJson(task)
@@ -20938,9 +21073,13 @@
         const sourceDay=calendar && completionMembershipDay(prior.value,ledger.calendars.get(intent.completionId),ledger.zone);
         if (sourceDay!==r.sourceDay) throw new Error('isolated_completion_calendar_unverified');
         const {after,completionAfter,target} = ownedHistoryResult(task,prior.value,intent,r.committedAtISO,calendar,
-          ledger.metrics.has(intent.completionId),ledger.calendars.get(intent.completionId));
+          ledger.metrics.has(intent.completionId) || ledger.legacyMetrics.has(intent.completionId),ledger.calendars.get(intent.completionId));
         if (stableJson([after,completionAfter,target]) !== stableJson([r.after,r.completionAfter,r.targetCalendar]))
           throw new Error('owned_completion_history_receipt_conflict');
+        if (intent.operation===OWNED_METRIC_EDIT) {
+          verifyOwnedMetricDependencies(ledger,intent.metric,intent.request,prior.value.id);
+          ledger.metrics.add(prior.value.id);
+        }
         updateOwnedRewardLedger(ledger,r);
         if (!old) retiredRevisions.set(r.taskId,r.revision);
         else {
@@ -21041,21 +21180,27 @@
   function ownedRewardLedger(meta) {
     const zone=meta.completionEvidence ? meta.completionTimeZone : undefined;
     const seed = validateOwnedScoringSeed(meta.scoringSeed,meta.homeTaskEvidence,meta.homeTaskId,meta.adoptLegacyTrash === true,zone);
-    const ledger = {origins:new Map(seed.map(row=>[row.id,row])),rows:new Map(),days:new Map(),calendars:new Map(),metrics:new Set(),
+    const legacyMetrics=new Set(seed.filter(row=>zone && meta.homeTaskEvidence.completions.some(saved=>stableJson(saved)===stableJson(row))
+      && hasExplicitStoredMetric(row)).map(row=>row.id));
+    const ledger = {origins:new Map(seed.map(row=>[row.id,row])),rows:new Map(),days:new Map(),calendars:new Map(),legacyMetrics,
+      awardReservations:new Map(),metrics:new Set(),
       zone};
     for (const value of seed) setOwnedRewardRow(ledger,value.id,{id:'isolated-score:'+value.id,value,ownerGeneration:meta.generation});
     return ledger;
+  }
+  function verifyOwnedMetricDependencies(ledger,metric,{day,zone},excludeId) {
+    if (metric.formula!=='calories') return;
+    const owned = [...ledger.rows.values()].map(row=>row.value).filter(row=>row.id!==excludeId);
+    const actual = ownedCalorieInputs(owned,day,zone);
+    const recorded = metric.dependencies.filter(row=>ledger.origins.has(row.id));
+    if (stableJson(actual)!==stableJson(recorded)) throw new Error('owned_metric_dependencies_unverified');
   }
   function recordOwnedAward(ledger, receipt) {
     const {intent,completion} = receipt;
     if (ledger.origins.has(completion.id) || ownedAwardConflicts(ledger,intent,receipt.calendar))
       throw new Error('owned_completion_duplicate_reward');
     if (intent.metric) {
-      if (intent.metric.formula==='calories') {
-        const actual = ownedCalorieInputs([...ledger.rows.values()].map(row=>row.value),receipt.calendar.day,receipt.calendar.zone);
-        const recorded = intent.metric.dependencies.filter(row=>ledger.origins.has(row.id));
-        if (stableJson(actual)!==stableJson(recorded)) throw new Error('owned_metric_dependencies_unverified');
-      }
+      verifyOwnedMetricDependencies(ledger,intent.metric,receipt.calendar);
       ledger.metrics.add(completion.id);
     }
     ledger.origins.set(completion.id,completion);
@@ -21067,9 +21212,11 @@
     for (const {value} of ledger.rows.values()) {
       if (value.taskId!==intent.taskId) continue;
       const previous = ledger.calendars.get(value.id);
+      const reservation = ledger.awardReservations.get(value.id);
       // Either view can place these two instants on the same award day.
       if (completionCalendar(completionInstant(value.completedAtISO),calendar.zone).day===calendar.day
         || (previous && completionCalendar(calendar.at,previous.zone).day===previous.day)
+        || (reservation && (calendar.day===reservation.day || completionCalendar(calendar.at,reservation.zone).day===reservation.day))
         || (!previous && ledger.zone && completionCalendar(calendar.at,ledger.zone).day===completionMembershipDay(value,undefined,ledger.zone))) return true;
     }
     return false;
@@ -21079,6 +21226,13 @@
   }
   function updateOwnedRewardLedger(ledger, receipt) {
     const id = receipt.intent.completionId;
+    if (receipt.intent.operation===OWNED_METRIC_EDIT) {
+      // A value correction can normalize the instant to noon in a new zone.
+      // Only an explicit Log date move releases the original award day.
+      const previous=ledger.calendars.get(id),zone=previous?.zone ?? ledger.zone;
+      if (zone && !ledger.awardReservations.has(id)) ledger.awardReservations.set(id,
+        {zone,day:completionMembershipDay(receipt.completionBefore,previous,zone)});
+    } else if (receipt.intent.operation!=='log-edit-sleep-score') ledger.awardReservations.delete(id);
     setOwnedRewardRow(ledger,id,receipt.completionAfter === null ? null
       : ownedRewardRow('isolated-score:'+id,receipt.completionAfter,receipt),receipt.targetCalendar);
   }
@@ -21155,14 +21309,14 @@
     return current.completions;
   }
 
-  async function readIsolatedTaskScoring(useProof) {
+  async function readIsolatedTaskScoring(useProof, serializeLegacyMetricWrite = false) {
     const fixture = ownedTaskContext(false, true);
     const marker = global.localStorage.getItem(OWNED_TASK_FIXTURE);
     if (fixture.homeTaskId !== 't1' || fixture.completionRead !== true)
       throw new Error('isolated_completion_read_not_selected');
     const db = await openOwnedTasks(false, true);
     try {
-      const tx = db.transaction(OWNED_TASK_STORES,'readonly');
+      const tx = db.transaction(OWNED_TASK_STORES,serializeLegacyMetricWrite ? 'readwrite' : 'readonly');
       return await withOwnedRecords(tx, (meta,rows,receipts,completionRows) => {
         const snapshot = verifyOwnedSnapshot(ownedTaskContext(false,true),meta,rows,receipts,completionRows);
         if (snapshot.sourceDrift || meta.mode !== 'owned') throw new Error('isolated_completion_source_conflict');
@@ -21188,8 +21342,8 @@
         const proof = {taskId:meta.homeTaskId,ownedIds:snapshot.ownedIds,tasks:tasks.map(row=>clone(row.value)),generation:meta.generation,
           revision:meta.revision,completions:clone(rewards),deletions:clone(snapshot.deletions),permanentIds:snapshot.permanentIds,assertCurrent,
           ...(meta.completionEvidence ? {scoringSettings} : {}),
-          completionMembershipDay(completion) {
-            return completionMembershipDay(completion,snapshot.rewardLedger.calendars.get(completion.id),snapshot.rewardLedger.zone);
+          completionMembershipDays(completion) {
+            return completionMembershipDays(completion,snapshot.rewardLedger);
           },
           statusReceipts:clone(snapshot.journal.filter(row=>row.type===OWNED_TASK_STATUS)),
           historyMembershipChanges:ownedHistoryMembershipChanges(snapshot.journal),
@@ -21337,6 +21491,60 @@
     return fixture;
   }
 
+  function standaloneMetricContext() {
+    const fixture=ownedTaskContext(false,true);
+    if (!/^\/experiments\/v2-home-plus-one-day\/full\/(index|settings)\.html$/.test(global.location.pathname)
+      || !fixture.completionEvidence || !fixture.completionControls)
+      throw new Error('owned_metric_selection_unverified');
+    return fixture;
+  }
+
+  function inspectIsolatedStandaloneMetric(input, useSelection, expected, liveRows) {
+    standaloneMetricContext();
+    const request=standaloneMetricRequest(input);
+    if (request.zone!==localCompletionTimeZone()) throw new Error('isolated_completion_time_zone_or_selection_changed');
+    // A legacy mutation is synchronous inside this callback. An exclusive
+    // transaction orders it against other admitted edits and V2 writes.
+    return readIsolatedTaskScoring(proof=>{
+      core.clearStateHotCache?.();
+      const legacy=proof.assertCurrent().filter(row=>!proof.ownedIds.includes(row?.taskId));
+      const selected=selectStandaloneMetric(request,legacy,proof.completions);
+      const selection={...selected,request,...(selected.owned ? {basis:proof.historyBasis(selected.entry.id)} : {})};
+      if (expected && stableJson(selection)!==stableJson(expected)) throw new Error('owned_metric_selection_changed');
+      if (liveRows && stableJson(selectStandaloneMetric(request,liveRows(),[]).entry)!==stableJson(selection.entry))
+        throw new Error('owned_metric_selection_changed');
+      return useSelection ? useSelection(selection,proof) : clone(selection);
+    },Boolean(useSelection));
+  }
+
+  async function prepareIsolatedStandaloneCorrection(selection, change, actionId) {
+    const fixture=standaloneMetricContext();
+    if (!selection?.owned || !selection.basis) throw new Error('owned_metric_selection_unverified');
+    const request=standaloneMetricRequest(selection.request);
+    const marker=global.localStorage.getItem(OWNED_TASK_FIXTURE), db=await openOwnedTasks(false,true);
+    try {
+      const snapshot=await readOwnedSnapshot(db,true);
+      core.clearStateHotCache?.();
+      const legacy=ownedScoringSource(fixture,marker,snapshot.meta,snapshot.completionOrigins,snapshot.ownedIds);
+      const intent=ownedHistoryIntent({...selection.basis,actionId,operation:OWNED_METRIC_EDIT,request,change,
+        completionId:selection.entry.id,zone:request.zone});
+      const prior=verifyStandaloneTarget(intent,snapshot,legacy);
+      const calendar=authorCompletionCalendar(nowIso(),true,request.zone);
+      const {entry}=correctedStandaloneMetric(prior,intent,calendar,snapshot.rewardLedger.calendars.get(prior.id));
+      const metric=captureOwnedMetric(entry,snapshot,request.day,request.zone,prior,negativeWorkCorrection(intent));
+      return ownedHistoryIntent({...intent,metric});
+    } finally { db.close(); }
+  }
+
+  function verifyStandaloneTarget(intent,snapshot,legacy) {
+    const selected=selectStandaloneMetric(intent.request,legacy.filter(row=>!snapshot.ownedIds.includes(row?.taskId)),snapshot.completionRewards);
+    const revision=snapshot.rows.find(row=>row.id===intent.taskId)?.ownerRevision ?? snapshot.retiredRevisions.get(intent.taskId);
+    if (!selected.owned || selected.entry.id!==intent.completionId || selected.entry.taskId!==intent.taskId
+      || snapshot.meta.generation!==intent.generation || revision!==intent.expectedRevision)
+      throw new Error('owned_metric_selection_changed');
+    return selected.entry;
+  }
+
   async function prepareIsolatedSleepCorrection(input) {
     const fixture=ownedLogContext(),intent=ownedHistoryIntent(input);
     if (!fixture.completionEvidence || intent.operation!=='log-edit-sleep-score' || intent.metric!==undefined)
@@ -21356,17 +21564,20 @@
   }
 
   async function commitIsolatedTaskHistory(input) {
-    const fixture = ownedLogContext(), intent = ownedHistoryIntent(input);
+    const intent = ownedHistoryIntent(input);
+    const readContext=intent.operation===OWNED_METRIC_EDIT ? standaloneMetricContext : ownedLogContext;
+    const fixture=readContext();
     const marker = global.localStorage.getItem(OWNED_TASK_FIXTURE);
     const id = 'isolated-task-action:'+intent.actionId;
     const db = await openOwnedTasks(false,true);
     try {
       const tx = db.transaction(OWNED_TASK_STORES,'readwrite',{durability:'strict'});
       const result = await withOwnedRecords(tx, (meta,rows,receipts,completionRows) => {
-        const snapshot = verifyOwnedSnapshot(ownedLogContext(),meta,rows,receipts,completionRows);
+        const snapshot = verifyOwnedSnapshot(readContext(),meta,rows,receipts,completionRows);
         if (meta.generation !== intent.generation || !snapshot.ownedIds.includes(intent.taskId))
           throw new Error('owned_task_generation_conflict');
-        ownedScoringSource(fixture,marker,meta,snapshot.completionOrigins,snapshot.ownedIds);
+        if (intent.operation===OWNED_METRIC_EDIT) core.clearStateHotCache?.();
+        const legacy=ownedScoringSource(fixture,marker,meta,snapshot.completionOrigins,snapshot.ownedIds);
         const previous = receipts.find(row=>row.id===id);
         if (previous) {
           if (previous.type!==OWNED_TASK_HISTORY || stableJson(previous.intent)!==stableJson(intent))
@@ -21386,8 +21597,15 @@
           const metric=captureOwnedMetric(correctedOwnedSleep(prior.value,intent.sleep),snapshot,calendar.day,calendar.zone);
           if (stableJson(metric)!==stableJson(intent.metric)) throw new Error('owned_metric_source_changed');
         }
+        if (intent.operation===OWNED_METRIC_EDIT) {
+          const selected=verifyStandaloneTarget(intent,snapshot,legacy);
+          const {entry}=correctedStandaloneMetric(selected,intent,calendar,snapshot.rewardLedger.calendars.get(selected.id));
+          const metric=captureOwnedMetric(entry,snapshot,intent.request.day,intent.zone,selected,negativeWorkCorrection(intent));
+          if (stableJson(metric)!==stableJson(intent.metric)) throw new Error('owned_metric_source_changed');
+        }
         const {after,completionAfter,target} = ownedHistoryResult(before,prior?.value,intent,committedAtISO,calendar,
-          snapshot.rewardLedger.metrics.has(intent.completionId),snapshot.rewardLedger.calendars.get(intent.completionId));
+          snapshot.rewardLedger.metrics.has(intent.completionId) || snapshot.rewardLedger.legacyMetrics.has(intent.completionId),
+          snapshot.rewardLedger.calendars.get(intent.completionId));
         if (stableJson(completionAfter)===stableJson(prior.value) && stableJson(after)===stableJson(before))
           return {unchanged:true};
         const revision = meta.revision+1;
@@ -21823,7 +22041,7 @@
       core.reconcileIsolatedTodayTaskMembership(list,tasks,prior.permanentIds,statusReceipts,historyChanges);
       for (const row of archiveCompletions) core.removeIsolatedTodayTask(list,row.intent.day,row.taskId);
       if (historyChanges.length || meta.completionEvidence) for (const row of rewards)
-        core.removeIsolatedTodayTask(list,completionMembershipDay(row,prior.rewardLedger.calendars.get(row.id),prior.rewardLedger.zone),row.taskId);
+        for (const day of completionMembershipDays(row,prior.rewardLedger)) core.removeIsolatedTodayTask(list,day,row.taskId);
       const candidate = JSON.stringify(list);
       if (candidate !== original) todayAfterTrash = candidate;
     }
@@ -22007,6 +22225,8 @@
     initializeIsolatedTaskOwner,
     readIsolatedOwnedTasks,
     readIsolatedTaskScoring,
+    inspectIsolatedStandaloneMetric,
+    prepareIsolatedStandaloneCorrection,
     prepareIsolatedSleepCorrection,
     commitIsolatedTaskHistory,
     commitIsolatedOwnedTaskCreation,
