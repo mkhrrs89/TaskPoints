@@ -208,3 +208,40 @@ test('Gold correction requires a verified pre-write recovery snapshot',()=>{
   }}});
   h.api.preview();assert.throws(()=>h.api.commit(),/Verified recovery snapshot/);
 });
+
+function crossedSlate(){
+  const s=replacedSlate(), when='2026-11-16';
+  s.players.push({id:'X',name:'X',greed:100});
+  // Preserve a fully paired old NPC slate; now its participants are
+  // redistributed between NPC matchups and the surviving YOU matchup.
+  s.goldLedger=s.goldLedger.filter(e=>!['new1','new2'].includes(e.matchupId));
+  s.goldLedger.push({id:'open-X',type:'opening_balance',playerId:'X',amount:100,balanceAfter:100,dateKey:s.goldEconomy.launchDateKey});
+  s.matchups=s.matchups.filter(m=>!['new1','new2'].includes(m.id));
+  s.goldEconomy.settledMatchupKeys.push('id:new3');
+  function row(id,a,b,sa,sb,balance){
+    s.matchups.push({id,dateKey:when,playerAId:a,playerBId:b,scoreA:sa,scoreB:sb});
+    if(sa!==sb)s.goldLedger.push({id:id+'-m',type:'matchup_margin',matchupId:id,playerId:a,opponentId:b,
+      dateKey:when,amount:1,balanceAfter:balance+1});
+  }
+  row('new1','C','YOU',40,30,111);
+  row('new2','D','F',40,30,90);
+  row('new3','E','X',40,40,111);
+  return s;
+}
+test('replacement slate can cross the retained YOU matchup boundary with a settled tie',()=>{
+  const h=install(crossedSlate()),initial=h.getSaved();
+  const p=h.api.preview();
+  assert.equal(p.stats.orphanGames,2);assert.equal(p.stats.orphanTransactions,6);
+  assert.equal(h.getWrites(),0);
+  h.api.commit();
+  assert.deepEqual(h.getSaved().goldLedger.slice(0,initial.goldLedger.length),initial.goldLedger);
+  assert.equal(h.api.preview().changes.length,0);
+});
+test('crossed slate rejects missing participants, arbitrary outsiders, and wrong current ledger pairs',()=>{
+  const a=crossedSlate();a.matchups=a.matchups.filter(x=>x.id!=='new3');
+  assert.throws(()=>install(a).api.preview(),/Replacement evidence is incomplete/);
+  const b=crossedSlate();b.matchups.find(x=>x.id==='new1').playerBId='Y';b.goldLedger.find(x=>x.id==='new1-m').opponentId='Y';
+  assert.throws(()=>install(b).api.preview(),/Replacement evidence is incomplete/);
+  const c=crossedSlate();c.goldLedger.find(x=>x.id==='new1-m').opponentId='wrong';
+  assert.throws(()=>install(c).api.preview(),/Replacement evidence is incomplete/);
+});

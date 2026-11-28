@@ -102,18 +102,46 @@
       if(d.players.has(winner)||d.players.has(loser))fail(when);
       d.players.add(winner);d.players.add(loser);d.games++;d.transactions+=rows.length;
     }
+    const currentLedger=new Map();
+    for(const e of s.goldLedger){
+      if(e.type!=='matchup_margin'&&e.type!=='matchup_theft')continue;
+      const id=str(e.matchupId);
+      if(!currentLedger.has(id))currentLedger.set(id,[]);
+      currentLedger.get(id).push(e);
+    }
     for(const [when,d] of days){
-      // Require an entire replacement slate, not an isolated missing game.
+      // Require a complete replacement slate, not an isolated missing game.
       if(d.games<2)fail(when);
-      const surviving=new Set();
-      for(const m of matches.filter(m=>m.when===when)){
+      const surviving=new Set(), outsiders=new Set();
+      const daily=matches.filter(m=>m.when===when);
+      for(const m of daily){
         const a=d.players.has(m.a),b=d.players.has(m.b);
         if(!a&&!b)continue;
-        if(!a||!b||surviving.has(m.a)||surviving.has(m.b)||!m.gameId||
+        if(surviving.has(m.a)||surviving.has(m.b)||!m.gameId||
           !settled.has('id:'+m.gameId))fail(when);
+        const rows=currentLedger.get(m.gameId)||[];
+        // The saved transactions may have an old winner after a score edit,
+        // but must refer to the same participants and date as the surviving game.
+        if(rows.some(e=>dateKey(e)!==when||
+          !((str(e.playerId)===m.a&&str(e.opponentId)===m.b)||
+            (str(e.playerId)===m.b&&str(e.opponentId)===m.a))))fail(when);
+        if(!rows.length&&m.sa!==m.sb)fail(when);
         surviving.add(m.a);surviving.add(m.b);
+        if(!a)outsiders.add(m.a);
+        if(!b)outsiders.add(m.b);
       }
-      if(surviving.size!==d.players.size)fail(when);
+      if([...d.players].some(p=>!surviving.has(p)))fail(when);
+      if(outsiders.size){
+        // A daily NPC re-pairing can move the old YOU opponent into the NPC
+        // pool and a former NPC opponent into the retained YOU matchup. Permit
+        // exactly this two-player boundary exchange, never an arbitrary gap.
+        if(outsiders.size!==2||!outsiders.has('YOU'))fail(when);
+        const all=new Set();
+        for(const m of daily){
+          if(all.has(m.a)||all.has(m.b)||!m.gameId||!settled.has('id:'+m.gameId))fail(when);
+          all.add(m.a);all.add(m.b);
+        }
+      }
     }
     return Array.from(days,([dateKey,d])=>({dateKey,games:d.games,transactions:d.transactions}))
       .sort((a,b)=>a.dateKey.localeCompare(b.dateKey));
