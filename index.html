@@ -4681,9 +4681,43 @@ function simulateToday() {
   markHomeMorningStartupPhase('schedule-ready');
 
   const todaysSchedule = state.schedule.find(d => d && d.date === todayKey);
-  const todaysPairs = todaysSchedule && Array.isArray(todaysSchedule.matchups)
+  const plannedPairs = todaysSchedule && Array.isArray(todaysSchedule.matchups)
     ? todaysSchedule.matchups
     : [];
+
+  // Reserve authoritative saved games, including unfinished user games,
+  // before admitting new pairings. A stale schedule ID or reversed pair
+  // must never attach scores/effects to different participants.
+  const storedToday = [];
+  const reservedIds = new Set(), reservedPlayers = new Set();
+  const stableIdOf = row => String(row?.id || row?.matchupId || '');
+  const participantOf = (row, side) => String(row?.['player' + side + 'Id'] || '');
+  const reserve = row => {
+    const a = participantOf(row, 'A'), b = participantOf(row, 'B'), id = stableIdOf(row);
+    if (!a || !b || a === b || reservedPlayers.has(a) || reservedPlayers.has(b) ||
+        (id && reservedIds.has(id))) return false;
+    reservedPlayers.add(a); reservedPlayers.add(b);
+    if (id) reservedIds.add(id);
+    return true;
+  };
+  for (let index = 0; index < state.matchups.length; index++) {
+    const row = state.matchups[index];
+    if (!row || getMatchupDateKeyLocal(row) !== todayKey) continue;
+    if (!reserve(row)) {
+      // Never resolve incompatible durable pairings by randomly scoring.
+      console.warn('Daily simulation stopped: conflicting saved games', todayKey);
+      markHomeMorningStartupPhase('simulation-finished', { saved: false, conflict: true });
+      return;
+    }
+    storedToday.push({ row, index });
+  }
+  const todaysPairs = storedToday.map(entry => entry.row);
+  for (const row of plannedPairs) {
+    if (reserve(row)) todaysPairs.push(row);
+  }
+  if (todaysSchedule && JSON.stringify(todaysPairs) !== JSON.stringify(plannedPairs)) {
+    todaysSchedule.matchups = todaysPairs.slice();
+  }
 
   if (!todaysPairs.length) {
     // A legitimate bye/off-day needs no daily score write. Persist only if
@@ -4724,8 +4758,8 @@ for (const entry of state.gameHistory) {
   if (id && !todayHistoryByPlayer.has(id)) todayHistoryByPlayer.set(id, entry);
 }
 const recordedNpcScores = new Map();
-for (const row of state.matchups) {
-  if (getMatchupDateKeyLocal(row) !== todayKey || !hasRecordedMatchupScore(row)) continue;
+for (const { row } of storedToday) {
+  // Preserve an NPC score already recorded in an unfinished user game.
   for (const side of ['A', 'B']) {
     const id = row['player' + side + 'Id'];
     const raw = row['score' + side] ?? row['player' + side + 'Score'];
@@ -4768,6 +4802,17 @@ const scoreNpcParticipants = () => {
       state.gameHistory.push(historyRow);
       todayHistoryByPlayer.set(String(id), historyRow);
     }
+    return;
+  }
+
+  // An interrupted simulation may have saved the score before the game.
+  // Reuse the durable score and effects rather than rolling again.
+  const previousHistory = todayHistoryByPlayer.get(String(id));
+  const previousScore = previousHistory?.score ?? previousHistory?.points ?? previousHistory?.total;
+  if (previousScore != null && previousScore !== '' && Number.isFinite(Number(previousScore))) {
+    scoresById[id] = Number(previousScore);
+    effectsById[id] = previousHistory.effects ?? null;
+    ensureOpponentDripSchedule(todayKey, id, scoresById[id]);
     return;
   }
 
@@ -4859,12 +4904,9 @@ effectsById[id] = capturedEffects;
       if (row && getMatchupDateKeyLocal(row) === todayKey) rememberTodayMatchup(row, index);
     }
   };
-  for (let index = 0; index < state.matchups.length; index++) {
-    const row = state.matchups[index];
-    if (row && getMatchupDateKeyLocal(row) === todayKey) {
-      todayMatchupIndexes.push(index);
-      rememberTodayMatchup(row, index);
-    }
+  for (const { row, index } of storedToday) {
+    todayMatchupIndexes.push(index);
+    rememberTodayMatchup(row, index);
   }
 
   todaysPairs.forEach(pair => {
@@ -4896,6 +4938,13 @@ playerBEffects: effectsById[pair.playerBId] ?? null
     );
     if (Number.isFinite(existingIndex)) {
       const existing = state.matchups[existingIndex];
+      // Completed games are immutable here; explicit user score edits
+      // retain their own existing path.
+      if (hasRecordedMatchupScore(existing)) return;
+      if (existing.playerAId !== matchup.playerAId || existing.playerBId !== matchup.playerBId) {
+        console.warn('Skipped conflicting daily matchup', todayKey, stableId);
+        return;
+      }
       const oldId = String(existing.id || existing.matchupId || '');
       const oldPair = matchupPairKey(existing);
       const updatedMatchup = {
@@ -4990,6 +5039,15 @@ function ensureTodayMatchupsFromHistory(){
     : [];
 
   if (!todaysPairs.length) return false;
+  const recoveryPlayers = new Set(), recoveryIds = new Set();
+  for (const pair of todaysPairs) {
+    const a = String(pair?.playerAId || ''), b = String(pair?.playerBId || '');
+    const id = String(pair?.id || pair?.matchupId || '');
+    if (!a || !b || a === b || recoveryPlayers.has(a) || recoveryPlayers.has(b) ||
+        (id && recoveryIds.has(id))) return false;
+    recoveryPlayers.add(a); recoveryPlayers.add(b);
+    if (id) recoveryIds.add(id);
+  }
 
   // If matchups already exist, do nothing
   const alreadyHas = state.matchups.some(m => {

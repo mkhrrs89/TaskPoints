@@ -15,7 +15,7 @@ const scoreFor = id => id === 'YOU' ? 12 : 55 + Number(id.split('-')[1]);
 const effectFor = id => ({ greedRating: 25, npcId: id });
 
 function seed() {
-  const players = Array.from({ length: 8 }, (_, i) =>
+  const players = Array.from({ length: 9 }, (_, i) =>
     ({ id: 'NPC-' + i, name: 'Player ' + i, greed: 25, active: true }));
   const matchups = Array.from({ length: 6500 }, (_, i) => ({
     id: 'prior-' + i, dateKey: '2026-11-10',
@@ -33,7 +33,7 @@ function seed() {
     { id: 'stable', playerAId: 'NPC-1', playerBId: 'NPC-2', matchupType: 'playoff' },
     { id: 'new-3', playerAId: 'NPC-2', playerBId: 'NPC-3', matchupType: 'regular' },
     { id: 'new-4', playerAId: 'NPC-4', playerBId: 'NPC-5', matchupType: 'regular' },
-    { id: 'new-5', playerAId: 'NPC-6', playerBId: 'YOU', matchupType: 'regular' }
+    { id: 'new-5', playerAId: 'NPC-8', playerBId: 'YOU', matchupType: 'regular' }
   ];
   const gameHistory = Array.from({ length: 5000 }, (_, i) => ({
     id: 'history-' + i, date: '2026-11-10', playerId: 'NPC-' + (i % 8), score: 50
@@ -48,41 +48,25 @@ function seed() {
 
 function expectedMatchups(state) {
   const existing = clone(state.matchups);
-  const pairs = state.schedule[0].matchups;
   const names = new Map(state.players.map(p => [p.id, p.name]));
-  for (const pair of pairs) {
-    const candidate = {
+  // Saved rows win against reversed pairs and colliding IDs.
+  // Only the three remaining disjoint pairings may be created.
+  for (const pair of state.schedule[0].matchups.slice(2)) {
+    const score = id => id === 'NPC-3' ? 31 : scoreFor(id);
+    const effects = id => id === 'YOU' ? null : id === 'NPC-3' ? { previous: true } : effectFor(id);
+    existing.push({
       ...pair, id: pair.id, date: day, dateKey: day,
+      playerAId: pair.playerAId, playerBId: pair.playerBId,
       playerAName: names.get(pair.playerAId) || (pair.playerAId === 'YOU' ? 'You' : 'Unknown'),
       playerBName: names.get(pair.playerBId) || (pair.playerBId === 'YOU' ? 'You' : 'Unknown'),
-      scoreA: scoreFor(pair.playerAId), scoreB: scoreFor(pair.playerBId),
-      playerAEffects: pair.playerAId === 'YOU' ? null : effectFor(pair.playerAId),
-      playerBEffects: pair.playerBId === 'YOU' ? null : effectFor(pair.playerBId)
-    };
-    const id = String(candidate.id || candidate.matchupId || '');
-    const index = existing.findIndex(m => {
-      if (!m || String(m.dateKey || m.date || '') !== day) return false;
-      if (id && String(m.id || m.matchupId || '') === id) return true;
-      const a = String(m.playerAId || '');
-      const b = String(m.playerBId || '');
-      return [a, b].sort().join('|') ===
-        [String(candidate.playerAId), String(candidate.playerBId)].sort().join('|')
-        && String(m.matchupType || '') === String(candidate.matchupType || '');
+      scoreA: score(pair.playerAId), scoreB: score(pair.playerBId),
+      playerAEffects: effects(pair.playerAId), playerBEffects: effects(pair.playerBId)
     });
-    if (index < 0) existing.push(candidate);
-    else {
-      const prior = existing[index];
-      existing[index] = {
-        ...candidate, ...prior,
-        playerAEffects: prior.playerAEffects ?? candidate.playerAEffects ?? null,
-        playerBEffects: prior.playerBEffects ?? candidate.playerBEffects ?? null
-      };
-    }
   }
   return existing;
 }
 
-test('daily matchup index reproduces the original earliest ID-or-pair matching with 6500 historical games', () => {
+test('daily matchup index preserves authoritative games despite stale IDs and reversed pairs across 6500 historical games', () => {
   const input = seed();
   const expected = expectedMatchups(input);
   const state = clone(input);
@@ -114,14 +98,14 @@ test('daily matchup index reproduces the original earliest ID-or-pair matching w
   vm.createContext(context);
   vm.runInContext(simulateSource + String.fromCharCode(10) + 'simulateToday();', context);
   assert.deepEqual(clone(state.matchups), expected,
-    'all same-day replacements and insertion orders must match legacy findIndex behavior');
+    'stored games remain byte-for-byte and only unoccupied scheduled pairs are added');
   assert.equal(saves, 1, 'new daily slate continues to save exactly once');
   assert.equal(generatedSchedules, 1);
   assert.ok(dateReads <= input.matchups.length * 2 + 100,
     'date lookups must scale with historic rows, not historic rows times each new game');
-  assert.ok(state.gameHistory.some(g => g.id === 'existing-today' && g.effects?.npcId === 'NPC-3'),
-    'existing today history receives updated effects');
-  assert.equal(state.gameHistory.filter(g => g.date === day).length, 7,
+  assert.ok(state.gameHistory.some(g => g.id === 'existing-today' && g.score === 31 && g.effects?.previous === true),
+    'interrupted simulation preserves original NPC score and effects');
+  assert.equal(state.gameHistory.filter(g => g.date === day).length, 9,
     'each NPC gets exactly one today record; old records stay intact');
   assert.equal(input.gameHistory.length, 5001, 'seed was not mutated by simulation');
 });
@@ -140,7 +124,7 @@ test('the one-pass matchup index does not remove season reconciliation or protec
 test('incomplete saved user matchup fills blank scores without replacing its opponent or Gold history', () => {
   const state = seed();
   const storedUser = {
-    id: 'new-5', dateKey: day, playerAId: 'NPC-6', playerBId: 'YOU',
+    id: 'new-5', dateKey: day, playerAId: 'NPC-8', playerBId: 'YOU',
     matchupType: 'regular', scoreA: null, scoreB: null,
     seriesId: 'keep-existing-series', recordedAtISO: null
   };
@@ -180,7 +164,8 @@ test('incomplete saved user matchup fills blank scores without replacing its opp
   assert.equal(userRows.length, 1, 'existing user game is completed, not duplicated');
   assert.equal(userRows[0].id, 'new-5');
   assert.equal(userRows[0].seriesId, 'keep-existing-series');
-  assert.equal(userRows[0].scoreA, scoreFor('NPC-6'));
+  assert.equal(userRows[0].scoreA, scoreFor('NPC-8'));
+  assert.equal(userRows[0].playerAId, 'NPC-8');
   assert.equal(userRows[0].scoreB, scoreFor('YOU'));
   assert.equal(saves, 1);
   const npcExisting = state.matchups.find(row => row.id === 'prior-today');
@@ -195,4 +180,38 @@ test('morning score generation prepares and reuses one canonical standing table'
   assert.match(simulateSource, /markHomeMorningStartupPhase\('gold-preflight-start'\)/);
   assert.match(simulateSource, /markHomeMorningStartupPhase\('gold-preflight-finished'\)/);
   assert.match(simulateSource, /markHomeMorningStartupPhase\('rankings-ready'\)/);
+});
+
+test('conflicting durable user pairing stops before scoring or saving', () => {
+  const state = seed();
+  state.matchups.push({ id:'existing-user', dateKey:day, playerAId:'NPC-6',
+    playerBId:'YOU', scoreA:null, scoreB:null });
+  const original = clone(state);
+  const context = { state, console:{warn(){},error(){}}, Date, JSON, Map, Set, Math, String, Number, Array,
+    getGameDayKey:()=>day, getMatchupDateKeyLocal:r=>r?.dateKey || r?.date || '',
+    markHomeMorningStartupPhase(){}, ensureUpcomingSchedule(){},
+    computeTodayPoints(){throw Error('must not compute scores');},
+    save(){throw Error('must not save conflicting state');} };
+  context.window=context;
+  vm.createContext(context);
+  vm.runInContext(simulateSource+'\nsimulateToday();',context);
+  assert.deepEqual(clone(state),original);
+});
+test('a partially saved NPC score is reused for the correct user opponent', () => {
+  const state=seed();
+  state.matchups.push({id:'new-5',dateKey:day,playerAId:'NPC-8',playerBId:'YOU',
+    matchupType:'regular',scoreA:63,scoreB:null,playerAEffects:{original:true}});
+  let saves=0;
+  const context={state,console:{warn(){},error(){}},Date,JSON,Math,Map,Set,String,Number,Array,
+    markHomeMorningStartupPhase(){},getGameDayKey:()=>day,getMatchupDateKeyLocal:r=>r?.dateKey||r?.date||'',
+    getHistoryDateKey:r=>r?.date||r?.dateKey||'',getYouName:()=> 'You',
+    hasRecordedMatchupScore:r=>Number.isFinite(r?.scoreA)&&Number.isFinite(r?.scoreB),
+    ensureUpcomingSchedule(){},computeTodayPoints:()=>12,ensureOpponentDripSchedule(){},
+    simulateAiScoreForPlayer(p,d,options){assert.notEqual(p.id,'NPC-8');options.captureEffects(effectFor(p.id));return scoreFor(p.id);},
+    makeId:()=> 'new-history',TaskPointsCore:{withGoldNpcScoringBatch(s,fn){return fn();}},save(){saves++;return true;}};
+  context.window=context;vm.createContext(context);
+  vm.runInContext(simulateSource+'\nsimulateToday();',context);
+  const row=state.matchups.find(r=>r.id==='new-5');
+  assert.equal(row.scoreA,63);assert.equal(row.scoreB,12);
+  assert.deepEqual(clone(row.playerAEffects),{original:true});assert.equal(saves,1);
 });
