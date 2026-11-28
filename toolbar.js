@@ -3517,6 +3517,17 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.hidden=!window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.();
     btn.addEventListener('click',()=>downloadCollectionPackage(true));
   });
+  document.querySelectorAll('[data-collection-forward-key]').forEach(btn=>{
+    btn.hidden=!window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.();
+    btn.addEventListener('click',async()=>{
+      try {
+        const destination=prompt('Paste the code shown in the disposable V1 destination. This frozen checkpoint can authorize only one destination.');
+        if (!destination) return;
+        const authorization=await window.TaskPointsStateRuntimeV2.authorizeIsolatedCollectionDestination(destination.trim());
+        prompt('Copy this authorization directly to the destination that showed the code.',authorization);
+      } catch (error) { alert(`Handoff authorization unavailable. ${error.message}`); }
+    });
+  });
   document.querySelectorAll('[data-collection-task-reset]').forEach(btn=>{
     btn.hidden=!window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.();
     btn.addEventListener('click',()=>runCollectionRecovery('reset-task-collection')

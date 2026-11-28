@@ -8329,3 +8329,136 @@ test('Authoritative recovery Settings Merge explicitly restores one verified del
   assert.equal((await recoveryCommit(page,recovery.intent)).replayed,true);
   await assert.rejects(commitCompletion(page,add),/generation_conflict/);
 });
+
+test('Detached V1 re-admission verifies the frozen source, retains newer Notes and resumes a committed handoff',async t=>{
+  const {page,context}=await stageTaskCollection(t);
+  await admitCollection(page);
+  await page.reload();
+  await waitCollectionHome(page);
+  const stale=await page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskCompletion('home','alpha'));
+  await settleRollbackSourceMirror(page);
+  const checkpoint=await page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskCollectionPackage(true));
+  assert.equal(Object.hasOwn(checkpoint.authority.publicKey,'d'),false);
+  const profile=await completionProfile(t);
+  let loader=await rollbackLoader(profile.context);
+  assert.deepEqual(await restoreCompletionCheckpoint(loader,checkpoint),{verified:true,checksum:checkpoint.checksum});
+  await selectCollectionPackage(loader,checkpoint);
+  await loader.locator('#showDestinationCode').click();
+  await loader.waitForFunction(()=>document.getElementById('destinationCode').textContent.length>0);
+  const destination=await loader.locator('#destinationCode').textContent();
+  const sourceSettings=await openScoringPage(context,'settings.html');
+  sourceSettings.removeAllListeners('dialog');
+  let key;
+  sourceSettings.on('dialog',async dialog=>{
+    if (dialog.message().startsWith('Paste the code')) await dialog.accept(destination);
+    else { key=dialog.defaultValue(); await dialog.accept(); }
+  });
+  const grantButton=sourceSettings.locator('[data-collection-forward-key]');
+  await grantButton.locator('xpath=ancestor::details[1]/summary').click();
+  await grantButton.click();
+  for (let i=0;i<45&&!key;i++) await new Promise(resolve=>setTimeout(resolve,100));
+  assert.match(key,/^[a-f0-9]{128}$/);
+  assert.equal(await page.evaluate(destination=>TaskPointsStateRuntimeV2.authorizeIsolatedCollectionDestination(destination),destination),key);
+  const readmit=(target,source=checkpoint,token=key)=>target.evaluate(([source,token])=>
+    TaskPointsStateRuntimeV2.readmitIsolatedDetachedCollection(source,token),[source,token]);
+  const extra=await browser.newContext({serviceWorkers:'block',timezoneId:'America/New_York'});
+  t.after(()=>extra.close());
+  await configureContext(extra);
+  const otherLoader=await rollbackLoader(extra);
+  await restoreCompletionCheckpoint(otherLoader,checkpoint);
+  const otherDestination=await otherLoader.evaluate(pkg=>TaskPointsStateRuntimeV2.getIsolatedCollectionDestination(pkg),checkpoint);
+  assert.notEqual(destination,otherDestination);
+  await assert.rejects(page.evaluate(id=>TaskPointsStateRuntimeV2.authorizeIsolatedCollectionDestination(id),otherDestination),/destination_already_authorized/);
+  await assert.rejects(readmit(otherLoader),/collection_handoff_source_unverified/);
+  const initial=await loader.evaluate(()=>Object.entries(localStorage).sort());
+  const wrongKey=(key.startsWith('0') ? '1' : '0')+key.slice(1);
+  await assert.rejects(readmit(loader,checkpoint,wrongKey),/collection_handoff_source_unverified/);
+  const rehashed=await loader.evaluate(async checkpoint=>{
+    const {checksum,...payload}=checkpoint;
+    payload.expected.notes='Synthetic alteration with recomputed checksum';
+    const bytes=new TextEncoder().encode(JSON.stringify(payload));
+    const digest=await crypto.subtle.digest('SHA-256',bytes);
+    return {...payload,checksum:`sha256:${Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('')}:${bytes.length}`};
+  },checkpoint);
+  assert.equal(await loader.evaluate(pkg=>TaskPointsStateRuntimeV2.verifyIsolatedCollectionPackage(pkg).then(proof=>proof.verified),rehashed),true);
+  await assert.rejects(readmit(loader,rehashed),/collection_handoff_source_unverified/);
+  assert.deepEqual(await loader.evaluate(()=>Object.entries(localStorage).sort()),initial);
+  // A different V1 edit survives an unsuccessful handoff. Return the Task to
+  // its original value independently before exercising the verified path.
+  await loader.evaluate(()=>{
+    const core=TaskPointsCore,state=core.readTaskPointsStoredState();
+    state.tasks.find(row=>row.id==='alpha').dueDateISO='2026-11-25';
+    core.writeTaskPointsStoredState(state);
+    localStorage.setItem('taskpoints_notes_v1','Synthetic Notes saved by V1 after rollback');
+  });
+  const stalePeer=await profile.context.newPage();
+  await stalePeer.goto(origin+prefix+'seed.html');
+  await stalePeer.addScriptTag({url:'/scoring_core.js'});
+  await stalePeer.addScriptTag({url:'/task_mutation_journal.js'});
+  await assert.rejects(readmit(loader),/collection_handoff_destination_changed/);
+  assert.equal((await canonicalSnapshot(loader)).tasks.find(row=>row.id==='alpha').dueDateISO,'2026-11-25');
+  assert.equal(await loader.evaluate(k=>localStorage.getItem(k),collectionFixtureKey),null);
+  await loader.evaluate(raw=>localStorage.setItem('taskpoints_v1',raw),checkpoint.raw);
+  await loader.evaluate(()=>{
+    const core=TaskPointsCore;
+    const task=core.readTaskPointsStoredState().tasks.find(row=>row.id==='alpha');
+    core.journalTaskMutation({task:{...task,title:'Synthetic title saved by V1 after rollback',points:9,
+      importance:'Low',tags:['synthetic-handoff']}});
+  });
+  // Interrupt before commit, then after commit but before writer release.
+  await loader.evaluate(()=>{
+    const add=IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add=function(row){
+      if (window.failHandoff && row?.intent?.operation==='readmit-detached-collection')
+        throw new DOMException('Synthetic handoff quota','QuotaExceededError');
+      return add.apply(this,arguments);
+    };
+    window.failHandoff=true;
+  });
+  await assert.rejects(readmit(loader),/Synthetic handoff quota/);
+  assert.ok(await loader.evaluate(k=>localStorage.getItem(k)!==null,collectionRecoveryHold));
+  await assert.rejects(stalePeer.evaluate(()=>TaskPointsCore.journalTaskMutation({task:{id:'alpha',title:'Synthetic stale peer'}})),
+    /Finish verified collection recovery/);
+  await loader.evaluate(key=>{
+    window.failHandoff=false;
+    const remove=Storage.prototype.removeItem;
+    Storage.prototype.removeItem=function(name){
+      if (name===key) throw Error('Synthetic handoff interrupted before release');
+      return remove.call(this,name);
+    };
+  },collectionRecoveryHold);
+  await assert.rejects(readmit(loader),/Synthetic handoff interrupted before release/);
+  const fresh=await profile.restart();
+  loader=await rollbackLoader(fresh);
+  allowRecoveryDialogs(loader);
+  await selectCollectionPackage(loader,checkpoint);
+  await loader.locator('#forwardCollectionKey').fill(key);
+  await loader.locator('#readmitCollection').click();
+  await loader.locator('#collectionRecoveryStatus').getByText(/V2 ownership verified/).waitFor();
+  assert.equal(await loader.evaluate(k=>localStorage.getItem(k),collectionRecoveryHold),null);
+  const [first,repeat]=await Promise.all([readmit(loader),readmit(await rollbackLoader(fresh))]);
+  assert.deepEqual(first,repeat);
+  assert.notEqual(first.receipt.nextGeneration,checkpoint.generation);
+  const home=await openScoringPage(fresh,'index.html');
+  await waitCollectionHome(home);
+  assert.deepEqual(await verifiedRewards(home),checkpoint.completions);
+  const recoveredTask=collectionTask(await owned(home),'alpha');
+  assert.deepEqual([recoveredTask.title,recoveredTask.points,recoveredTask.importance,recoveredTask.tags],
+    ['Synthetic title saved by V1 after rollback',9,'Low',['synthetic-handoff']]);
+  assert.equal(await home.evaluate(()=>localStorage.getItem('taskpoints_notes_v1')),'Synthetic Notes saved by V1 after rollback');
+  await assert.rejects(commitCompletion(home,stale),/generation_conflict/);
+  const editor=await openCreatedEditor(home,'alpha');
+  await editor.locator('[data-field="title"]').fill('Synthetic edit after handoff');
+  await editor.locator('[data-task-action="task-save"]').click();
+  await taskCard(home,'alpha').locator('.task-title').filter({hasText:'Synthetic edit after handoff'}).waitFor();
+  assert.equal(collectionTask(await owned(home),'alpha').title,'Synthetic edit after handoff');
+  await settleRollbackSourceMirror(home);
+  const second=await home.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskCollectionPackage(true));
+  const blank=await browser.newContext({serviceWorkers:'block',timezoneId:'America/New_York'});
+  t.after(()=>blank.close());
+  await configureContext(blank);
+  const again=await rollbackLoader(blank);
+  assert.deepEqual(await restoreCompletionCheckpoint(again,second),{verified:true,checksum:second.checksum});
+  assert.equal((await canonicalSnapshot(again)).tasks.find(row=>row.id==='alpha').title,'Synthetic edit after handoff');
+  assert.equal(await again.evaluate(()=>localStorage.getItem('taskpoints_notes_v1')),'Synthetic Notes saved by V1 after rollback');
+});

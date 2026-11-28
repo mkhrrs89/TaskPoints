@@ -149,6 +149,7 @@
   }
 
   function assertIsolatedCollectionJournalWrite(mutation, pending) {
+    if (isDetachedCollectionRecoveryPending()) throw new Error('Finish verified collection recovery before changing the Task journal.');
     if (!isIsolatedTaskCollectionSelected()) return;
     if (mutation.task || mutation.taskUpdates?.length) throw new Error('Task journal writes require verified V2 collection ownership.');
     const upserts=[...(mutation.completionUpserts || []),mutation.completionUpsert].filter(Boolean);

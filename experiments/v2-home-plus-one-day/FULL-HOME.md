@@ -956,12 +956,46 @@ and one TODO on both commits.
   Task data. Full reward-history merges still need multiple-reward, metric,
   and downstream Game, Matchup, Season and Gold handling. The remaining raw
   and sidecar writer paths and uninstrumented clients remain unqualified.
-- [ ] 5C still needs forward V2 re-admission following detached V1 recovery
-  and reconciliation of Task or reward edits made in that V1 profile. In-place
-  recovery preserves newer independent V1 data, including the tested Notes
-  edit. The old detached checkpoint alone cannot establish who owns newer
-  edits. Recovery from an off-origin live backup and physical iPhone and
-  old-client handoff qualification remain separate.
+- [ ] In-place recovery preserves newer independent V1 data, including the
+  tested Notes edit. The detached handoff below narrows the remaining 5C work
+  to unsupported V1 edits and live backups. Physical iPhone and old-client
+  qualification remain separate.
+
+**Package 5C — return from detached V1**
+
+- [x] A newly frozen checkpoint preserves the original Task ledger and
+  receipts. After restoring it into a disposable V1 profile, that profile
+  displays a randomly generated destination code. The frozen source signs
+  one authorization for that checkpoint and destination. Its private key
+  stays in the source database. Copy the authorization directly from the
+  frozen source. A file with a valid recomputed checksum or a second profile
+  restored from the same file cannot use that authorization.
+- [x] The detached loader replays the original authority, checks the local
+  restore receipt, generation, deletion evidence and current protected data,
+  and seals a new generation through the existing recovery receipt chain.
+  The instrumented V1 writer hold remains until readback and can survive
+  quota exhaustion, an interrupted release and restart. A repeated handoff
+  returns the same receipt. The readmitted owner can save and roll back again.
+- [x] The handoff reconciles supported post-checkpoint V1 edits to title,
+  importance, tags and configured points, including an application Task
+  journal still pending at the handoff. Independent data such as newer Notes
+  stays in place. An unsupported protected edit stops the handoff and remains
+  intact for review.
+- [ ] Recovery from an off-origin live backup, reconciliation of V1 Task
+  creation/deletion, scheduling/status, and reward changes, plus the physical
+  iPhone and uninstrumented old-client handoff still need qualification.
+  Older frozen checkpoints retain their detached V1 restore path.
+
+Package 5B's full-profile import/reset, broader reward recovery, native
+secondary/emergency/vault/rolling recovery and raw sidecar writer work remain
+open. M02's production status is unchanged.
+
+The browser suite passed all 16 cases. The immediate baseline `2594ff47`
+passed 14 of 15 on its combined run. Its source-mirror verification failure
+passed when rerun separately. The new handoff test also passed on its focused
+rerun with all four V1 field assertions. All 47 focused contracts and 19
+component tests passed. The 1,719-test batch had 1,693 passes, the same 25
+failures and one TODO as `22be4f84`.
 
 Against `22be4f84`, all 12 original browser cases passed on both revisions.
 The candidate passed all 15 browser cases, with a focused rerun of the three
