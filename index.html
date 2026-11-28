@@ -15722,6 +15722,8 @@ function getTaskPointsExportSnapshot() {
 }
 
 async function applyImportedState(rootOrPayload){
+  if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.() && window.isCollectionRecoveryPackage?.(rootOrPayload))
+    return window.runCollectionRecovery('restore-task-fields',rootOrPayload);
   if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.())
     throw new Error('Use a verified detached rollback before importing into this collection.');
   const fullPayload = rootOrPayload?.exportType === "taskpoints_full_backup" && rootOrPayload?.state ? rootOrPayload : null;
@@ -15783,6 +15785,8 @@ async function applyImportedState(rootOrPayload){
 }
 
 function importFile(ev){
+  if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.() && window.importCollectionRecoveryFile)
+    return window.importCollectionRecoveryFile(ev);
   const f = ev.target.files?.[0];
   if (!f) return;
 

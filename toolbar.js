@@ -3295,6 +3295,9 @@ async function applyImportedStateFallback(rootOrPayload) {
 }
 
 async function importFileFallback(ev) {
+  if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.() && /\/(index|settings)\.html$/.test(location.pathname)) {
+    return importCollectionRecoveryFile(ev);
+  }
   if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.()) {
     ev.target.value='';
     return alert('Use a verified detached rollback before importing into this collection.');
@@ -3361,6 +3364,12 @@ async function importFileFallback(ev) {
 }
 
 function importPasteFallback() {
+  if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.() && /\/(index|settings)\.html$/.test(location.pathname)) {
+    const text=prompt('Paste a verified TaskPoints collection package:');
+    if (text) Promise.resolve().then(()=>runCollectionRecovery('restore-task-fields',JSON.parse(text)))
+      .catch(error=>alert(`Collection recovery stopped. ${error.message}`));
+    return;
+  }
   if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.())
     return alert('Use a verified detached rollback before importing into this collection.');
   const txt = prompt('Paste TaskPoints JSON:');
@@ -3435,6 +3444,48 @@ async function downloadCollectionPackage(freeze) {
   } catch (error) { alert(`Collection export could not be verified. ${error.message}`); }
 }
 
+function isCollectionRecoveryPackage(value) {
+  return value?.taskCollectionVersion===1 && ['taskpoints-isolated-task-collection-backup-1',
+    'taskpoints-isolated-task-completion-rollback-1'].includes(value.format);
+}
+
+async function importCollectionRecoveryFile(ev) {
+  const file=ev.target.files?.[0];
+  if (!file) return;
+  try {
+    let text;
+    if (isZipFileFallback(file)) {
+      const entries=readZipEntriesFallback(await file.arrayBuffer());
+      const checkpoint=entries.get('checkpoint.json') || entries.get('manifest.json');
+      if (entries.size!==1 || !checkpoint)
+        throw new Error('Use a verified collection package. Legacy ZIP sidecars need separate recovery.');
+      text=new TextDecoder().decode(checkpoint.data);
+    } else text=await file.text();
+    await runCollectionRecovery('restore-task-fields',JSON.parse(text));
+  } catch (error) { alert(`Collection recovery stopped. ${error.message}`); }
+  finally { ev.target.value=''; }
+}
+
+async function runCollectionRecovery(operation, checkpoint) {
+  const reset=operation==='reset-task-collection';
+  if (!reset && !isCollectionRecoveryPackage(checkpoint))
+    throw new Error('Use a verified detached rollback before importing this backup into the collection.');
+  const runtime=window.TaskPointsStateRuntimeV2;
+  const intent=await runtime.prepareIsolatedCollectionRecovery(operation,checkpoint);
+  let message='Restore titles, importance, tags and point settings from this collection revision? Dates, statuses, rewards and other app data stay as they are now.';
+  if (reset) message='Erase the admitted synthetic Tasks and their linked rewards? Other app data stays in this profile and recovery evidence is retained.';
+  if (operation==='restore-task-reward') {
+    const reward=checkpoint.completions.find(row=>row.id===intent.rewardId);
+    message=`Intentionally restore the deleted reward for “${reward.title}” (${reward.points} points, ${reward.completedAtISO.slice(0,10)})? The Task status stays as it is now.`;
+  }
+  if (!confirm(message)) return;
+  const result=await runtime.commitIsolatedCollectionRecovery(intent);
+  if (result.unchanged) return alert('The collection already matches this request.');
+  if (!result.confirmedDurable) throw new Error('The recovery receipt could not be verified.');
+  alert(result.replayed ? 'The previous recovery receipt was verified.' : 'Collection recovery saved and verified.');
+  window.location.reload();
+}
+
 if (typeof window.exportOGDataOnly !== 'function') {
   window.exportOGDataOnly = exportOGDataOnly;
 }
@@ -3465,6 +3516,11 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('[data-collection-recovery-export]').forEach(btn=>{
     btn.hidden=!window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.();
     btn.addEventListener('click',()=>downloadCollectionPackage(true));
+  });
+  document.querySelectorAll('[data-collection-task-reset]').forEach(btn=>{
+    btn.hidden=!window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.();
+    btn.addEventListener('click',()=>runCollectionRecovery('reset-task-collection')
+      .catch(error=>alert(`Collection recovery stopped. ${error.message}`)));
   });
   // Daily Brief export integration (shared export controls).
   

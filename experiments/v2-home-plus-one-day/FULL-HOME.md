@@ -922,6 +922,53 @@ All 47 focused recovery/export contracts and all 19 component tests passed.
 The broader 1,719-test batch had 1,693 passes, the same 25 named failures,
 and one TODO on both commits.
 
+**Packages 5B and 5C — authoritative recovery transitions**
+
+- [x] Use a shared transition for the supported synthetic recovery requests.
+  The runtime retains an admitted intent, checks the live generation and
+  revision inside the same IndexedDB transaction that changes Tasks or rewards,
+  and seals the new generation with a receipt. Independent readback verifies
+  the transition. The prior-generation receipts and deletion evidence remain
+  available for replay and rollback. An interrupted or repeated request can
+  reuse its durable intent or receipt. Only the current admitted intent can
+  commit, and an outdated generation is refused.
+- [x] Home and Settings import a verified ancestor from collection JSON or a
+  ZIP containing the collection package. The verifier replays the local
+  receipt prefix and compares the historical Tasks and rewards against the
+  package. A valid hash with altered Task fields is refused. The import can
+  restore title, importance, tags and configured points. It keeps newer dates,
+  statuses, completion history, Notes, and other unrelated data.
+- [x] Settings Merge Backup can explicitly restore one deleted regular Task
+  reward from a verified ancestor when its original calendar evidence exists,
+  the Task identity still exists, and there is no duplicate award or downstream
+  stored score history. The confirmation names the reward. Its original ID,
+  earned points and timestamp are retained, and the Task stays in its current
+  state. An ordinary legacy backup cannot implicitly revive a deleted reward.
+- [x] The scoped synthetic reset retires admitted Tasks and their rewards and
+  verifies the successor generation. A quota abort retains the former owner
+  and records. The reset refuses collections with held records or downstream
+  history that needs independent recovery. Unrelated storage and the source
+  shadows remain untouched. Detached rollback keeps the retired IDs deleted.
+- [ ] 5B still needs full-profile Home/Settings JSON and ZIP imports (including
+  files with image or other sidecars), a cross-store Reset All, and recovery
+  from verified-secondary, emergency, vault, and rolling V1 sources. Those
+  formats need authoritative revision and deletion lineage for overlapping
+  Task data. Full reward-history merges still need multiple-reward, metric,
+  and downstream Game, Matchup, Season and Gold handling. The remaining raw
+  and sidecar writer paths and uninstrumented clients remain unqualified.
+- [ ] 5C still needs forward V2 re-admission following detached V1 recovery
+  and reconciliation of Task or reward edits made in that V1 profile. In-place
+  recovery preserves newer independent V1 data, including the tested Notes
+  edit. The old detached checkpoint alone cannot establish who owns newer
+  edits. Recovery from an off-origin live backup and physical iPhone and
+  old-client handoff qualification remain separate.
+
+Against `22be4f84`, all 12 original browser cases passed on both revisions.
+The candidate passed all 15 browser cases, with a focused rerun of the three
+new cases after expanding the restart and tombstone assertions. All 47
+focused contracts and 19 component tests passed. The 1,719-test regression
+batch had 1,693 passes, the same 25 failures and one TODO on both revisions.
+
 M02 remains Working. The official pass condition covers the full live
 Task writer family. See the [tracker](../../V2-PROGRESS-TRACKER.md)
 and the [writer handoff matrix](../../docs/state-runtime-v2-writer-handoff-matrix.md).

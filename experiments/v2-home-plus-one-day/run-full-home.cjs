@@ -7553,9 +7553,9 @@ test('V2 standalone concurrent legacy admissions keep one independent calorie en
 
 const collectionFixtureKey='taskpoints_isolated_task_fixture_v1';
 const collectionJournalKey='taskpoints_pending_task_mutations_v1';
-async function stageTaskCollection(t,context,{large=false,withMatchups=false}={}) {
+async function stageTaskCollection(t,context,{large=false,withMatchups=false,resettable=false}={}) {
   const result=await fixture(t,context);
-  const seed=await result.page.evaluate(({quietDate,large,withMatchups,marker,journalKey})=>{
+  const seed=await result.page.evaluate(({quietDate,large,withMatchups,resettable,marker,journalKey})=>{
     const core=TaskPointsCore,snapshot=core.readTaskPointsStoredState();
     const reward=(id,taskId,title,points,completedAtISO='2026-11-16T17:00:00.000Z')=>
       ({id,taskId,title,points,completedAtISO,unknownReward:{keep:id}});
@@ -7598,6 +7598,12 @@ async function stageTaskCollection(t,context,{large=false,withMatchups=false}={}
       snapshot.matchups.push({id:'synthetic-owned-matchup',date:quietDate,dateKey:quietDate,playerAId:'YOU',playerBId:'SYN',
         scoreA:8,scoreB:46,matchupType:'exhibition'});
     }
+    if (resettable) {
+      snapshot.tasks=snapshot.tasks.slice(0,2);
+      snapshot.completions=[];
+      for (const key of ['gameHistory','matchups','goldLedger','players','schedule','opponentDripSchedules']) snapshot[key]=[];
+      snapshot.goldEconomy=null;
+    }
     core.writeTaskPointsStoredState(snapshot);
     const bravo=snapshot.tasks.find(row=>row.id==='bravo');
     const journal={schemaVersion:1,tasks:[{...bravo,title:'Synthetic Bravo from pending journal',points:7.25}],
@@ -7609,7 +7615,7 @@ async function stageTaskCollection(t,context,{large=false,withMatchups=false}={}
     localStorage.setItem('taskpoints_isolated_task_scoring_read_v1',fixture.id);
     localStorage.setItem(marker,JSON.stringify(fixture));
     return {fixture,journal};
-  },{quietDate,large,withMatchups,marker:collectionFixtureKey,journalKey:collectionJournalKey});
+  },{quietDate,large,withMatchups,resettable,marker:collectionFixtureKey,journalKey:collectionJournalKey});
   return {...result,...seed};
 }
 const admitCollection=page=>page.evaluate(()=>TaskPointsStateRuntimeV2.initializeIsolatedTaskCollection());
@@ -8142,4 +8148,184 @@ test('Package 5B ordinary V1 retains the existing backup format and legacy merge
   // report success for the ordinary V1 route.
   assert.ok(reports.some(text=>text.startsWith('Merge failed verification')),reports.join('\n'));
   assert.ok(!reports.some(text=>text.startsWith('Merge verified') || text.startsWith('Merge complete')),reports.join('\n'));
+});
+
+const collectionBackup=page=>page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskCollectionPackage());
+const recoveryPrepare=(page,operation,checkpoint)=>page.evaluate(([operation,checkpoint])=>
+  TaskPointsStateRuntimeV2.prepareIsolatedCollectionRecovery(operation,checkpoint),[operation,checkpoint]);
+const recoveryCommit=(page,intent)=>page.evaluate(intent=>TaskPointsStateRuntimeV2.commitIsolatedCollectionRecovery(intent),intent);
+const collectionTask=(proof,id)=>proof.tasks.find(row=>row.id===id);
+
+async function chooseRecoveryFile(page,selector,buffer,name) {
+  const reports=[];
+  allowRecoveryDialogs(page,reports);
+  await page.locator(selector).setInputFiles({name,mimeType:name.endsWith('.zip') ? 'application/zip' : 'application/json',buffer});
+  for (let i=0;i<75&&!reports.some(message=>message.startsWith('Collection recovery saved') || message.startsWith('Collection recovery stopped'));i++)
+    await new Promise(resolve=>setTimeout(resolve,100));
+  assert.ok(reports.includes('Collection recovery saved and verified.'),reports.join('\n'));
+  await page.waitForLoadState();
+}
+
+test('Authoritative recovery Home JSON and Settings ZIP apply a verified ancestor without replacing newer data',async t=>{
+  const {page,context}=await stageTaskCollection(t);
+  await admitCollection(page);
+  await page.reload();
+  await waitCollectionHome(page);
+  await settleRollbackSourceMirror(page);
+  const backup=await collectionBackup(page), generation=(await owned(page)).meta.generation;
+  const edit=async (title,due)=>{
+    const editor=await openCreatedEditor(page,'alpha');
+    await editor.locator('[data-field="title"]').fill(title);
+    await editor.locator('[data-field="due"]').fill(due);
+    await editor.locator('[data-task-action="task-save"]').click();
+    await taskCard(page,'alpha').locator('.task-title').filter({hasText:title}).waitFor();
+  };
+  await edit('Synthetic newer title','2026-11-19');
+  const awards=await verifiedRewards(page);
+  const laterNote='Synthetic V1 Notes written after the checkpoint';
+  await page.evaluate(note=>localStorage.setItem('taskpoints_notes_v1',note),laterNote);
+  const forged=await page.evaluate(async checkpoint=>{
+    const {checksum,...payload}=checkpoint;
+    payload.snapshot.tasks.find(row=>row.id==='alpha').title='Synthetic forged recovery value';
+    payload.raw=TaskPointsCore.serializeTaskPointsStoredState(payload.snapshot);
+    const bytes=new TextEncoder().encode(JSON.stringify(payload));
+    const digest=await crypto.subtle.digest('SHA-256',bytes);
+    return {...payload,checksum:`sha256:${Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('')}:${bytes.length}`};
+  },backup);
+  assert.equal(await page.evaluate(value=>TaskPointsStateRuntimeV2.verifyIsolatedCollectionPackage(value).then(proof=>proof.verified),forged),true);
+  await assert.rejects(recoveryPrepare(page,'restore-task-fields',forged),/lineage_conflict/);
+  const displaced=await recoveryPrepare(page,'restore-task-fields',backup);
+  const competing=await recoveryPrepare(page,'reset-task-collection');
+  assert.notEqual(displaced.actionId,competing.actionId);
+  await assert.rejects(recoveryCommit(page,displaced),/recovery_not_admitted/);
+  assert.equal(collectionTask(await owned(page),'alpha').title,'Synthetic newer title');
+  const prepared=await recoveryPrepare(page,'restore-task-fields',backup);
+  await chooseRecoveryFile(page,'#importInput',Buffer.from(JSON.stringify(backup)),'checkpoint.json');
+  await waitCollectionHome(page);
+  let read=await owned(page);
+  assert.notEqual(read.meta.generation,generation);
+  assert.deepEqual(read.journal.at(-1).intent,prepared);
+  assert.equal(collectionTask(read,'alpha').title,'Synthetic Alpha');
+  assert.equal(collectionTask(read,'alpha').dueDateISO,'2026-11-19');
+  assert.deepEqual(await verifiedRewards(page),awards);
+  assert.equal(await page.evaluate(()=>localStorage.getItem('taskpoints_notes_v1')),laterNote);
+  assert.equal((await recoveryCommit(page,prepared)).replayed,true);
+
+  await edit('Synthetic second new title','2026-11-20');
+  const settings=await openScoringPage(context,'settings.html');
+  const zip=await page.evaluate(async backup=>Array.from(new Uint8Array(await (await TaskPointsResponsiveExport.buildZipBlob([
+    {path:'checkpoint.json',data:new TextEncoder().encode(JSON.stringify(backup))}
+  ])).arrayBuffer())),backup);
+  await chooseRecoveryFile(settings,'#settingsImportInput',Buffer.from(zip),'checkpoint.zip');
+  read=await owned(page);
+  assert.equal(collectionTask(read,'alpha').title,'Synthetic Alpha');
+  assert.equal(collectionTask(read,'alpha').dueDateISO,'2026-11-20');
+  assert.equal(read.journal.filter(row=>row.type==='isolated-collection-recovery').length,2);
+  assert.deepEqual(await verifiedRewards(page),awards);
+  assert.equal(await page.evaluate(()=>localStorage.getItem('taskpoints_notes_v1')),laterNote);
+  await page.reload();
+  await waitCollectionHome(page);
+  await edit('Synthetic ordinary save after recovery','2026-11-21');
+  assert.equal(collectionTask(await owned(page),'alpha').title,'Synthetic ordinary save after recovery');
+});
+
+test('Authoritative recovery scopes reset, fences a stale editor and survives quota, competing commits and restart',async t=>{
+  const profile=await completionProfile(t);
+  const {page,context}=await stageTaskCollection(t,profile.context,{resettable:true});
+  await admitCollection(page);
+  await page.reload();
+  await waitCollectionHome(page);
+  const original=await owned(page);
+  await settleRollbackSourceMirror(page);
+  const earlier=await collectionBackup(page);
+  const stale=await page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskCompletion('home','alpha'));
+  const rewards=await verifiedRewards(page);
+  const intent=await recoveryPrepare(page,'reset-task-collection');
+  await page.evaluate(()=>{
+    const add=IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add=function(row){
+      if (row?.type==='isolated-collection-recovery') throw new DOMException('Synthetic transition quota','QuotaExceededError');
+      return add.apply(this,arguments);
+    };
+  });
+  await assert.rejects(recoveryCommit(page,intent),/Synthetic transition quota/);
+  assert.deepEqual(await owned(page),original);
+  assert.deepEqual(await verifiedRewards(page),rewards);
+  const reopened=await profile.restart();
+  let home=await openScoringPage(reopened,'index.html');
+  await waitCollectionHome(home);
+  let settings=await openScoringPage(reopened,'settings.html');
+  assert.deepEqual(await recoveryPrepare(settings,'reset-task-collection'),intent);
+  const raw=await canonicalSnapshot(home);
+  const outcomes=await Promise.all([recoveryCommit(home,intent),recoveryCommit(settings,intent)]);
+  assert.deepEqual(outcomes.map(result=>result.replayed).sort(),[false,true]);
+  assert.deepEqual(outcomes[0].receipt,outcomes[1].receipt);
+  const read=await owned(home);
+  assert.deepEqual(read.tasks,[]);
+  assert.deepEqual(read.permanentIds.sort(),['alpha','bravo']);
+  assert.deepEqual(await verifiedRewards(home),[]);
+  assert.deepEqual(outcomes[0].receipt.removedRewards,rewards);
+  assert.equal(read.meta.generation,outcomes[0].receipt.nextGeneration);
+  assert.equal((await canonicalSnapshot(home)).notes,raw.notes);
+  await assert.rejects(commitCompletion(home,stale),/generation_conflict/);
+  assert.deepEqual((await owned(home)).journal,[outcomes[0].receipt]);
+  const afterCommit=await profile.restart();
+  home=await openScoringPage(afterCommit,'index.html');
+  settings=await openScoringPage(afterCommit,'settings.html');
+  assert.deepEqual((await owned(home)).tasks,[]);
+  const reports=[];
+  allowRecoveryDialogs(settings,reports);
+  const reset=settings.locator('[data-collection-task-reset]');
+  await reset.locator('xpath=ancestor::details[1]/summary').click();
+  await reset.click();
+  for (let i=0;i<45&&!reports.includes('The previous recovery receipt was verified.');i++)
+    await new Promise(resolve=>setTimeout(resolve,100));
+  assert.ok(reports.includes('The previous recovery receipt was verified.'),reports.join('\n'));
+  const obsolete=await recoveryPrepare(home,'restore-task-fields',earlier);
+  assert.deepEqual(await recoveryCommit(home,obsolete),{unchanged:true});
+  assert.deepEqual((await owned(home)).permanentIds.sort(),['alpha','bravo']);
+  await home.reload();
+  await home.waitForFunction(()=>TaskPointsCore.usesIsolatedTaskDone());
+  assert.deepEqual((await owned(home)).tasks,[]);
+  await settleRollbackSourceMirror(home);
+  const rollback=await home.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskCollectionPackage(true));
+  const target=await browser.newContext({serviceWorkers:'block',timezoneId:'America/New_York'});
+  t.after(()=>target.close());
+  await configureContext(target);
+  const loader=await rollbackLoader(target);
+  assert.deepEqual(await restoreCompletionCheckpoint(loader,rollback),{verified:true,checksum:rollback.checksum});
+  assert.deepEqual((await canonicalSnapshot(loader)).tasks,[]);
+  assert.deepEqual((await canonicalSnapshot(loader)).completions,[]);
+  await assert.rejects(loader.evaluate(task=>{
+    const core=TaskPointsCore,state=core.readTaskPointsStoredState();
+    core.writeTaskPointsStoredState({...state,tasks:[task]});
+  },collectionTask(original,'alpha')),/Detached rollback forbids/);
+});
+
+test('Authoritative recovery Settings Merge explicitly restores one verified deleted reward without reviving the Task',async t=>{
+  const {page,context}=await stageTaskCollection(t,undefined,{resettable:true});
+  await admitCollection(page);
+  await page.reload();
+  await waitCollectionHome(page);
+  const add=await page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskCompletion('home','alpha'));
+  const {receipt:earned}=await commitCompletion(page,add);
+  await settleRollbackSourceMirror(page);
+  const checkpoint=await collectionBackup(page);
+  const log=await openScoringPage(context,'log.html');
+  await deleteLogEntry(log,earned.completion.id);
+  const [deletion]=await waitHistory(page,1);
+  assert.equal(deletion.completionBefore.id,earned.completion.id);
+  assert.equal(deletion.completionAfter,null);
+  const trashed=collectionTask(await owned(page),'alpha');
+  assert.equal(trashed.status,'trashed');
+  const settings=await openScoringPage(context,'settings.html');
+  await chooseRecoveryFile(settings,'#settingsMergeBackupInput',Buffer.from(JSON.stringify(checkpoint)),'checkpoint.json');
+  const read=await owned(page);
+  const recovery=read.journal.at(-1);
+  assert.equal(recovery.intent.operation,'restore-task-reward');
+  assert.deepEqual(recovery.restoredReward,{value:earned.completion,calendar:earned.calendar});
+  assert.deepEqual(collectionTask(read,'alpha'),trashed);
+  assert.deepEqual((await verifiedRewards(page)).filter(row=>row.id===earned.completion.id),[earned.completion]);
+  assert.equal((await recoveryCommit(page,recovery.intent)).replayed,true);
+  await assert.rejects(commitCompletion(page,add),/generation_conflict/);
 });

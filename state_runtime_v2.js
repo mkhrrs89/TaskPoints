@@ -20635,6 +20635,7 @@
   const OWNED_TASK_HISTORY = 'isolated-task-history';
   const OWNED_TASK_TRASH = 'isolated-task-trash';
   const OWNED_TASK_STATUS = 'isolated-task-status';
+  const OWNED_COLLECTION_RECOVERY = 'isolated-collection-recovery';
   const OWNED_TRASH_UNDO_MS = 4500;
   const ownedStatusOperations = ['home-hide','home-decline','archive-unarchive','archive-decline','week-decline'];
   const ownedTrashMoves = ['home-move-to-trash','week-move-to-trash'];
@@ -21182,7 +21183,8 @@
   }
 
   function ownedTaskJournal(receipts) {
-    return receipts.filter(r=>['isolated-task-update',OWNED_TASK_DONE,OWNED_TASK_CREATE,OWNED_TASK_TRASH,OWNED_TASK_STATUS,OWNED_TASK_HISTORY].includes(r.type))
+    return receipts.filter(r=>['isolated-task-update',OWNED_TASK_DONE,OWNED_TASK_CREATE,OWNED_TASK_TRASH,OWNED_TASK_STATUS,
+      OWNED_TASK_HISTORY,OWNED_COLLECTION_RECOVERY].includes(r.type))
       .sort((a,b)=>a.revision-b.revision);
   }
 
@@ -21198,7 +21200,7 @@
     return verifyOwnedSnapshot(ownedTaskContext(false, scoringRead),meta,rows,receipts,completionRows);
   }
 
-  function verifyOwnedSnapshot(fixture,meta,rows,receipts,completionRows) {
+  function verifyOwnedSnapshot(fixture,meta,rows,receipts,completionRows,captureRevision) {
     if (!meta || meta.fixtureId!==fixture.id || meta.homeTaskId!==fixture.homeTaskId || meta.schemaVersion!==1 || !['owned','rollback-frozen'].includes(meta.mode)
       || !Number.isSafeInteger(meta.revision)||meta.revision<0) throw new Error('owned_task_authority_missing');
     if (typeof meta.generation!=='string'||!Array.isArray(meta.baseline?.tasks)||!Array.isArray(meta.source)
@@ -21215,10 +21217,11 @@
         || (!meta.completionEvidence && meta.completionTimeZone !== localCompletionTimeZone())
       : meta.completionTimeZone !== undefined) throw new Error('isolated_completion_time_zone_or_selection_changed');
     const journal=ownedTaskJournal(receipts);
-    if (journal.length!==meta.revision || journal.some((r,i)=>r.revision!==i+1||r.generation!==meta.generation)) throw new Error('owned_task_journal_incomplete');
+    if (journal.length!==meta.revision || journal.some((r,i)=>r.revision!==i+1)) throw new Error('owned_task_journal_incomplete');
     // Rebuild the exact expected Task rows from the sealed baseline and committed
     // receipts. No authority is inferred from a snapshot, revision number or flag.
-    const collection=meta.collection ? sealedIsolatedCollection(meta) : null;
+    let generation=meta.initialGeneration ?? meta.generation;
+    const collection=meta.collection ? sealedIsolatedCollection({...meta,generation}) : null;
     if (collection && fixture.phase==='sealed' && stableJson(fixture.legacyCompletionDeletes)!==stableJson(meta.collection.legacyDeletes))
       throw new Error('owned_collection_marker_unverified');
     const ownedIds = new Set(collection?.admitted ?? (meta.homeTaskId ? [meta.homeTaskId] : []));
@@ -21226,12 +21229,51 @@
       ? [[t.id,{value:t,revision:0,legacyIndex}]] : []));
     const deletions = new Map(), permanentIds = new Set(), retiredRevisions = new Map();
     const ledger = (collection || meta.scoringSeed !== undefined) && completionRows !== null
-      ? ownedRewardLedger(meta,collection?.seed) : null;
+      ? ownedRewardLedger({...meta,generation},collection?.seed) : null;
     if (fixture.completionWrite === true && !ledger) throw new Error('isolated_completion_rows_unverified');
-    const adoption = sealedLegacyTrash(fixture,meta);
+    const adoption = sealedLegacyTrash(fixture,{...meta,generation});
     if (adoption) deletions.set(adoption.taskId,adoption);
     for (const receipt of collection?.deletions || []) deletions.set(receipt.taskId,receipt);
+    const requestedRevisions=new Set(journal.filter(row=>row.type===OWNED_COLLECTION_RECOVERY)
+      .map(row=>row.intent?.source?.revision));
+    requestedRevisions.add(captureRevision);
+    const history=new Map();
+    function capture(revision) {
+      if (!requestedRevisions.has(revision)) return;
+      history.set(revision,{generation,rows:new Map(expected),ownedIds:new Set(ownedIds),
+        rewards:[...(ledger?.rows.values() || [])].map(row=>row.value),
+        calendars:new Map(ledger?.calendars), reservations:new Map(ledger?.awardReservations)});
+    }
     for(const r of journal){
+      capture(r.revision-1);
+      if (r.generation!==generation) throw new Error('owned_task_journal_generation_conflict');
+      if (r.type===OWNED_COLLECTION_RECOVERY) {
+        if (!collection || !ledger) throw new Error('owned_collection_recovery_unverified');
+        const intent=collectionRecoveryIntent(r.intent);
+        const effect=collectionRecoveryEffect(intent,expected,ledger,history.get(intent.source?.revision));
+        if (intent.generation!==generation || intent.expectedRevision!==r.revision-1
+          || stableJson(r)!==stableJson(collectionRecoveryReceipt(intent,effect,r.committedAtISO)))
+          throw new Error('owned_collection_recovery_unverified');
+        for (const {id,after} of effect.changes) {
+          if (after) expected.set(id,{...expected.get(id),value:after,revision:r.revision});
+          else {
+            expected.delete(id);
+            deletions.delete(id);
+            permanentIds.add(id);
+            retiredRevisions.set(id,r.revision);
+          }
+        }
+        for (const row of effect.removedRewards) {
+          ledger.awardReservations.delete(row.id);
+          setOwnedRewardRow(ledger,row.id,null);
+        }
+        if (effect.restoredReward) {
+          const {value,calendar}=effect.restoredReward;
+          setOwnedRewardRow(ledger,value.id,ownedRewardRow('isolated-score:'+value.id,value,r),calendar);
+        }
+        generation=r.nextGeneration;
+        continue;
+      }
       const old=expected.get(r.taskId);
       if (r.type === OWNED_TASK_CREATE) {
         const intent = ownedCreateIntent(r.intent);
@@ -21337,7 +21379,9 @@
       }
       expected.set(r.taskId,{...old,value:r.after,revision:r.revision});
     }
-    if (rows.length !== expected.size || rows.some(row=>{
+    capture(meta.revision);
+    if (generation!==meta.generation || (meta.initialGeneration!==undefined && (!collection || !journal.some(row=>row.type===OWNED_COLLECTION_RECOVERY)))
+      || rows.length !== expected.size || rows.some(row=>{
       const entry=expected.get(row.id);
       return !entry || row.ownerGeneration!==meta.generation || row.ownerRevision!==entry.revision
         || row.legacyIndex!==entry.legacyIndex || stableJson(row.value)!==stableJson(entry.value);
@@ -21354,7 +21398,7 @@
       // separate. A date correction must not invalidate its sealed source.
       Object.defineProperties(snapshot,{
         completionOrigins:{value:[...ledger.origins.values()]}, rewardRows:{value:ledger.rows}, retiredRevisions:{value:retiredRevisions},
-        rewardLedger:{value:ledger}
+        rewardLedger:{value:ledger}, recoverySource:{value:history.get(captureRevision)}
       });
     }
     return snapshot;
@@ -21442,10 +21486,10 @@
       adjust(row.value,calendar,1);
     } else ledger.rows.delete(id);
   }
-  function withOwnedRecords(tx, consume) {
+  function withOwnedRecords(tx, consume, extraReads = []) {
     const done = transactionPromise(tx);
     const reads = [tx.objectStore('meta').get(OWNED_TASK_META), tx.objectStore('tasks').getAll(),
-      tx.objectStore('mutations').getAll(), tx.objectStore('completions').getAll()];
+      tx.objectStore('mutations').getAll(), tx.objectStore('completions').getAll(),...extraReads];
     let remaining = reads.length, result, failure;
     for (const request of reads) request.onsuccess = () => {
       if (--remaining) return;
@@ -22105,8 +22149,173 @@
   const OWNED_COMPLETION_ROLLBACK = 'taskpoints-isolated-task-completion-rollback-1';
   const OWNED_COLLECTION_BACKUP = 'taskpoints-isolated-task-collection-backup-1';
   const OWNED_COLLECTION_CHECKPOINT = 'isolated-task-collection-recovery-checkpoint';
+  const OWNED_COLLECTION_RECOVERY_INTENT = 'isolated-task-collection-recovery-intent';
   const OWNED_COLLECTION_RESTORE_RECEIPT = 'taskpoints_isolated_collection_restore_receipt_v1';
   const ROLLBACK_HOLD = 'taskpoints_recovery_write_lock_v1';
+
+  function collectionRecoveryContext() {
+    const fixture=ownedTaskContext(false,true);
+    if (!fixture.taskCollection || !/\/(index|settings)\.html$/.test(global.location.pathname))
+      throw new Error('owned_collection_recovery_context_unverified');
+    return fixture;
+  }
+
+  function collectionRecoveryIntent(input) {
+    const {operation,actionId,generation,expectedRevision,source,rewardId}=input || {};
+    const reward=operation==='restore-task-reward';
+    const restore=operation==='restore-task-fields' || reward;
+    if ((!restore && operation!=='reset-task-collection') || !core.isIsolatedCreatedTaskId('v2-task-'+actionId)
+      || typeof generation!=='string' || !generation || !Number.isSafeInteger(expectedRevision) || expectedRevision<0
+      || (restore ? typeof source?.generation!=='string' || !source.generation || !Number.isSafeInteger(source.revision)
+        || source.revision<0 || source.revision>expectedRevision || !/^sha256:[0-9a-f]{64}:\d+$/.test(source.checksum)
+        : source!==undefined)
+      || (reward ? typeof rewardId!=='string' || !rewardId : rewardId!==undefined))
+      throw new Error('owned_collection_recovery_intent_unverified');
+    return {operation,actionId,generation,expectedRevision,...(restore ? {source:{generation:source.generation,
+      revision:source.revision,checksum:source.checksum}} : {}),...(reward ? {rewardId} : {})};
+  }
+
+  function collectionRecoveryEffect(intent, current, ledger, historical) {
+    const ordered=[...current].sort(([a],[b])=>a.localeCompare(b));
+    if (intent.operation==='reset-task-collection') return {
+      changes:ordered.map(([id,row])=>({id,before:row.value,after:null})),
+      removedRewards:[...ledger.rows.values()].map(row=>row.value)
+    };
+    if (!historical || historical.generation!==intent.source.generation) throw new Error('owned_collection_recovery_lineage_conflict');
+    if (intent.operation==='restore-task-reward') {
+      const {rewardId}=intent;
+      const value=historical.rewards.find(row=>row.id===rewardId), calendar=historical.calendars.get(rewardId);
+      if (!value || !calendar || !current.has(value.taskId) || !ledger.origins.has(rewardId) || ledger.rows.has(rewardId)
+        || historical.reservations.has(rewardId) || ownedMetricFormula(value) || hasExplicitStoredMetric(value)
+        || ownedAwardConflicts(ledger,{taskId:value.taskId,day:calendar.day},calendar))
+        throw new Error('owned_collection_reward_restore_unverified');
+      return {changes:[],removedRewards:[],restoredReward:{value,calendar}};
+    }
+    const changes=[];
+    for (const [id,{value:before}] of ordered) {
+      const past=historical.rows.get(id)?.value;
+      if (!past || core.normalizeTask(before).status==='trashed' || core.normalizeTask(past).status==='trashed') continue;
+      const after={...before};
+      // Preserve scheduling, completion, Trash and unknown metadata from the
+      // current Task. Historical values for these four editor fields were
+      // independently reconstructed from the same collection's receipts.
+      for (const field of ['title','importance','tags','points']) {
+        if (Object.hasOwn(past,field)) after[field]=past[field];
+        else delete after[field];
+      }
+      if (stableJson(before)!==stableJson(after)) changes.push({id,before,after});
+    }
+    return {changes,removedRewards:[]};
+  }
+
+  function collectionRecoveryReceipt(intent, effect, committedAtISO) {
+    return {id:'isolated-collection-recovery:'+intent.actionId,type:OWNED_COLLECTION_RECOVERY,intent,
+      generation:intent.generation,nextGeneration:'isolated-recovery-'+intent.actionId,revision:intent.expectedRevision+1,
+      ...effect,committedAtISO:completionInstant(committedAtISO)};
+  }
+
+  async function prepareIsolatedCollectionRecovery(operation, checkpoint) {
+    const fixture=collectionRecoveryContext();
+    if (checkpoint!==undefined) {
+      checkpoint=clone(checkpoint);
+      await verifyIsolatedCollectionPackage(checkpoint);
+    }
+    const marker=global.localStorage.getItem(OWNED_TASK_FIXTURE);
+    const db=await openOwnedTasks(false,true);
+    try {
+      const tx=db.transaction(OWNED_TASK_STORES,'readwrite',{durability:'strict'});
+      const store=tx.objectStore('meta');
+      return await withOwnedRecords(tx,(meta,rows,receipts,rewards,pending)=>{
+        const current=verifyOwnedSnapshot(fixture,meta,rows,receipts,rewards,checkpoint?.revision);
+        ownedScoringSource(fixture,marker,meta,current.completionOrigins,current.ownedIds);
+        if (meta.mode!=='owned') throw new Error('rollback_frozen_no_task_writes');
+        const source=checkpoint && {generation:checkpoint.generation,revision:checkpoint.revision,checksum:checkpoint.checksum};
+        if (source) {
+          const past=current.recoverySource;
+          const byId=rows=>stableJson([...rows].sort((a,b)=>a.id.localeCompare(b.id)));
+          if (!past || past.generation!==source.generation
+            || stableJson(checkpoint.receipts)!==stableJson(current.journal.slice(0,source.revision))
+            || byId(checkpoint.snapshot.tasks.filter(row=>past.ownedIds.has(row.id)))!==byId([...past.rows.values()].map(row=>row.value))
+            || byId(checkpoint.completions)!==byId(past.rewards)) throw new Error('owned_collection_recovery_lineage_conflict');
+        }
+        const last=current.journal.at(-1);
+        if (last?.type===OWNED_COLLECTION_RECOVERY && last.intent.operation===operation
+          && stableJson(last.intent.source)===stableJson(source)) return last.intent;
+        let rewardId;
+        if (operation==='restore-task-reward') {
+          const missing=current.recoverySource?.rewards.filter(row=>!current.rewardRows.has(row.id));
+          if (missing?.length!==1) throw new Error('Exactly one missing, verified reward is required for this recovery.');
+          rewardId=missing[0].id;
+        }
+        const intent=collectionRecoveryIntent({operation,actionId:global.crypto.randomUUID(),generation:meta.generation,
+          expectedRevision:meta.revision,source,rewardId});
+        if (pending?.intent?.operation===operation && stableJson(pending.intent.source)===stableJson(source)
+          && pending.intent.rewardId===rewardId && pending.intent.generation===meta.generation && pending.intent.expectedRevision===meta.revision)
+          return collectionRecoveryIntent(pending.intent);
+        store.put({id:OWNED_COLLECTION_RECOVERY_INTENT,intent});
+        return intent;
+      },[store.get(OWNED_COLLECTION_RECOVERY_INTENT)]);
+    } finally { db.close(); }
+  }
+
+  async function commitIsolatedCollectionRecovery(input) {
+    const intent=collectionRecoveryIntent(input);
+    const fixture=collectionRecoveryContext();
+    const marker=global.localStorage.getItem(OWNED_TASK_FIXTURE);
+    const db=await openOwnedTasks(false,true);
+    try {
+      const tx=db.transaction(OWNED_TASK_STORES,'readwrite',{durability:'strict'});
+      const store=tx.objectStore('meta');
+      const result=await withOwnedRecords(tx,(meta,rows,receipts,rewards,pending)=>{
+        const current=verifyOwnedSnapshot(collectionRecoveryContext(),meta,rows,receipts,rewards,intent.source?.revision);
+        const legacy=ownedScoringSource(fixture,marker,meta,current.completionOrigins,current.ownedIds);
+        const prior=current.journal.find(row=>row.type===OWNED_COLLECTION_RECOVERY && row.intent.actionId===intent.actionId);
+        if (prior) {
+          if (stableJson(prior.intent)!==stableJson(intent)) throw new Error('owned_collection_recovery_action_conflict');
+          return {receipt:prior,replayed:true};
+        }
+        if (meta.mode!=='owned' || meta.generation!==intent.generation || meta.revision!==intent.expectedRevision)
+          throw new Error('owned_collection_recovery_stale');
+        if (stableJson(pending?.intent)!==stableJson(intent)) throw new Error('owned_collection_recovery_not_admitted');
+        if (intent.operation==='reset-task-collection' || intent.operation==='restore-task-reward') {
+          const state=rollbackLegacyState();
+          const scoreFields=['matchups','gameHistory','goldLedger','seasonHistory'];
+          const scoresPresent=scoreFields.some(key=>state[key]!=null && (!Array.isArray(state[key]) || state[key].length))
+            || Object.keys(state.goldEconomy?.balances || {}).length;
+          if (scoresPresent
+            || (intent.operation==='reset-task-collection' && (current.heldTasks.length || current.heldCompletions.length
+              || legacy.some(row=>!current.ownedIds.includes(row.taskId)))))
+            throw new Error('Use a verified detached rollback. This request requires independent recovery of held records or downstream scores.');
+        }
+        const byId=new Map(rows.map(row=>[row.id,row]));
+        const effect=collectionRecoveryEffect(intent,byId,current.rewardLedger,current.recoverySource);
+        store.delete(OWNED_COLLECTION_RECOVERY_INTENT);
+        if (!effect.changes.length && !effect.removedRewards.length && !effect.restoredReward) return {unchanged:true};
+        const receipt=collectionRecoveryReceipt(intent,effect,nowIso());
+        const changes=new Map(effect.changes.map(change=>[change.id,change.after]));
+        for (const row of rows) {
+          if (changes.get(row.id)===null) tx.objectStore('tasks').delete(row.id);
+          else tx.objectStore('tasks').put({...row,ownerGeneration:receipt.nextGeneration,
+            ...(changes.has(row.id) ? {value:changes.get(row.id),ownerRevision:receipt.revision} : {})});
+        }
+        for (const row of effect.removedRewards) tx.objectStore('completions').delete(current.rewardRows.get(row.id).id);
+        if (effect.restoredReward) {
+          const {value}=effect.restoredReward;
+          tx.objectStore('completions').add(ownedRewardRow('isolated-score:'+value.id,value,receipt));
+        }
+        tx.objectStore('mutations').add(receipt);
+        store.put({...meta,initialGeneration:meta.initialGeneration ?? meta.generation,
+          generation:receipt.nextGeneration,revision:receipt.revision});
+        return {receipt,replayed:false};
+      },[store.get(OWNED_COLLECTION_RECOVERY_INTENT)]);
+      if (result.unchanged) return result;
+      const verified=await readOwnedSnapshot(db,true);
+      ownedScoringSource(fixture,marker,verified.meta,verified.completionOrigins,verified.ownedIds);
+      if (!verified.journal.some(row=>stableJson(row)===stableJson(result.receipt)))
+        throw new Error('owned_collection_recovery_readback_unverified');
+      return {confirmedDurable:true,...result};
+    } finally { db.close(); }
+  }
 
   function rollbackLegacyState() {
     const task = core.readPendingTaskMutations();
@@ -22407,8 +22616,10 @@
       if (payload.permanentIds !== undefined || payload.deletedCompletionIds !== undefined || held) {
         const ids = payload.permanentIds ?? [], deleted = payload.deletedCompletionIds ?? [];
         if (!Array.isArray(ids) || !Array.isArray(deleted) || !(ids.length || deleted.length || held) || new Set(ids).size !== ids.length
-          || ids.some(id=>collection ? (typeof id!=='string' || !payload.receipts.some(row=>row.taskId===id
-            && row.intent?.operation==='trash-delete-forever' && row.after===null)) : id!=='t1' && !core.isIsolatedCreatedTaskId(id))
+          || ids.some(id=>collection ? (typeof id!=='string' || !payload.receipts.some(row=>(row.taskId===id
+            && row.intent?.operation==='trash-delete-forever' && row.after===null)
+            || (row.type===OWNED_COLLECTION_RECOVERY && row.intent.operation==='reset-task-collection'
+              && row.changes.some(change=>change.id===id && change.after===null)))) : id!=='t1' && !core.isIsolatedCreatedTaskId(id))
           || new Set(deleted).size !== deleted.length || deleted.some(id=>typeof id!=='string'||!id)
           || payload.snapshot.tasks.some(row=>ids.includes(row.id))
           || payload.snapshot.completions.some(row=>deleted.includes(row.id)))
@@ -22612,6 +22823,8 @@
     prepareIsolatedTaskRollback,
     prepareIsolatedTaskCollectionPackage,
     verifyIsolatedCollectionPackage,
+    prepareIsolatedCollectionRecovery,
+    commitIsolatedCollectionRecovery,
     restoreIsolatedTaskCompletionRollback,
     inspectStartupMeta,
     seedFromLegacy,

@@ -1089,3 +1089,16 @@ checklist](../experiments/v2-home-plus-one-day/FULL-HOME.md#package-5-acceptance
 
 These tests use synthetic storage. The physical iPhone handoff and old-client
 qualification remain separate. Production certification remains unchanged.
+
+### Authoritative synthetic transitions
+
+| Writer route | Working transition | Remaining qualification |
+| --- | --- | --- |
+| Home and Settings import | Real JSON and single-package ZIP pickers restore four Task fields from a locally verified ancestor using a durable intent, atomic receipt and new Task generation. | Full-profile replacement, scheduling/status restoration and general legacy JSON/ZIP and image sidecars remain held. |
+| Settings Merge Backup | The same transition can restore one deliberately selected regular reward with verified prior lineage and calendar evidence. It retains the reward identity and keeps the Task in its existing state. | Multi-reward and metric history, downstream scoring repairs, and ambiguous V1 evidence remain held. |
+| Settings synthetic Task reset | The transition retires admitted Tasks and rewards, fences stale writes, and keeps pre-reset evidence. Detached rollback preserves the reset tombstones. | The existing full-profile Reset All stays held while Tasks are V2-owned. It still needs a verified cross-store generation transition. |
+| Verified-secondary, emergency, vault and rolling recovery, direct aliases | The previously verified holds remain in force. The shared transaction gives no write admission to older V1 recovery copies without V2 lineage. | Qualify trusted recovery lineage for those source formats, remaining direct and sidecar paths, and old clients. |
+| Detached V1 destination | Existing verified import and resumable rollback still work, including after a Task reset. In-place recovery keeps newer independent V1 data. | Re-admit a detached V1 profile into V2 and reconcile later Task and reward edits. Validate physical iPhone storage and handoff separately. |
+
+These are synthetic Task-generation transitions. Production certification
+remains unchanged.

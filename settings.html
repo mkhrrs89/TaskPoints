@@ -118,6 +118,7 @@
             <input id="settingsMergeBackupInput" type="file" accept="application/json,application/zip,.zip" class="hidden" />
             <button type="button" class="btn btn-ghost btn-toolbar nav-btn" data-export-images>Backup + Images</button>
             <button type="button" class="btn btn-ghost btn-toolbar nav-btn" data-collection-recovery-export hidden>Freeze and export recovery checkpoint</button>
+            <button type="button" class="btn btn-deny btn-toolbar nav-btn" data-collection-task-reset hidden>Reset synthetic Tasks and rewards</button>
             <button id="settingsExportMatchupsBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">
               Export Matchups + Player History (CSV)
             </button>
@@ -1251,6 +1252,8 @@ ${b}`;
     }
 
     async function applyImportedState(data) {
+      if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.() && window.isCollectionRecoveryPackage?.(data))
+        return window.runCollectionRecovery('restore-task-fields',data);
       if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.())
         throw new Error('Use a verified detached rollback before importing into this collection.');
       const isFullBackup = data && data.exportType === "taskpoints_full_backup" && data.state;
@@ -1446,6 +1449,8 @@ ${b}`;
     }
 
     async function handleSettingsFile(ev) {
+      if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.() && window.importCollectionRecoveryFile)
+        return window.importCollectionRecoveryFile(ev);
       const file = ev.target.files?.[0];
       if (!file) return;
 
@@ -1742,6 +1747,10 @@ ${summaryWithNotes}`)) return;
         if (!file || isZipFile(file))
           throw new Error('Use a verified detached rollback before merging this backup into the collection.');
         const data=JSON.parse(await file.text());
+        if (window.isCollectionRecoveryPackage?.(data)) {
+          await window.runCollectionRecovery('restore-task-reward',data);
+          return;
+        }
         const backup=extractImportRoot(data);
         if (!backup) throw new Error('Backup format is invalid for merge.');
         const fields=['weightHistory','vo2MaxHistory','reminders'];
