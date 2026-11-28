@@ -25,19 +25,62 @@
         isolatedCollectionSelected=true;
         for (const id of fixture.legacyCompletionDeletes || []) isolatedCollectionDeletedRewards.add(id);
       }
-    } catch (_) { /* A previously seen collection remains reserved. */ }
+      return true;
+    } catch (_) { return false; }
   }
 
-  function isIsolatedTaskCollectionSelected() {
+  function isIsolatedTaskCollectionSelected(failClosed = false) {
     if (!isolatedCompletionOrigin) return false;
-    try { rememberIsolatedCollection(global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY)); }
-    catch (_) { /* Retain the document's original admission hold. */ }
-    return isolatedCollectionSelected;
+    try {
+      if (rememberIsolatedCollection(global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY))) return isolatedCollectionSelected;
+    } catch (_) { /* Retain the document's original admission hold. */ }
+    return isolatedCollectionSelected || (failClosed && isolatedCompletionPage && global.__TASKPOINTS_OWNED_TASK_SYNTHETIC__===true);
+  }
+
+  function isDetachedCollectionRecoveryPending() {
+    if (!isolatedCompletionOrigin || global.location.pathname==='/experiments/v2-home-plus-one-day/full/rollback.html') return false;
+    try { return JSON.parse(global.localStorage.getItem('taskpoints_recovery_write_lock_v1'))?.isolatedCollectionRollback===true; }
+    catch (_) { return false; }
+  }
+
+  function isIsolatedCollectionRecoveryHeld() {
+    return isIsolatedTaskCollectionSelected(true) || isDetachedCollectionRecoveryPending();
+  }
+
+  // Raw aliases have no authority to replace the collection. The checked
+  // writer admits a snapshot synchronously after its scoring and shadow checks.
+  let checkedCollectionWrite = 0;
+  function installIsolatedCollectionStorageBoundary() {
+    const storage=global.localStorage;
+    const prototype=global.Storage?.prototype;
+    if (!prototype || !storage) return;
+    const setItem=prototype.setItem;
+    const removeItem=prototype.removeItem;
+    const clear=prototype.clear;
+    const refused=()=>new Error('Use a verified detached rollback before replacing this collection.');
+    prototype.setItem=function collectionCheckedSetItem(key,value) {
+      if (this===storage && String(key)===STORAGE_KEY && isDetachedCollectionRecoveryPending()) throw refused();
+      if (this===storage && String(key)===STORAGE_KEY && !checkedCollectionWrite && isIsolatedTaskCollectionSelected(true)) {
+        const previous=parseTaskPointsStorageJson(storage.getItem(STORAGE_KEY),null);
+        const candidate=parseTaskPointsStorageJson(String(value),null);
+        if (!Array.isArray(previous?.tasks) || !Array.isArray(previous.completions) || !deepEqual(previous,candidate)) throw refused();
+      }
+      return setItem.call(this,key,value);
+    };
+    prototype.removeItem=function collectionCheckedRemoveItem(key) {
+      if (this===storage && String(key)===STORAGE_KEY && isIsolatedCollectionRecoveryHeld()) throw refused();
+      return removeItem.call(this,key);
+    };
+    prototype.clear=function collectionCheckedClear() {
+      if (this===storage && isIsolatedCollectionRecoveryHeld()) throw refused();
+      return clear.call(this);
+    };
   }
   if (isolatedCompletionOrigin) {
     try {
       isolatedCompletionSelected = global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY) !== null;
       isIsolatedTaskCollectionSelected();
+      installIsolatedCollectionStorageBoundary();
     }
     catch (_) { /* The point-of-use check reports an unreadable marker. */ }
     global.addEventListener?.('storage', event => {
@@ -660,7 +703,8 @@
       global.document.addEventListener(eventName, () => { lastPlayerJournalInteractionAt = Date.now(); }, true);
     }
   }
-  if (global.setTimeout) global.setTimeout(() => {
+  if (global.setTimeout && !(isolatedCompletionPage && global.location.pathname.endsWith('/full/rollback.html')))
+    global.setTimeout(() => {
     try { if (readPendingPlayerEdits().length) schedulePlayerJournalFlush(); } catch (_) {}
   }, 1000);
   const pendingHabitJournalCompactions = new Map();
@@ -1465,6 +1509,7 @@ function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
   }
 
   function replaceCheckedTaskPointsStorage(storageKey, serializedCandidate) {
+    let collection=false;
     if (storageKey === STORAGE_KEY) {
       const guard = isolatedRollbackTombstones();
       if (guard) {
@@ -1474,9 +1519,13 @@ function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
           throw new Error('Detached rollback forbids restoring permanently deleted Tasks or changing their earned history.');
       }
       assertIsolatedScoringWrite(serializedCandidate);
-      if (isIsolatedTaskCollectionSelected()) assertIsolatedCollectionSnapshotWrite(serializedCandidate);
+      collection=isIsolatedTaskCollectionSelected(true);
     }
-    safeReplaceTaskPointsStorage(storageKey, serializedCandidate);
+    if (!collection) return safeReplaceTaskPointsStorage(storageKey, serializedCandidate);
+    assertIsolatedCollectionSnapshotWrite(serializedCandidate);
+    checkedCollectionWrite++;
+    try { safeReplaceTaskPointsStorage(storageKey, serializedCandidate); }
+    finally { checkedCollectionWrite--; }
   }
 
   function assertIsolatedCollectionSnapshotWrite(serializedCandidate) {
@@ -8751,6 +8800,8 @@ const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
   // mergeAndSaveState/saveAppState and should not go through this guard.
   function saveValidatedSnapshot(state, options = {}) {
     const storageKey = options.storageKey || STORAGE_KEY;
+    if (storageKey===STORAGE_KEY && isIsolatedCollectionRecoveryHeld())
+      throw new Error('Use a verified detached rollback before importing into this collection.');
     const shapeCheck = validateSnapshotShape(state);
     if (!shapeCheck.ok) {
       quarantineRejectedSnapshot(state, shapeCheck.reason, options);
@@ -8813,6 +8864,8 @@ const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
   }
 
   function restoreBackupSlot(slotKey, options = {}) {
+    if (isIsolatedCollectionRecoveryHeld())
+      return {restored:false,reason:'Use a verified detached rollback before restoring a legacy backup.'};
     if (!slotKey) return { restored: false, reason: 'Missing backup slot key.' };
     let parsed = null;
     try {
@@ -11691,6 +11744,7 @@ return Number(cappedScore.toFixed(1));
     isolatedTaskDoneError,
     usesIsolatedTaskScoring,
     isIsolatedTaskCollectionSelected,
+    isIsolatedCollectionRecoveryHeld,
     isIsolatedCollectionTaskLink,
     getLegacyLinkedCompletionHold,
     protectsIsolatedLegacyReward,

@@ -3134,6 +3134,8 @@ function readZipEntriesFallback(arrayBuffer) {
 }
 
 async function importBackupZipFallback(file) {
+  if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.())
+    throw new Error('Use a verified detached rollback before importing into this collection.');
   const entries = readZipEntriesFallback(await file.arrayBuffer());
   let manifestEntry = entries.get('manifest.json');
   if (!manifestEntry) {
@@ -3232,6 +3234,8 @@ async function exportBackupWithImagesFallback() {
 }
 
 async function applyImportedStateFallback(rootOrPayload) {
+  if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.())
+    throw new Error('Use a verified detached rollback before importing into this collection.');
   const fullPayload = rootOrPayload?.exportType === 'taskpoints_full_backup' && rootOrPayload?.state ? rootOrPayload : null;
   const root = fullPayload?.state || rootOrPayload;
   const importedNotesPayload = fullPayload ? readNotesPayloadFromBackupPayloadFallback(fullPayload) : readNotesPayloadFromBackupPayloadFallback(rootOrPayload);
@@ -3291,6 +3295,10 @@ async function applyImportedStateFallback(rootOrPayload) {
 }
 
 async function importFileFallback(ev) {
+  if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.()) {
+    ev.target.value='';
+    return alert('Use a verified detached rollback before importing into this collection.');
+  }
   const f = ev.target.files?.[0];
   if (!f) return;
 
@@ -3353,6 +3361,8 @@ async function importFileFallback(ev) {
 }
 
 function importPasteFallback() {
+  if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.())
+    return alert('Use a verified detached rollback before importing into this collection.');
   const txt = prompt('Paste TaskPoints JSON:');
   if (!txt) return;
 
@@ -3392,6 +3402,7 @@ function getHandler(name, fallback) {
 }
 
 function exportOGDataOnly() {
+  if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.()) return downloadCollectionPackage(false);
   window.TaskPointsCore?.flushPendingSaves?.();
   if (typeof window.exportData === 'function' && window.exportData !== exportOGDataOnly) {
     return window.exportData();
@@ -3400,11 +3411,28 @@ function exportOGDataOnly() {
 }
 
 function exportBackupWithImages() {
+  if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.()) return downloadCollectionPackage(false);
   window.TaskPointsCore?.flushPendingSaves?.();
   if (typeof window.exportBackupWithImages === 'function' && window.exportBackupWithImages !== exportBackupWithImages) {
     return window.exportBackupWithImages();
   }
   return exportBackupWithImagesFallback();
+}
+
+async function downloadCollectionPackage(freeze) {
+  try {
+    if (!/\/(index|settings)\.html$/.test(location.pathname)) throw new Error('Open Home or Settings to export the collection.');
+    if (freeze && !confirm('Freeze Task editing in this synthetic profile and download a checkpoint for a fresh V1 profile?')) return;
+    const runtime=window.TaskPointsStateRuntimeV2;
+    const checkpoint=await runtime.prepareIsolatedTaskCollectionPackage(freeze);
+    const proof=await runtime.verifyIsolatedCollectionPackage(checkpoint);
+    const url=URL.createObjectURL(new Blob([JSON.stringify(checkpoint)],{type:'application/json'}));
+    const anchor=document.createElement('a');
+    anchor.href=url;
+    anchor.download=proof.restorable ? 'taskpoints-collection-recovery.json' : 'taskpoints-collection-backup.json';
+    try { anchor.click(); }
+    finally { setTimeout(()=>URL.revokeObjectURL(url),0); }
+  } catch (error) { alert(`Collection export could not be verified. ${error.message}`); }
 }
 
 if (typeof window.exportOGDataOnly !== 'function') {
@@ -3433,6 +3461,10 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.querySelectorAll('[data-export-images]').forEach((btn) => {
     btn.addEventListener('click', exportOGDataOnly);
+  });
+  document.querySelectorAll('[data-collection-recovery-export]').forEach(btn=>{
+    btn.hidden=!window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.();
+    btn.addEventListener('click',()=>downloadCollectionPackage(true));
   });
   // Daily Brief export integration (shared export controls).
   

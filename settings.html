@@ -117,6 +117,7 @@
             <button id="settingsMergeBackupPickerBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Merge Backup</button>
             <input id="settingsMergeBackupInput" type="file" accept="application/json,application/zip,.zip" class="hidden" />
             <button type="button" class="btn btn-ghost btn-toolbar nav-btn" data-export-images>Backup + Images</button>
+            <button type="button" class="btn btn-ghost btn-toolbar nav-btn" data-collection-recovery-export hidden>Freeze and export recovery checkpoint</button>
             <button id="settingsExportMatchupsBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">
               Export Matchups + Player History (CSV)
             </button>
@@ -1250,7 +1251,7 @@ ${b}`;
     }
 
     async function applyImportedState(data) {
-      if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.())
+      if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.())
         throw new Error('Use a verified detached rollback before importing into this collection.');
       const isFullBackup = data && data.exportType === "taskpoints_full_backup" && data.state;
       const root =
@@ -1405,7 +1406,7 @@ ${b}`;
     }
 
     async function importBackupZip(file) {
-      if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.())
+      if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.())
         throw new Error('Use a verified detached rollback before importing into this collection.');
       const entries = readZipEntries(await file.arrayBuffer());
       let manifestEntry = entries.get("manifest.json");
@@ -1601,8 +1602,11 @@ ${b}`;
 
     async function handleMergeBackupFile(ev) {
       if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.()) {
+        return mergeIsolatedCollectionBackup(ev);
+      }
+      if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.()) {
         ev.target.value='';
-        return alert('Use a verified detached rollback before merging a backup into this collection.');
+        return alert('Finish the verified detached rollback before merging a backup.');
       }
       const file = ev.target.files?.[0];
       if (!file) return;
@@ -1732,8 +1736,63 @@ ${summaryWithNotes}`)) return;
       }
     }
 
+    async function mergeIsolatedCollectionBackup(ev) {
+      try {
+        const file=ev.target.files?.[0];
+        if (!file || isZipFile(file))
+          throw new Error('Use a verified detached rollback before merging this backup into the collection.');
+        const data=JSON.parse(await file.text());
+        const backup=extractImportRoot(data);
+        if (!backup) throw new Error('Backup format is invalid for merge.');
+        const fields=['weightHistory','vo2MaxHistory','reminders'];
+        for (const key of ['completions','matchups','gameHistory',...fields]) {
+          if (Object.hasOwn(backup,key) && (!Array.isArray(backup[key])
+            || backup[key].some(row=>!row || typeof row!=='object' || Array.isArray(row))))
+            throw new Error(`Backup ${key} is unreadable.`);
+        }
+        const core=TaskPointsCore;
+        const before=localStorage.getItem(SETTINGS_STORAGE_KEY);
+        if (!confirm('Merge missing Weight, VO2 Max and Reminder records? The verified Task collection and reward history stay in place.')) return;
+        const result=await core.runWithVerifiedTaskScoring(()=>{
+          if (localStorage.getItem(SETTINGS_STORAGE_KEY)!==before) throw new Error('The current save changed. Reopen the backup and review it again.');
+          const current=core.parseTaskPointsStorageJson(before,null);
+          if (!Array.isArray(current?.tasks) || !Array.isArray(current.completions)) throw new Error('The current save is unreadable.');
+          const completions=core.readScoringCompletions(current.completions);
+          const notes=normalizeNotesPayload(readNotesPayloadFromBackupPayload(data));
+          if (mergeHistoryArray(completions,backup.completions,'completions').added
+            || ['matchups','gameHistory'].some(key=>mergeHistoryArray(current[key],backup[key],key).added)
+            || (notes.trim() && notes!==getCurrentNotesTextForSettings()))
+            throw new Error('This backup requires a reviewed history or notes import. Use the verified detached checkpoint workflow.');
+          const patch={};
+          let added=0;
+          for (const key of fields) {
+            const merged=mergeHistoryArray(current[key],backup[key],key);
+            if (merged.added) patch[key]=merged.merged;
+            added+=merged.added;
+          }
+          if (!added) return {added};
+          const ordered=sortHistoryForDisplay({...patch});
+          const candidate={...current,...Object.fromEntries(Object.keys(patch).map(key=>[key,ordered[key]]))};
+          const expected=core.normalizeState(candidate);
+          const saved=core.saveStateSnapshot(candidate, {
+            storageKey:SETTINGS_STORAGE_KEY,immediateWrite:true,userInitiated:true,source:'settings-collection-merge',
+            limits:{allowHistoryPrune:false,allowCompletionPrune:false}
+          });
+          assertCommittedSettingsImport(saved,'Merge');
+          const readback=core.parseTaskPointsStorageJson(localStorage.getItem(SETTINGS_STORAGE_KEY),null);
+          for (const key of Object.keys(patch))
+            if (core.shadowCanonicalJson(readback?.[key])!==core.shadowCanonicalJson(expected[key]))
+              throw new Error('Merge readback is incomplete.');
+          return {added};
+        });
+        if (!result) throw new Error('The V2 collection could not be verified.');
+        alert(`Merge verified. ${result.added} records added.`);
+      } catch (error) { alert(`Merge stopped. ${error.message}`); }
+      finally { ev.target.value=''; }
+    }
+
     function handleSettingsReset() {
-      if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.())
+      if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.())
         return alert('Use a verified detached rollback before resetting this collection.');
       const msg = [
         'This will erase ALL TaskPoints data stored on this device:',

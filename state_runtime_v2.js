@@ -22103,6 +22103,9 @@
     } finally { db.close(); }
   }
   const OWNED_COMPLETION_ROLLBACK = 'taskpoints-isolated-task-completion-rollback-1';
+  const OWNED_COLLECTION_BACKUP = 'taskpoints-isolated-task-collection-backup-1';
+  const OWNED_COLLECTION_CHECKPOINT = 'isolated-task-collection-recovery-checkpoint';
+  const OWNED_COLLECTION_RESTORE_RECEIPT = 'taskpoints_isolated_collection_restore_receipt_v1';
   const ROLLBACK_HOLD = 'taskpoints_recovery_write_lock_v1';
 
   function rollbackLegacyState() {
@@ -22234,11 +22237,39 @@
     return databases;
   }
 
-  async function prepareCompletionRollback(db, prior, expectedRevision) {
+  async function readFrozenCollectionCheckpoint(db, meta, allowMissing = false) {
+    const row=await requestPromise(db.transaction('meta','readonly').objectStore('meta').get(OWNED_COLLECTION_CHECKPOINT));
+    if (!row && allowMissing) return null;
+    const checkpoint=row?.checkpoint;
+    if (!checkpoint || checkpoint.checksum!==meta.rollbackChecksum || checkpoint.generation!==meta.generation
+      || checkpoint.revision!==meta.revision || checkpoint.v2Frozen!==true)
+      throw new Error('rollback_collection_checkpoint_unverified');
+    await verifyIsolatedCollectionPackage(checkpoint);
+    return checkpoint;
+  }
+
+  async function verifyIsolatedCollectionPackage(checkpoint) {
+    requireIsolatedTaskExperiment();
+    const {checksum,...payload}=clone(checkpoint);
+    if (payload.taskCollectionVersion!==1 || typeof checksum!=='string'
+      || (payload.format!==OWNED_COLLECTION_BACKUP || payload.v2Frozen!==false)
+        && (payload.format!==OWNED_COMPLETION_ROLLBACK || payload.v2Frozen!==true)
+      || !Array.isArray(payload.expected?.tasks) || !Array.isArray(payload.expected.completions)
+      || !Array.isArray(payload.databases) || !Array.isArray(payload.currentLegacySource)
+      || checksum!==await previewRecoveryFingerprint(payload)
+      || stableJson(core.parseTaskPointsStorageJson(payload.raw))!==stableJson(payload.snapshot))
+      throw new Error('rollback_detached_checkpoint_unverified');
+    return {verified:true,checksum,restorable:payload.v2Frozen,tasks:payload.expected.tasks.length,
+      completions:payload.expected.completions.length};
+  }
+
+  async function prepareCompletionRollback(db, prior, expectedRevision, {freeze=true} = {}) {
     const {meta, rows, journal, completionRows} = prior;
-    const fixture = ownedTaskContext();
+    const fixture = ownedTaskContext(false,true);
     const marker = global.localStorage.getItem(OWNED_TASK_FIXTURE);
     const currentLegacySource = ownedLegacyEvidence();
+    if (meta.collection && currentLegacySource.some(([key])=>[OWNED_COLLECTION_RESTORE_RECEIPT,OWNED_COLLECTION_ROLLBACK_JOURNAL].includes(key)))
+      throw new Error('rollback_collection_archive_key_collision');
     if (currentLegacySource.some(([key])=>key === core.ISOLATED_TASK_SCHEDULE_PENDING_KEY))
       throw new Error('rollback_pending_task_schedule_requires_review');
     if (fixture.completionRead !== true || (!fixture.taskCollection && fixture.homeTaskId !== 't1')
@@ -22280,9 +22311,10 @@
     if (stableJson(core.parseTaskPointsStorageJson(raw)) !== stableJson(snapshot))
       throw new Error('rollback_snapshot_roundtrip_unverified');
     const databases = await captureRollbackDatabases();
-    const payload = rollbackJsonValue({format:OWNED_COMPLETION_ROLLBACK, generation:meta.generation, revision:meta.revision,
+    const payload = rollbackJsonValue({format:freeze ? OWNED_COMPLETION_ROLLBACK : OWNED_COLLECTION_BACKUP,
+      generation:meta.generation, revision:meta.revision,
       snapshot, raw, expected, databases, currentLegacySource, originalSource:meta.source,
-      receipts:journal, completions:rewards, v2Frozen:true,
+      receipts:journal, completions:rewards, v2Frozen:freeze,
       ...(meta.collection ? {taskCollectionVersion:1} : {}),
       ...(todayAfterTrash !== undefined ? {todayAfterTrash} : {}),
       ...(prior.permanentIds.length ? {permanentIds:prior.permanentIds} : {}),
@@ -22296,17 +22328,39 @@
     // Seal only after verifying the detached candidate. Recheck all authority
     // records in the transaction that freezes V2, and check localStorage at
     // that boundary. Legacy databases and localStorage are separate stores.
-    const tx = db.transaction(OWNED_TASK_STORES,'readwrite',{durability:'strict'});
+    const tx = db.transaction(OWNED_TASK_STORES,freeze ? 'readwrite' : 'readonly',freeze ? {durability:'strict'} : {});
     await withOwnedRecords(tx, (current,tasks,mutations,completions) => {
       const receipts = ownedTaskJournal(mutations);
-      if (ownedTaskContext().id !== fixture.id || global.localStorage.getItem(OWNED_TASK_FIXTURE) !== marker
+      if (ownedTaskContext(false,true).id !== fixture.id || global.localStorage.getItem(OWNED_TASK_FIXTURE) !== marker
         || stableJson(currentLegacySource) !== stableJson(ownedLegacyEvidence())
         || stableJson([meta, rows, journal, completionRows]) !== stableJson([current, tasks, receipts, completions])
         || (meta.mode === 'rollback-frozen' && meta.rollbackChecksum !== checksum))
         throw new Error('rollback_revision_conflict');
-      if (meta.mode === 'owned') tx.objectStore('meta').put({...meta, mode:'rollback-frozen', rollbackChecksum:checksum});
+      if (freeze && meta.mode === 'owned') {
+        const store=tx.objectStore('meta');
+        store.put({...meta, mode:'rollback-frozen', rollbackChecksum:checksum});
+      }
+      if (freeze && meta.collection) tx.objectStore('meta').add({id:OWNED_COLLECTION_CHECKPOINT,checkpoint:{...payload,checksum}});
     });
+    if (freeze && meta.collection) return readFrozenCollectionCheckpoint(db,{...meta,rollbackChecksum:checksum});
     return {...payload, checksum};
+  }
+
+  async function prepareIsolatedTaskCollectionPackage(freeze = false) {
+    const fixture=ownedTaskContext(false,true);
+    if (!fixture.taskCollection || !/\/(index|settings)\.html$/.test(global.location.pathname))
+      throw new Error('owned_collection_recovery_context_unverified');
+    const db=await openOwnedTasks(false,true);
+    try {
+      const prior=await readOwnedSnapshot(db,true);
+      if (prior.meta.mode==='rollback-frozen') {
+        const cached=await readFrozenCollectionCheckpoint(db,prior.meta,true);
+        if (cached) return cached;
+        freeze=true;
+      }
+      if (prior.sourceDrift) throw new Error('legacy_source_changed_preserved_reconciliation_required');
+      return await prepareCompletionRollback(db,prior,prior.meta.revision,{freeze:freeze===true});
+    } finally { db.close(); }
   }
 
   async function restoreIsolatedTaskCompletionRollback(checkpoint) {
@@ -22316,9 +22370,9 @@
       || typeof global.indexedDB?.databases !== 'function') throw new Error('rollback_disposable_context_required');
     return global.navigator.locks.request(OWNED_COMPLETION_ROLLBACK, async () => {
       const storage = global.localStorage;
-      if (storage.length || (await global.indexedDB.databases()).length)
-        throw new Error('rollback_fresh_profile_required');
       const {checksum, ...payload} = clone(checkpoint);
+      if (payload.taskCollectionVersion!==1 && (storage.length || (await global.indexedDB.databases()).length))
+        throw new Error('rollback_fresh_profile_required');
       if (payload.format !== OWNED_COMPLETION_ROLLBACK || payload.v2Frozen !== true
         || checksum !== await previewRecoveryFingerprint(payload)
         || (payload.completionEvidenceVersion!==undefined && payload.completionEvidenceVersion!==1)
@@ -22334,6 +22388,8 @@
         .map(([key, value]) => [key, key === core.STORAGE_KEY ? payload.raw
           : key === core.ISOLATED_TODAY_LIST_KEY ? (payload.todayAfterTrash ?? value) : value]);
       if (collection) {
+        if (entries.some(([key])=>key===OWNED_COLLECTION_RESTORE_RECEIPT))
+          throw new Error('rollback_collection_archive_key_collision');
         const {effective}=isolatedCollectionSource(payload.originalSource);
         const manifest=isolatedCollectionManifest(effective,payload.originalSource,payload.generation);
         const tasks=payload.snapshot.tasks.filter(row=>manifest.heldTasks.some(entry=>entry.id===row.id));
@@ -22365,20 +22421,60 @@
         })]);
       }
       entries.sort(([a],[b])=>a < b ? -1 : a > b ? 1 : 0);
-      const hold = JSON.stringify({active:true, retainUntilManualRecovery:true, token:checksum});
-      if (storage.length) throw new Error('rollback_fresh_profile_required');
-      storage.setItem(ROLLBACK_HOLD, hold);
+      const hold = JSON.stringify({active:true, retainUntilManualRecovery:true, token:checksum,
+        ...(collection ? {isolatedCollectionRollback:true} : {})});
+      const receipt=JSON.stringify({checksum,generation:payload.generation,revision:payload.revision});
+      const catalog=await global.indexedDB.databases();
+      const resuming=collection && storage.getItem(ROLLBACK_HOLD)===hold;
+      const restored=collection && storage.getItem(ROLLBACK_HOLD)===null
+        && storage.getItem(OWNED_COLLECTION_RESTORE_RECEIPT)===receipt;
+      const permitted=new Map(entries);
+      if (resuming) permitted.set(ROLLBACK_HOLD,hold);
+      if (resuming || restored) permitted.set(OWNED_COLLECTION_RESTORE_RECEIPT,receipt);
+      const assertStorageBoundary=()=>{
+        if (ownedLegacyEvidence().some(([key,value])=>permitted.get(key)!==value)
+          || storage.getItem(OWNED_TASK_FIXTURE)!==null)
+          throw new Error('rollback_destination_evidence_conflict');
+      };
+      if (resuming || restored) {
+        if (catalog.some(db=>!payload.databases.some(expected=>expected.name===db.name)))
+          throw new Error('rollback_destination_evidence_conflict');
+        assertStorageBoundary();
+      } else if (storage.length || catalog.length) throw new Error('rollback_fresh_profile_required');
+
+      const existing=(resuming || restored) ? await captureRollbackDatabases() : [];
+      for (const database of existing) {
+        const expected=payload.databases.find(row=>row.name===database.name);
+        if (database.version!==expected.version || database.stores.length!==expected.stores.length
+          || database.stores.some(store=>{
+            const target=expected.stores.find(row=>row.name===store.name);
+            return !target || target.keyPath!==store.keyPath
+              || store.rows.some(row=>!target.rows.some(value=>stableJson(value)===stableJson(row)));
+          })) throw new Error('rollback_destination_evidence_conflict');
+      }
+      if (restored) {
+        if (stableJson(existing)!==stableJson(payload.databases) || entries.some(([key,value])=>storage.getItem(key)!==value))
+          throw new Error('rollback_destination_evidence_conflict');
+        return {verified:true,checksum};
+      }
+      if (resuming) assertStorageBoundary();
+      else {
+        if (storage.length) throw new Error('rollback_fresh_profile_required');
+        storage.setItem(ROLLBACK_HOLD, hold);
+      }
       if (storage.getItem(ROLLBACK_HOLD) !== hold) throw new Error('rollback_hold_unverified');
       // A partial destination is disposable. Retain the hold on any error
       // or interruption; only a completely verified import may open V1.
       for (const database of payload.databases) {
-        const db = await openRollbackDatabase(database, database.stores);
+        const present=existing.find(row=>row.name===database.name);
+        const db = await openRollbackDatabase(database, present ? undefined : database.stores);
         try {
           const tx = db.transaction(database.stores.map(store => store.name), 'readwrite', {durability:'strict'});
           const done = transactionPromise(tx);
           try {
             for (const {name, keyPath, rows} of database.stores) for (const row of rows) {
               const store = tx.objectStore(name);
+              if (present?.stores.find(other=>other.name===name)?.rows.some(existing=>existing.key===row.key)) continue;
               const value = row.blob ? new global.Blob([Uint8Array.from(row.blob.bytes)], {type:row.blob.type}) : row.value;
               if (keyPath === null) store.add(value, row.key);
               else store.add(value);
@@ -22389,17 +22485,27 @@
       }
       if (stableJson(await captureRollbackDatabases()) !== stableJson(payload.databases))
         throw new Error('rollback_database_readback_unverified');
+      if (collection) {
+        permitted.set(ROLLBACK_HOLD, hold);
+        assertStorageBoundary();
+        if (storage.getItem(ROLLBACK_HOLD)!==hold) throw new Error('rollback_hold_unverified');
+      }
       for (const [key, value] of entries) if (key !== core.STORAGE_KEY) storage.setItem(key, value);
       storage.setItem(core.STORAGE_KEY, payload.raw);
-      if (stableJson(ownedLegacyEvidence().filter(([key]) => key !== ROLLBACK_HOLD)) !== stableJson(entries)
+      if (stableJson(ownedLegacyEvidence().filter(([key]) => key !== ROLLBACK_HOLD
+        && (!collection || key!==OWNED_COLLECTION_RESTORE_RECEIPT))) !== stableJson(entries)
         || storage.getItem(ROLLBACK_HOLD) !== hold || storage.getItem(OWNED_TASK_FIXTURE) !== null)
         throw new Error('rollback_v1_readback_unverified');
       if (collection) core.clearStateHotCache?.();
-      const restored=rollbackLegacyState();
-      if (stableJson(restored)!==stableJson(payload.expected)) {
-        const changed=[...new Set([...Object.keys(restored ?? {}),...Object.keys(payload.expected)])]
-          .filter(key=>stableJson(restored?.[key])!==stableJson(payload.expected[key]));
+      const readback=rollbackLegacyState();
+      if (stableJson(readback)!==stableJson(payload.expected)) {
+        const changed=[...new Set([...Object.keys(readback ?? {}),...Object.keys(payload.expected)])]
+          .filter(key=>stableJson(readback?.[key])!==stableJson(payload.expected[key]));
         throw new Error(`rollback_v1_readback_unverified: ${changed.join(', ')}`);
+      }
+      if (collection) {
+        storage.setItem(OWNED_COLLECTION_RESTORE_RECEIPT,receipt);
+        if (storage.getItem(OWNED_COLLECTION_RESTORE_RECEIPT)!==receipt) throw new Error('rollback_release_unverified');
       }
       storage.removeItem(ROLLBACK_HOLD);
       if (storage.getItem(ROLLBACK_HOLD) !== null) throw new Error('rollback_release_unverified');
@@ -22413,6 +22519,11 @@
       if (global.localStorage.getItem(core.ISOLATED_TASK_SCHEDULE_PENDING_KEY) !== null)
         throw new Error('rollback_pending_task_schedule_requires_review');
       const prior=await readOwnedSnapshot(db, true);
+      if (prior.meta.collection && prior.meta.mode==='rollback-frozen') {
+        if (prior.meta.revision!==expectedRevision) throw new Error('rollback_revision_conflict');
+        const cached=await readFrozenCollectionCheckpoint(db,prior.meta,true);
+        if (cached) return cached;
+      }
       if(prior.sourceDrift)throw new Error('legacy_source_changed_preserved_reconciliation_required');
       if(prior.meta.scoringSeed !== undefined || prior.completionRows.length
         || ownedTaskContext().completionRead === true || global.localStorage.getItem(OWNED_TASK_SCORING) !== null)
@@ -22499,6 +22610,8 @@
     commitIsolatedOwnedTask,
     commitIsolatedTaskScheduling,
     prepareIsolatedTaskRollback,
+    prepareIsolatedTaskCollectionPackage,
+    verifyIsolatedCollectionPackage,
     restoreIsolatedTaskCompletionRollback,
     inspectStartupMeta,
     seedFromLegacy,

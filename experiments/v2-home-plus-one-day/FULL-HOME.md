@@ -877,6 +877,51 @@ component suite passed all 19 tests. The final focused Chromium run passed
 all nine tests: the five collection tests, two existing rollback tests and
 both Archive timeout reruns.
 
+**Packages 5B and 5C — recovery writer coordination and compatibility**
+
+- [x] The real Home and Settings export controls can make a verified read-only
+  synthetic collection package. It includes the current V2 Tasks, linked
+  rewards, receipts, tombstones, the effective V1 state, pending journal and
+  recovery evidence, unknown fields, backups and image bytes. The source can
+  continue editing after that export.
+- [x] The Settings recovery action freezes Task writes and stores the complete
+  checkpoint in the same IndexedDB transaction. After an interrupted download
+  or Chromium restart, retry returns the stored package for that revision.
+- [x] The detached loader independently checks the file and imports the frozen
+  checkpoint in a fresh disposable V1 profile. Its hold persists until database
+  and V1 readback passes. Retry resumes only an identical partial checkpoint.
+  A completed retry checks the existing receipt and refuses newer or unrelated
+  destination data. Opening a legacy recovery page during that hold cannot
+  replace the snapshot.
+- [x] The real Settings Merge Backup control admits a JSON merge of missing
+  Weight, VO2 Max and Reminder records under current collection verification.
+  It checks the committed records and preserves all Task and reward ownership.
+  An unreadable backup or one requiring unverified rewards, Game history or
+  Notes changes stops before writing the independent history.
+- [ ] Complete in-place Task and reward recovery through Home/Settings imports,
+  Reset All, verified-secondary, emergency/vault, rolling backups and the
+  remaining direct aliases. Their instrumented replacement paths refuse safely
+  today. Old V1 snapshots have no matching V2 revision or deletion proof, and
+  a full reset needs a verified generation boundary across the snapshot,
+  journals, images and sidecars. A checksum proves file integrity and cannot
+  establish that an older V1 backup is current.
+- [ ] Complete forward re-admission after detached recovery, recovery from
+  prior live backup copies, and reconciliation of independent V1 edits made
+  after a source checkpoint. The read-only live backup can be opened and
+  checked. The detached importer accepts a frozen checkpoint for fresh V1.
+  Qualification of the actual iPhone and old edit-session handoff stays open.
+
+On `24e6d700`, the ordinary V1 Settings merge fixture with existing Game
+history reports a verification mismatch. This milestone preserves that result
+and checks that the same fixture still uses the ordinary V1 export and merge
+routes when collection ownership is disabled.
+
+The browser run passed 12 tests, including all five new recovery tests. The
+seven existing rollback and collection tests also passed on `24e6d700`.
+All 47 focused recovery/export contracts and all 19 component tests passed.
+The broader 1,719-test batch had 1,693 passes, the same 25 named failures,
+and one TODO on both commits.
+
 M02 remains Working. The official pass condition covers the full live
 Task writer family. See the [tracker](../../V2-PROGRESS-TRACKER.md)
 and the [writer handoff matrix](../../docs/state-runtime-v2-writer-handoff-matrix.md).

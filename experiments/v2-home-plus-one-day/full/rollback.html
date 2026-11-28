@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TaskPoints synthetic recovery</title>
+  <script>
+    if (['localhost','127.0.0.1'].includes(location.hostname))
+      window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ = true;
+  </script>
+  <script src="/scoring_core.js" defer></script>
+  <script src="/flex_action_fast_path.js" defer></script>
+  <script src="/state_runtime_v2.js" defer></script>
+  <script src="/task_mutation_journal.js" defer></script>
+  <script src="/task_create_fast_path.js" defer></script>
+  <script src="rollback.js" defer></script>
+</head>
+<body>
+  <main>
+    <h1>TaskPoints synthetic recovery</h1>
+    <p>Open a collection package to check it. Restore a frozen checkpoint only in a fresh disposable profile.</p>
+    <label for="collectionPackage">Collection package</label>
+    <input id="collectionPackage" type="file" accept=".json,application/json">
+    <button id="restoreCollection" type="button" disabled>Restore checkpoint</button>
+    <p id="collectionRecoveryStatus" role="status"></p>
+  </main>
+</body>
+</html>

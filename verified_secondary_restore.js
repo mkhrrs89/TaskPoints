@@ -315,6 +315,7 @@
   }
 
   async function restore() {
+    if (global.isTaskPointsCollectionRecoveryHeld?.()) return reportCollectionHold();
     if (!candidate || !validation?.verified) return;
     const initialJournals = currentJournalState();
     if (initialJournals.pendingHabitCount || initialJournals.legacyJournalPresent) {
@@ -346,6 +347,7 @@
       if ((localStorage.getItem(STORAGE_KEY) || '') !== validation.currentRaw) {
         throw new Error('The current authoritative save changed immediately before replacement.');
       }
+      if (global.isTaskPointsCollectionRecoveryHeld?.()) throw new Error('The V2 collection became active during recovery.');
 
       localStorage.setItem(MODE_KEY, 'off');
       localStorage.setItem(HOLD_KEY, JSON.stringify({
@@ -411,7 +413,14 @@
     }
   }
 
+  function reportCollectionHold() {
+    $('restoreBtn').disabled = true;
+    $('message').className = 'warning mb-4';
+    $('message').textContent = 'This legacy copy cannot replace the verified V2 collection. Use the collection recovery checkpoint from Home or Settings.';
+  }
+
   async function initialize() {
+    if (global.isTaskPointsCollectionRecoveryHeld?.()) return reportCollectionHold();
     try {
       const result = await validate();
       renderCounts(candidate.counts);

@@ -5570,7 +5570,7 @@ function save(savePath, extraOptions = {}) {
 
 
 function resetAll(){
-  if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.())
+  if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.())
     return alert('Use a verified detached rollback before resetting this collection.');
   const msg = [
     'This will erase ALL TaskPoints data stored on this device:',
@@ -15520,6 +15520,8 @@ function readZipEntries(arrayBuffer) {
 }
 
 async function importBackupZip(file) {
+  if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.())
+    throw new Error('Use a verified detached rollback before importing into this collection.');
   const entries = readZipEntries(await file.arrayBuffer());
   let manifestEntry = entries.get("manifest.json");
   if (!manifestEntry) {
@@ -15720,7 +15722,7 @@ function getTaskPointsExportSnapshot() {
 }
 
 async function applyImportedState(rootOrPayload){
-  if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.())
+  if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.())
     throw new Error('Use a verified detached rollback before importing into this collection.');
   const fullPayload = rootOrPayload?.exportType === "taskpoints_full_backup" && rootOrPayload?.state ? rootOrPayload : null;
   const root = fullPayload?.state || rootOrPayload;

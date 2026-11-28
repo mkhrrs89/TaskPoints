@@ -24,14 +24,9 @@ before(async()=>{
       if(file==='seed.html') {
         res.writeHead(200,{'Content-Type':'text/html'});res.end('<!doctype html><title>Synthetic seed</title>');return;
       }
-      if(request.pathname===prefix+'rollback.html'){
-        res.writeHead(200,{'Content-Type':'text/html'});
-        const scripts=['scoring_core.js','flex_action_fast_path.js','state_runtime_v2.js','task_mutation_journal.js','task_create_fast_path.js'];
-        res.end('<!doctype html><title>Synthetic detached rollback</title>'
-          // Install the actual legacy readers without their scheduled startup
-          // jobs. The disposable loader must not compact a partial import.
-          +'<script>window.setTimeout = () => 0;</script>'
-          +scripts.map(file=>`<script src="/${file}"></script>`).join(''));
+      if(['rollback.html','rollback.js'].some(asset=>request.pathname===prefix+asset)){
+        res.writeHead(200,{'Content-Type':file.endsWith('.html')?'text/html':'text/javascript'});
+        res.end(fs.readFileSync(path.join(__dirname,'full',file)));
         return;
       }
       if(file==='index.html'&&!request.pathname.startsWith(prefix)) {
@@ -7923,4 +7918,228 @@ test('V2 collection holds malformed or conflicting source evidence before admiss
   assert.deepEqual(await canonicalSnapshot(page),before);
   assert.equal((await owned(page)).sourceDrift,false);
   assert.deepEqual((await owned(page)).journal,[]);
+});
+
+const collectionRecoveryReceipt='taskpoints_isolated_collection_restore_receipt_v1';
+const collectionRecoveryHold='taskpoints_recovery_write_lock_v1';
+
+async function readCollectionDownload(page,control) {
+  const [download]=await Promise.all([page.waitForEvent('download'),control.click()]);
+  assert.equal(await download.failure(),null);
+  return JSON.parse(fs.readFileSync(await download.path(),'utf8'));
+}
+
+function allowRecoveryDialogs(page,reports=[]) {
+  page.removeAllListeners('dialog');
+  page.on('dialog',async dialog=>{reports.push(dialog.message());await dialog.accept();});
+}
+
+async function selectCollectionPackage(page,checkpoint) {
+  await page.locator('#collectionPackage').setInputFiles({name:'synthetic-collection.json',
+    mimeType:'application/json',buffer:Buffer.from(JSON.stringify(checkpoint))});
+}
+
+test('Package 5B real export keeps the live owner, and a frozen download recovers after quota, lost response and restart',async t=>{
+  const profile=await completionProfile(t);
+  const {page,context}=await stageTaskCollection(t,profile.context);
+  await admitCollection(page);
+  await page.reload();
+  await waitCollectionHome(page);
+  const editor=await openCreatedEditor(page,'alpha');
+  const title='Synthetic Alpha portable checkpoint';
+  await editor.locator('[data-field="title"]').fill(title);
+  await editor.locator('[data-task-action="task-save"]').click();
+  await taskCard(page,'alpha').locator('.task-title').filter({hasText:title}).waitFor();
+  await settleRollbackSourceMirror(page);
+  const copy=await readCollectionDownload(page,page.locator('[data-export-button]:visible').first());
+  assert.equal(copy.snapshot.tasks.find(row=>row.id==='alpha').title,title);
+  assert.equal(copy.v2Frozen,false);
+  assert.equal((await owned(page)).meta.mode,'owned');
+
+  const settings=await openScoringPage(context,'settings.html');
+  const reports=[];
+  allowRecoveryDialogs(settings,reports);
+  const freeze=settings.locator('[data-collection-recovery-export]');
+  await freeze.locator('xpath=ancestor::details[1]/summary').click();
+  await settings.evaluate(()=>{
+    const add=IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add=function(row){
+      if (window.failFreeze && row?.id==='isolated-task-collection-recovery-checkpoint')
+        throw new DOMException('Synthetic recovery quota','QuotaExceededError');
+      return add.apply(this,arguments);
+    };
+    window.failFreeze=true;
+  });
+  await freeze.click();
+  await settings.waitForFunction(()=>window.failFreeze===true);
+  for (let i=0;i<60&&!reports.some(value=>value.includes('Synthetic recovery quota'));i++) await new Promise(resolve=>setTimeout(resolve,100));
+  assert.ok(reports.some(value=>value.includes('Synthetic recovery quota')),reports.join('\n'));
+  assert.equal((await owned(page)).meta.mode,'owned');
+  await settings.evaluate(()=>{
+    window.failFreeze=false;
+    HTMLAnchorElement.prototype.click=function(){throw Error('Synthetic lost checkpoint download');};
+  });
+  await freeze.click();
+  for (let i=0;i<60&&!reports.some(value=>value.includes('Synthetic lost checkpoint download'));i++) await new Promise(resolve=>setTimeout(resolve,100));
+  assert.ok(reports.some(value=>value.includes('Synthetic lost checkpoint download')),reports.join('\n'));
+  const frozen=(await owned(page)).meta;
+  assert.equal(frozen.mode,'rollback-frozen');
+  await assert.rejects(page.evaluate(()=>TaskPointsStateRuntimeV2.readIsolatedTaskScoring()),/source_conflict/);
+  const reopened=await profile.restart();
+  const freshSettings=await openScoringPage(reopened,'settings.html');
+  allowRecoveryDialogs(freshSettings);
+  const retry=freshSettings.locator('[data-collection-recovery-export]');
+  await retry.locator('xpath=ancestor::details[1]/summary').click();
+  const recovered=await readCollectionDownload(freshSettings,retry);
+  assert.deepEqual([recovered.checksum,recovered.revision,recovered.generation],
+    [frozen.rollbackChecksum,frozen.revision,frozen.generation]);
+  assert.equal(recovered.snapshot.tasks.find(row=>row.id==='alpha').title,title);
+});
+
+test('Package 5B real detached restore refuses a malformed package, resumes a held copy and refuses stale replays',async t=>{
+  const {page}=await stageTaskCollection(t);
+  await page.evaluate(()=>TaskPointsCore.saveImageBlob('synthetic-recovery-image',new Blob([new Uint8Array([7,0,9])],{type:'image/png'})));
+  await admitCollection(page);
+  await settleRollbackSourceMirror(page);
+  const copy=await page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskCollectionPackage());
+  const checkpoint=await page.evaluate(()=>TaskPointsStateRuntimeV2.prepareIsolatedTaskCollectionPackage(true));
+  const profile=await completionProfile(t);
+  let loader=await rollbackLoader(profile.context);
+  allowRecoveryDialogs(loader);
+  const status=()=>loader.locator('#collectionRecoveryStatus');
+  await selectCollectionPackage(loader,{...checkpoint,checksum:'corrupt'});
+  await status().getByText(/Package refused/).waitFor();
+  assert.equal(await loader.evaluate(()=>localStorage.length),0);
+  await selectCollectionPackage(loader,copy);
+  await status().getByText(/read-only backup/).waitFor();
+  assert.equal(await loader.locator('#restoreCollection').isDisabled(),true);
+  await selectCollectionPackage(loader,checkpoint);
+  await status().getByText(/Ready to restore/).waitFor();
+  await loader.evaluate(()=>{
+    const add=IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add=function(value,key){
+      if (key==='synthetic-recovery-image') throw new DOMException('Synthetic destination quota','QuotaExceededError');
+      return add.apply(this,arguments);
+    };
+  });
+  await loader.locator('#restoreCollection').click();
+  await status().getByText(/Synthetic destination quota/).waitFor();
+  assert.equal(await loader.evaluate(key=>JSON.parse(localStorage.getItem(key)).retainUntilManualRecovery,collectionRecoveryHold),true);
+  assert.equal(await loader.evaluate(()=>localStorage.getItem('taskpoints_v1')),null);
+  const competingLegacyRestore=await openScoringPage(profile.context,'verified_secondary_restore.html');
+  await competingLegacyRestore.locator('#message').getByText(/legacy copy cannot replace/).waitFor();
+  assert.equal(await competingLegacyRestore.locator('#restoreBtn').isDisabled(),true);
+  const retryContext=await profile.restart();
+  loader=await rollbackLoader(retryContext);
+  allowRecoveryDialogs(loader);
+  // Simulate interruption after all data and the receipt were written but
+  // before the hold was removed. The same file can finish the release.
+  await loader.evaluate(key=>{
+    const remove=Storage.prototype.removeItem;
+    Storage.prototype.removeItem=function(name){
+      if (name===key) throw Error('Synthetic interruption before release');
+      return remove.call(this,name);
+    };
+  },collectionRecoveryHold);
+  await selectCollectionPackage(loader,checkpoint);
+  await status().getByText(/Ready to restore/).waitFor();
+  await loader.locator('#restoreCollection').click();
+  await status().getByText(/Synthetic interruption before release/).waitFor();
+  assert.equal(await loader.evaluate(key=>JSON.parse(localStorage.getItem(key)).checksum,collectionRecoveryReceipt),checkpoint.checksum);
+  loader=await rollbackLoader(await profile.restart());
+  allowRecoveryDialogs(loader);
+  await selectCollectionPackage(loader,checkpoint);
+  await status().getByText(/Ready to restore/).waitFor();
+  await loader.locator('#restoreCollection').click();
+  await status().getByText(/Restore verified/).waitFor();
+  assert.equal(await loader.evaluate(key=>localStorage.getItem(key),collectionRecoveryHold),null);
+  assert.deepEqual(await loader.evaluate(async()=>{
+    const image=await TaskPointsCore.getImageBlob('synthetic-recovery-image');
+    return [...new Uint8Array(await image.arrayBuffer())];
+  }),[7,0,9]);
+  const peer=await rollbackLoader(loader.context());
+  assert.deepEqual(await Promise.all([loader,peer].map(view=>restoreCompletionCheckpoint(view,checkpoint))),
+    [{verified:true,checksum:checkpoint.checksum},{verified:true,checksum:checkpoint.checksum}]);
+  await loader.evaluate(()=>localStorage.setItem('synthetic-newer-edit','original must remain'));
+  await assert.rejects(restoreCompletionCheckpoint(loader,checkpoint),/destination_evidence_conflict/);
+  assert.equal(await loader.evaluate(()=>localStorage.getItem('synthetic-newer-edit')),'original must remain');
+});
+
+test('Package 5B Settings Merge Backup writes independent history and refuses obsolete completion history',async t=>{
+  const {page,context}=await stageTaskCollection(t);
+  await admitCollection(page);
+  await settleRollbackSourceMirror(page);
+  const settings=await openScoringPage(context,'settings.html');
+  const reports=[];
+  allowRecoveryDialogs(settings,reports);
+  const input=settings.locator('#settingsMergeBackupInput');
+  const merge=async (data,diagnostic)=>{
+    reports.length=0;
+    await input.setInputFiles({name:'synthetic-backup.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(data))});
+    for (let i=0;i<70&&!reports.some(text=>diagnostic.test(text));i++) await new Promise(resolve=>setTimeout(resolve,100));
+    assert.ok(reports.some(text=>diagnostic.test(text)),reports.join('\n'));
+  };
+  const backup={tasks:[],completions:[],weightHistory:[{dateKey:'2026-10-22',weight:182,unknown:{keep:7}}],
+    vo2MaxHistory:[{dateKey:'2026-10-22',value:42}],reminders:[{id:'synthetic-reminder-merge',text:'Synthetic recovery reminder'}]};
+  const authority=(await owned(page)).meta;
+  await merge(backup,/Merge verified\. 3 records added/);
+  const merged=await canonicalSnapshot(page);
+  assert.deepEqual(merged.weightHistory.find(row=>row.weight===182).unknown,{keep:7});
+  assert.equal(merged.vo2MaxHistory.find(row=>row.value===42).value,42);
+  assert.equal(merged.reminders.find(row=>row.id==='synthetic-reminder-merge').text,'Synthetic recovery reminder');
+  assert.deepEqual((await owned(page)).meta,authority);
+  await merge(backup,/Merge verified\. 0 records added/);
+  const stale={...backup,completions:[{id:'legacy-delete',taskId:'bravo',points:12,completedAtISO:quietDate+'T15:00:00Z'}],
+    weightHistory:[{dateKey:'2026-10-23',weight:183}]};
+  await merge(stale,/reviewed history or notes import/);
+  await merge({...backup,weightHistory:[null]},/weightHistory is unreadable/);
+  assert.deepEqual(await canonicalSnapshot(page),merged);
+  assert.deepEqual((await owned(page)).meta,authority);
+});
+
+test('Package 5B legacy recovery pages and raw aliases preserve the owned source',async t=>{
+  const {page,context}=await stageTaskCollection(t);
+  await admitCollection(page);
+  const before=await canonicalSnapshot(page);
+  await page.evaluate(state=>localStorage.setItem('taskpoints_backup_prev3',JSON.stringify({state})),before);
+  const reports=await page.evaluate(()=>{
+    const core=TaskPointsCore;
+    const replace=()=>localStorage.setItem(core.STORAGE_KEY,JSON.stringify({tasks:[],completions:[]}));
+    return [replace,()=>localStorage.removeItem(core.STORAGE_KEY),()=>localStorage.clear(),
+      ()=>core.saveValidatedSnapshot({tasks:[],completions:[]},{allowDestructiveOverwrite:true,source:'manual-restore'})]
+      .map(write=>{try {write();return 'unexpected write';} catch(error) {return error.message;}});
+  });
+  assert.ok(reports.every(text=>/verified detached rollback/.test(text)),reports.join('\n'));
+  await assert.rejects(page.evaluate(()=>importBackupZip({arrayBuffer(){throw Error('unexpected ZIP side effects');}})),/verified detached rollback/);
+  await assert.rejects(page.evaluate(()=>importBackupZipFallback({arrayBuffer(){throw Error('unexpected ZIP side effects');}})),/verified detached rollback/);
+  const [secondary,emergency]=await Promise.all(['verified_secondary_restore.html','emergency_recovery.html']
+    .map(file=>openScoringPage(context,file)));
+  await secondary.locator('#message').getByText(/legacy copy cannot replace/).waitFor();
+  assert.equal(await secondary.locator('#restoreBtn').isDisabled(),true);
+  await emergency.locator('[data-restore="backup-3"]').click();
+  await emergency.getByText(/legacy copy cannot replace/).waitFor();
+  assert.equal(await page.evaluate(key=>localStorage.getItem(key),collectionRecoveryHold),null);
+  assert.equal(await page.evaluate(()=>localStorage.getItem('taskpoints_emergency_recovery_hold_v1')),null);
+  assert.deepEqual(await canonicalSnapshot(page),before);
+  assert.equal((await owned(page)).sourceDrift,false);
+});
+
+test('Package 5B ordinary V1 retains the existing backup format and legacy merge verification with ownership disabled',async t=>{
+  const {page,context}=await fixture(t);
+  const [download]=await Promise.all([page.waitForEvent('download'),page.locator('[data-export-button]:visible').first().click()]);
+  assert.match(download.suggestedFilename(),/\.zip$/);
+  assert.equal((await download.failure()),null);
+  const settings=await openScoringPage(context,'settings.html');
+  const reports=[];
+  allowRecoveryDialogs(settings,reports);
+  const legacy={tasks:[],completions:[{id:'unowned-recovered-reward',taskId:'t2',title:'Synthetic legacy reward',points:2.75,
+    completedAtISO:'2026-10-22T17:00:00.000Z'}]};
+  await settings.locator('#settingsMergeBackupInput').setInputFiles({name:'synthetic-v1-backup.json',
+    mimeType:'application/json',buffer:Buffer.from(JSON.stringify(legacy))});
+  for (let i=0;i<70&&!reports.some(text=>text.startsWith('Merge failed verification'));i++) await new Promise(resolve=>setTimeout(resolve,100));
+  // This fixture has the existing V1 history-summary mismatch on the pinned
+  // starting commit. Advancing the collection must neither bypass it nor
+  // report success for the ordinary V1 route.
+  assert.ok(reports.some(text=>text.startsWith('Merge failed verification')),reports.join('\n'));
+  assert.ok(!reports.some(text=>text.startsWith('Merge verified') || text.startsWith('Merge complete')),reports.join('\n'));
 });

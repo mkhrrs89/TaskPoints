@@ -452,6 +452,12 @@
 
   function startExport() {
     return runSingleExport(async () => {
+      if (global.TaskPointsCore?.isIsolatedTaskCollectionSelected?.()) {
+        if (typeof global.downloadCollectionPackage==='function') return global.downloadCollectionPackage(false);
+        updateStatus('The verified collection exporter is unavailable. Reload Home or Settings.', {error:true});
+        restoreButtons();
+        return;
+      }
       setButtonsBusy('Preparing…');
       updateStatus('Preparing your full backup…');
       await nextPaint();

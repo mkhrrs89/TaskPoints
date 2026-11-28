@@ -1074,3 +1074,18 @@ recovery, and any direct writer aliases that bypass the shared boundary. This
 browser evidence leaves the old-client fence, existing iPhone Home Screen
 handoff, and all production certification entries open. See the [Package 5
 checklist](../experiments/v2-home-plus-one-day/FULL-HOME.md#package-5-acceptance-checklist).
+
+## M02 Packages 5B and 5C synthetic recovery evidence
+
+| Writer route | Demonstrated on loopback Chromium | Remaining qualification |
+| --- | --- | --- |
+| Settings Merge Backup | Independent Weight, VO2 Max and Reminder history merges with readback. An obsolete completion or malformed backup leaves the existing snapshot intact. | Intentional recovery of missing Task rewards requires verified identity and deletion history. ZIP, Notes and scoring-history merge remain held. |
+| Home and Settings imports | JSON and ZIP replacement are held before the app changes Tasks, Projects or image data. Export includes the latest V2 records. The detached checkpoint loader restores into fresh V1. | An in-place full import and forward V2 re-admission remain open. |
+| Home and Settings Reset All | The collection boundary holds both ordinary command paths and raw removal. | Verify an intentional reset with a new generation and retained recovery evidence across all storage domains. |
+| Verified-secondary restore | The actual page holds its legacy replacement while V2 owns the source or a detached restore is incomplete. | Build a verified transition for a secondary recovery candidate carrying relevant V2 provenance. |
+| Emergency/vault and rolling backups | The real Emergency restore control and the rolling-slot writer refuse older V1 candidates. Existing backup evidence is preserved. | Verify intentional emergency recovery, including journal replay and vault lineage, through a V2 recovery transaction. |
+| Manual recovery | Verified source freeze, durable file retry, and same-checkpoint resume in a fresh disposable V1 profile. Readback keeps failed or incomplete destinations on hold. | Recovery directly into an existing V2 profile and recovery from older live copies remain open. |
+| Direct snapshot and storage aliases | The checked shared V1 save retains its existing protections. Instrumented `setItem`, `removeItem` and `clear` refuse raw authority replacement. Re-encoding that decodes to the same state can still pass the existing safeguards. | Inventory the remaining aliases and sidecar writes. Browser named-property writes and already-open uninstrumented clients are outside this proof. |
+
+These tests use synthetic storage. The physical iPhone handoff and old-client
+qualification remain separate. Production certification remains unchanged.

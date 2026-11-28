@@ -1309,5 +1309,7 @@
     };
   };
 
-  global.setTimeout?.(() => scheduleCompaction('startup-replay'), 0);
+  const detachedRollback = ['localhost','127.0.0.1'].includes(global.location?.hostname)
+    && global.location.pathname === '/experiments/v2-home-plus-one-day/full/rollback.html';
+  if (!detachedRollback) global.setTimeout?.(() => scheduleCompaction('startup-replay'), 0);
 })(typeof window !== 'undefined' ? window : globalThis);
