@@ -7471,6 +7471,102 @@ return { state: merged, storageKey };
     return compacted;
   }
   
+  // Gold repair can operate on a state far larger than the localStorage quota.
+  // Keep its exact pre-write mirror in a separate IndexedDB recovery store.
+  // Only a read-back-verified, single-use token for the unchanged mirror can
+  // authorize the Gold-specific alternate backup path.
+  const GOLD_REPAIR_BACKUP_DB = 'taskpoints_gold_repair_recovery_v1';
+  const GOLD_REPAIR_BACKUP_STORE = 'snapshots';
+  let verifiedGoldRepairBackup = null;
+  function openGoldRepairBackupDb(create) {
+    if (!global.indexedDB) return Promise.reject(new Error('IndexedDB is not available.'));
+    return new Promise((resolve, reject) => {
+      const request = global.indexedDB.open(GOLD_REPAIR_BACKUP_DB);
+      let absent = false, rejected = false;
+      request.onupgradeneeded = () => {
+        if (!create) {
+          absent = true;
+          request.transaction.abort();
+          return;
+        }
+        if (!request.result.objectStoreNames.contains(GOLD_REPAIR_BACKUP_STORE))
+          request.result.createObjectStore(GOLD_REPAIR_BACKUP_STORE, { keyPath: 'id' });
+      };
+      request.onsuccess = () => {
+        if (rejected || absent) { request.result.close(); if (!rejected) resolve(null); }
+        else resolve(request.result);
+      };
+      request.onerror = () => absent ? resolve(null) : reject(request.error || new Error('Gold recovery database could not be opened.'));
+      request.onblocked = () => { rejected = true; reject(new Error('Gold recovery database is blocked.')); };
+    });
+  }
+  async function goldRepairRawHash(raw) {
+    if (!global.crypto?.subtle || typeof TextEncoder !== 'function') throw new Error('Recovery hash verification is unavailable.');
+    const digest = await global.crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
+    return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
+  }
+  async function readGoldRepairBackupRecord(db) {
+    const tx = db.transaction(GOLD_REPAIR_BACKUP_STORE, 'readonly');
+    const done = shadowTransaction(tx);
+    const request = shadowRequest(tx.objectStore(GOLD_REPAIR_BACKUP_STORE).get('latest'));
+    const [record] = await Promise.all([request, done]);
+    if (!record) return null;
+    if (record.schemaVersion !== 1 || typeof record.raw !== 'string' || !record.raw ||
+      record.rawHash !== await goldRepairRawHash(record.raw))
+      throw new Error('Gold recovery snapshot hash verification failed.');
+    const state = parseTaskPointsStorageJson(record.raw, null);
+    if (!state || !Array.isArray(state.goldLedger) || !validateSnapshotShape(state).ok)
+      throw new Error('Gold recovery snapshot could not be decoded safely.');
+    return { record, state };
+  }
+  async function createVerifiedGoldRepairBackup(expectedRaw) {
+    verifiedGoldRepairBackup = null;
+    if (typeof expectedRaw !== 'string' || !expectedRaw || localStorage.getItem(STORAGE_KEY) !== expectedRaw)
+      throw new Error('Saved data changed. Run a fresh Gold preview.');
+    if (readPendingHabitDeltas().length || readPendingPlayerEdits().length ||
+        (Number(global.TaskPointsCore?.getPendingShadowDualWriteCount?.()) || 0) > 0 ||
+        (Number(global.TaskPointsCore?.getPendingPhase4WriteCount?.()) || 0) > 0)
+      throw new Error('Pending changes must finish saving before Gold recovery can be verified. Reopen the Gold Ledger.');
+    const state = parseTaskPointsStorageJson(expectedRaw, null);
+    if (!state || !Array.isArray(state.goldLedger) || !validateSnapshotShape(state).ok)
+      throw new Error('Current Gold recovery snapshot could not be decoded safely.');
+    const rawHash = await goldRepairRawHash(expectedRaw);
+    let db;
+    try {
+      db = await openGoldRepairBackupDb(true);
+      const record = { id: 'latest', schemaVersion: 1, timestamp: new Date().toISOString(),
+        raw: expectedRaw, rawHash };
+      const tx = db.transaction(GOLD_REPAIR_BACKUP_STORE, 'readwrite');
+      const done = shadowTransaction(tx);
+      tx.objectStore(GOLD_REPAIR_BACKUP_STORE).put(record);
+      await done;
+      const verified = await readGoldRepairBackupRecord(db);
+      if (!verified || verified.record.raw !== expectedRaw || localStorage.getItem(STORAGE_KEY) !== expectedRaw)
+        throw new Error('Gold recovery snapshot changed before verification. No correction saved.');
+      const token = Object.freeze({});
+      verifiedGoldRepairBackup = { token, raw: expectedRaw };
+      return token;
+    } finally { db?.close(); }
+  }
+  function consumeVerifiedGoldRepairBackup(token, storageKey, options) {
+    const verified = verifiedGoldRepairBackup;
+    verifiedGoldRepairBackup = null;
+    return Boolean(verified && verified.token === token && storageKey === STORAGE_KEY &&
+      options.source === 'gold-recalculation' && options.savePath === 'gold-recalculation' &&
+      localStorage.getItem(storageKey) === verified.raw && !readPendingHabitDeltas().length &&
+      !readPendingPlayerEdits().length &&
+      !(Number(global.TaskPointsCore?.getPendingShadowDualWriteCount?.()) || 0) &&
+      !(Number(global.TaskPointsCore?.getPendingPhase4WriteCount?.()) || 0));
+  }
+  async function readVerifiedGoldRepairBackup() {
+    const db = await openGoldRepairBackupDb(false);
+    if (!db) return null;
+    try {
+      const verified = await readGoldRepairBackupRecord(db);
+      return verified ? { timestamp: verified.record.timestamp, state: verified.state } : null;
+    } finally { db.close(); }
+  }
+
   function storeRollingBackup(storageKey, options = {}) {
     const currentRaw = localStorage.getItem(storageKey);
     if (!currentRaw) return false;
@@ -8104,7 +8200,9 @@ const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
       }
     }
 
-    const backupVerified = storeRollingBackup(storageKey, options);
+    const backupVerified = options.goldRepairBackupToken
+      ? consumeVerifiedGoldRepairBackup(options.goldRepairBackupToken, storageKey, options)
+      : storeRollingBackup(storageKey, options);
     if (options.requireVerifiedRollingBackup === true && !backupVerified) {
       return { state: storedState, blocked: true, reason: 'Verified recovery snapshot could not be created. No wallet corrections saved.', trimmed: false };
     }
@@ -11035,6 +11133,8 @@ return Number(cappedScore.toFixed(1));
     readPendingPlayerEdits,
     applyPendingPlayerEdits,
     saveValidatedSnapshot,
+    createVerifiedGoldRepairBackup,
+    readVerifiedGoldRepairBackup,
     mergeAndSaveState,
     saveAppState,
     getRecoveryCandidate,

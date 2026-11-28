@@ -414,6 +414,14 @@
       const errors = [];
       try { scanLocalCandidates(); } catch (error) { errors.push(`Local scan: ${error?.message || error}`); }
       try { await scanIndexedDbCandidates(); } catch (error) { errors.push(`IndexedDB scan: ${error?.message || error}`); }
+      try {
+        const backup = await window.TaskPointsCore?.readVerifiedGoldRepairBackup?.();
+        if (backup?.state) addCandidate({
+          id: 'gold-repair-backup', source: 'Verified pre-Gold-repair snapshot',
+          kind: 'gold-repair-backup', timestamp: backup.timestamp,
+          reason: 'Original state before Gold correction', state: backup.state
+        });
+      } catch (error) { errors.push(`Gold recovery snapshot: ${error?.message || error}`); }
       renderCandidates();
       renderDiagnostic(errors);
       const candidates = sortedCandidates();

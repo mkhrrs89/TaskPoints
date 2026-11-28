@@ -247,7 +247,7 @@
           </div>
           <div id="goldRecalcResults" class="gold-recalc-results text-sm space-y-3" aria-live="polite"></div>
           <p id="goldRecalcStatus" class="gold-manual-status mt-3" role="status" aria-live="polite">Preview first. Nothing changes until you confirm.</p>
-          <p class="text-xs gold-muted mt-2">This replays Gold accounting only; it does not re-simulate historical NPC scores, and any correction is recorded separately without deleting old transactions. Verified replacement slates can be repaired; ambiguous missing games block the operation. A recovery snapshot must be saved successfully before corrections are written. Export a current backup before applying.</p>
+          <p class="text-xs gold-muted mt-2">This replays Gold accounting only; it does not re-simulate historical NPC scores, and any correction is recorded separately without deleting old transactions. Verified replacement slates can be repaired; ambiguous missing games block the operation. A verified recovery snapshot is saved in IndexedDB before corrections are written and is available in Emergency Data Recovery. Export a current backup before applying.</p>
         </div>
       </details>
 
@@ -507,6 +507,6 @@
   })();
   </script>
   <script src="gold_manual_adjustment.js?v=20261117-you-wallet-2"></script>
-  <script src="gold_recalculation.js?v=20261128-replaced-games-2"></script>
+  <script src="gold_recalculation.js?v=20261128-replaced-games-3"></script>
 </body>
 </html>

@@ -231,7 +231,7 @@
     const current=read(),result=plan(current.state,options);
     pending={raw:current.raw,result};return result;
   }
-  function commit(approved=pending){
+  function commit(approved=pending,goldRepairBackupToken=null){
     if(saving)throw Error('A recalculation is already saving.');
     if(!approved?.raw||!approved?.result)throw Error('Preview before confirming.');
     if(!approved.result.changes.length)throw Error('No Gold corrections are needed.');
@@ -263,7 +263,7 @@
       if(latest.storage.getItem(KEY)!==latest.raw)throw Error('Saved data changed. Preview again.');
       const answer=latest.core.saveValidatedSnapshot(candidate,{storageKey:KEY,immediateWrite:true,
         savePath:'gold-recalculation',source:'gold-recalculation',
-        requireVerifiedRollingBackup:true});
+        requireVerifiedRollingBackup:true,...(goldRepairBackupToken?{goldRepairBackupToken}:{})});
       if(!answer||answer.blocked||answer.skipped||answer.blockedByQuotaCircuit||answer.ok===false)
         throw Error('The protected save did not accept this correction. '+str(answer?.reason));
       const raw=latest.storage.getItem(KEY);
@@ -279,6 +279,21 @@
       pending=null;
       return {state:saved,adjustments,stats:verified.stats};
     }finally{saving=false;}
+  }
+  let preparing=false;
+  async function commitWithRecovery(approved=pending){
+    if(preparing||saving)throw Error('A recalculation is already saving.');
+    if(!approved?.raw||!approved?.result?.changes?.length)throw Error('Preview a needed correction first.');
+    preparing=true;
+    try{
+      const latest=read();
+      if(latest.raw!==approved.raw)throw Error('Your saved data changed. Run a fresh preview.');
+      if(typeof latest.core.createVerifiedGoldRepairBackup!=='function')
+        throw Error('Verified recovery storage is unavailable. Refresh the app before applying.');
+      const token=await latest.core.createVerifiedGoldRepairBackup(approved.raw);
+      if(!token)throw Error('Verified recovery snapshot could not be created. No Gold changed.');
+      return commit(approved,token);
+    }finally{preparing=false;}
   }
   function escape(text){return str(text).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
   function install(){
@@ -315,23 +330,25 @@
         notice('Read-only preview. Nothing has been changed.');
       }catch(e){notice(e?.message||String(e),true);}
     });
-    saveBtn.addEventListener('click',()=>{
-      if(!shown||saveBtn.disabled||saving)return;
+    saveBtn.addEventListener('click',async()=>{
+      if(!shown||saveBtn.disabled||saving||preparing)return;
       const r=shown.result, you=r.changes.find(x=>x.playerId==='YOU');
       const question='Apply '+r.changes.length+' Gold wallet correction(s) through '+r.until+'?\n'+
         (you?'Your Gold: '+you.before.toFixed(1)+' → '+you.after.toFixed(1)+'\n':'')+
         'Original transactions will be kept. A verified recovery snapshot is required before saving. Have you exported a current backup?';
       if(!global.confirm?.(question))return;
-      saveBtn.disabled=true;
+      saveBtn.disabled=true;previewBtn.disabled=true;
+      notice('Creating and verifying a recovery snapshot before saving…');
       try{
-        const saved=commit(shown);shown=null;
+        const saved=await commitWithRecovery(shown);shown=null;
         notice('Verified: '+saved.adjustments.length+' corrections saved; original transactions preserved.');
         global.dispatchEvent?.(new CustomEvent('taskpoints:gold-manual-adjusted',
           {detail:{state:saved.state,source:'gold-recalculation'}}));
       }catch(e){shown=null;results.replaceChildren();notice(e?.message||String(e),true);}
+      finally{previewBtn.disabled=false;}
     });
   }
-  const api={plan,preview,commit,readLatest:read,throughDay};
+  const api={plan,preview,commit,commitWithRecovery,readLatest:read,throughDay};
   global.TaskPointsGoldRecalculation=api;
   if(typeof module!=='undefined'&&module.exports)module.exports=api;
   if(global.document?.readyState==='loading')

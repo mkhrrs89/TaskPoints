@@ -245,3 +245,19 @@ test('crossed slate rejects missing participants, arbitrary outsiders, and wrong
   const c=crossedSlate();c.goldLedger.find(x=>x.id==='new1-m').opponentId='wrong';
   assert.throws(()=>install(c).api.preview(),/Replacement evidence is incomplete/);
 });
+
+test('UI recovery path waits for verified snapshot before protected save and passes its token',async()=>{
+  const token={},calls=[];
+  const h=install(crossedSlate(),{core:{
+    async createVerifiedGoldRepairBackup(raw){calls.push('backup');assert.equal(raw,h.localStorage.getItem('taskpoints_v1'));return token;},
+    saveValidatedSnapshot(candidate,options){calls.push('save');assert.equal(options.goldRepairBackupToken,token);assert.equal(options.requireVerifiedRollingBackup,true);h.localStorage.setItem('taskpoints_v1',JSON.stringify(candidate));return {state:candidate};}
+  }});
+  h.api.preview();await h.api.commitWithRecovery();
+  assert.deepEqual(calls,['backup','save']);assert.equal(h.api.preview().changes.length,0);
+});
+test('UI recovery path blocks on failed snapshot or changed saved state',async()=>{
+  const h=install(crossedSlate(),{core:{async createVerifiedGoldRepairBackup(){throw Error('quota');}}});
+  h.api.preview();await assert.rejects(()=>h.api.commitWithRecovery(),/quota/);assert.equal(h.getWrites(),0);
+  const t=install(crossedSlate(),{core:{async createVerifiedGoldRepairBackup(){const s=t.getSaved();s.notes='changed';t.localStorage.setItem('taskpoints_v1',JSON.stringify(s));return {};}}});
+  t.api.preview();await assert.rejects(()=>t.api.commitWithRecovery(),/changed.*fresh preview/i);assert.equal(t.getWrites(),0);
+});
