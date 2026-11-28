@@ -545,7 +545,7 @@ function saveTodayStore(store = todayStore) {
         const hold = window.TaskPointsCore?.getLegacyTaskCompletionHold?.(taskId);
         if (hold) {
           if (TaskPointsCore.usesIsolatedTaskDone?.(taskId)) {
-            const row = $('#todayList [data-kind="task"][data-id="t1"]');
+            const row = $('#todayList [data-kind="task"][data-id="'+CSS.escape(taskId)+'"]');
             if (row?.getAttribute('aria-busy') === 'true') return false;
             row?.setAttribute('aria-busy','true');
             TaskPointsCore.runIsolatedTaskDone(taskId,'today',receipt=>{
@@ -726,7 +726,7 @@ const habits = getActiveHabits().filter(h => {
         if (ownedScoring) {
           try {
             for (const row of TaskPointsCore.readScoringCompletions(appState.completions)) {
-              if (TaskPointsCore.getLegacyTaskCompletionHold(row.taskId) && dateKeyFromISO(row.completedAtISO) === dayKey) {
+              if (TaskPointsCore.getLegacyLinkedCompletionHold(row) && dateKeyFromISO(row.completedAtISO) === dayKey) {
                 const rewards = earned.get(row.taskId) || [];
                 rewards.push(row);
                 earned.set(row.taskId,rewards);

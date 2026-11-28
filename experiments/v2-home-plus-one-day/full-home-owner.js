@@ -30,7 +30,8 @@
     return createSelected;
   }
   function owns(id) {
-    return id === seedTaskId || (usesTaskCreation() && TaskPointsCore.isIsolatedCreatedTaskId(id));
+    return TaskPointsCore.isIsolatedTaskCollectionSelected()
+      || id === seedTaskId || (usesTaskCreation() && TaskPointsCore.isIsolatedCreatedTaskId(id));
   }
 
   function recoverTaskCreation() {
@@ -116,7 +117,7 @@
     read = (async () => {
       try {
         const result = await TaskPointsStateRuntimeV2.readIsolatedOwnedTasks();
-        if (result.meta.homeTaskId !== seedTaskId || !result.ownedIds.includes(seedTaskId))
+        if (!result.meta.collection && (result.meta.homeTaskId !== seedTaskId || !result.ownedIds.includes(seedTaskId)))
           throw Error('Home ownership evidence does not match the selected Task');
         verified = result;
         error = result.sourceDrift ? 'Competing or unreadable V1 Task evidence. Further edits are paused.' : '';
@@ -132,7 +133,11 @@
     const legacyTasks = Array.isArray(legacy?.tasks) ? legacy.tasks : [];
     const owned = new Map(verified?.tasks.filter(task=>verified.ownedIds.includes(task.id))
       .map(task=>[task.id,structuredClone(task)]));
-    const tasks = legacyTasks.flatMap(task=>owns(task.id) ? (owned.has(task.id) ? [owned.get(task.id)] : []) : [task]);
+    const held = new Set(verified?.heldTasks?.map(task=>task.id));
+    const tasks = legacyTasks.flatMap(task=>{
+      if (!owns(task.id) || held.has(task.id)) return [task];
+      return owned.has(task.id) ? [owned.get(task.id)] : [];
+    });
     for (const task of [...owned.values()].reverse()) {
       if (!legacyTasks.some(row=>row.id===task.id)) {
         if (task.id===seedTaskId) tasks.push(task);

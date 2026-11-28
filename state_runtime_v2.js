@@ -20163,11 +20163,13 @@
       throw new Error('isolated_task_fixture_not_ready');
     for (const key of ['taskpoints_recovery_write_lock_v1','taskpoints_recovery_attempt_lock_v1','taskpoints_emergency_recovery_hold_v1'])
       if (global.localStorage.getItem(key) !== null) throw new Error('recovery_evidence_blocks_task_write');
-    if (fixture.homeTaskId !== undefined && (typeof fixture.homeTaskId !== 'string' || !fixture.homeTaskId
+    if (fixture.taskCollection===true || fixture.homeTaskId !== undefined) {
+      if ((fixture.taskCollection!==true && (typeof fixture.homeTaskId !== 'string' || !fixture.homeTaskId))
       || (scoringRead ? !/^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups|week|trash|archive|log|settings)\.html$/.test(global.location.pathname)
         : global.location.pathname !== '/experiments/v2-home-plus-one-day/full/index.html')
-      || global.localStorage.getItem('taskpoints_storage_guard_incident_v1') !== null))
+      || global.localStorage.getItem('taskpoints_storage_guard_incident_v1') !== null)
       throw new Error('owned_home_task_context_or_recovery_conflict');
+    }
     return fixture;
   }
   const isOwnedWeekPage = () => global.location?.pathname === '/experiments/v2-home-plus-one-day/full/week.html';
@@ -20214,7 +20216,180 @@
     };
   }
 
+  const OWNED_COLLECTION_JOURNAL = 'taskpoints_pending_task_mutations_v1';
+  const OWNED_COLLECTION_ROLLBACK_JOURNAL = 'taskpoints_isolated_collection_prior_journal_v1';
+
+  function isolatedCollectionSource(entries) {
+    const raw = entries ? new Map(entries).get(core.STORAGE_KEY) : global.localStorage.getItem(core.STORAGE_KEY);
+    const journalRaw = entries ? new Map(entries).get(OWNED_COLLECTION_JOURNAL) ?? null
+      : global.localStorage.getItem(OWNED_COLLECTION_JOURNAL);
+    const canonical = core.parseTaskPointsStorageJson(raw,null);
+    const journal = core.readPendingTaskMutations(journalRaw);
+    if (!Array.isArray(canonical?.tasks) || !Array.isArray(canonical.completions) || journal.malformed
+      || (entries ? new Map(entries).has('taskpoints_phase5b_pending_changes_v1')
+        : global.localStorage.getItem('taskpoints_phase5b_pending_changes_v1') !== null))
+      throw new Error('owned_collection_source_unreadable');
+    function uniqueIds(rows) {
+      const ids=rows.map(row=>row?.id);
+      return ids.every(id=>typeof id==='string' && id) && new Set(ids).size===ids.length;
+    }
+    if (![canonical.tasks,canonical.completions,journal.record.tasks,journal.record.completionUpserts].every(uniqueIds)
+      || journal.record.completionDeletes.some(id=>journal.record.completionUpserts.some(row=>row.id===id)))
+      throw new Error('owned_collection_identity_conflict');
+    const effective=core.applyPendingTaskMutations(canonical,journal.record);
+    return {canonical,effective,journal:journal.record};
+  }
+
+  function collectionTaskHold(row, rewards) {
+    if (!/^[A-Za-z0-9_-]{1,72}$/.test(row.id) || core.isIsolatedCreatedTaskId(row.id) || row.id.startsWith('habit-'))
+      return 'unsupported_task_identity';
+    if (typeof row.title!=='string' || !row.title.trim() || !Number.isFinite(row.points)
+      || (row.status!==undefined && !['active','done','hidden','wontdo','trashed'].includes(row.status))
+      || (row.recurrence?.mode && !['none','daily','weekly','monthly','yearly','everyWeekday','weekdays','custom'].includes(row.recurrence.mode))
+      || (row.recurrence?.mode==='custom' && (!Number.isSafeInteger(row.recurrence.customCount) || row.recurrence.customCount<1
+        || !['day','week','month','year'].includes(row.recurrence.customUnit)))
+      || ['dueDateISO','originalDueDateISO'].some(key=>row[key] && !Number.isFinite(taskDueDateMillis(row[key]))))
+      return 'unsupported_task_state';
+    try {
+      if (row.completedAtISO) completionInstant(row.completedAtISO);
+      if (row.deletedAtISO) completionInstant(row.deletedAtISO);
+      for (const reward of rewards) {
+        if (typeof reward.title!=='string' || !Number.isFinite(reward.points)
+          || (reward.source && !['task','metric','work'].includes(reward.source))
+          || reward.habitId || reward.viceId || reward.flexId) return 'unsupported_completion_evidence';
+        completionInstant(reward.completedAtISO);
+        if (!hasExplicitStoredMetric(reward)) ownedMetricFormula(reward);
+      }
+    } catch (_) { return 'ambiguous_completion_evidence'; }
+    return null;
+  }
+
+  function isolatedCollectionManifest(baseline, source, generation) {
+    const ids=new Set(baseline.tasks.map(row=>row?.id));
+    const rewardIds=new Set(baseline.completions.map(row=>row?.id));
+    if (ids.size!==baseline.tasks.length || rewardIds.size!==baseline.completions.length
+      || [...ids,...rewardIds].some(id=>typeof id!=='string' || !id))
+      throw new Error('owned_collection_identity_conflict');
+    const linked=new Map();
+    const heldCompletions=[];
+    for (const reward of baseline.completions) {
+      if (ids.has(reward.taskId)) {
+        if (!linked.has(reward.taskId)) linked.set(reward.taskId,[]);
+        linked.get(reward.taskId).push(reward);
+      } else if (core.isIsolatedCollectionTaskLink(reward)) {
+        heldCompletions.push({id:reward.id,reason:'missing_task_lineage'});
+      }
+    }
+    const admitted=[], heldTasks=[], deletions=[];
+    for (const row of baseline.tasks) {
+      const rewards=linked.get(row.id) || [];
+      let reason=collectionTaskHold(row,rewards);
+      if (!reason && core.normalizeTask(row).status==='trashed') {
+        try {
+          const adoption=sealedLegacyTrash({adoptLegacyTrash:true,completionWrite:true},{
+            homeTaskId:row.id,source,baseline,generation,
+            homeTaskEvidence:{task:normalizeOwnedHomeTaskEvidence(row),completions:rewards}
+          });
+          deletions.push(adoption);
+        } catch (_) { reason='unproven_trash_lineage'; }
+      } else if (!reason && (row.deletedAtISO || row.deletedAt)) reason='unproven_deletion_lineage';
+      if (!reason) admitted.push(row.id);
+      else {
+        heldTasks.push({id:row.id,reason});
+        for (const reward of rewards) heldCompletions.push({id:reward.id,reason});
+      }
+    }
+    const owned=new Set(admitted);
+    return {admitted,heldTasks,heldCompletions,deletions,seed:baseline.completions.filter(row=>owned.has(row.taskId))};
+  }
+
+  function sealedIsolatedCollection(meta) {
+    const {canonical,effective,journal}=isolatedCollectionSource(meta.source);
+    const expected={...canonical,tasks:effective.tasks,completions:effective.completions};
+    const manifest=isolatedCollectionManifest(expected,meta.source,meta.generation);
+    const {seed,deletions,...decisions}=manifest;
+    if (stableJson(meta.baseline)!==stableJson(expected)
+      || stableJson(meta.collection)!==stableJson({...decisions,legacyDeletes:journal.completionDeletes}))
+      throw new Error('owned_collection_seal_unverified');
+    return manifest;
+  }
+
+  async function admitIsolatedTaskCollection(fixture) {
+    const storage=global.localStorage;
+    if (fixture.homeTaskId!==undefined || fixture.adoptLegacyTrash || fixture.completionRead!==true
+      || fixture.completionWrite!==true || fixture.completionControls!==true || fixture.completionEvidence!==true
+      || storage.getItem(OWNED_TASK_SCORING)!==fixture.id)
+      throw new Error('owned_collection_selection_unverified');
+    const marker=storage.getItem(OWNED_TASK_FIXTURE);
+    const source=ownedLegacyEvidence();
+    const {canonical,effective,journal}=isolatedCollectionSource(source);
+    const baseline=clone({...canonical,tasks:effective.tasks,completions:effective.completions});
+    const generation=newResetGeneration('isolated-task');
+    const manifest=isolatedCollectionManifest(baseline,source,generation);
+    const {seed:seedRows,deletions,...decisions}=manifest;
+    const collection={...decisions,legacyDeletes:journal.completionDeletes};
+    const seed={id:OWNED_TASK_META,schemaVersion:1,fixtureId:fixture.id,generation,revision:0,mode:'owned',
+      baseline,source,collection,completionTimeZone:localCompletionTimeZone(),
+      completionEvidence:true,...(fixture.taskCreate ? {taskCreate:true} : {}),...(fixture.weekControls ? {weekControls:true} : {}),
+      ...(fixture.logControls ? {logControls:true} : {})};
+    const db=await openOwnedTasks(fixture.phase==='prepared');
+    try {
+      if (fixture.phase==='prepared') {
+        const stores=db.transaction(OWNED_TASK_STORES,'readwrite',{durability:'strict'});
+        await withOwnedRecords(stores,(meta,rows,receipts,rewards)=>{
+          if (storage.getItem(OWNED_TASK_FIXTURE)!==marker) throw new Error('owned_collection_marker_changed');
+          if (meta) {
+            if (meta.revision!==0 || meta.mode!=='owned') throw new Error('existing_v2_evidence_preserved');
+            const prior=verifyOwnedSnapshot(fixture,meta,rows,receipts,rewards);
+            if (prior.sourceDrift) throw new Error('owned_collection_source_changed');
+            return;
+          }
+          if (rows.length || receipts.length || rewards.length
+            || stableJson(ownedLegacyEvidence())!==stableJson(source)) throw new Error('owned_collection_source_changed');
+          const txRows=baseline.tasks;
+          txRows.forEach((value,legacyIndex)=>{
+            if (manifest.admitted.includes(value.id)) stores.objectStore('tasks').add({id:value.id,value,legacyIndex,
+              ownerRevision:0,ownerGeneration:generation});
+          });
+          for (const value of seedRows) stores.objectStore('completions').add({id:'isolated-score:'+value.id,value,ownerGeneration:generation});
+          stores.objectStore('meta').add(seed);
+        });
+      }
+      const proof=await withOwnedRecords(db.transaction(OWNED_TASK_STORES,'readonly'),
+        (...records)=>verifyOwnedSnapshot(fixture,...records));
+      if (proof.sourceDrift || proof.meta.mode!=='owned' || storage.getItem(OWNED_TASK_FIXTURE)!==marker
+        || ownedTaskSourceConflict(proof.meta))
+        throw new Error('owned_collection_source_changed');
+      if (fixture.phase==='prepared') {
+        const sealed=JSON.stringify({...fixture,phase:'sealed',legacyCompletionDeletes:proof.meta.collection.legacyDeletes});
+        storage.setItem(OWNED_TASK_FIXTURE,sealed);
+        if (storage.getItem(OWNED_TASK_FIXTURE)!==sealed) throw new Error('owned_collection_admission_unconfirmed');
+      }
+      return {authority:'v2-isolated-task-collection',generation:proof.meta.generation,revision:proof.meta.revision,
+        ownedIds:proof.ownedIds,heldTasks:proof.heldTasks,heldCompletions:proof.heldCompletions};
+    } finally { db.close(); }
+  }
+
+  async function initializeIsolatedTaskCollection() {
+    const prepared=JSON.parse(global.localStorage.getItem(OWNED_TASK_FIXTURE) || 'null');
+    const fixture=ownedTaskContext(prepared?.phase==='prepared');
+    if (fixture.taskCollection!==true || typeof global.navigator?.locks?.request!=='function')
+      throw new Error('owned_collection_selection_unverified');
+    return global.navigator.locks.request(OWNED_TASK_FIXTURE,()=>{
+      const current=JSON.parse(global.localStorage.getItem(OWNED_TASK_FIXTURE) || 'null');
+      return admitIsolatedTaskCollection(ownedTaskContext(current?.phase==='prepared'));
+    });
+  }
+
   function ownedTaskSourceConflict(meta) {
+    if (meta.collection) {
+      try {
+        const {effective}=isolatedCollectionSource();
+        const shadow=state=>stableJson(core.isolatedTaskCollectionShadow(state,meta.collection.legacyDeletes));
+        return shadow(effective)!==shadow(meta.baseline)
+          || global.localStorage.getItem(GENERATION_KEY)!==(new Map(meta.source).get(GENERATION_KEY) ?? null);
+      } catch (_) { return true; }
+    }
     if (!meta.homeTaskId) return stableJson(meta.source) !== stableJson(ownedLegacyEvidence());
     try {
       const expected = meta.homeTaskEvidence;
@@ -20284,6 +20459,7 @@
   }
   async function initializeIsolatedTaskOwner(snapshot, options = {}) {
     const fixture=ownedTaskContext(true), source=ownedLegacyEvidence();
+    if (fixture.taskCollection===true) throw new Error('owned_collection_requires_complete_admission');
     const baseline=clone(snapshot);
     if (!baseline || !Array.isArray(baseline.tasks) || baseline.tasks.some(t=>!t||typeof t.id!=='string'||!t.id)
       || new Set(baseline.tasks.map(t=>t.id)).size!==baseline.tasks.length)
@@ -20463,11 +20639,16 @@
   const ownedStatusOperations = ['home-hide','home-decline','archive-unarchive','archive-decline','week-decline'];
   const ownedTrashMoves = ['home-move-to-trash','week-move-to-trash'];
 
+  function validOwnedTaskIdentity(id) {
+    return id==='t1' || core.isIsolatedCreatedTaskId(id)
+      || (core.isIsolatedTaskCollectionSelected() && typeof id==='string' && /^[A-Za-z0-9_-]{1,72}$/.test(id));
+  }
+
   function ownedTrashIntent(input) {
     const {operation, taskId, generation, expectedRevision, deletionId, day, selectedDay} = input || {};
     const requiresDeletion = ['home-undo-trash','trash-restore','trash-delete-forever'].includes(operation);
     const status = ownedStatusOperations.includes(operation);
-    if ((!status && !requiresDeletion && !ownedTrashMoves.includes(operation)) || (taskId !== 't1' && !core.isIsolatedCreatedTaskId(taskId))
+    if ((!status && !requiresDeletion && !ownedTrashMoves.includes(operation)) || !validOwnedTaskIdentity(taskId)
       || typeof generation !== 'string' || !generation || !Number.isSafeInteger(expectedRevision)
       || expectedRevision < 0 || (requiresDeletion ? typeof deletionId !== 'string' || !deletionId : deletionId !== undefined)
       || (status ? !Number.isFinite(taskDueDateMillis(day)) : day !== undefined)
@@ -20616,7 +20797,7 @@
   function completionIntent(input) {
     const {actionId, taskId, generation, expectedRevision, source, day, zone, metric} = input || {};
     if (typeof actionId !== 'string' || !/^[\w-]{1,128}$/.test(actionId)
-      || (taskId !== 't1' && !core.isIsolatedCreatedTaskId(taskId))
+      || !validOwnedTaskIdentity(taskId)
       || typeof generation !== 'string' || !generation || !Number.isSafeInteger(expectedRevision)
       || expectedRevision < 0 || !['home','today','archive','week'].includes(source) || typeof day !== 'string'
       || !Number.isFinite(taskDueDateMillis(day)) || (zone !== undefined && (typeof zone !== 'string' || !zone)))
@@ -20938,7 +21119,7 @@
     const standalone=operation===OWNED_METRIC_EDIT;
     if (!core.isIsolatedCreatedTaskId('v2-task-'+actionId)
       || (!edit && !correctSleep && !standalone && operation !== 'log-delete-completion')
-      || (taskId !== 't1' && !core.isIsolatedCreatedTaskId(taskId)) || typeof generation !== 'string' || !generation
+      || !validOwnedTaskIdentity(taskId) || typeof generation !== 'string' || !generation
       || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0
       || typeof completionId !== 'string' || !completionId
       || (edit ? !/^\d{4}-\d{2}-\d{2}$/.test(day ?? '') : day !== undefined)
@@ -21021,6 +21202,7 @@
     if (!meta || meta.fixtureId!==fixture.id || meta.homeTaskId!==fixture.homeTaskId || meta.schemaVersion!==1 || !['owned','rollback-frozen'].includes(meta.mode)
       || !Number.isSafeInteger(meta.revision)||meta.revision<0) throw new Error('owned_task_authority_missing');
     if (typeof meta.generation!=='string'||!Array.isArray(meta.baseline?.tasks)||!Array.isArray(meta.source)
+      || Boolean(meta.collection) !== (fixture.taskCollection === true)
       || (meta.taskCreate === true) !== (fixture.taskCreate === true)
       || (meta.weekControls === true) !== (fixture.weekControls === true)
       || (meta.logControls === true) !== (fixture.logControls === true)
@@ -21036,13 +21218,19 @@
     if (journal.length!==meta.revision || journal.some((r,i)=>r.revision!==i+1||r.generation!==meta.generation)) throw new Error('owned_task_journal_incomplete');
     // Rebuild the exact expected Task rows from the sealed baseline and committed
     // receipts. No authority is inferred from a snapshot, revision number or flag.
-    const expected=new Map(meta.baseline.tasks.map((t,legacyIndex)=>[t.id,{value:t,revision:0,legacyIndex}]));
-    const ownedIds = new Set(meta.homeTaskId ? [meta.homeTaskId] : []);
+    const collection=meta.collection ? sealedIsolatedCollection(meta) : null;
+    if (collection && fixture.phase==='sealed' && stableJson(fixture.legacyCompletionDeletes)!==stableJson(meta.collection.legacyDeletes))
+      throw new Error('owned_collection_marker_unverified');
+    const ownedIds = new Set(collection?.admitted ?? (meta.homeTaskId ? [meta.homeTaskId] : []));
+    const expected=new Map(meta.baseline.tasks.flatMap((t,legacyIndex)=>!collection || ownedIds.has(t.id)
+      ? [[t.id,{value:t,revision:0,legacyIndex}]] : []));
     const deletions = new Map(), permanentIds = new Set(), retiredRevisions = new Map();
-    const ledger = meta.scoringSeed !== undefined && completionRows !== null ? ownedRewardLedger(meta) : null;
+    const ledger = (collection || meta.scoringSeed !== undefined) && completionRows !== null
+      ? ownedRewardLedger(meta,collection?.seed) : null;
     if (fixture.completionWrite === true && !ledger) throw new Error('isolated_completion_rows_unverified');
     const adoption = sealedLegacyTrash(fixture,meta);
     if (adoption) deletions.set(adoption.taskId,adoption);
+    for (const receipt of collection?.deletions || []) deletions.set(receipt.taskId,receipt);
     for(const r of journal){
       const old=expected.get(r.taskId);
       if (r.type === OWNED_TASK_CREATE) {
@@ -21091,7 +21279,7 @@
       }
       if(!old||r.id!=='isolated-task-action:'+r.intent?.actionId||r.intent?.taskId!==r.taskId
         ||r.intent?.generation!==r.generation
-        ||(meta.homeTaskId && !ownedIds.has(r.taskId))
+        ||((meta.homeTaskId || collection) && !ownedIds.has(r.taskId))
         ||(isOwnedEditorOperation(r.intent.operation) && (!ownedIds.has(r.taskId)
           ||!validOwnedEditorChange(old.value,r.after,ownedEditorFields(r.intent))))
         ||r.intent?.expectedRevision!==old.revision
@@ -21142,7 +21330,7 @@
           || stableJson(choice) !== stableJson(r.intent.choice) || stableJson(r.intent.expectedTask) !== stableJson(old.value)
           || stableJson(after) !== stableJson(r.after))
           throw new Error('owned_schedule_receipt_conflict');
-      } else if (!supportsOwnedTaskOperation(r.intent.operation,meta.homeTaskId)
+      } else if (!supportsOwnedTaskOperation(r.intent.operation,meta.homeTaskId || collection)
         || core.normalizeTask(old.value).status === 'trashed'
         || stableJson(r.intent.expectedTask)!==stableJson(old.value)) {
         throw new Error('owned_task_journal_conflict');
@@ -21155,6 +21343,7 @@
         || row.legacyIndex!==entry.legacyIndex || stableJson(row.value)!==stableJson(entry.value);
     })) throw new Error('owned_task_row_receipt_mismatch');
     const snapshot = {meta,rows,journal,completionRows,ownedIds:[...ownedIds],deletions:[...deletions.values()],permanentIds:[...permanentIds],
+      ...(collection ? {heldTasks:collection.heldTasks,heldCompletions:collection.heldCompletions} : {}),
       sourceDrift:ownedTaskSourceConflict(meta) || !ownedCreatedSourceIsClean(ownedIds)};
     if (ledger) {
       const expectedRows = new Map([...ledger.rows.values()].map(row=>[row.id,row]));
@@ -21177,10 +21366,11 @@
     try {const {completionRows: _unused,completionRewards: _rewards,...s}=await readOwnedSnapshot(db,week);return {...s,authority:'v2-isolated-task',tasks:s.rows.sort((a,b)=>a.legacyIndex-b.legacyIndex).map(r=>clone(r.value))};}
     finally{db.close();}
   }
-  function ownedRewardLedger(meta) {
+  function ownedRewardLedger(meta,collectionSeed) {
     const zone=meta.completionEvidence ? meta.completionTimeZone : undefined;
-    const seed = validateOwnedScoringSeed(meta.scoringSeed,meta.homeTaskEvidence,meta.homeTaskId,meta.adoptLegacyTrash === true,zone);
-    const legacyMetrics=new Set(seed.filter(row=>zone && meta.homeTaskEvidence.completions.some(saved=>stableJson(saved)===stableJson(row))
+    const seed = meta.collection ? collectionSeed
+      : validateOwnedScoringSeed(meta.scoringSeed,meta.homeTaskEvidence,meta.homeTaskId,meta.adoptLegacyTrash === true,zone);
+    const legacyMetrics=new Set(seed.filter(row=>zone && (meta.collection || meta.homeTaskEvidence.completions.some(saved=>stableJson(saved)===stableJson(row)))
       && hasExplicitStoredMetric(row)).map(row=>row.id));
     const ledger = {origins:new Map(seed.map(row=>[row.id,row])),rows:new Map(),days:new Map(),calendars:new Map(),legacyMetrics,
       awardReservations:new Map(),metrics:new Set(),
@@ -21288,9 +21478,16 @@
     // The ordinary load path can tolerate a malformed Habit journal.
     // Award-dependent scoring has to leave it intact and stop.
     core.readPendingHabitDeltas();
+    if (meta.collection) core.clearStateHotCache?.();
     let current = core.readTaskPointsStoredState();
     if (!Array.isArray(current?.completions)) throw new Error('isolated_completion_source_unreadable');
-    if (fixture.completionWrite === true) {
+    if (meta.collection) {
+      // The sealed effective V1 shadow is checked above. IDs shared with
+      // another completion family must still fail closed.
+      const protectedIds=new Map(rewards.map(row=>[row.id,row.taskId]));
+      if (current.completions.some(row=>protectedIds.has(row.id) && protectedIds.get(row.id)!==row.taskId))
+        throw new Error('rollback_completion_evidence_conflict');
+    } else if (fixture.completionWrite === true) {
       const journal = core.readPendingTaskMutations().record;
       if (fixture.logControls === true) {
         // A warm wrapped reader may lag a raw V1 save. Independently check
@@ -21312,7 +21509,7 @@
   async function readIsolatedTaskScoring(useProof, serializeLegacyMetricWrite = false) {
     const fixture = ownedTaskContext(false, true);
     const marker = global.localStorage.getItem(OWNED_TASK_FIXTURE);
-    if (fixture.homeTaskId !== 't1' || fixture.completionRead !== true)
+    if ((!fixture.taskCollection && fixture.homeTaskId !== 't1') || fixture.completionRead !== true)
       throw new Error('isolated_completion_read_not_selected');
     const db = await openOwnedTasks(false, true);
     try {
@@ -21341,6 +21538,7 @@
         if (meta.completionEvidence) scoringSettings();
         const proof = {taskId:meta.homeTaskId,ownedIds:snapshot.ownedIds,tasks:tasks.map(row=>clone(row.value)),generation:meta.generation,
           revision:meta.revision,completions:clone(rewards),deletions:clone(snapshot.deletions),permanentIds:snapshot.permanentIds,assertCurrent,
+          ...(meta.collection ? {heldTasks:clone(snapshot.heldTasks),heldCompletions:clone(snapshot.heldCompletions)} : {}),
           ...(meta.completionEvidence ? {scoringSettings} : {}),
           completionMembershipDays(completion) {
             return completionMembershipDays(completion,snapshot.rewardLedger);
@@ -21386,7 +21584,7 @@
     if (source === 'week') return ownedWeekTaskContext();
     const fixture = ownedTaskContext(false, true);
     const archive = global.location.pathname.endsWith('/archive.html');
-    if (fixture.completionWrite !== true || fixture.completionRead !== true || fixture.homeTaskId !== 't1'
+    if (fixture.completionWrite !== true || fixture.completionRead !== true || (!fixture.taskCollection && fixture.homeTaskId !== 't1')
       || (archive ? source !== 'archive' || fixture.completionControls !== true
         : source === 'archive' || !/\/(index|today)\.html$/.test(global.location.pathname)))
       throw new Error('isolated_completion_write_not_selected');
@@ -21510,6 +21708,8 @@
       const legacy=proof.assertCurrent().filter(row=>!proof.ownedIds.includes(row?.taskId));
       const selected=selectStandaloneMetric(request,legacy,proof.completions);
       const selection={...selected,request,...(selected.owned ? {basis:proof.historyBasis(selected.entry.id)} : {})};
+      if (selection.entry && !selection.owned && proof.heldCompletions?.some(row=>row.id===selection.entry.id))
+        throw new Error('owned_metric_source_held');
       if (expected && stableJson(selection)!==stableJson(expected)) throw new Error('owned_metric_selection_changed');
       if (liveRows && stableJson(selectStandaloneMetric(request,liveRows(),[]).entry)!==stableJson(selection.entry))
         throw new Error('owned_metric_selection_changed');
@@ -21741,7 +21941,7 @@
   async function commitIsolatedOwnedTask(input) {
     const fixture=ownedTaskContext();
     if(!input || typeof input.actionId!=='string'||!input.actionId||input.actionId.length>128
-      ||!supportsOwnedTaskOperation(input.operation,fixture.homeTaskId)||typeof input.taskId!=='string'
+      ||!supportsOwnedTaskOperation(input.operation,fixture.homeTaskId || fixture.taskCollection)||typeof input.taskId!=='string'
       ||!Number.isSafeInteger(input.expectedRevision))throw new Error('invalid_owned_task_intent');
     const editorOperation = isOwnedEditorOperation(input.operation);
     const fields = editorOperation ? ownedEditorFields(input) : null;
@@ -21754,9 +21954,9 @@
     const mutate=input.mutate;
     const db=await openOwnedTasks();let receipt,replayed=false;
     try {
-      const before=await readOwnedSnapshot(db);
+      let before=await readOwnedSnapshot(db);
       if(before.sourceDrift)throw new Error('legacy_source_changed_preserved_reconciliation_required');
-      const tx=db.transaction(['tasks','mutations','meta'],'readwrite',{durability:'strict'}),done=transactionPromise(tx);
+      const tx=db.transaction(fixture.taskCollection ? OWNED_TASK_STORES : ['tasks','mutations','meta'],'readwrite',{durability:'strict'});
       const tasks=tx.objectStore('tasks'),mutations=tx.objectStore('mutations'),metaStore=tx.objectStore('meta');
       let row,previous,meta,count=0,failure;
       const stop=reason=>{failure=new Error(reason);tx.abort();};
@@ -21765,7 +21965,7 @@
         try{
           const context=ownedTaskContext();
           if(!meta||meta.fixtureId!==fixture.id||context.id!==fixture.id||meta.generation!==intent.generation) return stop('owned_task_generation_conflict');
-          if (meta.homeTaskId && (meta.homeTaskId !== context.homeTaskId || !before.ownedIds.includes(intent.taskId)))
+          if ((meta.homeTaskId || meta.collection) && (meta.homeTaskId !== context.homeTaskId || !before.ownedIds.includes(intent.taskId)))
             return stop('task_outside_home_ownership');
           if(ownedTaskSourceConflict(meta) || !ownedCreatedSourceIsClean(before.ownedIds))
             return stop('legacy_source_changed_preserved_reconciliation_required');
@@ -21798,8 +21998,21 @@
           metaStore.put({...meta,revision:receipt.revision});
         }catch(e){failure=e;try{tx.abort();}catch(_){}}
       };
-      const a=tasks.get(intent.taskId),b=mutations.get('isolated-task-action:'+intent.actionId),c=metaStore.get(OWNED_TASK_META);
-      a.onsuccess=()=>{row=a.result;decide();};b.onsuccess=()=>{previous=b.result;decide();};c.onsuccess=()=>{meta=c.result;decide();};
+      let done;
+      if (fixture.taskCollection) {
+        done=withOwnedRecords(tx,(current,rows,receipts,rewards)=>{
+          before=verifyOwnedSnapshot(ownedTaskContext(),current,rows,receipts,rewards);
+          meta=current;
+          row=rows.find(saved=>saved.id===intent.taskId);
+          previous=receipts.find(saved=>saved.id==='isolated-task-action:'+intent.actionId);
+          count=2;
+          decide();
+        });
+      } else {
+        done=transactionPromise(tx);
+        const a=tasks.get(intent.taskId),b=mutations.get('isolated-task-action:'+intent.actionId),c=metaStore.get(OWNED_TASK_META);
+        a.onsuccess=()=>{row=a.result;decide();};b.onsuccess=()=>{previous=b.result;decide();};c.onsuccess=()=>{meta=c.result;decide();};
+      }
       try{await done;}catch(e){throw failure||e;}
       // Readback AFTER transaction completion, using the same journal verifier as
       // startup. An IDB request success or a V1 mirror is never an acknowledgement.
@@ -21822,7 +22035,7 @@
     const weekChoice = choice.kind.startsWith('week-');
     if ((weekChoice && fixture.weekControls !== true) || (!replayOnly && weekChoice !== week))
       throw new Error('isolated_week_task_actions_not_selected');
-    if (!fixture.homeTaskId || !core.isIsolatedCreatedTaskId('v2-task-'+actionId) || typeof generation !== 'string'
+    if ((!fixture.homeTaskId && !fixture.taskCollection) || !core.isIsolatedCreatedTaskId('v2-task-'+actionId) || typeof generation !== 'string'
       || !Array.isArray(bases) || !bases.length || (choice.kind !== 'postpone-all' && bases.length !== 1)
       || bases.some(row => !row || typeof row.taskId !== 'string' || row.expectedTask?.id !== row.taskId
         || !Number.isSafeInteger(row.expectedRevision) || row.expectedRevision < 0)
@@ -21927,6 +22140,21 @@
   }
 
   function replaceOwnedRollbackRows(state, taskId, tasks, rewards, journal, authority) {
+    if (authority.meta.collection) {
+      const ownedIds=new Set(authority.ownedIds);
+      const active=new Map(tasks.map(row=>[row.id,row]));
+      const currentIds=new Set(state.tasks.map(row=>row.id));
+      const origins=new Map(authority.completionOrigins.map(row=>[row.id,row.taskId]));
+      const history=new Map(rewards.map(row=>[row.id,row]));
+      const currentRewards=new Set(state.completions.map(row=>row.id));
+      if (state.completions.some(row=>origins.has(row.id) && origins.get(row.id)!==row.taskId))
+        throw new Error('rollback_completion_evidence_conflict');
+      return {...state,
+        tasks:[...tasks.filter(row=>!currentIds.has(row.id)),...state.tasks.flatMap(row=>
+          ownedIds.has(row.id) ? (active.has(row.id) ? [active.get(row.id)] : []) : [row])],
+        completions:[...state.completions.flatMap(row=>ownedIds.has(row.taskId)
+          ? (history.has(row.id) ? [history.get(row.id)] : []) : [row]),...rewards.filter(row=>!currentRewards.has(row.id))]};
+    }
     const {ids,owned} = verifyOwnedLegacyRewardEvidence(state,taskId,authority.completionOrigins,journal,authority.ownedIds);
     const active = new Map(rewards.map(row=>[row.id,row]));
     const task = tasks.find(row=>row.id===taskId);
@@ -22013,21 +22241,24 @@
     const currentLegacySource = ownedLegacyEvidence();
     if (currentLegacySource.some(([key])=>key === core.ISOLATED_TASK_SCHEDULE_PENDING_KEY))
       throw new Error('rollback_pending_task_schedule_requires_review');
-    if (fixture.completionRead !== true || fixture.homeTaskId !== 't1'
+    if (fixture.completionRead !== true || (!fixture.taskCollection && fixture.homeTaskId !== 't1')
       || global.localStorage.getItem(OWNED_TASK_SCORING) !== fixture.id || meta.revision !== expectedRevision)
       throw new Error('rollback_completion_selection_conflict');
     const rewards = prior.completionRewards;
     if (!rewards) throw new Error('isolated_completion_rows_unverified');
     const activeIds = new Set(rewards.map(row=>row.id));
-    const deletedCompletionIds = prior.completionOrigins.filter(row=>!activeIds.has(row.id)).map(row=>row.id);
+    const deletedCompletionIds = [...new Set([...prior.completionOrigins.filter(row=>!activeIds.has(row.id)).map(row=>row.id),
+      ...(meta.collection?.legacyDeletes || [])])];
     const tasks = rows.filter(row=>prior.ownedIds.includes(row.id)).sort((a,b)=>a.legacyIndex-b.legacyIndex).map(row=>row.value);
+    if (meta.collection) core.clearStateHotCache?.();
     const effective = rollbackLegacyState();
     const pending = core.readPendingTaskMutations().record;
     const legacyEntries = new Map(currentLegacySource);
     const canonical = core.parseTaskPointsStorageJson(legacyEntries.get(core.STORAGE_KEY));
     if (meta.taskCreate && currentLegacySource.some(([key])=>key.startsWith(core.ISOLATED_TASK_CREATE_PENDING_PREFIX)))
       throw new Error('rollback_pending_task_create_requires_recovery');
-    const snapshot = replaceOwnedRollbackRows(canonical,meta.homeTaskId,tasks,rewards,pending,prior);
+    const rollbackBase=meta.collection ? core.applyPendingTaskMutations(canonical,pending) : canonical;
+    const snapshot = replaceOwnedRollbackRows(rollbackBase,meta.homeTaskId,tasks,rewards,pending,prior);
     const expected = replaceOwnedRollbackRows(effective,meta.homeTaskId,tasks,rewards,pending,prior);
     const todayRaw = legacyEntries.get(core.ISOLATED_TODAY_LIST_KEY);
     let todayAfterTrash;
@@ -22052,6 +22283,7 @@
     const payload = rollbackJsonValue({format:OWNED_COMPLETION_ROLLBACK, generation:meta.generation, revision:meta.revision,
       snapshot, raw, expected, databases, currentLegacySource, originalSource:meta.source,
       receipts:journal, completions:rewards, v2Frozen:true,
+      ...(meta.collection ? {taskCollectionVersion:1} : {}),
       ...(todayAfterTrash !== undefined ? {todayAfterTrash} : {}),
       ...(prior.permanentIds.length ? {permanentIds:prior.permanentIds} : {}),
       ...(deletedCompletionIds.length ? {deletedCompletionIds} : {}),
@@ -22093,23 +22325,46 @@
         || (!payload.completionEvidenceVersion && payload.completionTimeZone && payload.completionTimeZone !== localCompletionTimeZone())
         || stableJson(core.parseTaskPointsStorageJson(payload.raw)) !== stableJson(payload.snapshot))
         throw new Error('rollback_detached_checkpoint_unverified');
-      const entries = payload.currentLegacySource.filter(([key]) => key !== OWNED_TASK_SCORING)
+      if (payload.taskCollectionVersion!==undefined && payload.taskCollectionVersion!==1)
+        throw new Error('rollback_detached_checkpoint_unverified');
+      const collection=payload.taskCollectionVersion===1;
+      let held;
+      const entries = payload.currentLegacySource.filter(([key]) => key !== OWNED_TASK_SCORING
+        && (!collection || key!==OWNED_COLLECTION_JOURNAL))
         .map(([key, value]) => [key, key === core.STORAGE_KEY ? payload.raw
           : key === core.ISOLATED_TODAY_LIST_KEY ? (payload.todayAfterTrash ?? value) : value]);
-      if (payload.permanentIds !== undefined || payload.deletedCompletionIds !== undefined) {
+      if (collection) {
+        const {effective}=isolatedCollectionSource(payload.originalSource);
+        const manifest=isolatedCollectionManifest(effective,payload.originalSource,payload.generation);
+        const tasks=payload.snapshot.tasks.filter(row=>manifest.heldTasks.some(entry=>entry.id===row.id));
+        const completions=payload.snapshot.completions.filter(row=>manifest.heldCompletions.some(entry=>entry.id===row.id));
+        if (tasks.length!==manifest.heldTasks.length || completions.length!==manifest.heldCompletions.length)
+          throw new Error('rollback_held_collection_evidence_unverified');
+        if (tasks.length || completions.length) held={tasks,completions};
+        const sourceJournal=new Map(payload.originalSource).get(OWNED_COLLECTION_JOURNAL) ?? null;
+        const boundaryJournal=new Map(payload.currentLegacySource).get(OWNED_COLLECTION_JOURNAL) ?? null;
+        if (sourceJournal!==null || boundaryJournal!==null) {
+          if (entries.some(([key])=>key===OWNED_COLLECTION_ROLLBACK_JOURNAL)) throw new Error('rollback_journal_evidence_collision');
+          entries.push([OWNED_COLLECTION_ROLLBACK_JOURNAL,JSON.stringify({sourceJournal,boundaryJournal})]);
+        }
+      }
+      if (payload.permanentIds !== undefined || payload.deletedCompletionIds !== undefined || held) {
         const ids = payload.permanentIds ?? [], deleted = payload.deletedCompletionIds ?? [];
-        if (!Array.isArray(ids) || !Array.isArray(deleted) || !(ids.length || deleted.length) || new Set(ids).size !== ids.length
-          || ids.some(id=>id!=='t1' && !core.isIsolatedCreatedTaskId(id))
+        if (!Array.isArray(ids) || !Array.isArray(deleted) || !(ids.length || deleted.length || held) || new Set(ids).size !== ids.length
+          || ids.some(id=>collection ? (typeof id!=='string' || !payload.receipts.some(row=>row.taskId===id
+            && row.intent?.operation==='trash-delete-forever' && row.after===null)) : id!=='t1' && !core.isIsolatedCreatedTaskId(id))
           || new Set(deleted).size !== deleted.length || deleted.some(id=>typeof id!=='string'||!id)
           || payload.snapshot.tasks.some(row=>ids.includes(row.id))
           || payload.snapshot.completions.some(row=>deleted.includes(row.id)))
           throw new Error('rollback_permanent_deletion_unverified');
         entries.push([core.ISOLATED_ROLLBACK_TOMBSTONES_KEY,JSON.stringify({
           ids,rewards:payload.completions.filter(row=>ids.includes(row.taskId)),
+          ...(collection ? {taskCollection:true} : {}),
+          ...(held ? {held} : {}),
           ...(deleted.length ? {deletedCompletionIds:deleted} : {})
         })]);
-        entries.sort(([a],[b])=>a < b ? -1 : a > b ? 1 : 0);
       }
+      entries.sort(([a],[b])=>a < b ? -1 : a > b ? 1 : 0);
       const hold = JSON.stringify({active:true, retainUntilManualRecovery:true, token:checksum});
       if (storage.length) throw new Error('rollback_fresh_profile_required');
       storage.setItem(ROLLBACK_HOLD, hold);
@@ -22137,9 +22392,15 @@
       for (const [key, value] of entries) if (key !== core.STORAGE_KEY) storage.setItem(key, value);
       storage.setItem(core.STORAGE_KEY, payload.raw);
       if (stableJson(ownedLegacyEvidence().filter(([key]) => key !== ROLLBACK_HOLD)) !== stableJson(entries)
-        || storage.getItem(ROLLBACK_HOLD) !== hold || storage.getItem(OWNED_TASK_FIXTURE) !== null
-        || stableJson(rollbackLegacyState()) !== stableJson(payload.expected))
+        || storage.getItem(ROLLBACK_HOLD) !== hold || storage.getItem(OWNED_TASK_FIXTURE) !== null)
         throw new Error('rollback_v1_readback_unverified');
+      if (collection) core.clearStateHotCache?.();
+      const restored=rollbackLegacyState();
+      if (stableJson(restored)!==stableJson(payload.expected)) {
+        const changed=[...new Set([...Object.keys(restored ?? {}),...Object.keys(payload.expected)])]
+          .filter(key=>stableJson(restored?.[key])!==stableJson(payload.expected[key]));
+        throw new Error(`rollback_v1_readback_unverified: ${changed.join(', ')}`);
+      }
       storage.removeItem(ROLLBACK_HOLD);
       if (storage.getItem(ROLLBACK_HOLD) !== null) throw new Error('rollback_release_unverified');
       return {verified:true, checksum};
@@ -22223,6 +22484,7 @@
     startCoordinatedDarkMirror,
     open,
     initializeIsolatedTaskOwner,
+    initializeIsolatedTaskCollection,
     readIsolatedOwnedTasks,
     readIsolatedTaskScoring,
     inspectIsolatedStandaloneMetric,

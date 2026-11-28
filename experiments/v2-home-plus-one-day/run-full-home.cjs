@@ -71,6 +71,8 @@ async function configureContext(context){
     Error.stackTraceLimit=36;
     const set=Storage.prototype.setItem,remove=Storage.prototype.removeItem;
     Storage.prototype.setItem=function(key,value){
+      if(this===localStorage && window.blockCollectionAcknowledgement && key==='taskpoints_isolated_task_fixture_v1'
+        && JSON.parse(value).phase==='sealed') throw new DOMException('Synthetic interrupted acknowledgement','QuotaExceededError');
       if(this===localStorage && window.failOwnedCreateDraft && key.startsWith('taskpoints_isolated_task_create_pending_v1:'))
         throw new DOMException('Synthetic draft quota','QuotaExceededError');
       if(this===localStorage&&this.getItem(key)!==String(value)) {
@@ -7552,4 +7554,373 @@ test('V2 standalone concurrent legacy admissions keep one independent calorie en
   assert.equal(entries.length,1);
   assert.equal(entries[0].taskId,undefined);
   assert.deepEqual(await historyReceipts(page),[]);
+});
+
+const collectionFixtureKey='taskpoints_isolated_task_fixture_v1';
+const collectionJournalKey='taskpoints_pending_task_mutations_v1';
+async function stageTaskCollection(t,context,{large=false,withMatchups=false}={}) {
+  const result=await fixture(t,context);
+  const seed=await result.page.evaluate(({quietDate,large,withMatchups,marker,journalKey})=>{
+    const core=TaskPointsCore,snapshot=core.readTaskPointsStoredState();
+    const reward=(id,taskId,title,points,completedAtISO='2026-11-16T17:00:00.000Z')=>
+      ({id,taskId,title,points,completedAtISO,unknownReward:{keep:id}});
+    const task=(id,title,more={})=>({id,title,points:5,status:'active',importance:'High',dueDateISO:quietDate,
+      originalDueDateISO:quietDate,recurrence:{mode:'none'},tags:[],skills:[],skipDates:[],hidden:false,
+      postponedDays:0,completedAtISO:null,unknownTask:{keep:id},...more});
+    const trashTime='2026-11-15T17:00:00.000Z';
+    snapshot.tasks=[
+      task('alpha','Synthetic Alpha'),
+      task('bravo','Synthetic Bravo',{recurrence:{mode:'daily'}}),
+      task('charlie','Synthetic Charlie',{recurrence:{mode:'weekly'}}),
+      task('hidden-row','Synthetic Hidden',{status:'hidden',hidden:true}),
+      task('declined-row','Synthetic Declined',{status:'wontdo'}),
+      task('done-row','Synthetic Completed',{status:'done',completedAtISO:trashTime}),
+      task('old-trash','Synthetic Old Trash',{status:'trashed',prevStatus:'active',deletedFrom:'TasksScreen',
+        updatedAtISO:trashTime,deletedAtISO:trashTime,deletedAt:trashTime}),
+      task('opaque-trash','Synthetic Unproven Trash',{status:'trashed',deletedAtISO:trashTime}),
+      task('opaque-metric','Synthetic Opaque Metric'),
+      task('calorie-row','Calories (2200)',{recurrence:{mode:'daily'}})
+    ];
+    snapshot.completions=[
+      reward('old-trash-reward','old-trash','Synthetic legacy reward',-2.25),
+      reward('history-a','done-row','Synthetic retained reward',2.5),
+      reward('history-b','done-row','Synthetic intentional historical duplicate',1.75),
+      reward('unproof-reward','opaque-metric','Calories',2200),
+      reward('orphan-reward','unknown-legacy-id','Synthetic dangling reward',2),
+      reward('legacy-delete','bravo','Synthetic pending legacy deletion',12),
+      {...reward('independent','habit:synthetic:2026-11-16','Synthetic unrelated Habit',3),source:'habit',habitId:'synthetic',
+        dayKey:'2026-11-16'}
+    ];
+    if (large) for (let i=0;i<30;i++) {
+      const id='historical-'+i;
+      snapshot.tasks.push(task(id,'Synthetic archived '+i,{status:'done',completedAtISO:trashTime}));
+      for (let j=0;j<15;j++) snapshot.completions.push(reward('large-'+i+'-'+j,id,'Historical points',(j-3)/4,
+        new Date(Date.UTC(2026,8,j+1,17)).toISOString()));
+    }
+    snapshot.scoringSettings={...snapshot.scoringSettings,inertia:{multiplier:0}};
+    if (withMatchups) {
+      snapshot.players.push({id:'SYN2',name:'Synthetic second player',baseline:50},{id:'SYN3',name:'Synthetic third player',baseline:50});
+      snapshot.matchups.push({id:'synthetic-owned-matchup',date:quietDate,dateKey:quietDate,playerAId:'YOU',playerBId:'SYN',
+        scoreA:8,scoreB:46,matchupType:'exhibition'});
+    }
+    core.writeTaskPointsStoredState(snapshot);
+    const bravo=snapshot.tasks.find(row=>row.id==='bravo');
+    const journal={schemaVersion:1,tasks:[{...bravo,title:'Synthetic Bravo from pending journal',points:7.25}],
+      completionUpserts:[reward('pending-reward','bravo','Synthetic pending reward',1.25,'2026-11-17T17:00:00.000Z')],
+      completionDeletes:['legacy-delete'],updatedAtISO:quietDate+'T17:00:00.000Z'};
+    localStorage.setItem(journalKey,JSON.stringify(journal));
+    const fixture={id:crypto.randomUUID(),syntheticOnly:true,taskCollection:true,phase:'prepared',
+      completionRead:true,completionWrite:true,completionControls:true,completionEvidence:true,taskCreate:true,weekControls:true,logControls:true};
+    localStorage.setItem('taskpoints_isolated_task_scoring_read_v1',fixture.id);
+    localStorage.setItem(marker,JSON.stringify(fixture));
+    return {fixture,journal};
+  },{quietDate,large,withMatchups,marker:collectionFixtureKey,journalKey:collectionJournalKey});
+  return {...result,...seed};
+}
+const admitCollection=page=>page.evaluate(()=>TaskPointsStateRuntimeV2.initializeIsolatedTaskCollection());
+
+test('V2 collection seals a large real-format legacy collection and replays pending journal evidence',async t=>{
+  const {page,journal}=await stageTaskCollection(t,undefined,{large:true});
+  const admission=await admitCollection(page);
+  assert.equal(admission.authority,'v2-isolated-task-collection');
+  assert.equal(admission.revision,0);
+  assert.equal(admission.ownedIds.length,38);
+  assert.ok(!admission.ownedIds.includes('t1'));
+  assert.deepEqual(admission.heldTasks,[
+    {id:'opaque-trash',reason:'unproven_trash_lineage'},{id:'opaque-metric',reason:'ambiguous_completion_evidence'}
+  ]);
+  assert.deepEqual(admission.heldCompletions,[
+    {id:'orphan-reward',reason:'missing_task_lineage'},{id:'unproof-reward',reason:'ambiguous_completion_evidence'}
+  ]);
+  assert.deepEqual(await admitCollection(page),admission);
+  const read=await owned(page);
+  assert.deepEqual(read.tasks.find(row=>row.id==='bravo'),journal.tasks[0]);
+  assert.equal(read.deletions.find(row=>row.taskId==='old-trash').type,'sealed-v1-trash');
+  const rewards=await verifiedRewards(page);
+  assert.equal(rewards.length,454);
+  assert.deepEqual(rewards.find(row=>row.id==='pending-reward'),journal.completionUpserts[0]);
+  assert.deepEqual(rewards.filter(row=>row.taskId==='done-row').map(row=>row.id),['history-a','history-b']);
+  assert.ok(!rewards.some(row=>['unproof-reward','independent','legacy-delete'].includes(row.id)));
+  assert.equal(await page.evaluate(()=>TaskPointsCore.usesIsolatedTaskDone('opaque-metric')),false);
+  const later=await page.evaluate(()=>({compacted:TaskPointsCore.flushPendingTaskMutations(),
+    pending:TaskPointsCore.readPendingTaskMutations().record.tasks.length}));
+  assert.deepEqual(later,{compacted:true,pending:0});
+  assert.equal((await owned(page)).sourceDrift,false);
+  assert.deepEqual((await owned(page)).meta.collection.legacyDeletes,['legacy-delete']);
+});
+
+test('V2 collection admission aborts quota and recovers a durable but unacknowledged seal after restart',async t=>{
+  const profile=await completionProfile(t);
+  const {page,fixture,journal}=await stageTaskCollection(t,profile.context);
+  await page.evaluate(()=>{
+    const add=IDBObjectStore.prototype.add;
+    window.blockCollectionQuota=true;
+    IDBObjectStore.prototype.add=function(row){
+      if (window.blockCollectionQuota && row?.value?.id==='charlie') throw new DOMException('Synthetic collection quota','QuotaExceededError');
+      return add.apply(this,arguments);
+    };
+  });
+  await assert.rejects(admitCollection(page),/QuotaExceededError/);
+  const marker=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)),collectionFixtureKey);
+  assert.deepEqual(marker,fixture);
+  await assert.rejects(verifiedRewards(page),/isolated_task_fixture_not_ready/);
+  assert.deepEqual(await page.evaluate(()=>TaskPointsCore.readPendingTaskMutations().record),journal);
+  await page.evaluate(()=>{
+    window.blockCollectionQuota=false;
+    window.blockCollectionAcknowledgement=true;
+  });
+  await assert.rejects(admitCollection(page),/Synthetic interrupted acknowledgement/);
+  assert.deepEqual(await page.evaluate(key=>JSON.parse(localStorage.getItem(key)),collectionFixtureKey),fixture);
+  const context=await profile.restart();
+  const reopened=await openScoringPage(context,'index.html');
+  const admission=await admitCollection(reopened);
+  assert.equal(admission.ownedIds.length,8);
+  assert.deepEqual(await admitCollection(reopened),admission);
+  assert.equal((await owned(reopened)).sourceDrift,false);
+});
+
+async function waitCollectionHome(page) {
+  await page.waitForFunction(()=>window.TaskPointsCore?.usesIsolatedTaskDone('alpha')
+    && document.querySelector('#taskList [data-task-id="alpha"]'));
+}
+
+test('V2 collection real Home, Today, Week, Archive, Trash, Log and metric edits share authority through detached rollback',async t=>{
+  const {page,context}=await stageTaskCollection(t,undefined,{withMatchups:true});
+  await page.evaluate(async()=>{
+    localStorage.setItem('taskpoints_backup_prev3',localStorage.getItem(TaskPointsCore.STORAGE_KEY));
+    await TaskPointsCore.saveImageBlob('synthetic-collection-image',new Blob([new Uint8Array([21,0,255])],{type:'image/webp'}));
+  });
+  const marker=await admitCollection(page);
+  await page.reload();
+  await waitCollectionHome(page);
+  const title='Synthetic Alpha from V2';
+  const editor=await openCreatedEditor(page,'alpha');
+  await editor.locator('[data-field="title"]').fill(title);
+  await editor.locator('[data-task-action="task-save"]').click();
+  await taskCard(page,'alpha').locator('.task-title').filter({hasText:title}).waitFor();
+  const initial=(await owned(page)).rows;
+  assert.equal(initial.find(row=>row.id==='alpha').ownerRevision,1);
+  assert.equal(initial.find(row=>row.id==='bravo').ownerRevision,0);
+
+  const today=await openScoringPage(context,'today.html');
+  const week=await openScoringPage(context,'week.html');
+  const archive=await openScoringPage(context,'archive.html');
+  const trash=await openScoringPage(context,'trash.html');
+  const log=await openScoringPage(context,'log.html');
+  const list=weekTodayStore(cleanedTodayList,[quietDate],'bravo');
+  await writeTodayFixture(page,JSON.stringify(list));
+  await todayTask(today,'bravo').locator('.today-check').click();
+  const todayReward=await weekReceipt(page,'today','bravo');
+  assert.equal(todayReward.completion.points,7.25);
+  assert.equal(todayReward.after.dueDateISO,'2026-11-19');
+  assert.equal((await owned(page)).rows.find(row=>row.id==='alpha').ownerRevision,1);
+
+  await weekAction(week,quietDate,'done','charlie').click();
+  const weekReward=await weekReceipt(page,'week','charlie');
+  assert.equal(weekReward.after.dueDateISO,'2026-11-25');
+  await archiveReady(archive,'hidden-row');
+  await archiveControl(archive,'hidden-row','Done').click();
+  const archiveReward=await weekReceipt(page,'archive','hidden-row');
+  assert.equal(archiveReward.completion.points,5);
+
+  await (await expandCreated(page,'calorie-row')).locator('[data-task-action="complete"]').click();
+  const calorie=await weekReceipt(page,'home','calorie-row');
+  await openStandaloneEditor(page,'calories');
+  await standaloneValues(page,'calories',['2100']);
+  await standaloneSave(page,'calories');
+  await page.locator('#caloriesEditModal').waitFor({state:'hidden'});
+  const [metric]=await waitHistory(page,1);
+  assert.equal(metric.completionAfter.id,calorie.completion.id);
+  assert.equal(metric.completionAfter.points,3);
+  assert.deepEqual(metric.intent.metric.bonus,{before:2,after:2});
+  const score=await scoresForMetricEvidence(page);
+  assert.equal(score.totals[quietDate],22.25);
+  assert.match(await editLogDate(log,weekReward.completion.id,'2026-11-17'),/Edit completion date/);
+  const afterLog=await waitHistory(page,2);
+  assert.equal(afterLog.at(-1).completionAfter.id,weekReward.completion.id);
+
+  await restoreViaTrash(trash,'old-trash');
+  await weekReceipt(page,'trash-restore','old-trash');
+  weekDialogs(week);
+  await weekAction(week,quietDate,'delete','old-trash').click();
+  await weekReceipt(page,'week-move-to-trash','old-trash');
+  trash.removeAllListeners('dialog');
+  await clickDeleteForever(trash,'old-trash');
+  await weekReceipt(page,'trash-delete-forever','old-trash');
+  assert.ok((await owned(page)).permanentIds.includes('old-trash'));
+  await trashRestore(trash,'opaque-trash').waitFor();
+  assert.equal(await trashRestore(trash,'opaque-trash').isDisabled(),true);
+  await putCreateForm(page,{title:'Synthetic collection Add',due:quietDate,points:'9'});
+  const created=await saveCreateForm(page);
+  assert.ok((await owned(page)).ownedIds.includes(created));
+  assert.notEqual(created,'alpha');
+  assert.equal((await owned(page)).meta.generation,marker.generation);
+
+  const rawAfter=await canonicalSnapshot(page);
+  assert.equal(rawAfter.tasks.find(row=>row.id==='alpha').title,'Synthetic Alpha');
+  assert.ok(!rawAfter.tasks.some(row=>row.id===created));
+  assert.ok(!rawAfter.completions.some(row=>row.id===calorie.completion.id));
+  const rewardState=await verifiedRewards(page);
+  const {totals:expectedTotals}=await scoresForMetricEvidence(page);
+  const game=await openScoringPage(context,'game.html');
+  await game.locator('#playersList .playerCard').first().waitFor();
+  assert.equal(await game.evaluate(()=>TaskPointsCore.runWithVerifiedTaskScoring(()=>computeTodayPoints())),
+    Number(expectedTotals[quietDate].toFixed(1)));
+  const matchups=await openScoringPage(context,'matchups.html');
+  const matchupErrors=[];
+  matchups.on('pageerror',error=>matchupErrors.push(error.message));
+  matchups.on('console',message=>{if (['warning','error'].includes(message.type())) matchupErrors.push(message.text());});
+  const generate=matchups.locator('#matchupsChronological').getByRole('button',{name:'Generate retro matchups'}).first();
+  const header=generate.locator('xpath=ancestor::section[1]').locator('.matchup-collapsible-header').first();
+  if (await header.getAttribute('aria-expanded')==='false') await header.click();
+  await generate.click();
+  await matchups.waitForFunction(score=>TaskPointsCore.parseTaskPointsStorageJson(localStorage.getItem(TaskPointsCore.STORAGE_KEY)).matchups
+    .find(row=>row.id==='synthetic-owned-matchup')?.scoreA===score,expectedTotals[quietDate]).catch(async error=>{
+      const actual=await canonicalSnapshot(matchups);
+      throw new Error(JSON.stringify({expected:expectedTotals[quietDate],matchups:actual.matchups,matchupErrors}),{cause:error});
+    });
+  await Promise.all([today,week,archive,trash,log,game,matchups].map(tab=>tab.close()));
+  await page.reload();
+  await waitCollectionHome(page);
+  assert.equal(await page.evaluate(()=>TaskPointsCore.runWithVerifiedTaskScoring(
+    ()=>save('collection-verified-score-settle',{userInitiated:true}))),true);
+  const warnings=[];
+  page.on('console',message=>{if (['warning','error'].includes(message.type())) warnings.push(message.text());});
+  assert.equal(await page.evaluate(()=>save('whole-collection-ordinary-save',{immediateWrite:true,userInitiated:true})),true,warnings.join('\n'));
+  const backup=await page.evaluate(()=>localStorage.getItem('taskpoints_backup_prev3'));
+  const source=await canonicalSnapshot(page);
+  const {loader,fresh}=await restoreHistoryCheckpoint(t,page);
+  const restored=await canonicalSnapshot(loader);
+  assert.equal(restored.tasks.find(row=>row.id==='alpha').title,title);
+  assert.equal(restored.tasks.find(row=>row.id==='bravo').title,'Synthetic Bravo from pending journal');
+  assert.ok(!restored.tasks.some(row=>row.id==='old-trash'));
+  assert.equal(restored.completions.find(row=>row.id==='old-trash-reward').points,-2.25);
+  assert.equal(restored.tasks.find(row=>row.id==='opaque-trash').deletedAtISO,'2026-11-15T17:00:00.000Z');
+  assert.equal(restored.completions.find(row=>row.id==='unproof-reward').points,2200);
+  assert.ok(!restored.completions.some(row=>row.id==='legacy-delete'));
+  for (const row of rewardState) assert.deepEqual(restored.completions.filter(entry=>entry.id===row.id),[row]);
+  const evidence=await loader.evaluate(()=>JSON.parse(localStorage.getItem('taskpoints_isolated_collection_prior_journal_v1')));
+  assert.equal(JSON.parse(evidence.sourceJournal).tasks[0].id,'bravo');
+  assert.ok(source.inboxMessages.some(row=>row.id===inboxEventId));
+  for (const key of ['habits','flexActions','players','gameHistory','matchups','goldLedger','inboxMessages','projects','notes','unknownRoot'])
+    assert.deepEqual(restored[key],source[key],key);
+  assert.ok(backup);
+  assert.equal(await loader.evaluate(()=>localStorage.getItem('taskpoints_backup_prev3')),backup);
+  assert.deepEqual(await loader.evaluate(async()=>{
+    const blob=await TaskPointsCore.getImageBlob('synthetic-collection-image');
+    return [blob.type,[...new Uint8Array(await blob.arrayBuffer())]];
+  }),['image/webp',[21,0,255]]);
+  await assert.rejects(loader.evaluate(task=>{
+    const core=TaskPointsCore,state=core.readTaskPointsStoredState();
+    core.writeTaskPointsStoredState({...state,tasks:[...state.tasks,task]});
+  },rawAfter.tasks.find(row=>row.id==='old-trash')),/Detached rollback forbids/);
+  const freshHome=await openScoringPage(fresh,'index.html');
+  await freshHome.waitForFunction(()=>TaskPointsHomeLiveState?.getState()?.tasks?.some(row=>row.id==='alpha'));
+  assert.equal(await freshHome.evaluate(()=>TaskPointsCore.usesIsolatedTaskScoring()),false);
+  const freshGame=await openScoringPage(fresh,'game.html');
+  await freshGame.locator('#playersList .playerCard').first().waitFor();
+  for (const view of [freshHome,freshGame]) assert.equal((await scoresFromCore(view)).totals[quietDate],expectedTotals[quietDate]);
+  assert.equal(await freshHome.evaluate(()=>save('restored-collection-v1-save',{immediateWrite:true,userInitiated:true})),true);
+  const resaved=await canonicalSnapshot(freshHome);
+  assert.ok(!resaved.tasks.some(row=>row.id==='old-trash'));
+  const normalize=rows=>freshHome.evaluate(rows=>TaskPointsCore.normalizeState({completions:rows}).completions,rows);
+  const ids=new Set([...rewardState.map(row=>row.id),'unproof-reward','orphan-reward']);
+  assert.deepEqual(await normalize(resaved.completions.filter(row=>ids.has(row.id))),
+    await normalize(restored.completions.filter(row=>ids.has(row.id))));
+  assert.equal(resaved.completions.find(row=>row.id==='unproof-reward').points,2200);
+});
+
+test('V2 collection serializes independent edits and same-Task awards, and retries quota and restart safely',async t=>{
+  const profile=await completionProfile(t);
+  const {page,context}=await stageTaskCollection(t,profile.context);
+  await admitCollection(page);
+  const peer=await openScoringPage(context,'index.html');
+  const today=await openScoringPage(context,'today.html');
+  const prepareAt=(tab,source,id)=>tab.evaluate(([source,id])=>TaskPointsStateRuntimeV2.prepareIsolatedTaskCompletion(source,id),[source,id]);
+  const [alpha,bravo,bravoToday]=await Promise.all([
+    prepareAt(page,'home','alpha'),prepareAt(peer,'home','bravo'),prepareAt(today,'today','bravo')
+  ]);
+  const [left,right,other]=await Promise.allSettled([
+    commitCompletion(page,alpha),commitCompletion(peer,bravo),commitCompletion(today,bravoToday)
+  ]);
+  assert.equal(left.status,'fulfilled');
+  assert.deepEqual([right.status,other.status].sort(),['fulfilled','rejected']);
+  assert.match((right.status==='rejected'?right:other).reason.message,/owned_completion_already_awarded/);
+  const won=(right.status==='fulfilled'?right:other).value.receipt;
+  assert.equal(won.completion.points,7.25);
+  assert.equal((await verifiedRewards(page)).filter(row=>row.taskId==='bravo' && row.completedAtISO.startsWith(quietDate)).length,1);
+  for (const id of ['calorie-row','hidden-row','charlie']) assert.equal((await owned(page)).rows.find(row=>row.id===id).ownerRevision,0);
+
+  const charlie=await prepareAt(page,'home','charlie');
+  await page.evaluate(()=>{
+    const add=IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add=function(row){
+      if (row?.type==='isolated-task-completion' && row.taskId==='charlie') throw new DOMException('Synthetic collection award quota','QuotaExceededError');
+      return add.apply(this,arguments);
+    };
+  });
+  await assert.rejects(commitCompletion(page,charlie),/QuotaExceededError/);
+  assert.equal((await owned(page)).rows.find(row=>row.id==='charlie').ownerRevision,0);
+  const reopened=await profile.restart();
+  const home=await openScoringPage(reopened,'index.html');
+  const result=await commitCompletion(home,charlie);
+  assert.equal(result.confirmedDurable,true);
+  assert.equal(result.receipt.completion.points,5);
+  assert.deepEqual(await commitCompletion(home,charlie),{...result,replayed:true});
+  assert.equal((await verifiedRewards(home)).filter(row=>row.taskId==='charlie').length,1);
+});
+
+test('V2 collection holds malformed or conflicting source evidence before admission and rejects legacy journal and snapshot writers',async t=>{
+  const {page,context,journal}=await stageTaskCollection(t);
+  await page.evaluate(key=>localStorage.setItem(key,'{malformed'),collectionJournalKey);
+  await assert.rejects(admitCollection(page),/owned_collection_source_unreadable/);
+  assert.equal(await page.evaluate(key=>localStorage.getItem(key),collectionJournalKey),'{malformed');
+  await page.evaluate(({key,journal})=>localStorage.setItem(key,JSON.stringify({...journal,tasks:[...journal.tasks,...journal.tasks]})),
+    {key:collectionJournalKey,journal});
+  await assert.rejects(admitCollection(page),/owned_collection_identity_conflict/);
+  await page.evaluate(({key,journal})=>localStorage.setItem(key,JSON.stringify(journal)),{key:collectionJournalKey,journal});
+  await admitCollection(page);
+  const before=await canonicalSnapshot(page);
+  const initial=await owned(page);
+  assert.equal(initial.journal.length,0);
+  await assert.rejects(page.evaluate(()=>TaskPointsStateRuntimeV2.inspectIsolatedStandaloneMetric({
+    formula:'calories',day:'2026-11-16',zone:Intl.DateTimeFormat().resolvedOptions().timeZone,time:'keep',id:'unproof-reward'
+  },()=>{throw Error('unexpected legacy writer');})),/owned_metric_source_held/);
+  const attempts=await page.evaluate(()=>{
+    const core=TaskPointsCore;
+    core.clearStateHotCache?.();
+    const source=core.readTaskPointsStoredState();
+    const task=source.tasks.find(row=>row.id==='alpha');
+    const reward=source.completions.find(row=>row.id==='history-a');
+    const unsafe=[
+      ()=>core.journalTaskMutation({task:{...task,title:'V1 replacement'}}),
+      ()=>core.journalTaskMutation({task:{...task,id:'legacy-created'}}),
+      ()=>core.journalTaskUpdates(['alpha'],row=>{row.points=123;return true;}),
+      ()=>core.journalTaskCompletionBatch([{...reward,points:123}]),
+      ()=>core.journalTaskMutation({completionDeleteId:reward.id}),
+      ()=>core.journalTaskMutation({completionUpsert:{...reward,taskId:null,id:'legacy-delete'}}),
+      ()=>core.clearPendingTaskMutations(),
+      ()=>core.writeTaskPointsStoredState({...source,tasks:source.tasks.filter(row=>row.id!=='alpha')}),
+      ()=>core.writeTaskPointsStoredState({...source,completions:[...source.completions,{...reward,taskId:null,id:'isolated-done:stale'}]})
+    ];
+    return unsafe.map(write=>{try {write();return 'unexpected write';} catch(error) {return error.message;}});
+  });
+  assert.ok(attempts.every(value=>/collection/.test(value)),attempts.join('\n'));
+  await assert.rejects(page.evaluate(()=>applyImportedState({})),/verified detached rollback/);
+  const settings=await openScoringPage(context,'settings.html');
+  await assert.rejects(settings.evaluate(()=>applyImportedState({})),/verified detached rollback/);
+  await assert.rejects(settings.evaluate(()=>importBackupZip(null)),/verified detached rollback/);
+  for (const [view,func] of [[page,'resetAll'],[settings,'handleSettingsReset'],[settings,'handleMergeBackupFile']]) {
+    const reports=await view.evaluate(func=>{
+      const messages=[];
+      const previous=window.alert;
+      try { window.alert=message=>messages.push(message); window[func]({target:{}}); }
+      finally { window.alert=previous; }
+      return messages;
+    },func);
+    assert.match(reports[0],/verified detached rollback/);
+  }
+  assert.deepEqual(await canonicalSnapshot(page),before);
+  assert.equal((await owned(page)).sourceDrift,false);
+  assert.deepEqual((await owned(page)).journal,[]);
 });

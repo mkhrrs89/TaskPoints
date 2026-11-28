@@ -1250,6 +1250,8 @@ ${b}`;
     }
 
     async function applyImportedState(data) {
+      if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.())
+        throw new Error('Use a verified detached rollback before importing into this collection.');
       const isFullBackup = data && data.exportType === "taskpoints_full_backup" && data.state;
       const root =
         (data && Array.isArray(data.tasks) && Array.isArray(data.completions)) ? data :
@@ -1403,6 +1405,8 @@ ${b}`;
     }
 
     async function importBackupZip(file) {
+      if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.())
+        throw new Error('Use a verified detached rollback before importing into this collection.');
       const entries = readZipEntries(await file.arrayBuffer());
       let manifestEntry = entries.get("manifest.json");
       if (!manifestEntry) {
@@ -1596,6 +1600,10 @@ ${b}`;
     }
 
     async function handleMergeBackupFile(ev) {
+      if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.()) {
+        ev.target.value='';
+        return alert('Use a verified detached rollback before merging a backup into this collection.');
+      }
       const file = ev.target.files?.[0];
       if (!file) return;
       try {
@@ -1725,6 +1733,8 @@ ${summaryWithNotes}`)) return;
     }
 
     function handleSettingsReset() {
+      if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.())
+        return alert('Use a verified detached rollback before resetting this collection.');
       const msg = [
         'This will erase ALL TaskPoints data stored on this device:',
         '- Tasks',

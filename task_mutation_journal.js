@@ -338,6 +338,7 @@
 
   function journalMutation(mutation = {}) {
     const current = assertJournalWritable();
+    core.assertIsolatedCollectionJournalWrite?.(mutation, current.record);
     let record = current.record;
     if (mutation.task?.id && typeof mutation.task === 'object'
       && !Array.isArray(mutation.task)) {
@@ -425,6 +426,7 @@
     if (ids.some(id => !((typeof id === 'string' && id) || Number.isFinite(id))) || typeof prepare !== 'function')
       throw new TypeError('Task update batch requires valid Task IDs and a synchronous prepare callback.');
     const current = assertJournalWritable();
+    core.assertIsolatedCollectionJournalWrite?.({taskUpdates:ids}, current.record);
     const snapshotRaw = storage.getItem(STORAGE_KEY);
     if (snapshotRaw !== null && (typeof snapshotRaw !== 'string' || !snapshotRaw))
       throw new Error('The TaskPoints snapshot could not be read.');
@@ -1187,8 +1189,8 @@
     };
   }
 
-  core.readPendingTaskMutations = () => {
-    const current = readRecord();
+  core.readPendingTaskMutations = (raw) => {
+    const current = readRecord(raw);
     // Keep the public absent-key convention. Internal write guards compare
     // the actual storage value so a newly appeared empty string is a conflict.
     if (current.raw === null) current.raw = '';
@@ -1205,6 +1207,7 @@
   core.schedulePendingTaskMutationCompaction = scheduleCompaction;
   core.flushPendingTaskMutations = () => persistPending('explicit-flush');
   core.clearPendingTaskMutations = () => {
+    if (core.isIsolatedTaskCollectionSelected?.()) throw new Error('The collection requires its pending Task journal evidence.');
     // Unlike a normal edit, a SAME-PAGE Reset All may finish a scheduled
     // cleanup after its verified local epoch rotation. Only that exact,
     // snapshot-absent reset may use the new token once. Other old tabs must

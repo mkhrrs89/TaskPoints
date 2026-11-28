@@ -15,12 +15,36 @@
   const isolatedCompletionPage = isolatedCompletionOrigin &&
     global.location.pathname?.startsWith('/experiments/v2-home-plus-one-day/full/');
   let isolatedCompletionSelected = false;
+  let isolatedCollectionSelected = false;
+  let isolatedCollectionDeletedRewards = new Set();
+
+  function rememberIsolatedCollection(raw) {
+    try {
+      const fixture=JSON.parse(raw);
+      if (fixture?.syntheticOnly===true && fixture.taskCollection===true) {
+        isolatedCollectionSelected=true;
+        for (const id of fixture.legacyCompletionDeletes || []) isolatedCollectionDeletedRewards.add(id);
+      }
+    } catch (_) { /* A previously seen collection remains reserved. */ }
+  }
+
+  function isIsolatedTaskCollectionSelected() {
+    if (!isolatedCompletionOrigin) return false;
+    try { rememberIsolatedCollection(global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY)); }
+    catch (_) { /* Retain the document's original admission hold. */ }
+    return isolatedCollectionSelected;
+  }
   if (isolatedCompletionOrigin) {
-    try { isolatedCompletionSelected = global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY) !== null; }
+    try {
+      isolatedCompletionSelected = global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY) !== null;
+      isIsolatedTaskCollectionSelected();
+    }
     catch (_) { /* The point-of-use check reports an unreadable marker. */ }
     global.addEventListener?.('storage', event => {
       if (event.key === ISOLATED_TASK_FIXTURE_KEY && event.storageArea === global.localStorage) {
         isolatedCompletionSelected = true;
+        rememberIsolatedCollection(event.oldValue);
+        rememberIsolatedCollection(event.newValue);
       }
     });
   }
@@ -31,6 +55,10 @@
     return typeof id === 'string' && /^v2-task-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id);
   }
   function getLegacyTaskCompletionHold(taskId) {
+    if (taskId && isIsolatedTaskCollectionSelected())
+      return 'This Task is reserved for verified collection ownership. The legacy writer is paused.';
+    if (taskId && isolatedRollbackTombstones()?.held?.tasks.some(row=>row.id===taskId))
+      return 'This Task was preserved by rollback and still needs recovery review.';
     if (!isolatedCompletionOrigin || (taskId !== 't1' && !isIsolatedCreatedTaskId(taskId))) return null;
     try {
       isolatedCompletionSelected ||= global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY) !== null;
@@ -41,6 +69,54 @@
     return isolatedCompletionSelected || usesIsolatedTaskScoring()
       ? 'This Task is owned by the V2 experiment. Use a verified V1 rollback before completing it.'
       : null;
+  }
+
+  function isIsolatedCollectionTaskLink(row) {
+    return Boolean(row?.taskId) && !(['habit','vice'].includes(row.source) && String(row.taskId).startsWith('habit:'))
+      && !(row.source==='flex' && row.flexId && String(row.taskId).startsWith('flex:'));
+  }
+
+  function getLegacyLinkedCompletionHold(row) {
+    if (isIsolatedTaskCollectionSelected() && !isIsolatedCollectionTaskLink(row)) return null;
+    if (row && isolatedRollbackTombstones()?.held?.completions.some(entry=>entry.id===row.id))
+      return 'This completion was preserved by rollback and still needs recovery review.';
+    return getLegacyTaskCompletionHold(row?.taskId);
+  }
+
+  function protectsIsolatedLegacyReward(row) {
+    return (isIsolatedTaskCollectionSelected() && isIsolatedCollectionTaskLink(row))
+      || Boolean(isolatedRollbackTombstones()?.held?.completions.some(entry=>entry.id===row?.id));
+  }
+
+  function isolatedTaskCollectionShadow(state, reservedIds = []) {
+    if (!Array.isArray(state?.tasks) || !Array.isArray(state.completions)) throw new Error('The collection shadow is unreadable.');
+    const ids=new Set(state.tasks.map(row=>row?.id));
+    const reserved=new Set(reservedIds);
+    return {
+      tasks:state.tasks.map(row=>{
+        const normalized=normalizeTask(row);
+        if (!normalized || typeof normalized.id!=='string' || !normalized.id) throw new Error('The Task identity is unreadable.');
+        return {skills:[],skipDates:[],...normalized,
+          ...(row.status && !['active','done','hidden','wontdo','trashed'].includes(row.status) ? {status:row.status} : {})};
+      }),
+      completions:state.completions.filter(row=>ids.has(row?.taskId) || isIsolatedCollectionTaskLink(row)
+        || reserved.has(row?.id) || String(row?.id).startsWith('isolated-done:'))
+        .map(normalizeCompletion)
+    };
+  }
+
+  function assertIsolatedCollectionJournalWrite(mutation, pending) {
+    if (!isIsolatedTaskCollectionSelected()) return;
+    if (mutation.task || mutation.taskUpdates?.length) throw new Error('Task journal writes require verified V2 collection ownership.');
+    const upserts=[...(mutation.completionUpserts || []),mutation.completionUpsert].filter(Boolean);
+    if (!upserts.length && !mutation.completionDeleteId) return;
+    const canonical=parseTaskPointsStorageJson(localStorage.getItem(STORAGE_KEY),null);
+    const shadow=isolatedTaskCollectionShadow(canonical,[...isolatedCollectionDeletedRewards,...pending.completionDeletes]);
+    const protectedIds=new Set([...isolatedCollectionDeletedRewards,...pending.completionDeletes,
+      ...shadow.completions.map(row=>row.id),...pending.completionUpserts.filter(isIsolatedCollectionTaskLink).map(row=>row.id)]);
+    const reserved=id=>protectedIds.has(id) || String(id).startsWith('isolated-done:');
+    if (upserts.some(row=>isIsolatedCollectionTaskLink(row) || reserved(row.id)) || reserved(mutation.completionDeleteId))
+      throw new Error('Task completion journal writes require verified V2 collection ownership.');
   }
   let isolatedScoringSelected = false;
   let verifiedCompletionRead = null;
@@ -80,18 +156,20 @@
       && /^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups|week|trash|archive|log)\.html$/.test(global.location.pathname);
   }
 
-  function usesIsolatedTaskDone(taskId = 't1') {
-    if ((taskId !== 't1' && !isIsolatedCreatedTaskId(taskId)) || !isolatedTaskDonePage()) return false;
+  function usesIsolatedTaskDone(taskId) {
+    if (!isolatedTaskDonePage()) return false;
     try {
       const fixture = JSON.parse(global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY));
-      return fixture?.syntheticOnly === true && fixture.phase === 'sealed'
-        && (fixture.homeTaskId === taskId || fixture.taskCreate === true)
+      return Boolean(fixture?.syntheticOnly === true && fixture.phase === 'sealed'
+        && (fixture.taskCollection===true ? taskId===undefined || verifiedCompletionRead?.ownedIds.includes(taskId)
+          : ((taskId ?? 't1') === 't1' || isIsolatedCreatedTaskId(taskId))
+            && (fixture.homeTaskId === (taskId ?? 't1') || fixture.taskCreate === true))
         && fixture.completionRead === true && fixture.completionWrite === true && fixture.completionControls === true
-        && global.localStorage.getItem(ISOLATED_SCORING_KEY) === fixture.id;
+        && global.localStorage.getItem(ISOLATED_SCORING_KEY) === fixture.id);
     } catch (_) { return false; }
   }
 
-  function usesIsolatedWeekTaskActions(taskId = 't1') {
+  function usesIsolatedWeekTaskActions(taskId) {
     if (!usesIsolatedTaskDone(taskId) || !global.location.pathname.endsWith('/week.html')) return false;
     try { return JSON.parse(global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY)).weekControls === true; }
     catch (_) { return false; }
@@ -208,7 +286,7 @@
     const result = [...owned.values()].filter(task=>!existing.has(task.id));
     for (const task of tasks) {
       if (owned.has(task.id)) result.push(owned.get(task.id));
-      else if (!getLegacyTaskCompletionHold(task.id)
+      else if (!getLegacyTaskCompletionHold(task.id) || (verified && verifiedCompletionRead.heldTasks?.some(held=>held.id===task.id))
         || (keepSeedWhenUnavailable && !verified && task.id==='t1')) result.push(task);
     }
     return result;
@@ -421,8 +499,8 @@
     const candidate = parseTaskPointsStorageJson(raw);
     const ownedRows = state => state.completions?.filter(row=>row?.taskId==='t1' || isIsolatedCreatedTaskId(row?.taskId));
     const createdTasks = state => state.tasks?.filter(row=>isIsolatedCreatedTaskId(row?.id));
-    if (JSON.stringify(ownedRows(previous)) !== JSON.stringify(ownedRows(candidate))
-      || JSON.stringify(createdTasks(previous)) !== JSON.stringify(createdTasks(candidate)))
+    if (!isIsolatedTaskCollectionSelected() && (JSON.stringify(ownedRows(previous)) !== JSON.stringify(ownedRows(candidate))
+      || JSON.stringify(createdTasks(previous)) !== JSON.stringify(createdTasks(candidate))))
       throw new Error('Legacy scoring cannot replace the selected Task completion history.');
     const fields = ['matchups','gameHistory','goldLedger','goldEconomy'];
     if (fields.every(key=>JSON.stringify(previous[key])===JSON.stringify(candidate[key]))) return;
@@ -1256,12 +1334,20 @@ function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
       throw new Error('Detached rollback tombstones changed.');
     const data = JSON.parse(raw);
     const deleted = data?.deletedCompletionIds ?? [];
-    if (!Array.isArray(data?.ids) || !Array.isArray(deleted) || !(data.ids.length || deleted.length)
+    const held = data?.held;
+    const distinctRows = rows => Array.isArray(rows) && rows.every(row=>typeof row?.id==='string' && row.id)
+      && new Set(rows.map(row=>row.id)).size===rows.length;
+    if (!Array.isArray(data?.ids) || !Array.isArray(deleted) || !(data.ids.length || deleted.length || held)
       || new Set(data.ids).size !== data.ids.length || new Set(deleted).size !== deleted.length
       || deleted.some(id=>typeof id!=='string'||!id)
-      || data.ids.some(id=>id!=='t1' && !isIsolatedCreatedTaskId(id)) || !Array.isArray(data.rewards)
+      || (data.taskCollection!==undefined && data.taskCollection!==true)
+      || data.ids.some(id=>data.taskCollection ? (typeof id!=='string' || !/^[A-Za-z0-9_-]{1,72}$/.test(id))
+        : id!=='t1' && !isIsolatedCreatedTaskId(id)) || !Array.isArray(data.rewards)
       || data.rewards.some(row=>typeof row?.id!=='string' || !data.ids.includes(row.taskId) || deleted.includes(row.id))
-      || new Set(data.rewards.map(row=>row.id)).size!==data.rewards.length)
+      || new Set(data.rewards.map(row=>row.id)).size!==data.rewards.length
+      || (held !== undefined && (data.taskCollection!==true || !distinctRows(held?.tasks) || !distinctRows(held?.completions)
+        || held.tasks.some(row=>data.ids.includes(row.id))
+        || held.completions.some(row=>data.ids.includes(row.taskId) || deleted.includes(row.id)))))
       throw new Error('Detached rollback tombstones are unreadable.');
     observedRollbackTombstones = raw;
     return data;
@@ -1274,6 +1360,15 @@ function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
     const deleted = new Set(guard.deletedCompletionIds || []);
     const linked = completions.filter(row=>guard.ids.includes(row?.taskId));
     const byId = new Map(guard.rewards.map(row=>[row.id,row]));
+    const held=guard.held;
+    const holdsMatch=(actual,expected,normalize)=>{
+      const ids=new Set(expected.map(row=>row.id));
+      const matching=actual.filter(row=>ids.has(row?.id));
+      return matching.length===ids.size && new Set(matching.map(row=>row.id)).size===ids.size
+        && expected.every(row=>deepEqual(normalize(row),normalize(matching.find(entry=>entry.id===row.id))));
+    };
+    if (held && (!holdsMatch(tasks,held.tasks,normalizeTask) || !holdsMatch(completions,held.completions,normalizeCompletion)))
+      throw new Error('Detached rollback preserves unresolved Task and completion evidence.');
     if (completions.some(row=>byId.has(row?.id) && byId.get(row.id).taskId!==row.taskId))
       throw new Error('Detached rollback completion identity conflict.');
     if (tasks.every(row=>!guard.ids.includes(row?.id)) && !completions.some(row=>deleted.has(row?.id))
@@ -1286,11 +1381,14 @@ function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
   function filterIsolatedRollbackTaskJournal(record) {
     const guard = isolatedRollbackTombstones();
     if (!guard) return record;
-    const tasks = record.tasks.filter(row=>!guard.ids.includes(row.id));
+    const heldTasks=new Set((guard.held?.tasks || []).map(row=>row.id));
+    const heldRewards=new Set((guard.held?.completions || []).map(row=>row.id));
+    const tasks = record.tasks.filter(row=>!guard.ids.includes(row.id) && !heldTasks.has(row.id));
     const completionUpserts = record.completionUpserts.filter(row=>!guard.ids.includes(row.taskId)
       && !guard.deletedCompletionIds?.includes(row.id)
+      && !heldTasks.has(row.taskId) && !heldRewards.has(row.id)
       && !guard.rewards.some(reward=>reward.id===row.id));
-    const completionDeletes = record.completionDeletes.filter(id=>!guard.rewards.some(reward=>reward.id===id));
+    const completionDeletes = record.completionDeletes.filter(id=>!heldRewards.has(id) && !guard.rewards.some(reward=>reward.id===id));
     return tasks.length===record.tasks.length && completionUpserts.length===record.completionUpserts.length
       && completionDeletes.length===record.completionDeletes.length ? record
       : {...record,tasks,completionUpserts,completionDeletes};
@@ -1376,8 +1474,22 @@ function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
           throw new Error('Detached rollback forbids restoring permanently deleted Tasks or changing their earned history.');
       }
       assertIsolatedScoringWrite(serializedCandidate);
+      if (isIsolatedTaskCollectionSelected()) assertIsolatedCollectionSnapshotWrite(serializedCandidate);
     }
     safeReplaceTaskPointsStorage(storageKey, serializedCandidate);
+  }
+
+  function assertIsolatedCollectionSnapshotWrite(serializedCandidate) {
+    const pending=global.TaskPointsCore.readPendingTaskMutations();
+    if (pending.malformed) throw new Error('The collection Task journal is unreadable.');
+    const readShadow=raw=>{
+      const state=parseTaskPointsStorageJson(raw,null);
+      if (!Array.isArray(state?.tasks) || !Array.isArray(state.completions)) throw new Error('The collection shadow is unreadable.');
+      return isolatedTaskCollectionShadow(global.TaskPointsCore.applyPendingTaskMutations(state,pending.record),
+        [...isolatedCollectionDeletedRewards,...pending.record.completionDeletes]);
+    };
+    if (!deepEqual(readShadow(localStorage.getItem(STORAGE_KEY)),readShadow(serializedCandidate)))
+      throw new Error('The legacy save cannot change the reserved Task collection.');
   }
 
   function safeReplaceTaskPointsStorage(storageKey, serializedCandidate) {
@@ -10212,7 +10324,7 @@ function buildDailyBreakdowns(state){
     let changed = false;
 
     normalized.completions = (normalized.completions || []).map(c => {
-      if (!c) return c;
+      if (!c || protectsIsolatedLegacyReward(c)) return c;
       const derived = deriveCompletionPoints(c, normalized);
       if (!derived) return c;
 
@@ -11578,6 +11690,12 @@ return Number(cappedScore.toFixed(1));
     runIsolatedTaskDone,
     isolatedTaskDoneError,
     usesIsolatedTaskScoring,
+    isIsolatedTaskCollectionSelected,
+    isIsolatedCollectionTaskLink,
+    getLegacyLinkedCompletionHold,
+    protectsIsolatedLegacyReward,
+    isolatedTaskCollectionShadow,
+    assertIsolatedCollectionJournalWrite,
     usesIsolatedStandaloneMetrics,
     runIsolatedLegacyMetricWrite,
     commitIsolatedMetricCorrection,

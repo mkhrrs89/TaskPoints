@@ -1546,6 +1546,20 @@ function save(nextState, savePath = 'matchups-save') {
     const existing = load() || {};
     const fullState = { ...existing, ...(nextState || {}) };
     const options = { storageKey: STORAGE_KEY, savePath, ...window.TaskPointsCore?.verifiedScoringSaveOptions?.() };
+    if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.()) {
+      // Scoring consumes the verified completion projection. Only the matchup
+      // domains belong in the legacy write; keep the exact current Task shadow.
+      const live=TaskPointsCore.parseTaskPointsStorageJson(localStorage.getItem(STORAGE_KEY),null);
+      if (!Array.isArray(live?.tasks) || !Array.isArray(live.completions))
+        throw new Error('The collection snapshot is unreadable.');
+      const result=TaskPointsCore.saveStateSnapshot({...live,matchups:fullState.matchups,gameHistory:fullState.gameHistory,
+        opponentDripSchedules:fullState.opponentDripSchedules},options);
+      if (result?.skipped || result?.blockedByQuotaCircuit || !result?.state)
+        throw new Error('The matchup save could not be verified.');
+      pageStateCache=result.state;
+      pageStateCacheDirty=false;
+      return result.state;
+    }
     if (window.TaskPointsCore?.mergeAndSaveState) {
       // Matchups only edits matchup/game-history domains. Always merge with the
       // latest full app snapshot so Home-only histories (weight, VO2, live H2H

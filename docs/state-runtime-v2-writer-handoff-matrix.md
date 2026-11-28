@@ -1048,3 +1048,29 @@ The synchronous production `journalTaskMutation()` completes its V1 write/readba
 This is useful evidence that **real** user Task edits can reach the existing V2 Task schema, but the journal itself is still the V1 authority; paused legacy tabs, all fallback writers and reset/restore paths are not atomically fenced. Consequently `allLegacyWritersFenced:false`, `canPromote:false`, and the eight known unfenced writer families remain unchanged. No source inventory anchor is reclassified as a certified V2 owner.
 
 The bridge notification excludes unrelated Work/SCWM completion batches, and automatic Task mirroring has bounded deep-idle retries rather than starting V2 work in the foreground or spinning indefinitely. These constraints are scoped exclusively to the preview-only observer.
+
+## M02 Package 5A synthetic collection evidence
+
+In the loopback experiment, the verified V2 receipt ledger owns supported Task
+IDs and their linked completion records. Independent legacy records stay under
+V1. Unsupported records remain held with their source evidence preserved. The
+actual Task mutation controls use the shared owner across Home, Today, Week,
+Archive, Trash, Log and overlapping metric editors. Game and persisted matchup
+scoring use the same verified completion read.
+
+Instrumented Task journal writes and shared snapshot replacement refuse writes
+to reserved Tasks and rewards. Existing pending journal work replays into the
+seal, and verified journal compaction can persist that same effective V1 shadow.
+Verified Matchups writes preserve the collection shadow while committing the
+matchup and related Game fields through the existing snapshot safeguards.
+Home and Settings reset/import and the Settings backup merge refuse before
+changing the owned collection. Detached rollback restores the latest verified
+collection, keeps original journal and recovery evidence and retains both
+permanent deletion and unresolved-record protections in the fresh profile.
+
+Package 5B still needs verified transitions for backup history merge, reset and
+import, plus proof for verified-secondary restore, emergency/vault and manual
+recovery, and any direct writer aliases that bypass the shared boundary. This
+browser evidence leaves the old-client fence, existing iPhone Home Screen
+handoff, and all production certification entries open. See the [Package 5
+checklist](../experiments/v2-home-plus-one-day/FULL-HOME.md#package-5-acceptance-checklist).

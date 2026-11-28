@@ -652,6 +652,7 @@ function migrateSleepEntriesForBonus() {
 
   state.completions.forEach(c => {
     if (!c || !c.title || !c.title.startsWith('Sleep Score')) return;
+    if (window.TaskPointsCore?.protectsIsolatedLegacyReward?.(c)) return;
 
     const { score, rested } = getSleepInfo(c);
     if (!Number.isFinite(score)) return;
@@ -681,6 +682,7 @@ function migrateWorkEntriesForHours() {
 
   state.completions.forEach(c => {
     if (!c || !c.title || !c.title.startsWith('Work Score')) return;
+    if (window.TaskPointsCore?.protectsIsolatedLegacyReward?.(c)) return;
 
     const { score, hours } = getWorkInfo(c);
     const safeHours = Number.isFinite(hours) ? Math.max(0, hours) : 0;
@@ -728,11 +730,17 @@ function formatDayLabel(key) {
     : key;
 }
 
+function legacyLogCompletionHold(row) {
+  const core=window.TaskPointsCore;
+  return core?.getLegacyLinkedCompletionHold ? core.getLegacyLinkedCompletionHold(row)
+    : core?.getLegacyTaskCompletionHold?.(row?.taskId);
+}
+
 function getBaseRows() {
   let completions = state.completions || [];
   if (window.TaskPointsCore?.usesIsolatedTaskScoring?.()) {
     try { completions = TaskPointsCore.readScoringCompletions(completions); }
-    catch (_) { completions = completions.filter(row=>!TaskPointsCore.getLegacyTaskCompletionHold(row?.taskId)); }
+    catch (_) { completions = completions.filter(row=>!legacyLogCompletionHold(row)); }
   }
   return completions
     .slice()
@@ -764,7 +772,7 @@ function renderRows(rows, dayKeys, totalPages, pageStart, pageEnd) {
   const renderedOwned = new Map();
 
   rows.forEach((c)=>{
-    if (window.TaskPointsCore?.getLegacyTaskCompletionHold?.(c.taskId)) {
+    if (legacyLogCompletionHold(c)) {
       renderedOwned.set(String(c.id),{entry:c,basis:TaskPointsCore.isolatedLogCompletionBasis(c.id)});
     }
     const completionDate = new Date(c.completedAtISO);
@@ -1054,7 +1062,7 @@ function deleteCompletion(token, rendered){
 
   const c = rendered?.entry ?? state.completions[idx];
 
-  if (rendered || window.TaskPointsCore?.getLegacyTaskCompletionHold?.(c.taskId)) {
+  if (rendered || legacyLogCompletionHold(c)) {
     if (!rendered?.basis) return alert('Log changes are paused until this V2 completion can be verified.');
     if (pendingOwnedHistory.get(c.id)?.writing) return;
     if (!confirm(`Delete entry and send its task to Trash?\n\n${(c.title || 'Untitled')}\n${niceISO(c.completedAtISO)}`)) return;
@@ -1173,7 +1181,7 @@ function deleteCompletion(token, rendered){
 function editCompletionDate(id, rendered){
   const entry = rendered?.entry ?? state.completions.find(c => c.id === id);
   if (!entry) return;
-  const owned = Boolean(rendered || window.TaskPointsCore?.getLegacyTaskCompletionHold?.(entry.taskId));
+  const owned = Boolean(rendered || legacyLogCompletionHold(entry));
   if (owned && !rendered?.basis) return alert('Log changes are paused until this V2 completion can be verified.');
   if (owned && pendingOwnedHistory.get(id)?.writing) return;
 
@@ -1223,7 +1231,7 @@ function editCompletionDate(id, rendered){
 function editSleepScore(id,rendered){
   const entry = rendered?.entry ?? state.completions.find(c => c.id === id);
   if (!entry) return;
-  const owned = rendered || window.TaskPointsCore?.getLegacyTaskCompletionHold?.(entry.taskId);
+  const owned = rendered || legacyLogCompletionHold(entry);
   if (owned && !rendered?.basis?.zone) return alert('This V2 sleep entry has no verified scoring evidence for correction.');
 
   const { score, rested } = getSleepInfo(entry);

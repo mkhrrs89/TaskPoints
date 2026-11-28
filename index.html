@@ -3059,6 +3059,7 @@ function migrateSleepEntriesForBonus() {
 
   state.completions.forEach(c => {
     if (!c || !c.title || !c.title.startsWith('Sleep Score')) return;
+    if (window.TaskPointsCore?.protectsIsolatedLegacyReward?.(c)) return;
 
     const { score, rested } = getSleepInfo(c);
     if (!Number.isFinite(score)) return;
@@ -3105,6 +3106,7 @@ function migrateWorkEntriesForHours() {
 
   state.completions.forEach(c => {
     if (!c || !c.title || !c.title.startsWith('Work Score')) return;
+    if (window.TaskPointsCore?.protectsIsolatedLegacyReward?.(c)) return;
 
     const { score, hours } = getWorkInfo(c);
     const safeHours = Number.isFinite(hours) ? Math.max(0, hours) : 0;
@@ -5568,6 +5570,8 @@ function save(savePath, extraOptions = {}) {
 
 
 function resetAll(){
+  if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.())
+    return alert('Use a verified detached rollback before resetting this collection.');
   const msg = [
     'This will erase ALL TaskPoints data stored on this device:',
     '- Tasks',
@@ -15716,6 +15720,8 @@ function getTaskPointsExportSnapshot() {
 }
 
 async function applyImportedState(rootOrPayload){
+  if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.())
+    throw new Error('Use a verified detached rollback before importing into this collection.');
   const fullPayload = rootOrPayload?.exportType === "taskpoints_full_backup" && rootOrPayload?.state ? rootOrPayload : null;
   const root = fullPayload?.state || rootOrPayload;
   const importedNotesPayload = fullPayload ? readNotesPayloadFromBackupPayload(fullPayload) : readNotesPayloadFromBackupPayload(rootOrPayload);
@@ -15981,7 +15987,7 @@ function renderScoreDashboardV2_Skeleton(){
     if (legacy || !useHomeMetricOwnership()) return legacy;
     try {
       const rows=TaskPointsCore.readScoringCompletions(state.completions).filter(row=>
-        TaskPointsCore.getLegacyTaskCompletionHold(row.taskId)
+        TaskPointsCore.getLegacyLinkedCompletionHold(row)
         && String(row.title).startsWith({sleep:'Sleep Score',work:'Work Score',mood:'Mood Score',calories:'Calories'}[formula])
         && dateKey(row.completedAtISO)===dateKey(new Date()));
       return rows.length===1 ? rows[0] : null;

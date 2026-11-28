@@ -820,6 +820,63 @@ old-client qualification are still required for production handoff.
    on isolated storage. Obtain explicit approval before real capture or
    transfer, retiring the old-client requirement, or production activation.
 
+**Package 5A — supported collections verified in loopback Chromium**
+
+- [x] Admit a mixed collection without a preselected Task ID. The large fixture
+  has 40 legacy Tasks and 454 admitted rewards, including pending Task edits,
+  completion upserts and deletions, fractional and negative rewards, and
+  intentional duplicate historical days. V2 admits 38 Tasks. Two Tasks and
+  two linked rewards remain under explicit holds. Independent V1 rewards retain
+  their existing owner. V2-created Tasks and permanent deletion receipts are
+  verified through the existing receipt chain.
+- [x] Admit and verify the complete collection before acknowledging ownership.
+  Quota failure rolls back the IndexedDB transaction. Interruption after that
+  commit leaves the marker prepared and writers held. Chromium restart verifies
+  the committed collection and finishes admission; repeating admission returns
+  the same generation and owner map. A malformed Task journal or conflicting
+  identities hold the entire admission and leave the bytes intact.
+- [x] Use the real Home, Today, Week, Archive, Trash, Log and standalone Calories
+  controls against multiple Task IDs. The browser test also checks Game and
+  persisted matchup scoring. Competing requests from separate tabs commit a
+  single same-day reward; independent Tasks keep independent revisions. A quota
+  retry after Chromium restart replays the original verified receipt.
+- [x] Restore a detached whole-collection checkpoint into a fresh synthetic V1
+  profile. The test checks ordinary Home saving, Home and Game totals, original
+  reward IDs and values, pending journal effects, the archived journal bytes,
+  a prior backup, image bytes, held records, and permanent deletion protection.
+  Held records remain subject to review after rollback.
+- [ ] Finish Package 5B. The journal fast paths, verified Task-journal
+  compaction, shared snapshot save, and overlapping metric admission already
+  have synthetic coverage. Home/Settings reset, import and Settings backup
+  merge safely refuse while the experiment owns the collection. The remaining
+  recovery and direct writer routes need their own admission and verified
+  transition tests before they can move an owned collection.
+- [ ] Qualify the physical iPhone and existing edit-session handoff separately.
+
+Unsupported Task IDs or shapes, unproven Trash or deletion lineage, orphan
+rewards, and metric rows without enough evidence remain held. The test covers
+an unproven Trash record, a bare Calories reward and an orphan reward. V2
+does not invent prior status or reward inputs. A conflicting or unreadable
+source, including outstanding Phase 5B pending state at admission, pauses the
+collection for review. Today localStorage reconciliation continues to run
+separately from the V2 transaction.
+
+The shared scoring guard still refuses a snapshot that would change score
+fields without a current verified completion read. The real Matchups save
+preserves the current Task shadow and updates only the scoring domains it
+owns. The full-page test checks a subsequent ordinary Home save. A Task
+journal whose compaction would also change an unverified score retains its
+pending bytes for replay.
+
+Qualification against `b604715f`: the existing 234-test full-Home suite had
+231 passes, one Archive UI timeout and two Archive TODOs on each side. The
+timeouts occurred in different tests. Both tests passed when run on their
+own in both checkouts. The 1,817-test Main, V2 and focused regression batch
+had 1,791 passes, the same 25 failures, and one TODO in both checkouts. The
+component suite passed all 19 tests. The final focused Chromium run passed
+all nine tests: the five collection tests, two existing rollback tests and
+both Archive timeout reruns.
+
 M02 remains Working. The official pass condition covers the full live
 Task writer family. See the [tracker](../../V2-PROGRESS-TRACKER.md)
 and the [writer handoff matrix](../../docs/state-runtime-v2-writer-handoff-matrix.md).
