@@ -2174,7 +2174,8 @@ function getDerived(){
   // A lifecycle refresh, journal compaction or storage reconciliation can
   // replace state/completions without calling markCompletionsDirty(). Never
   // reuse a cache built for a different state or a different completions array.
-  const comps = Array.isArray(state?.completions) ? state.completions : [];
+  const legacyComps = Array.isArray(state?.completions) ? state.completions : [];
+  const comps = window.TaskPointsCore?.readScoringCompletions?.(legacyComps) ?? legacyComps;
   if (_derived.builtRev === _derived.rev
     && _derived.builtState === state
     && _derived.builtCompletions === comps
@@ -2587,6 +2588,103 @@ function workPoints(score, hours = 0) {
   return score + workHoursBonus(hours);
 }
 
+const homeMetricEditorSelections = new WeakMap();
+const homeMetricPending = new WeakMap();
+let homeMetricLegacyAdmitted = false;
+
+function useHomeMetricOwnership() {
+  return window.TaskPointsCore?.usesIsolatedStandaloneMetrics?.() === true;
+}
+
+function homeMetricEditorError(error) {
+  const messages = {
+    owned_metric_selection_ambiguous:'More than one Task reward matches this metric and date. Open a specific history entry.',
+    owned_metric_selection_changed:'That metric entry changed while the editor was open. Reopen it before saving.',
+    owned_task_stale_edit:'That Task or reward changed. Reopen the metric editor before saving.',
+    owned_metric_source_changed:'Scoring settings or entries changed. Review the score and tap Save again.',
+    isolated_completion_time_zone_or_selection_changed:'Your time zone changed. Reopen the metric editor before saving.'
+  };
+  alert(messages[error?.message] || 'The metric change could not be verified. Your values have been kept in the editor.');
+}
+
+function homeMetricRequest(formula,entry,time,day) {
+  return {formula,day:day ?? dateKey(entry?.completedAtISO || new Date()),
+    zone:Intl.DateTimeFormat().resolvedOptions().timeZone,time,
+    ...(entry?.id && !entry.__tpDraft ? {id:entry.id} : {})};
+}
+
+async function openHomeMetricEntry(formula, entry, time, day, open) {
+  try {
+    const runtime=window.TaskPointsStateRuntimeV2;
+    const selection=await runtime.inspectIsolatedStandaloneMetric(homeMetricRequest(formula,entry,time,day));
+    // Keep the legacy writer's reference to the live row. The detached
+    // verified value is suitable for display and V2 corrections only.
+    const selected=selection.owned ? selection.entry
+      : selection.entry ? state.completions.find(row=>row.id===selection.entry.id)
+        : entry || ensureScoreEntryForDate(formula,selection.request.day);
+    if (!selected) throw Error('owned_metric_selection_changed');
+    homeMetricEditorSelections.set(selected,selection);
+    return open(selected);
+  } catch (error) { homeMetricEditorError(error); }
+}
+
+function runHomeMetricEdit({formula,entry,time,day,values,fastName,onOwned},writeLegacy) {
+  if (!useHomeMetricOwnership()) return writeLegacy();
+  return saveHomeMetric({formula,entry,time,day,values,fastName,onOwned},writeLegacy);
+}
+
+async function saveHomeMetric({formula,entry,time,day,values,fastName,onOwned},writeLegacy) {
+  const runtime=window.TaskPointsStateRuntimeV2;
+  let selection, pending;
+  try {
+    selection=entry && homeMetricEditorSelections.get(entry);
+    if (!selection) {
+      selection=await runtime.inspectIsolatedStandaloneMetric(homeMetricRequest(formula,entry,time,day));
+    }
+    if (selection.request.formula!==formula || selection.request.time!==time || (day && selection.request.day!==day))
+      throw Error('owned_metric_selection_changed');
+
+    if (!selection.owned) {
+      return TaskPointsCore.runIsolatedLegacyMetricWrite(selection,()=>{
+        homeMetricLegacyAdmitted=true;
+        try {
+          const fast=window.TaskPointsWorkEntryFastPath;
+          return fastName && fast?.runAdmittedMetricCommit
+            ? fast.runAdmittedMetricCommit(fastName,writeLegacy)!==false : writeLegacy()!==false;
+        } finally { homeMetricLegacyAdmitted=false; }
+      },()=>state.completions).catch(error=>{homeMetricEditorError(error);return false;});
+    }
+
+    pending=homeMetricPending.get(selection);
+    if (pending?.busy) return false;
+    const input=JSON.stringify(values);
+    if (!pending || pending.input!==input) {
+      pending={input,actionId:crypto.randomUUID()};
+      homeMetricPending.set(selection,pending);
+    }
+    pending.busy=true;
+    const result=await TaskPointsCore.commitIsolatedMetricCorrection(selection,values,pending);
+    if (!result.confirmedDurable && !result.unchanged) throw Error('owned_metric_result_unverified');
+    homeMetricPending.delete(selection);
+    if (result.receipt && !result.replayed) {
+      const {completionBefore,completionAfter,intent}=result.receipt;
+      const bonus=intent.metric.bonus;
+      toastPointsDeltaTodayAware(completionAfter.points+(bonus?.after ?? 0),
+        (Number(completionBefore.points) || 0)+(bonus?.before ?? 0),completionAfter);
+    }
+    onOwned?.();
+    await TaskPointsCore.refreshIsolatedTaskScoring(true);
+    markCompletionsDirty();
+    scheduleRender(renderAll);
+    return true;
+  } catch (error) {
+    homeMetricEditorError(error);
+    return false;
+  } finally {
+    if (pending) pending.busy=false;
+  }
+}
+
 function getTodaySleepEntry() {
   const today = new Date();
   const todayKey = dateKey(today);
@@ -2642,14 +2740,12 @@ async function editTodayCalories() {
   if (!entry) return alert("You haven't entered today's calories yet.");
 
   const current = entry.title.match(/\((\d+)\)/)?.[1] ?? '';
-  const result = await openCaloriesEditModal({
+  return openHomeCaloriesEditor({
     title: "Edit today's calories",
     currentCalories: current,
     currentBonusEnabled: isCalLogBonusEnabledForEntry(entry),
     currentNotTracked: caloriesNotTrackedForEntry(entry)
-  });
-
-  if (!result) return;
+  },entry,'noon',dateKey(new Date()),result=>{
 
   const caloriesNotTracked = result.caloriesNotTracked === true;
   const raw = caloriesNotTracked ? null : Number(result.calories);
@@ -2681,12 +2777,15 @@ async function editTodayCalories() {
 
   persistCaloriesEditFast(entry);
   scheduleRender(renderAll);
+  });
 }
 
 let sleepEditContext = null;
 
-function promptEditSleepEntry(entry) {
+function promptEditSleepEntry(entry, prepared = false) {
   if (!entry) return;
+  if (useHomeMetricOwnership() && !prepared)
+    return openHomeMetricEntry('sleep',entry,'keep',undefined,selected=>promptEditSleepEntry(selected,true));
 
   // These sibling dashboard editors share a z-index. Never leave the Mood
   // editor active underneath Sleep; retain each editor's regular close path.
@@ -2753,6 +2852,10 @@ function submitSleepEditModal() {
     return;
   }
 
+  const entry=sleepEditContext;
+  return runHomeMetricEdit({formula:'sleep',entry,time:'keep',values:{score:scoreVal,rested:restVal},
+    fastName:'submitSleepEditModal',onOwned:()=>{if (sleepEditContext===entry) closeSleepEditModal();}},()=>{
+if (sleepEditContext!==entry) throw Error('owned_metric_selection_changed');
 let target = resolveCompletionRef(sleepEditContext, "Sleep Score");
 if (!target) {
   const d = new Date(sleepEditContext.completedAtISO || new Date());
@@ -2787,6 +2890,7 @@ target.source = "metric";
   save();
   scheduleRender(renderAll);
   closeSleepEditModal();
+  });
 }
 
 let workEditContext = null;
@@ -2797,6 +2901,7 @@ let workEditOptions = null;
 // is not a reliable contract for retrieving it across script wrappers.
 window.TaskPointsWorkEntryAccess = {
   getState: () => state,
+  isAdmittedMetricWrite: () => homeMetricLegacyAdmitted,
   getEditedRow: (name) => {
     const entry = name === 'submitWorkEditModal'
       ? resolveCompletionRef(workEditContext, 'Work Score')
@@ -2807,8 +2912,11 @@ window.TaskPointsWorkEntryAccess = {
   }
 };
 
-function promptEditWorkEntry(entry, options = {}) {
+function promptEditWorkEntry(entry, options = {}, prepared = false) {
   if (!entry) return;
+  if (useHomeMetricOwnership() && !prepared)
+    return openHomeMetricEntry('work',entry,'noon',options.pinToToday ? dateKey(new Date()) : undefined,
+      selected=>promptEditWorkEntry(selected,options,true));
 
   workEditContext = entry;
   workEditOptions = options;
@@ -2888,6 +2996,10 @@ function submitWorkEditModal() {
     : d;
   const targetKey = dateKey(targetDate);
 
+  const entry=workEditContext;
+  return runHomeMetricEdit({formula:'work',entry,time:'noon',day:targetKey,values:{score:scoreVal,hours:safeHours},
+    fastName:'submitWorkEditModal',onOwned:()=>{if (workEditContext===entry) closeWorkEditModal();}},()=>{
+  if (workEditContext!==entry) throw Error('owned_metric_selection_changed');
   let target = resolveCompletionRef(workEditContext, "Work Score");
   if (!target) {
     target = (state.completions || []).find(c => {
@@ -2931,6 +3043,7 @@ function submitWorkEditModal() {
   }
   scheduleRender(renderAll);
   closeWorkEditModal();
+  });
 }
 
 function logHomeBootReadOnlySkip(pathName) {
@@ -2946,6 +3059,7 @@ function migrateSleepEntriesForBonus() {
 
   state.completions.forEach(c => {
     if (!c || !c.title || !c.title.startsWith('Sleep Score')) return;
+    if (window.TaskPointsCore?.protectsIsolatedLegacyReward?.(c)) return;
 
     const { score, rested } = getSleepInfo(c);
     if (!Number.isFinite(score)) return;
@@ -2992,6 +3106,7 @@ function migrateWorkEntriesForHours() {
 
   state.completions.forEach(c => {
     if (!c || !c.title || !c.title.startsWith('Work Score')) return;
+    if (window.TaskPointsCore?.protectsIsolatedLegacyReward?.(c)) return;
 
     const { score, hours } = getWorkInfo(c);
     const safeHours = Number.isFinite(hours) ? Math.max(0, hours) : 0;
@@ -3099,6 +3214,30 @@ function openAddTaskModal() {
   // ✅ add this
   const rep = $("repeatInput");
   syncCustomRepeatUI(rep);
+  const owner = window.TaskPointsOwnedTaskExperiment;
+  if (owner?.usesTaskCreation?.() && !ownedAddTaskWriting) {
+    try {
+      const pending = owner.recoverTaskCreation();
+      if (pending) {
+        $('titleInput').value = pending.title;
+        $('importanceInput').value = pending.importance;
+        $('dueDateInput').value = pending.dueDateISO || '';
+        $('pointsInput').value = pending.points;
+        $('tagsInput').value = pending.tags.join(', ');
+        rep.value = pending.recurrence.mode === 'everyWeekday' ? 'weekdays' : pending.recurrence.mode;
+        if (rep.value === 'custom') {
+          $('repeatCustomCount').value = pending.recurrence.customCount;
+          $('repeatCustomUnit').value = pending.recurrence.customUnit;
+        }
+        syncCustomRepeatUI(rep);
+      }
+      syncOwnedAddTaskForm(Boolean(pending));
+    } catch (error) {
+      syncOwnedAddTaskForm(true);
+      $('addBtn').disabled = true;
+      alert(error.message);
+    }
+  }
 }
 
 
@@ -3295,6 +3434,23 @@ function parseCaloriesFromTitle(title) {
   return Number.isFinite(raw) ? raw : null;
 }
 
+async function openHomeCaloriesEditor(options,entry,time,day,writeLegacy) {
+  if (!useHomeMetricOwnership()) {
+    const result=await openCaloriesEditModal(options);
+    if (result) return writeLegacy(result);
+    return;
+  }
+  return openHomeMetricEntry('calories',entry,time,day,selected=>openCaloriesEditModal({...options,
+    currentCalories:selected.__tpDraft ? options.currentCalories
+      : selected.calories ?? parseCaloriesFromTitle(selected.title) ?? '',
+    currentNotTracked:caloriesNotTrackedForEntry(selected),
+    currentBonusEnabled:isCalLogBonusEnabledForEntry(selected),
+    commit:result=>runHomeMetricEdit({formula:'calories',entry:selected,time,day,
+      values:{calories:result.calories,notTracked:result.caloriesNotTracked,bonus:result.calLogBonusEnabled}},
+    ()=>writeLegacy(result,selected))
+  }));
+}
+
 function openCaloriesEditModal(options = {}) {
   return new Promise((resolve) => {
     const modal = $('caloriesEditModal');
@@ -3307,11 +3463,13 @@ function openCaloriesEditModal(options = {}) {
     if (!modal || !input || !toggle || !skipToggle || !saveBtn || !cancelBtn) {
       const fallback = prompt(options.title || 'Edit calories:', String(options.currentCalories || ''));
       if (fallback === null) return resolve(null);
-      return resolve({
-        calories: fallback,
-        calLogBonusEnabled: options.currentBonusEnabled !== false,
-        caloriesNotTracked: false
-      });
+      const result={calories:fallback,calLogBonusEnabled:options.currentBonusEnabled!==false,caloriesNotTracked:false};
+      if (options.commit) {
+        result.calories=Number(fallback.trim());
+        if (!fallback.trim() || !Number.isFinite(result.calories) || result.calories<0) return resolve(null);
+        return Promise.resolve(options.commit(result)).then(resolve);
+      }
+      return resolve(result);
     }
 
     input.value = options.currentNotTracked ? '' : (options.currentCalories ?? '');
@@ -3345,7 +3503,9 @@ saveBtn.removeEventListener('click', onSave);
       document.removeEventListener('keydown', onKeydown);
     };
 
+    let writing=false;
     const onSave = () => {
+      if (writing) return;
       const caloriesNotTracked = skipToggle.checked === true;
       const entered = String(input.value || '').trim();
       const raw = caloriesNotTracked ? null : Number(entered);
@@ -3360,11 +3520,20 @@ saveBtn.removeEventListener('click', onSave);
         caloriesNotTracked
       };
 
+      if (options.commit) {
+        writing=true;
+        saveBtn.disabled=true;
+        Promise.resolve(options.commit(result)).then(saved=>{
+          if (saved) { cleanup(); resolve(saved); }
+        }).finally(()=>{writing=false;saveBtn.disabled=false;});
+        return;
+      }
       cleanup();
       resolve(result);
     };
 
     const onCancel = () => {
+      if (writing) return;
       cleanup();
       resolve(null);
     };
@@ -3468,6 +3637,16 @@ function addCompletion(entry){
 
 function removeTaskFromTodayView(taskId, dayKey) {
   if (!taskId || !dayKey) return;
+  if (window.TaskPointsCore?.usesIsolatedTaskScoring?.()) {
+    // Preserve the legacy flat-list behavior for an unrelated Home completion
+    // while sharing the lock used by the current Today writers.
+    TaskPointsCore.reconcileIsolatedTodayList(list => {
+      if (list.dayKey !== dayKey) return;
+      if (list.taskIds) list.taskIds = list.taskIds.filter(id=>id!==taskId);
+      if (list.order) list.order = list.order.filter(key=>key!=='task:'+taskId);
+    }).catch(error=>console.warn('Today list update refused:',error.message));
+    return;
+  }
   const raw = localStorage.getItem(TODAY_STORE_KEY);
   if (!raw) return;
   let parsed = null;
@@ -3491,6 +3670,11 @@ function removeTaskFromTodayView(taskId, dayKey) {
     taskIds: nextTaskIds,
     order: nextOrder
   }));
+}
+
+function replayHomeTodayCleanup() {
+  TaskPointsCore.reconcileIsolatedTodayList()
+    .catch(error=>console.warn('Today list reconciliation paused:',error.message));
 }
 
 function loadProjectsFromStorage(){
@@ -3801,7 +3985,7 @@ function computeYourRecord(){
 
 function getCompletionPoints(entry) {
   if (window.TaskPointsCore?.pointsForCompletion) {
-    return TaskPointsCore.pointsForCompletion(entry, state);
+    return TaskPointsCore.pointsForCompletion(entry, TaskPointsCore.isolatedLiveScoringState?.(state) ?? state);
   }
   const caloriesRaw = parseCaloriesFromTitle(entry?.title);
   if (Number.isFinite(caloriesRaw)) return caloriesToPoints(caloriesRaw);
@@ -5215,16 +5399,22 @@ function scheduleHomeDailySimulationAfterReveal() {
             state = normalizeState(load());
             markCompletionsDirty();
           }
-          const generated = maybeAutoSimToday();
-          if (!generated) return;
-          state = syncStateWithMatchups(state);
-          markCompletionsDirty();
-          scheduleRender(renderAll);
-          // renderAll only refreshes the Home cards. The matchup normally
-          // refreshes on its separate 45-second timer; update it immediately
-          // after today's games finish rather than leaving  —  placeholders.
-          refreshHomeMatchupAfterSimulation();
-          markHomeLifecycleBaseline();
+          const runSimulation = () => {
+            const generated = maybeAutoSimToday();
+            if (!generated) return;
+            state = syncStateWithMatchups(state);
+            markCompletionsDirty();
+            scheduleRender(renderAll);
+            // The matchup has a separate refresh timer. Show today's result
+            // as soon as the simulation finishes.
+            refreshHomeMatchupAfterSimulation();
+            markHomeLifecycleBaseline();
+          };
+          if (window.TaskPointsCore?.usesIsolatedTaskScoring?.()) {
+            await TaskPointsCore.runWithVerifiedTaskScoring(runSimulation);
+          } else {
+            runSimulation();
+          }
         } catch (error) {
           markHomeMorningStartupPhase('simulation-error');
           console.error('TaskPoints first-of-day simulation failed; saved data was preserved.', error);
@@ -5316,7 +5506,9 @@ function save(savePath, extraOptions = {}) {
   try {
     pruneOpponentDripSchedulesToTodayOnly();
 
-    const saveOptions = buildHomeSaveOptions(savePath, extraOptions);
+    const saveOptions = buildHomeSaveOptions(savePath, {
+      ...extraOptions, ...window.TaskPointsCore?.verifiedScoringSaveOptions?.()
+    });
 
     if (window.TaskPointsCore?.saveStateSnapshot) {
       const result = TaskPointsCore.saveStateSnapshot(state, saveOptions);
@@ -5378,6 +5570,8 @@ function save(savePath, extraOptions = {}) {
 
 
 function resetAll(){
+  if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.())
+    return alert('Use a verified detached rollback before resetting this collection.');
   const msg = [
     'This will erase ALL TaskPoints data stored on this device:',
     '- Tasks',
@@ -5795,7 +5989,7 @@ function niceDate(d){
 
 function aggregateCompletionsByDate(completions){
   if (window.TaskPointsCore?.aggregateCompletionsByDate) {
-    return TaskPointsCore.aggregateCompletionsByDate(completions || [], state);
+    return TaskPointsCore.aggregateCompletionsByDate(completions || [], TaskPointsCore.isolatedLiveScoringState?.(state) ?? state);
   }
   const dailyTotals   = {};
   const weeklyTotals  = {};
@@ -6842,23 +7036,29 @@ function scheduleHomeHistoricalRepairPersistenceAfterFirstPaint() {
       return;
     }
 
-    try {
-      // Re-read *current* durable state, never persist a stale startup copy.
-      const latest = TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY);
-      if (!latest) return;
-      const repaired = TaskPointsCore.repairConfirmedJune2026LifetimeHistory(latest);
-      if (!repaired?.changed) return; // already saved by normal daily simulation
-      const saved = TaskPointsCore.mergeAndSaveState(repaired.state, {
-        storageKey: STORAGE_KEY,
-        savePath: 'june-2026-lifetime-history-repair'
-      });
-      if (saved?.skipped || saved?.blocked || saved?.blockedByQuotaCircuit) {
-        console.warn('June history repair persistence deferred by storage protection; in-memory correction retained.');
+    const persistRepair = () => {
+      try {
+        // Re-read *current* durable state, never persist a stale startup copy.
+        const latest = TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY);
+        if (!latest) return;
+        const repaired = TaskPointsCore.repairConfirmedJune2026LifetimeHistory(latest);
+        if (!repaired?.changed) return; // already saved by normal daily simulation
+        const saved = TaskPointsCore.mergeAndSaveState(repaired.state, {
+          storageKey: STORAGE_KEY,
+          savePath: 'june-2026-lifetime-history-repair'
+        });
+        if (saved?.skipped || saved?.blocked || saved?.blockedByQuotaCircuit) {
+          console.warn('June history repair persistence deferred by storage protection; in-memory correction retained.');
+        }
+      } catch (error) {
+        // No clearing, reset or fallback overwrite: protected data stays intact.
+        console.warn('Deferred June history repair could not be persisted; retry on next launch.', error);
       }
-    } catch (error) {
-      // No clearing, reset or fallback overwrite: protected data stays intact.
-      console.warn('Deferred June history repair could not be persisted; retry on next launch.', error);
+    };
+    if (window.TaskPointsCore?.usesIsolatedTaskScoring?.()) {
+      return TaskPointsCore.runWithVerifiedTaskScoring(persistRepair);
     }
+    persistRepair();
   };
 
   if (window.TaskPointsHomeIdleQueue?.enqueue) {
@@ -7798,7 +7998,7 @@ if (titleStr.startsWith('Sleep Score (')) {
     return Number.isFinite(caloriesRaw);
   });
   const calLogBonus = window.TaskPointsCore?.computeCalLogBonusPoints
-    ? TaskPointsCore.computeCalLogBonusPoints(calorieEntries, state)
+    ? TaskPointsCore.computeCalLogBonusPoints(calorieEntries, TaskPointsCore.isolatedLiveScoringState?.(state) ?? state)
     : (() => {
         const configuredBonus = Number(state?.scoringSettings?.calories?.logBonus);
         const logBonus = Number.isFinite(configuredBonus) ? configuredBonus : 2;
@@ -9009,12 +9209,13 @@ ctx.restore();
   ctx.restore();
 }
   
-function bumpOneDay(task){
+function bumpOneDay(task, ownedDate = false){
   if (!task.dueDateISO) return;  // nothing to bump
   const d = new Date(task.dueDateISO + 'T00:00:00');
   const bumped = addDays(d, 1);
   const oldDue = task.dueDateISO;
   task.dueDateISO = dateKey(bumped);
+  if (ownedDate) task.dueDateISO = task.dueDateISO.padStart(10,'0');
   trackDueDatePush(task, oldDue, task.dueDateISO);
   task.updatedAtISO = new Date().toISOString();
 }
@@ -11825,10 +12026,10 @@ function toggleFlexRetired(id){
 
 /* ---------- TASKS ---------- */
 
-function taskDueMeta(t, today){
+function taskDueMeta(t, today, ownedDate = false){
   const parts = [t.importance || 'Medium'];
   if (t.dueDateISO) {
-    const dueDate = fromKey(t.dueDateISO);
+    const dueDate = ownedDate ? new Date(t.dueDateISO + 'T00:00:00') : fromKey(t.dueDateISO);
     const diff = Math.round((dueDate - today) / 86400000);
     parts.push(niceDate(dueDate).replace(/\b(\d{4})\b/, (_, year) => `’${year.slice(-2)}`));
     if (diff > 0) parts.push(`Due in ${diff}d`);
@@ -11880,21 +12081,37 @@ function restoreTaskFromTrash(task){
   return true;
 }
 
-function showTrashToast(taskId){
+const shownOwnedTrashToasts = new Set();
+const ownedTrashWriting = new Set();
+
+function showTrashToast(taskId, deletion = null){
   const container = document.getElementById('pointsToastContainer');
   if (!container) return;
   const toastEl = document.createElement('div');
   toastEl.className = 'points-toast';
   toastEl.innerHTML = `<span>Moved to Trash</span> <button class="btn btn-ghost text-xs px-2 py-1" type="button">Undo</button>`;
+  if (deletion) toastEl.dataset.ownedTrash = deletion.id;
   const undoBtn = toastEl.querySelector('button');
   let closed = false;
   const close = () => {
     if (closed) return;
     closed = true;
+    if (deletion) undoBtn.disabled = true;
     toastEl.style.opacity = '0';
     setTimeout(() => toastEl.remove(), 220);
   };
   undoBtn?.addEventListener('click', () => {
+    if (deletion) {
+      const owner = ownedHomeTaskEditor(taskId);
+      if (closed || undoBtn.disabled) return;
+      if (!owner) return alert('Verified Undo is paused.');
+      undoBtn.disabled = true;
+      owner.undoTrash(deletion).then(close).catch(error => {
+        if (!closed) undoBtn.disabled = false;
+        alert(error.message);
+      });
+      return;
+    }
     const t = state.tasks.find(x => x.id === taskId);
     if (TaskPointsCore?.journalTaskMutation && !assertTaskActionMutationWritable()) return;
     if (restoreTaskFromTrash(t)) {
@@ -11909,13 +12126,54 @@ function showTrashToast(taskId){
     close();
   });
   container.appendChild(toastEl);
-  setTimeout(close, 4500);
+  const remaining = deletion
+    ? Date.parse(deletion.committedAtISO) + TaskPointsStateRuntimeV2.OWNED_TRASH_UNDO_MS - Date.now() : 4500;
+  setTimeout(close, Math.max(remaining,0));
 }
 
 function renderTasks(stateInput = null){
+  if (window.TaskPointsCore?.usesIsolatedTaskDone?.()
+    && [...taskCompletionAnimations.keys()].some(id=>TaskPointsCore.usesIsolatedTaskDone(id))) return;
   const container=$('taskList'), empty=$('emptyList'); container.innerHTML='';
   window.updateUndatedReminderIsland?.();
-  const active=state.tasks.filter(t=>!t.completedAtISO && !t.hidden && !isTaskTrashed(t) && getTaskStatus(t)!=='wontdo');
+  const owner = window.TaskPointsOwnedTaskExperiment;
+  const ownedDisplay = window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true && owner?.displayOnly && owner.isEnabled();
+  // Keep the legacy state and cache out of the V2 display path. Ordinary
+  // saves (including background saves) still receive only the V1 backing state.
+  const taskView = ownedDisplay ? owner.taskView(state) : state;
+  if (ownedDisplay) {
+    const recentTrash = owner.recentTrash?.() ?? [];
+    for (const toast of document.querySelectorAll('[data-owned-trash]')) {
+      if (!recentTrash.some(deletion=>deletion.id===toast.dataset.ownedTrash)) toast.remove();
+    }
+    for (const deletion of recentTrash) {
+      if (shownOwnedTrashToasts.has(deletion.id)) continue;
+      shownOwnedTrashToasts.add(deletion.id);
+      showTrashToast(deletion.taskId,deletion);
+    }
+    const message = owner.onRender(() => renderTasks(state));
+    if (message) {
+      const notice = document.createElement('p');
+      notice.setAttribute('role', 'status');
+      notice.textContent = message;
+      container.appendChild(notice);
+    }
+    if (owner.scheduleNotice()) {
+      const notice = document.createElement('p');
+      notice.setAttribute('role', 'status');
+      notice.textContent = owner.scheduleNotice();
+      container.appendChild(notice);
+    }
+    if (owner.pendingSchedule()) {
+      const review = document.createElement('button');
+      review.type = 'button';
+      review.className = 'btn btn-ghost';
+      review.textContent = 'Check pending schedule';
+      review.addEventListener('click', () => owner.recoverSchedule().catch(error => alert(error.message)));
+      container.appendChild(review);
+    }
+  }
+  const active=taskView.tasks.filter(t=>!t.completedAtISO && !t.hidden && !isTaskTrashed(t) && getTaskStatus(t)!=='wontdo');
   if(!active.length){ empty.classList.remove('hidden'); } else empty.classList.add('hidden');
 
   const sort=$('sortSelect').value;
@@ -12015,26 +12273,28 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
       card.className = cardClasses.join(' ');
 
       if (editingTaskId === t.id) {
+        const editor = ownedDisplay && owner.owns(t.id) ? owner.taskEditor?.() : null;
+        const importance = editor?.draft.importance ?? t.importance;
         const rec = t.recurrence || {};
-        const recMode = rec.mode || 'none';
-        const recCount = Number.isFinite(rec.customCount) && rec.customCount > 0 ? rec.customCount : 1;
-        const recUnit  = rec.customUnit || 'day';
+        const recMode = editor?.draft.repeat ?? (rec.mode || 'none');
+        const recCount = editor?.draft.repeatCustomCount ?? (Number.isFinite(rec.customCount) && rec.customCount > 0 ? rec.customCount : 1);
+        const recUnit = editor?.draft.repeatCustomUnit ?? (rec.customUnit || 'day');
         
         card.innerHTML = `
           <div class="flex flex-col gap-3">
             <div class="grid gap-2">
               <div class="sm:col-span-2">
                 <label class="text-xs muted">Title</label>
-                <input class="input mt-1" data-field="title" value="${escapeHtml(t.title)}">
+                <input class="input mt-1" data-field="title" value="${escapeHtml(editor?.draft.title ?? t.title)}">
               </div>
               <div class="task-edit-paired-row sm:col-span-2">
                 <div>
                   <label class="text-xs muted">Importance</label>
                   <select class="input mt-1" data-field="importance">
-                    <option ${t.importance==='Low'?'selected':''}>Low</option>
-                    <option ${t.importance==='Medium'?'selected':''}>Medium</option>
-                    <option ${t.importance==='High'?'selected':''}>High</option>
-                    <option ${t.importance==='Critical'?'selected':''}>Critical</option>
+                    <option ${importance==='Low'?'selected':''}>Low</option>
+                    <option ${importance==='Medium'?'selected':''}>Medium</option>
+                    <option ${importance==='High'?'selected':''}>High</option>
+                    <option ${importance==='Critical'?'selected':''}>Critical</option>
                   </select>
                 </div>
                 <div>
@@ -12045,7 +12305,7 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
               <div class="task-edit-paired-row sm:col-span-2">
                 <div>
                   <label class="text-xs muted">Points</label>
-                  <input class="input mt-1" type="number" data-field="points" value="${t.points||0}">
+                  <input class="input mt-1" type="number" data-field="points" value="${escapeHtml(editor?.draft.points ?? (t.points||0))}">
                 </div>
                 <div>
                   <label class="text-xs muted">Repeat</label>
@@ -12064,7 +12324,7 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
                 <label class="text-xs muted">Custom Repeat</label>
                 <div class="mt-1 flex items-center gap-2">
                   <span class="text-xs muted">Every</span>
-                  <input class="input" style="max-width:90px" type="number" min="1" data-field="repeatCustomCount" value="${recCount}">
+                  <input class="input" style="max-width:90px" type="number" min="1" data-field="repeatCustomCount" value="${escapeHtml(recCount)}">
                   <select class="input" data-field="repeatCustomUnit">
                     <option value="day" ${recUnit==='day'?'selected':''}>day(s)</option>
                     <option value="week" ${recUnit==='week'?'selected':''}>week(s)</option>
@@ -12077,7 +12337,7 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
               
 <div class="sm:col-span-2">
   <label class="text-xs muted">Tags</label>
-  <input class="input mt-1" data-field="tags" value="${(Array.isArray(t.tags) ? t.tags : []).join(', ')}">
+  <input class="input mt-1" data-field="tags" value="${escapeHtml(editor?.draft.tags ?? tags.join(', '))}">
 </div>
 
             </div>
@@ -12091,9 +12351,23 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
 
         body.appendChild(card);
 
+        if (editor) {
+          for (const field of card.querySelectorAll('[data-field]')) {
+            const key = field.dataset.field;
+            if (!Object.hasOwn(editor.draft, key)) {
+              field.disabled = true;
+              continue;
+            }
+            const remember = () => owner.rememberTaskDraft(key, field.value, key === 'due' && !field.validity.valid);
+            field.addEventListener('input', remember);
+            if (key === 'due' || key.startsWith('repeat')) field.addEventListener('change', remember);
+          }
+          if (editor.saving) lockOwnedTaskEditor(card);
+        }
+
         const dueInput = card.querySelector('input[data-field="due"]');
         if (dueInput) {
-          dueInput.value = t.dueDateISO || '';
+          dueInput.value = editor ? editor.draft.due : (t.dueDateISO || '');
           dueInput.defaultValue = '';
         }
 
@@ -12110,6 +12384,7 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
         
         
       } else {
+        const doneToday = window.TaskPointsCore?.isolatedTaskDoneView?.(t.id)?.reward;
         card.innerHTML = `
           <div class="task-card-shell" data-task-card-body="${t.id}" tabindex="0" role="button" aria-expanded="${isTaskExpanded ? 'true' : 'false'}" aria-label="${isTaskExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(t.title)}">
             <div class="task-card-header">
@@ -12119,10 +12394,10 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
               </div>
               <div class="task-main min-w-0">
                 <div class="font-semibold task-title">${escapeHtml(t.title)}</div>
-                <div class="task-meta-line muted text-xs">${taskDueMeta(t, today)}</div>
+              <div class="task-meta-line muted text-xs">${taskDueMeta(t, today, ownedDisplay && owner.owns(t.id))}</div>
               </div>
               <div class="task-card-header-actions">
-                <button class="btn btn-success btn-task btn-check" data-task-action="complete" data-task-id="${t.id}" aria-label="Done">✓</button>
+                <button class="btn btn-success btn-task btn-check" data-task-action="complete" data-task-id="${t.id}" aria-label="${doneToday ? 'Done today' : 'Done'}"${doneToday ? ' disabled' : ''}>✓</button>
                 ${isOverdue ? `<button class="btn btn-ghost btn-task" data-task-action="postpone" data-task-id="${t.id}">Postpone</button>` : ''}
               </div>
             </div>
@@ -12136,6 +12411,7 @@ if (hasWorkTag) cardClasses.push('task-work-tagged');
               <button class="btn btn-ghost btn-task" data-task-action="edit" data-task-id="${t.id}">Edit</button>
               <button class="btn btn-ghost btn-task" data-task-action="hide" data-task-id="${t.id}">Hide</button>
               <button class="btn btn-delete btn-task" data-task-action="delete" data-task-id="${t.id}">Delete</button>
+              ${ownedDisplay && owner.owns(t.id) && window.TaskPointsCore?.usesIsolatedTaskDone?.(t.id) ? `<button class="btn btn-ghost btn-task" data-task-action="more" data-task-id="${t.id}">Task actions</button>` : ''}
             </div>
           </div>`;
         body.appendChild(card);
@@ -12428,6 +12704,8 @@ function updateTaskActionSheetVisibility(){
 function openTaskActionSheet(id, trigger){
   const sheet = $('taskActionSheet');
   if (!sheet) return;
+  try { taskActionSheetSchedule = homeSchedulingBasis(id); }
+  catch (error) { alert(error.message); return; }
   taskActionSheetTaskId = id;
   taskActionSheetTrigger = trigger || null;
   updateTaskActionSheetVisibility();
@@ -12440,12 +12718,15 @@ function openTaskActionSheet(id, trigger){
   }, 0);
 }
 
+let taskActionSheetSchedule = null;
+
 function closeTaskActionSheet(){
   const sheet = $('taskActionSheet');
   if (!sheet) return;
   sheet.classList.add('hidden');
   sheet.setAttribute('aria-hidden', 'true');
   taskActionSheetTaskId = null;
+  taskActionSheetSchedule = null;
   if (taskActionSheetTrigger && typeof taskActionSheetTrigger.focus === 'function') {
     taskActionSheetTrigger.focus();
   }
@@ -12453,6 +12734,10 @@ function closeTaskActionSheet(){
 }
 
 function snoozeTaskDays(id, days){
+  if (window.TaskPointsCore?.getLegacyTaskCompletionHold?.(id)) {
+    alert('Reopen Task actions to verify the schedule.');
+    return;
+  }
   const t = state.tasks.find(x => x.id === id);
   if (!t || !Number.isFinite(days)) return;
   const oldDue = t.dueDateISO || todayKey();
@@ -12466,7 +12751,23 @@ function snoozeTaskDays(id, days){
   window.updateCriticalTasksIsland?.();
 }
 
-function pickTaskDate(id){
+function pickTaskDate(id, schedule){
+  if (schedule === undefined) {
+    try { schedule = homeSchedulingBasis(id); }
+    catch (error) { alert(error.message); return; }
+  }
+  if (schedule) {
+    const initial = schedule.basis.expectedTask.dueDateISO || todayKey();
+    const val = prompt('Pick due date (YYYY-MM-DD)', initial);
+    if (val === null) return;
+    const next = (val || '').trim();
+    if (!isTaskRescheduleDateKey(next)) return alert('Please enter a valid date as YYYY-MM-DD.');
+    return runHomeTaskSchedule(schedule.owner,'pick-date',todayKey(),[schedule.basis],[],next);
+  }
+  if (window.TaskPointsCore?.getLegacyTaskCompletionHold?.(id)) {
+    alert('Reopen Task actions to verify the schedule.');
+    return;
+  }
   const t = state.tasks.find(x => x.id === id);
   if (!t) return;
   const initial = t.dueDateISO || todayKey();
@@ -12499,6 +12800,7 @@ let taskRescheduleDisplayMonth = null;
 let taskRescheduleReturnFocus = null;
 let taskReschedulePending = false;
 let taskRescheduleRevision = 0;
+let taskRescheduleSchedule = null;
 let taskRescheduleFeedbackTimer = null;
 const TASK_RESCHEDULE_CONFIRMATION_MS = 360;
 
@@ -12591,7 +12893,7 @@ function renderTaskRescheduleCalendar() {
   if (!overlay || !month) return;
   const year = month.getFullYear();
   const monthIndex = month.getMonth();
-  const currentTask = state.tasks.find(task => task?.id === taskRescheduleTaskId);
+  const currentTask = taskRescheduleSchedule?.basis.expectedTask || state.tasks.find(task => task?.id === taskRescheduleTaskId);
   const selected = currentTask?.dueDateISO || '';
   const firstWeekday = new Date(year, monthIndex, 1).getDay();
   const numberOfDays = new Date(year, monthIndex + 1, 0).getDate();
@@ -12615,10 +12917,14 @@ function renderTaskRescheduleCalendar() {
 
 function openTaskRescheduleCalendar(id) {
   if (taskReschedulePending) return false;
-  const task = state.tasks.find(item => item?.id === id);
+  let schedule;
+  try { schedule = homeSchedulingBasis(id); }
+  catch (error) { alert(error.message); return false; }
+  const task = schedule?.basis.expectedTask || state.tasks.find(item => item?.id === id);
   if (!task || task.completedAtISO || task.hidden || isTaskTrashed(task)
     || getTaskStatus(task) === 'wontdo') return false;
   taskRescheduleTaskId = id;
+  taskRescheduleSchedule = schedule;
   const initial = isTaskRescheduleDateKey(task.dueDateISO) ? task.dueDateISO : todayKey();
   const dueDate = fromKey(initial);
   taskRescheduleDisplayMonth = new Date(dueDate.getFullYear(), dueDate.getMonth(), 1);
@@ -12652,6 +12958,7 @@ function closeTaskRescheduleCalendar(force = false) {
     overlay.dataset.stage = 'idle';
   }
   taskRescheduleTaskId = null;
+  taskRescheduleSchedule = null;
   taskRescheduleDisplayMonth = null;
   if (taskRescheduleReturnFocus?.isConnected) taskRescheduleReturnFocus.focus?.();
   taskRescheduleReturnFocus = null;
@@ -12707,6 +13014,12 @@ function queueTaskRescheduleAfterPaint(callback) {
 
 function applyTaskRescheduleDate(newDateKey) {
   if (taskReschedulePending || !isTaskRescheduleDateKey(newDateKey) || !taskRescheduleTaskId) return false;
+  if (taskRescheduleSchedule) return applyOwnedTaskRescheduleDate(newDateKey);
+  if (window.TaskPointsCore?.getLegacyTaskCompletionHold?.(taskRescheduleTaskId)) {
+    closeTaskRescheduleCalendar();
+    alert('Reopen the calendar to verify the schedule.');
+    return false;
+  }
   const task = state.tasks.find(item => item?.id === taskRescheduleTaskId);
   if (!task || task.completedAtISO || task.hidden || isTaskTrashed(task)
     || getTaskStatus(task) === 'wontdo') {
@@ -12731,6 +13044,12 @@ function applyTaskRescheduleDate(newDateKey) {
 
   queueTaskRescheduleAfterPaint(() => {
     if (revision !== taskRescheduleRevision || taskRescheduleTaskId !== taskId) return;
+    if (window.TaskPointsCore?.getLegacyTaskCompletionHold?.(taskId)) {
+      taskReschedulePending = false;
+      setTaskRescheduleFeedback(newDateKey, 'error');
+      alert('Reopen the calendar to verify the schedule.');
+      return;
+    }
     const liveTask = state.tasks.find(item => item?.id === taskId);
     if (!liveTask || liveTask.completedAtISO || liveTask.hidden || isTaskTrashed(liveTask)
       || getTaskStatus(liveTask) === 'wontdo') {
@@ -12773,6 +13092,31 @@ function applyTaskRescheduleDate(newDateKey) {
     }, TASK_RESCHEDULE_CONFIRMATION_MS);
   });
   return true; // Accepted date tap; persistence completes after the feedback paints.
+}
+
+function applyOwnedTaskRescheduleDate(newDateKey) {
+  const {owner,basis} = taskRescheduleSchedule;
+  const revision = ++taskRescheduleRevision;
+  const day = todayKey();
+  taskReschedulePending = true;
+  setTaskRescheduleFeedback(newDateKey, 'saving');
+  queueTaskRescheduleAfterPaint(async () => {
+    if (revision !== taskRescheduleRevision) return;
+    try {
+      const result = await owner.commitSchedule('swipe-date',day,[basis],[],newDateKey);
+      if (!result?.confirmedDurable && !result?.unchanged) throw Error('The new due date could not be verified.');
+      setTaskRescheduleFeedback(newDateKey, result.unchanged ? 'unchanged' : 'saved');
+      window.updateCriticalTasksIsland?.();
+      taskRescheduleFeedbackTimer = setTimeout(() => {
+        if (revision === taskRescheduleRevision) closeTaskRescheduleCalendar(true);
+      }, TASK_RESCHEDULE_CONFIRMATION_MS);
+    } catch (error) {
+      taskReschedulePending = false;
+      setTaskRescheduleFeedback(newDateKey, 'error');
+      alert(error.message);
+    }
+  });
+  return true;
 }
 
 // Mobile-only left-swipe gesture. This opens the SAME confirmation and Trash
@@ -12825,7 +13169,9 @@ function installMobileTaskSwipeDelete(list) {
     if (!card || !list.contains(card)) return;
     const id = card.dataset.taskId;
     if (!id || editingTaskId === id) return;
-    if (!Array.isArray(state?.tasks) || !state.tasks.some(t =>
+    const owner = window.TaskPointsOwnedTaskExperiment;
+    const tasks = owner?.displayOnly && owner.isEnabled() && owner.owns(id) ? owner.taskView(state).tasks : state?.tasks;
+    if (!Array.isArray(tasks) || !tasks.some(t =>
       t?.id === id && !t.completedAtISO && !t.hidden && !isTaskTrashed(t)
     )) return;
     gesture = {
@@ -12954,7 +13300,6 @@ function initTaskListDelegation(){
     const action = btn.getAttribute('data-task-action');
     const id = btn.getAttribute('data-task-id');
     if (!action) return;
-
     switch (action) {
       case 'postpone-all-overdue':
         postponeAllOverdueTasks();
@@ -12995,10 +13340,18 @@ function initTaskListDelegation(){
       case 'task-save': {
         if (!id) return;
         const card = btn.closest('.glass[data-task-id]');
-        if (card) saveTaskEdit(id, card);
+        if (!card) return;
+        const owner = ownedHomeTaskEditor(id);
+        if (owner) saveOwnedHomeTaskEdit(owner, id, card);
+        else saveTaskEdit(id, card);
         break;
       }
       case 'task-cancel':
+        if (id) {
+          const owner = ownedHomeTaskEditor(id);
+          if (owner?.taskEditor()?.saving) return;
+          owner?.endTaskEdit();
+        }
         editingTaskId = null;
         renderTasks();
         break;
@@ -13047,18 +13400,31 @@ function initTaskListDelegation(){
         return;
       }
       const actionBtn = e.target.closest('[data-task-sheet-action]');
-      if (!actionBtn || !taskActionSheetTaskId) return;
+      if (!actionBtn || actionBtn.disabled || !taskActionSheetTaskId) return;
       const action = actionBtn.getAttribute('data-task-sheet-action');
       const targetId = taskActionSheetTaskId;
+      const schedule = taskActionSheetSchedule;
       closeTaskActionSheet();
       if (!targetId) return;
+      if (!schedule && ['bump','bump7','pick-date'].includes(action) && window.TaskPointsCore?.getLegacyTaskCompletionHold?.(targetId)) {
+        alert('Reopen Task actions to verify the schedule.');
+        return;
+      }
       switch (action) {
         case 'edit': editTask(targetId); break;
-        case 'bump': bumpTaskOneDay(targetId); break;
-        case 'bump7': snoozeTaskDays(targetId, 7); break;
-        case 'pick-date': pickTaskDate(targetId); break;
-        case 'hide': hideTask(targetId); break;
-        case 'wont-do': wontDoMain(targetId); break;
+        case 'bump':
+          if (schedule) runHomeTaskSchedule(schedule.owner,'snooze-one',todayKey(),[schedule.basis]);
+          else bumpTaskOneDay(targetId);
+          break;
+        case 'bump7':
+          if (schedule) runHomeTaskSchedule(schedule.owner,'snooze-week',todayKey(),[schedule.basis]);
+          else snoozeTaskDays(targetId, 7);
+          break;
+        case 'pick-date': pickTaskDate(targetId, schedule); break;
+        case 'hide':
+          if (!changeOwnedHomeTaskStatus(targetId,'home-hide',schedule)) hideTask(targetId);
+          break;
+        case 'wont-do': wontDoMain(targetId,schedule); break;
         case 'delete': deleteTask(targetId); break;
         default: break;
       }
@@ -13111,6 +13477,7 @@ function saveSleepScore(){
   const key = dateKey(d);         // e.g. "2025-12-03"
   const whenISO = d.toISOString();
 
+  return runHomeMetricEdit({formula:'sleep',time:'noon',day:key,values:{score:raw,rested},fastName:'saveSleepScore'},()=>{
   // Look for an existing Sleep Score entry for this same day
   let existing = null;
   for (const c of state.completions) {
@@ -13152,6 +13519,7 @@ state.completions.unshift({
 
   save();
   scheduleRender(renderAll);  // refresh stats, history chips, etc.
+  });
 }
 
 function editTodaySleepScore() {
@@ -13189,6 +13557,7 @@ const impactPts = caloriesTotalImpactPoints(raw, calLogBonusEnabled, caloriesNot
   const key = dateKey(d);
   const whenISO = d.toISOString();
 
+  return runHomeMetricEdit({formula:'calories',time:'noon',day:key,values:{calories:raw,notTracked:caloriesNotTracked,bonus:calLogBonusEnabled},fastName:'saveCalories'},()=>{
   // 2) Look for an existing Calories entry for this same date
   let existing = null;
   for (const c of state.completions) {
@@ -13235,6 +13604,7 @@ if (existing) {
   
   save();
   scheduleRender(renderAll);
+  });
 }
 
 
@@ -13634,14 +14004,13 @@ if (calNum != null && !Number.isNaN(calNum)) {
 block.onclick = async () => {
   const target = entry;
 
-  const result = await openCaloriesEditModal({
+  return openHomeCaloriesEditor({
     title: "Edit calories for this day",
     currentCalories: caloriesNotTrackedForEntry(target) ? '' : cal,
     currentBonusEnabled: isCalLogBonusEnabledForEntry(target),
     currentNotTracked: caloriesNotTrackedForEntry(target)
-  });
-
-  if (!result) return;
+  },target,'keep',undefined,(result,selected)=>{
+  const target=selected ?? entry;
 
   const caloriesNotTracked = result.caloriesNotTracked === true;
   const raw = caloriesNotTracked ? null : Number(result.calories);
@@ -13667,6 +14036,7 @@ block.onclick = async () => {
   markCompletionsDirty();
   persistCaloriesEditFast(target);
   scheduleRender(renderAll);
+  });
 };
     container.appendChild(block);
   });
@@ -13712,6 +14082,7 @@ function saveWorkScore() {
   const key = dateKey(d);
   const whenISO = d.toISOString();
 
+  return runHomeMetricEdit({formula:'work',time:'noon',day:key,values:{score:raw,hours:safeHours},fastName:'saveWorkScore'},()=>{
   // Look for an existing Work Score entry for today
   let existing = null;
   for (const c of state.completions) {
@@ -13753,6 +14124,7 @@ function saveWorkScore() {
   const hoursInput = $('workHoursInput');
   if (hoursInput) hoursInput.value = "";
   scheduleRender(renderAll);
+  });
 }
 
 function renderWorkHistory() {
@@ -14005,7 +14377,11 @@ function getMoodNotesValue(entry) {
 
 let moodEditContext = null;
 
-function openMoodEditModal({ entry = null, score = '', notes = '', onSave = null } = {}) {
+function openMoodEditModal({ entry = null, score = '', notes = '', onSave = null, time = 'keep', today = false } = {}, prepared = false) {
+  if (useHomeMetricOwnership() && !prepared)
+    return openHomeMetricEntry('mood',entry,time,today ? dateKey(new Date()) : undefined,selected=>
+      openMoodEditModal({entry:selected,score:score==='' ? '' : getMoodScoreValue(selected),
+        notes:getMoodNotesValue(selected),onSave,time,today},true));
   const modal = $('moodEditModal');
   const scoreInput = $('moodEditScoreInput');
   const notesInput = $('moodEditNotesInput');
@@ -14014,7 +14390,7 @@ function openMoodEditModal({ entry = null, score = '', notes = '', onSave = null
   // Sleep is later in the DOM at the same z-index and can otherwise intercept
   // clicks on this editor after quick dashboard updates or overlapping taps.
   if (!$('sleepEditModal')?.classList.contains('hidden')) closeSleepEditModal();
-  moodEditContext = { entry, onSave };
+  moodEditContext = { entry, onSave, time, today };
 
   $('moodEditDateLabel').textContent = entry?.completedAtISO
     ? new Date(entry.completedAtISO).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })
@@ -14052,12 +14428,15 @@ function submitMoodEditModal() {
   if (!Number.isFinite(num)) return alert('Invalid mood score.');
 
   const notes = String(notesInput.value || '');
-  const { entry, onSave } = moodEditContext;
-  closeMoodEditModal();
-
-  if (typeof onSave === 'function') {
-    onSave({ score: num, notes, entry });
-  }
+  const context=moodEditContext;
+  const {entry,onSave,time,today}=context;
+  const close=()=>{if (moodEditContext===context) closeMoodEditModal();};
+  return runHomeMetricEdit({formula:'mood',entry,time,day:today ? dateKey(new Date()) : undefined,
+    values:{score:num,notes},fastName:'submitMoodEditModal',onOwned:close},()=>{
+    if (moodEditContext!==context) throw Error('owned_metric_selection_changed');
+    close();
+    if (typeof onSave === 'function') onSave({score:num,notes,entry});
+  });
 }
 
   function getTodayMoodEntry() {
@@ -14075,6 +14454,7 @@ function editTodayMood() {
   if (!entry) return alert("You haven't entered today's mood score yet.");
 
   openMoodEditModal({
+    time:'noon',today:true,
     entry,
     score: getMoodScoreValue(entry),
     notes: getMoodNotesValue(entry),
@@ -14116,6 +14496,7 @@ function saveMoodScore() {
     : (existing ? String(getMoodScoreValue(existing)) : '');
 
   openMoodEditModal({
+    time:'noon',today:true,
     entry: existing,
     score: initialScore,
     notes: getMoodNotesValue(existing),
@@ -14261,8 +14642,8 @@ block.onclick = () => {
     entry,
     score: getMoodScoreValue(entry),
     notes: getMoodNotesValue(entry),
-    onSave: ({ score, notes }) => {
-      const target = entry;
+    onSave: ({ score, notes, entry:liveEntry }) => {
+      const target = liveEntry ?? entry;
       const oldPts = Number(target.points) || 0;
       const newPts = moodPoints(score);
 
@@ -14282,6 +14663,38 @@ block.onclick = () => {
   });
 }
 
+
+let ownedAddTaskWriting = false;
+function syncOwnedAddTaskForm(pending, writing = false) {
+  const button = $('addBtn');
+  button.disabled = writing;
+  button.textContent = pending ? 'Retry Add Task' : 'Add Task';
+  button.setAttribute('aria-busy',String(writing));
+  $('addTaskModalBody').querySelectorAll('input, select, #addTaskQuickDueRow button').forEach(control => {
+    control.disabled = pending || writing;
+  });
+}
+
+async function addOwnedHomeTask(owner, fields) {
+  if (ownedAddTaskWriting || $('addBtn').disabled) return;
+  ownedAddTaskWriting = true;
+  syncOwnedAddTaskForm(true, true);
+  try {
+    const result = await owner.commitTaskCreation(fields);
+    if (!result?.confirmedDurable) throw Error('The saved Task could not be verified.');
+    renderTasks();
+    await owner.finishTaskCreation();
+    clearForm();
+    syncOwnedAddTaskForm(false);
+    closeAddTaskModal();
+  } catch (error) {
+    let pending = true;
+    try { pending = Boolean(owner.recoverTaskCreation()); } catch (_) {}
+    syncOwnedAddTaskForm(pending);
+    window.ownerOutcome = {ok:false,error:error.message};
+    alert('Add Task could not be confirmed. '+error.message);
+  } finally { ownedAddTaskWriting = false; }
+}
 
 function addTask(){
   const title = $('titleInput').value.trim();
@@ -14307,15 +14720,22 @@ function addTask(){
     rec.customUnit = unit;
   }
 
+  const fields = {title, importance: $('importanceInput').value,
+    dueDateISO: $('dueDateInput').value || null, points: Number($('pointsInput').value)||0, recurrence:rec, tags};
+  const owner = window.TaskPointsOwnedTaskExperiment;
+  if (owner?.usesTaskCreation?.()) {
+    // The legacy Add select emits "weekdays"; the editor and scheduler use
+    // "everyWeekday". Keep the visible option and store its scheduling value.
+    if (mode === 'weekdays') rec.mode = 'everyWeekday';
+    if ($('dueDateInput').validity.badInput || (fields.dueDateISO && !/^\d{4}-/.test(fields.dueDateISO)))
+      return alert('Enter a valid four-digit due date or clear the field.');
+    return addOwnedHomeTask(owner, fields);
+  }
+
 const task = {
   id: crypto.randomUUID(),
-  title,
-  importance: $('importanceInput').value,
-  dueDateISO: $('dueDateInput').value || null,
+  ...fields,
   originalDueDateISO: $('dueDateInput').value || null,
-  points: Number($('pointsInput').value)||0,
-  recurrence: rec,
-  tags,
   skills: [],
   skipDates: [],
   hidden: false,
@@ -14480,16 +14900,30 @@ function persistTaskActionMutation(task, action){
 
 function bumpTaskOneDay(id){
   const index = state.tasks.findIndex(row => row.id === id);
-  if (index < 0) return;
+  const owner = window.TaskPointsOwnedTaskExperiment;
+  const ownedAction = window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true && owner?.isEnabled?.() && (owner.owns?.(id) ?? true);
+  if (index < 0 && !ownedAction) return;
   let advanced = false;
   const advance = task => {
     if (!task.dueDateISO || task.completedAtISO || task.hidden || getTaskStatus(task) !== 'active')
       return false;
     task.originalDueDateISO ||= task.dueDateISO;
-    bumpOneDay(task);
+    bumpOneDay(task, ownedAction && owner.displayOnly);
     advanced = true;
     return true;
   };
+  // Only the separately loaded localhost synthetic experiment installs this
+  // adapter. Ordinary Home keeps the exact V1 journal path below.
+  if (ownedAction) {
+    return owner.commitPlusOneDay(id, state.tasks[index], advance).then(result => {
+      if (!result?.confirmedDurable) return;
+      const currentIndex = state.tasks.findIndex(row => row.id === id);
+      if (!owner.displayOnly && currentIndex >= 0) state.tasks[currentIndex] = result.task;
+      renderTasks(state);
+    }).catch(error => {
+      alert(error?.message || 'The new due date could not be verified.');
+    });
+  }
   try {
     if (TaskPointsCore?.journalTaskUpdates) {
       const latest = TaskPointsCore.journalTaskUpdates([id], advance);
@@ -14575,17 +15009,77 @@ function postponeTasks(tasks, today, bulk = false){
   return true;
 }
 
+function homeSchedulingBasis(id) {
+  const owner = ownedHomeTaskEditor(id);
+  if (owner) return {owner,basis:owner.currentScheduleBasis(id)};
+  if (window.TaskPointsCore?.getLegacyTaskCompletionHold?.(id))
+    throw Error('The V2 scheduling state is unavailable. Review this Task in the experimental Home.');
+  return null;
+}
+
+async function runHomeTaskSchedule(owner, kind, day, bases, legacyTasks = [], date) {
+  try {
+    const result = await owner.commitSchedule(kind,day,bases,legacyTasks.map(row=>row.id),date,
+      () => typeof TaskPointsCore?.journalTaskUpdates === 'function' && postponeTasks(legacyTasks,day,kind === 'postpone-all'));
+    if (result?.confirmedDurable) window.updateCriticalTasksIsland?.();
+  } catch (error) { alert(error.message); }
+}
+
 function postponeTask(id){
+  let schedule;
+  try { schedule = homeSchedulingBasis(id); }
+  catch (error) { alert(error.message); return; }
+  if (schedule) return runHomeTaskSchedule(schedule.owner,'postpone',todayKey(),[schedule.basis]);
   const task = state.tasks.find(row => row.id === id);
   if (task) postponeTasks([task], todayKey());
 }
 
 function postponeAllOverdueTasks(){
   const today = todayKey();
-  const overdue = state.tasks.filter(task => canPostponeTask(task, today));
+  const owner = globalThis.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true ? ownedHomeTaskEditor('t1') : null;
+  if (owner && !owner.scheduleReady()) {
+    alert('The V2 overdue list could not be verified.');
+    return;
+  }
+  const view = owner ? owner.taskView(state) : state;
+  const overdue = view.tasks.filter(task => canPostponeTask(task, today));
+  if (owner) {
+    const owned = overdue.filter(row=>owner.owns(row.id));
+    const legacy = overdue.filter(row=>!owner.owns(row.id));
+    if (owned.length) return runHomeTaskSchedule(owner,'postpone-all',today,
+      owned.map(row=>owner.currentScheduleBasis(row.id)),legacy);
+    if (owner.pendingSchedule()) {
+      alert('Check the pending schedule before postponing more Tasks.');
+      return;
+    }
+  }
+  if (overdue.some(row=>TaskPointsCore?.getLegacyTaskCompletionHold?.(row.id))) {
+    alert('The V2 overdue list could not be verified.');
+    return;
+  }
   postponeTasks(overdue, today, true);
 }
-function wontDoMain(id){
+const pendingHomeTaskStatuses = new Set();
+function changeOwnedHomeTaskStatus(id, operation, rendered){
+  if (!ownedHomeTaskEditor(id) && !window.TaskPointsCore?.getLegacyTaskCompletionHold?.(id)) return false;
+  if (pendingHomeTaskStatuses.has(id)) return true;
+  try {
+    const selection = rendered === undefined ? homeSchedulingBasis(id) : rendered;
+    if (!selection) throw Error('Reopen Task actions to verify this change.');
+    const {owner,basis:{taskId,generation,expectedRevision,expectedTask}} = selection;
+    if (operation === 'home-decline' && (expectedTask.recurrence?.mode || 'none') === 'none'
+      && !confirm('Won’t do this task? It will be removed.')) return true;
+    pendingHomeTaskStatuses.add(id);
+    owner.changeStatus({operation,taskId,generation,expectedRevision,day:todayKey()})
+      .then(()=>replayHomeTodayCleanup())
+      .catch(error=>alert(error.message))
+      .finally(()=>pendingHomeTaskStatuses.delete(id));
+  } catch (error) { alert(error.message); }
+  return true;
+}
+
+function wontDoMain(id, rendered){
+  if (changeOwnedHomeTaskStatus(id,'home-decline',rendered)) return;
   const t=state.tasks.find(x=>x.id===id); if(!t || !assertTaskActionMutationWritable()) return;
   const mode = (t.recurrence && t.recurrence.mode) || 'none';
   if(mode==='none'){
@@ -14675,7 +15169,97 @@ function animateTaskCompletion(id, onDone){
   taskCompletionAnimations.set(id, { timeoutId, card });
 }
 
+function ownedHomeTaskEditor(id) {
+  const owner = window.TaskPointsOwnedTaskExperiment;
+  if (window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true && owner?.displayOnly
+      && owner.isEnabled() && owner.owns(id)) return owner;
+  return null;
+}
+
+function lockOwnedTaskEditor(card) {
+  card.querySelector('[data-field="title"]').readOnly = true;
+  card.querySelector('[data-field="tags"]').readOnly = true;
+  card.querySelector('[data-field="points"]').readOnly = true;
+  card.querySelector('[data-field="due"]').readOnly = true;
+  card.querySelector('[data-field="repeatCustomCount"]').readOnly = true;
+  card.querySelector('[data-field="importance"]').disabled = true;
+  card.querySelector('[data-field="repeat"]').disabled = true;
+  card.querySelector('[data-field="repeatCustomUnit"]').disabled = true;
+  card.querySelectorAll('[data-task-action]').forEach(button => { button.disabled = true; });
+}
+
+async function saveOwnedHomeTaskEdit(owner, id, card) {
+  const edit = owner.taskEditor();
+  if (!edit || edit.saving) return;
+  const dueInput = card.querySelector('[data-field="due"]');
+  if (edit.dueBadInput || !dueInput.validity.valid) {
+    alert('Enter a valid due date or clear the field.');
+    return;
+  }
+  const draft = {};
+  for (const key of ['title', 'importance', 'tags', 'points', 'due', 'repeat', 'repeatCustomCount', 'repeatCustomUnit']) {
+    draft[key] = card.querySelector(`[data-field="${key}"]`).value;
+    if (key !== 'due' || edit.dueTouched || draft.due) owner.rememberTaskDraft(key, draft[key]);
+  }
+  const fields = {};
+  const due = draft.due.trim();
+  if ((edit.dueTouched || due) && due !== edit.original.due) fields.dueDateISO = due || null;
+  const title = draft.title.trim() || edit.original.title;
+  if (title !== edit.original.title) fields.title = title;
+  if (draft.importance !== edit.original.importance && ['Low','Medium','High','Critical'].includes(draft.importance)) {
+    fields.importance = draft.importance;
+  }
+  if (draft.tags !== edit.original.tags.join(', ').replace(/[\r\n]/g, '')) {
+    const tags = draft.tags.split(',').map(tag => tag.trim()).filter(Boolean);
+    if (JSON.stringify(tags) !== JSON.stringify(edit.original.tags)) fields.tags = tags;
+  }
+  const points = Number(draft.points) || 0;
+  if (points !== edit.original.points) fields.points = points;
+  const repeat = readTaskRepeatSettings(card);
+  if (repeat.mode !== edit.original.repeat || (repeat.mode === 'custom'
+    && (repeat.customUnit !== edit.original.repeatCustomUnit
+      || (draft.repeatCustomCount !== edit.original.repeatCustomCount
+        && repeat.customCount !== Number(edit.original.repeatCustomCount))))) fields.recurrence = repeat;
+  if (Object.keys(fields).length || edit.pending) {
+    lockOwnedTaskEditor(card);
+    try {
+      const result = await owner.commitTaskEdit(id, fields);
+      if (!result?.confirmedDurable) throw Error('The V2 Task edit could not be verified.');
+    } catch (error) {
+      renderTasks(state);
+      let message = error.message;
+      if (error.message === 'owned_task_stale_edit') {
+        message = 'This Task changed while you were editing. Your draft is still in the editor. Review the latest Task before trying again.';
+      } else if (error.message === 'invalid_owned_task_intent' && Object.hasOwn(fields,'dueDateISO')) {
+        message = 'This due date could not be saved. Use a four-digit calendar year or clear the field.';
+      }
+      alert(message);
+      return;
+    }
+  }
+  owner.endTaskEdit();
+  if (editingTaskId === id) editingTaskId = null;
+  renderTasks(state);
+}
+
 function completeTask(id){
+  const hold = window.TaskPointsCore?.getLegacyTaskCompletionHold?.(id);
+  // Retain the existing owner check if Home loaded a prior core bundle.
+  if (hold || ownedHomeTaskEditor(id)) {
+    if (window.TaskPointsCore?.usesIsolatedTaskDone?.(id) && ownedHomeTaskEditor(id)) {
+      const button = document.querySelector(`[data-task-action="complete"][data-task-id="${CSS.escape(id)}"]`);
+      if (button?.getAttribute('aria-busy') === 'true' || taskCompletionAnimations.has(id)) return;
+      button?.setAttribute('aria-busy','true');
+      TaskPointsCore.runIsolatedTaskDone(id,'home',receipt=>{
+        if (receipt.intent.day === todayKey()) showPointsToast(receipt.completion.points);
+        animateTaskCompletion(id, () => scheduleRender(renderAll));
+      }).catch(error=>alert(TaskPointsCore.isolatedTaskDoneError(error)))
+        .finally(()=>button?.removeAttribute('aria-busy'));
+      return;
+    }
+    alert(hold || 'This Task is owned by the V2 experiment. Use a verified V1 rollback before completing it.');
+    return;
+  }
   return tpPerfTime('completeTask total', () => {
     const liveTask = state.tasks.find(x => x.id === id);
     if (!liveTask || taskCompletionAnimations.has(id)) return;
@@ -14745,6 +15329,15 @@ function completeTask(id){
 
 function editTask(id){
   const startedAt = performance.now();
+  const owner = ownedHomeTaskEditor(id);
+  if (owner) {
+    try {
+      owner.beginTaskEdit(id);
+    } catch (error) {
+      alert(error.message);
+      return;
+    }
+  }
   editingTaskId = id;
   renderTasks();
   try {
@@ -14783,21 +15376,9 @@ function saveTaskEdit(id,card){
 
   
 if (repSel) {
-  const mode = repSel.value || 'none';
   t.recurrence = t.recurrence || {};
-  t.recurrence.mode = mode;
-
-  if (mode === 'custom') {
-    const countInput = card.querySelector('input[data-field="repeatCustomCount"]');
-    const unitSel    = card.querySelector('select[data-field="repeatCustomUnit"]');
-    let count = parseInt(countInput && countInput.value, 10);
-    if (!Number.isFinite(count) || count <= 0) count = 1;
-    const unit = (unitSel && (unitSel.value === 'week' || unitSel.value === 'month' || unitSel.value === 'year'))
-      ? unitSel.value
-      : 'day';
-    t.recurrence.customCount = count;
-    t.recurrence.customUnit  = unit;
-  } else {
+  Object.assign(t.recurrence, readTaskRepeatSettings(card));
+  if (t.recurrence.mode !== 'custom') {
     // if you switch away from custom, clean it up
     delete t.recurrence.customCount;
     delete t.recurrence.customUnit;
@@ -14810,7 +15391,17 @@ if (repSel) {
   renderTasks(state);
 }
 
+function readTaskRepeatSettings(card) {
+  const mode = card.querySelector('select[data-field="repeat"]')?.value || 'none';
+  if (mode !== 'custom') return {mode};
+  const count = parseInt(card.querySelector('input[data-field="repeatCustomCount"]')?.value, 10);
+  const unit = card.querySelector('select[data-field="repeatCustomUnit"]')?.value;
+  return {mode, customCount: Number.isFinite(count) && count > 0 ? count : 1,
+    customUnit: ['week','month','year'].includes(unit) ? unit : 'day'};
+}
+
 function hideTask(id){
+  if (changeOwnedHomeTaskStatus(id,'home-hide')) return;
   const t = state.tasks.find(x => x.id === id);
   if (!t) return;
   t.hidden = true;
@@ -14822,6 +15413,23 @@ function hideTask(id){
 }
 
 function deleteTask(id){
+  const owner = ownedHomeTaskEditor(id);
+  if (owner || window.TaskPointsCore?.getLegacyTaskCompletionHold?.(id)) {
+    if (ownedTrashWriting.has(id)) return;
+    try {
+      const intent = owner?.taskTrashIntent(id);
+      if (!intent) throw Error('Verified Trash is paused.');
+      if (!confirm('Move this task to Trash?')) return;
+      ownedTrashWriting.add(id);
+      return owner.moveToTrash(intent).then(() => {
+        if (editingTaskId === id) {
+          editingTaskId = null;
+          owner.endTaskEdit();
+        }
+        renderTasks();
+      }).catch(error=>alert(error.message)).finally(()=>ownedTrashWriting.delete(id));
+    } catch (error) { alert(error.message); return; }
+  }
   if(!confirm('Move this task to Trash?')) return;
   const t = state.tasks.find(x => x.id === id);
   // V2 Task edits can still be pending in the durable mutation journal.
@@ -14912,6 +15520,8 @@ function readZipEntries(arrayBuffer) {
 }
 
 async function importBackupZip(file) {
+  if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.())
+    throw new Error('Use a verified detached rollback before importing into this collection.');
   const entries = readZipEntries(await file.arrayBuffer());
   let manifestEntry = entries.get("manifest.json");
   if (!manifestEntry) {
@@ -15112,6 +15722,10 @@ function getTaskPointsExportSnapshot() {
 }
 
 async function applyImportedState(rootOrPayload){
+  if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.() && window.isCollectionRecoveryPackage?.(rootOrPayload))
+    return window.runCollectionRecovery('restore-task-fields',rootOrPayload);
+  if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.())
+    throw new Error('Use a verified detached rollback before importing into this collection.');
   const fullPayload = rootOrPayload?.exportType === "taskpoints_full_backup" && rootOrPayload?.state ? rootOrPayload : null;
   const root = fullPayload?.state || rootOrPayload;
   const importedNotesPayload = fullPayload ? readNotesPayloadFromBackupPayload(fullPayload) : readNotesPayloadFromBackupPayload(rootOrPayload);
@@ -15171,6 +15785,8 @@ async function applyImportedState(rootOrPayload){
 }
 
 function importFile(ev){
+  if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.() && window.importCollectionRecoveryFile)
+    return window.importCollectionRecoveryFile(ev);
   const f = ev.target.files?.[0];
   if (!f) return;
 
@@ -15373,10 +15989,20 @@ function renderScoreDashboardV2_Skeleton(){
   if (!mount) return;
 
   // Pull today's entries using your existing helpers
-  const sleepEntry = (typeof getTodaySleepEntry === "function") ? getTodaySleepEntry() : null;
-  const calEntry   = (typeof getTodayCaloriesEntry === "function") ? getTodayCaloriesEntry() : null;
-  const workEntry  = (typeof getTodayWorkEntry === "function") ? getTodayWorkEntry() : null;
-  const moodEntry  = (typeof getTodayMoodEntry === "function") ? getTodayMoodEntry() : null;
+  const ownedToday=(formula,legacy)=>{
+    if (legacy || !useHomeMetricOwnership()) return legacy;
+    try {
+      const rows=TaskPointsCore.readScoringCompletions(state.completions).filter(row=>
+        TaskPointsCore.getLegacyLinkedCompletionHold(row)
+        && String(row.title).startsWith({sleep:'Sleep Score',work:'Work Score',mood:'Mood Score',calories:'Calories'}[formula])
+        && dateKey(row.completedAtISO)===dateKey(new Date()));
+      return rows.length===1 ? rows[0] : null;
+    } catch (_) { return null; }
+  };
+  const sleepEntry = ownedToday('sleep',getTodaySleepEntry());
+  const calEntry   = ownedToday('calories',getTodayCaloriesEntry());
+  const workEntry  = ownedToday('work',getTodayWorkEntry());
+  const moodEntry  = ownedToday('mood',getTodayMoodEntry());
 
   function fmtNum(n){
     if (!Number.isFinite(n)) return "";
@@ -15512,14 +16138,12 @@ if (key === "calories") {
   const target = e || ensureTodayScoreEntry("calories");
   const current = String(target?.title || "").match(/\((\d+)\)/)?.[1] ?? "";
 
-  const result = await openCaloriesEditModal({
+  return openHomeCaloriesEditor({
     title: "Edit today's calories",
     currentCalories: current,
     currentBonusEnabled: isCalLogBonusEnabledForEntry(target),
     currentNotTracked: caloriesNotTrackedForEntry(target)
-  });
-
-  if (!result) return;
+  },target,'noon',dateKey(new Date()),(result,selected)=>{
 
   const caloriesNotTracked = result.caloriesNotTracked === true;
   const raw = caloriesNotTracked ? null : Number(result.calories);
@@ -15533,7 +16157,7 @@ if (key === "calories") {
   const whenISO = d.toISOString();
 
   let existing = (typeof resolveCompletionRef === "function")
-    ? resolveCompletionRef(target, "Calories")
+    ? resolveCompletionRef(selected ?? target, "Calories")
     : null;
 
   if (!existing) {
@@ -15583,6 +16207,7 @@ if (key === "calories") {
     try { if (scoreV2RecentOpen) renderScoreV2RecentGrid(); } catch(e){}
   }, 50);
 
+  });
   return;
 }
 
@@ -15605,11 +16230,11 @@ function openTodayMoodScoreV2Editor() {
     entry,
     score: getMoodScoreValue(entry),
     notes: getMoodNotesValue(entry),
-    onSave: ({ score, notes }) => {
+    onSave: ({ score, notes, entry:liveEntry }) => {
       const d = new Date(entry?.completedAtISO || new Date());
       d.setHours(12, 0, 0, 0);
       const key = dateKey(d);
-      let target = resolveCompletionRef(entry, "Mood Score");
+      let target = resolveCompletionRef(liveEntry ?? entry, "Mood Score");
       if (!target) {
         target = (state.completions || []).find(c => {
           if (!c?.title?.startsWith("Mood Score")) return false;
@@ -15854,14 +16479,12 @@ if (cat === "work" && typeof promptEditWorkEntry === "function") {
 if (cat === "calories") {
   const current = String(entry?.title || "").match(/\((\d+)\)/)?.[1] || "";
 
-  const result = await openCaloriesEditModal({
+  return openHomeCaloriesEditor({
     title: "Edit calories for this day",
     currentCalories: current,
     currentBonusEnabled: isCalLogBonusEnabledForEntry(entry),
     currentNotTracked: caloriesNotTrackedForEntry(entry)
-  });
-
-  if (!result) return;
+  },entry,'noon',dk,(result,selected)=>{
 
   const caloriesNotTracked = result.caloriesNotTracked === true;
   const raw = caloriesNotTracked ? null : Number(result.calories);
@@ -15873,7 +16496,7 @@ if (cat === "calories") {
   d.setHours(12,0,0,0);
   const targetKey = dateKey(d);
 
-  let target = resolveCompletionRef(entry, "Calories");
+  let target = resolveCompletionRef(selected ?? entry, "Calories");
 
   if (!target) {
     target = (state.completions || []).find(c => {
@@ -15922,6 +16545,7 @@ if (cat === "calories") {
 try { if (scoreV2RecentOpen) renderScoreV2RecentGrid(); } catch(e){}
 try { renderScoreDashboardV2_Skeleton(); } catch(e){}
 
+  });
 return;
 
     }
@@ -15931,11 +16555,11 @@ return;
         entry,
         score: getMoodScoreValue(entry),
         notes: getMoodNotesValue(entry),
-        onSave: ({ score, notes }) => {
+        onSave: ({ score, notes, entry:liveEntry }) => {
           const d = new Date(entry?.completedAtISO || `${dk}T12:00:00`);
           d.setHours(12,0,0,0);
           const targetKey = dateKey(d);
-          let target = resolveCompletionRef(entry, "Mood Score");
+          let target = resolveCompletionRef(liveEntry ?? entry, "Mood Score");
           if (!target) {
             target = (state.completions || []).find(c => {
               if (!c?.title?.startsWith("Mood Score")) return false;
@@ -16105,7 +16729,7 @@ function applyCapitalizeWordsInput(input) {
   });
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   const earlyBootPromise = window.__tpMatrixFinishedPromise;
   const shouldPlayBoot = !hasSeenBootThisSession();
 
@@ -16221,10 +16845,16 @@ try {
 updateWeekToggleButtons();
 updateFlexDayToggleButton();
 
-// Paint the saved Home state first; then generate today's games without
-// trapping the splash behind a full simulation and protected save.
+// Paint the saved Home state before running the expensive daily simulation.
 scheduleHomeDailySimulationAfterReveal();
-state = syncStateWithMatchups(state);
+if (window.TaskPointsCore?.usesIsolatedTaskScoring?.()) {
+  await TaskPointsCore.runWithVerifiedTaskScoring(() => {
+    state = syncStateWithMatchups(state);
+  });
+  replayHomeTodayCleanup();
+} else {
+  state = syncStateWithMatchups(state);
+}
 markHomeLifecycleBaseline();
 
 renderHabitWeekLabels();
@@ -16278,6 +16908,15 @@ function refreshMainPageFromStorage() {
 }
 
 function refreshMainPageIfChanged(reason = 'lifecycle') {
+  const owner = window.TaskPointsOwnedTaskExperiment;
+  if (window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true && owner?.displayOnly && owner.isEnabled()) {
+    // V2 can change without a V1 revision bump, including while Home is hidden.
+    owner.refresh(() => renderTasks(state));
+  }
+  if (window.TaskPointsCore?.usesIsolatedTaskScoring?.()) {
+    replayHomeTodayCleanup();
+    return TaskPointsCore.runWithVerifiedTaskScoring(refreshMainPageFromStorage);
+  }
   const currentRevision = readHomeStateRevision();
   const currentGameDayKey = readHomeGameDayKey();
   const revisionUnchanged = Boolean(
@@ -16339,6 +16978,16 @@ document.addEventListener('visibilitychange', () => {
   
   startOpponentDripTicker();
   initTaskListDelegation();
+  window.TaskPointsCore?.watchIsolatedTaskDone?.(async ready=>{
+    await ownedHomeTaskEditor('t1')?.refresh();
+    markCompletionsDirty();
+    if (ready) {
+      replayHomeTodayCleanup();
+    } else {
+      for (const id of ['todayPoints','todayScoreIslandValue']) if ($(id)) $(id).textContent = '—';
+    }
+    scheduleRender(renderAll);
+  });
 
   if (window.TP_DEBUG_PERF) {
     requestAnimationFrame(() => {
@@ -16985,7 +17634,12 @@ let tasksInView = false;
 let reminderDismissed = false;
 let reminderTaskId = null;
 
-    const getUndatedReminderTasks = () => (Array.isArray(state?.tasks) ? state.tasks : []).filter((task) => (
+    const undatedReminderTaskList = () => {
+      const owner = window.TaskPointsOwnedTaskExperiment;
+      return owner?.usesTaskCreation?.() && owner.isEnabled()
+        ? owner.taskView(state).tasks : (Array.isArray(state?.tasks) ? state.tasks : []);
+    };
+    const getUndatedReminderTasks = () => undatedReminderTaskList().filter((task) => (
       task
       && !task.completedAtISO
       && !task.hidden
@@ -17048,9 +17702,7 @@ const openReminderTaskEditor = () => {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        const currentTask = Array.isArray(state?.tasks)
-          ? state.tasks.find((item) => item?.id === targetTaskId)
-          : null;
+        const currentTask = undatedReminderTaskList().find(item=>item?.id === targetTaskId);
 
         if (!currentTask) {
           console.warn(`Unable to open editor for reminder task: ${targetTaskId}`);
@@ -17063,8 +17715,12 @@ const openReminderTaskEditor = () => {
         taskGroupExpandedState.nodue = true;
 
         expandedTaskId = null;
-        editingTaskId = currentTask.id;
-        renderTasks();
+        if (ownedHomeTaskEditor(currentTask.id)) {
+          editTask(currentTask.id);
+        } else {
+          editingTaskId = currentTask.id;
+          renderTasks();
+        }
 
         requestAnimationFrame(() => {
           const taskCard = Array.from(document.querySelectorAll('[data-task-id]'))

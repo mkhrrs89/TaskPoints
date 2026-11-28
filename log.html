@@ -603,7 +603,7 @@ function saveMerged(partial) {
 
 function getCompletionPoints(entry) {
   if (window.TaskPointsCore?.pointsForCompletion) {
-    return TaskPointsCore.pointsForCompletion(entry, state);
+    return TaskPointsCore.pointsForCompletion(entry, TaskPointsCore.isolatedLiveScoringState?.(state) ?? state);
   }
   return Number(entry?.points) || 0;
 }
@@ -652,6 +652,7 @@ function migrateSleepEntriesForBonus() {
 
   state.completions.forEach(c => {
     if (!c || !c.title || !c.title.startsWith('Sleep Score')) return;
+    if (window.TaskPointsCore?.protectsIsolatedLegacyReward?.(c)) return;
 
     const { score, rested } = getSleepInfo(c);
     if (!Number.isFinite(score)) return;
@@ -681,6 +682,7 @@ function migrateWorkEntriesForHours() {
 
   state.completions.forEach(c => {
     if (!c || !c.title || !c.title.startsWith('Work Score')) return;
+    if (window.TaskPointsCore?.protectsIsolatedLegacyReward?.(c)) return;
 
     const { score, hours } = getWorkInfo(c);
     const safeHours = Number.isFinite(hours) ? Math.max(0, hours) : 0;
@@ -728,8 +730,19 @@ function formatDayLabel(key) {
     : key;
 }
 
+function legacyLogCompletionHold(row) {
+  const core=window.TaskPointsCore;
+  return core?.getLegacyLinkedCompletionHold ? core.getLegacyLinkedCompletionHold(row)
+    : core?.getLegacyTaskCompletionHold?.(row?.taskId);
+}
+
 function getBaseRows() {
-  return (state.completions || [])
+  let completions = state.completions || [];
+  if (window.TaskPointsCore?.usesIsolatedTaskScoring?.()) {
+    try { completions = TaskPointsCore.readScoringCompletions(completions); }
+    catch (_) { completions = completions.filter(row=>!legacyLogCompletionHold(row)); }
+  }
+  return completions
     .slice()
     .filter(Boolean)
     .sort((a,b)=> new Date(b.completedAtISO)-new Date(a.completedAtISO));
@@ -756,8 +769,12 @@ function renderRows(rows, dayKeys, totalPages, pageStart, pageEnd) {
   empty.style.display='none';
   let lastDayKey = null;
   const listFrag = document.createDocumentFragment();
+  const renderedOwned = new Map();
 
   rows.forEach((c)=>{
+    if (legacyLogCompletionHold(c)) {
+      renderedOwned.set(String(c.id),{entry:c,basis:TaskPointsCore.isolatedLogCompletionBasis(c.id)});
+    }
     const completionDate = new Date(c.completedAtISO);
     const completionKey = getCompletionDateKey(c);
     if (completionKey && completionKey !== lastDayKey) {
@@ -821,6 +838,7 @@ function renderRows(rows, dayKeys, totalPages, pageStart, pageEnd) {
     const displayTitle = (c.source === 'vice' && typeof c.title === 'string' && c.title.startsWith('[Habit]'))
       ? c.title.replace('[Habit]', '[Vice]')
       : c.title;
+    const id = escapeHtml(c.id);
 
     row.innerHTML = `
   <div>${new Date(c.completedAtISO).toLocaleString()}</div>
@@ -828,11 +846,11 @@ function renderRows(rows, dayKeys, totalPages, pageStart, pageEnd) {
   <div class="font-semibold">${displayPoints.toLocaleString()}</div>
   <div>${src}</div>
   <div class="flex gap-1 justify-center">
-    ${canEditDate ? `<button class="btn" data-edit-date-id="${c.id}">📅</button>` : ''}
-    ${isSleep ? `<button class="btn" data-edit-sleep-id="${c.id}">✎</button>` : ''}
-    ${canDelete ? `<button class="btn" data-del-id="${c.id}">🗑</button>` : ''}
+    ${canEditDate ? `<button class="btn" data-edit-date-id="${id}">📅</button>` : ''}
+    ${isSleep ? `<button class="btn" data-edit-sleep-id="${id}">✎</button>` : ''}
+    ${canDelete ? `<button class="btn" data-del-id="${id}">🗑</button>` : ''}
   </div>
-  <div class="text-xs text-zinc-400 truncate">${c.id}</div>
+  <div class="text-xs text-zinc-400 truncate">${id}</div>
 `;
 
     listFrag.appendChild(row);
@@ -877,17 +895,20 @@ function renderRows(rows, dayKeys, totalPages, pageStart, pageEnd) {
 
   // Hook up delete buttons
   list.querySelectorAll('button[data-del-id]').forEach(btn=>{
-    btn.onclick = () => deleteCompletion(btn.getAttribute('data-del-id'));
+    const id = btn.getAttribute('data-del-id');
+    btn.onclick = () => deleteCompletion(id,renderedOwned.get(id));
   });
 
   // Hook up edit-sleep buttons
   list.querySelectorAll('button[data-edit-sleep-id]').forEach(btn=>{
-    btn.onclick = () => editSleepScore(btn.getAttribute('data-edit-sleep-id'));
+    const id = btn.getAttribute('data-edit-sleep-id');
+    btn.onclick = () => editSleepScore(id,renderedOwned.get(id));
   });
 
   // Hook up edit-date buttons
   list.querySelectorAll('button[data-edit-date-id]').forEach(btn=>{
-    btn.onclick = () => editCompletionDate(btn.getAttribute('data-edit-date-id'));
+    const id = btn.getAttribute('data-edit-date-id');
+    btn.onclick = () => editCompletionDate(id,renderedOwned.get(id));
   });
 }
 
@@ -988,7 +1009,42 @@ function niceISO(iso) {
 }
 
   
-function deleteCompletion(token){
+const pendingOwnedHistory = new Map();
+
+async function saveOwnedLogHistory({entry,basis},operation,day,sleep) {
+  if (!basis) return alert('Log changes are paused until this V2 completion can be verified.');
+  const previous = pendingOwnedHistory.get(entry.id);
+  if (previous?.writing) return;
+  const reuse = previous && previous.intent.operation===operation && previous.intent.day===day
+    && previous.intent.zone===basis.zone && previous.intent.sleep?.score===sleep?.score && previous.intent.sleep?.rested===sleep?.rested
+    && previous.intent.expectedRevision===basis.expectedRevision && previous.intent.generation===basis.generation
+  let intent = reuse ? previous.intent : {...basis,actionId:crypto.randomUUID(),operation,completionId:entry.id,
+    ...(day===undefined ? {} : {day}),...(sleep ? {sleep} : {})};
+  pendingOwnedHistory.set(entry.id,{intent,writing:true});
+  try {
+    const runtime = window.TaskPointsStateRuntimeV2;
+    if (sleep && !reuse) intent = await runtime.prepareIsolatedSleepCorrection(intent);
+    let result;
+    try { result = await runtime.commitIsolatedTaskHistory(intent); }
+    catch (error) {
+      const receipt = await runtime.readIsolatedTaskScoring(proof=>proof.findHistoryReceipt(intent)).catch(()=>null);
+      if (!receipt) throw error;
+      result = {confirmedDurable:true,receipt};
+    }
+    if (!result.confirmedDurable && !result.unchanged) throw Error('The Log update could not be verified.');
+    pendingOwnedHistory.delete(entry.id);
+  } catch (error) {
+    if ((!sleep || intent.metric) && error.message!=='owned_metric_source_changed') pendingOwnedHistory.set(entry.id,{intent,writing:false});
+    else pendingOwnedHistory.delete(entry.id);
+    alert(error.message);
+  } finally {
+    await TaskPointsCore.refreshIsolatedTaskScoring(true);
+    render();
+    TaskPointsCore.reconcileIsolatedTodayList().catch(error=>console.warn('Today list reconciliation paused:',error.message));
+  }
+}
+
+function deleteCompletion(token, rendered){
   if (!token) return;
 
   const key = String(token);
@@ -999,12 +1055,19 @@ function deleteCompletion(token){
     String(c?.id ?? '') === key || String(c?.taskId ?? '') === key
   );
 
-  if (idx === -1) {
+  if (idx === -1 && !rendered) {
     console.warn('[log delete] completion not found for token:', key);
     return;
   }
 
-  const c = state.completions[idx];
+  const c = rendered?.entry ?? state.completions[idx];
+
+  if (rendered || legacyLogCompletionHold(c)) {
+    if (!rendered?.basis) return alert('Log changes are paused until this V2 completion can be verified.');
+    if (pendingOwnedHistory.get(c.id)?.writing) return;
+    if (!confirm(`Delete entry and send its task to Trash?\n\n${(c.title || 'Untitled')}\n${niceISO(c.completedAtISO)}`)) return;
+    return saveOwnedLogHistory(rendered,'log-delete-completion');
+  }
 
   const isHabitOrVice = (c?.source === 'habit' || c?.source === 'vice');
 
@@ -1115,9 +1178,12 @@ function deleteCompletion(token){
 }
 
 
-function editCompletionDate(id){
-  const entry = state.completions.find(c => c.id === id);
+function editCompletionDate(id, rendered){
+  const entry = rendered?.entry ?? state.completions.find(c => c.id === id);
   if (!entry) return;
+  const owned = Boolean(rendered || legacyLogCompletionHold(entry));
+  if (owned && !rendered?.basis) return alert('Log changes are paused until this V2 completion can be verified.');
+  if (owned && pendingOwnedHistory.get(id)?.writing) return;
 
   const oldDate = new Date(entry.completedAtISO);
   if (isNaN(oldDate)) {
@@ -1141,6 +1207,7 @@ function editCompletionDate(id){
     alert('Invalid date.');
     return;
   }
+  if (owned) return saveOwnedLogHistory(rendered,'log-edit-completion-date',input);
 
   // Update completion timestamp (normalized to noon for safety)
   entry.completedAtISO = newDate.toISOString();
@@ -1161,9 +1228,11 @@ function editCompletionDate(id){
   render();
 }
 
-function editSleepScore(id){
-  const entry = state.completions.find(c => c.id === id);
+function editSleepScore(id,rendered){
+  const entry = rendered?.entry ?? state.completions.find(c => c.id === id);
   if (!entry) return;
+  const owned = rendered || legacyLogCompletionHold(entry);
+  if (owned && !rendered?.basis?.zone) return alert('This V2 sleep entry has no verified scoring evidence for correction.');
 
   const { score, rested } = getSleepInfo(entry);
   const currentScore = Number.isFinite(score) ? score : '';
@@ -1186,6 +1255,7 @@ function editSleepScore(id){
     return;
   }
 
+  if (owned) return saveOwnedLogHistory(rendered,'log-edit-sleep-score',undefined,{score:raw,rested:newRested});
   entry.title = `Sleep Score (${raw}) — Rest ${newRested}`;
   entry.points = sleepPoints(raw, newRested); // keep in sync with main-page logic
   entry.sleepRested = newRested;
@@ -1203,9 +1273,15 @@ let logEnhancedReady = false;
 function runLogEnhancementStage() {
   if (logEnhancedReady) return;
   const perfStart = performance.now();
-  migrateSleepEntriesForBonus();
-  migrateWorkEntriesForHours();
-  syncDerivedPointsIfNeeded();
+  const enhance = () => {
+    migrateSleepEntriesForBonus();
+    migrateWorkEntriesForHours();
+    syncDerivedPointsIfNeeded();
+  };
+  if (window.TaskPointsCore?.usesIsolatedTaskScoring?.()) {
+    TaskPointsCore.runWithVerifiedTaskScoring(enhance)
+      .then(()=>renderFull()).catch(error=>console.warn('Log scoring repairs paused:',error.message));
+  } else enhance();
   logEnhancedReady = true;
   if (window.TP_DEBUG_PERF) console.log('[log:perf] stageBMigrationsSyncMs', (performance.now() - perfStart).toFixed(1));
   renderFull();
@@ -1232,6 +1308,12 @@ function runLogBoot() {
 }
 
 runLogBoot();
+window.TaskPointsCore?.watchIsolatedTaskDone?.(ready=>{
+  invalidatePageStateCache();
+  state = load();
+  render();
+  if (ready) TaskPointsCore.reconcileIsolatedTodayList().catch(error=>console.warn('Today list reconciliation paused:',error.message));
+});
 
 </script>
 

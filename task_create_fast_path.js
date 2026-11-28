@@ -417,12 +417,17 @@
   }
 
   function readJournal() {
-    let raw = '';
-    try { raw = storage.getItem(JOURNAL_KEY) || ''; }
-    catch (_) { return { raw: '', malformed: true, record: null }; }
-    if (!raw) return { raw: '', malformed: false, record: null };
+    let raw;
+    try { raw = storage.getItem(JOURNAL_KEY); }
+    catch (_) { return { raw: null, malformed: true, record: null }; }
+    if (raw === null) return { raw, malformed: false, record: null };
     try {
-      const record = normalizePatch(JSON.parse(raw));
+      const value = JSON.parse(raw);
+      if (!value || Object.keys(value).some(key => !TRACKED_FIELDS.includes(key)
+        && key !== 'schemaVersion' && key !== 'updatedAtISO')) {
+        return { raw, malformed: true, record: null };
+      }
+      const record = normalizePatch(value);
       return record ? { raw, malformed: false, record } : { raw, malformed: true, record: null };
     } catch (_) {
       return { raw, malformed: true, record: null };
@@ -569,7 +574,9 @@
     const record = normalizePatch(candidate);
     if (!record) throw new Error('Inbox journal patch was invalid.');
     const raw = JSON.stringify(record);
+    if (storage.getItem(JOURNAL_KEY) !== existing.raw) throw new Error('Inbox journal changed before replacement.');
     storage.setItem(JOURNAL_KEY, raw);
+    if (storage.getItem(JOURNAL_KEY) !== raw) throw new Error('Inbox journal write did not verify.');
     invalidateCaches();
     try { global.TaskPointsStateRevision?.bump?.('inbox-journal'); } catch (_) {}
     scheduleCompaction();
@@ -602,12 +609,17 @@
         encoding: 'inbox-journal-v2'
       };
     } catch (error) {
+      // Keep the established fallback for unreadable journal bytes, with
+      // the core restricted to additions. A valid pending journal must win.
+      const latest = readJournal();
+      if (latest.record || (latest.malformed && latest.raw === null)) throw error;
+      const fallbackOptions = latest.malformed ? { ...options, inboxFallbackJournalRaw: latest.raw } : options;
       fallbackSaves += 1;
       mark('inbox.populate.journalFallback', {
         savePath,
         message: String(error?.message || error || 'journal_failed')
       });
-      return originalMergeAndSaveState(nextState, options);
+      return originalMergeAndSaveState(nextState, fallbackOptions);
     }
   };
 
@@ -644,7 +656,7 @@
       journaledSavePaths: Array.from(JOURNALED_SAVE_PATHS),
       pending: Boolean(current.record),
       malformed: current.malformed,
-      journalBytes: current.raw.length,
+      journalBytes: current.raw?.length || 0,
       journalSaves,
       fallbackSaves,
       compactionsStarted,

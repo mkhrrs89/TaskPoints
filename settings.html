@@ -117,6 +117,9 @@
             <button id="settingsMergeBackupPickerBtn" class="btn btn-teal btn-toolbar nav-btn" type="button">Merge Backup</button>
             <input id="settingsMergeBackupInput" type="file" accept="application/json,application/zip,.zip" class="hidden" />
             <button type="button" class="btn btn-ghost btn-toolbar nav-btn" data-export-images>Backup + Images</button>
+            <button type="button" class="btn btn-ghost btn-toolbar nav-btn" data-collection-recovery-export hidden>Freeze and export recovery checkpoint</button>
+            <button type="button" class="btn btn-ghost btn-toolbar nav-btn" data-collection-forward-key hidden>Authorize restored destination</button>
+            <button type="button" class="btn btn-deny btn-toolbar nav-btn" data-collection-task-reset hidden>Reset synthetic Tasks and rewards</button>
             <button id="settingsExportMatchupsBtn" class="btn btn-ghost btn-toolbar nav-btn" type="button">
               Export Matchups + Player History (CSV)
             </button>
@@ -1250,6 +1253,10 @@ ${b}`;
     }
 
     async function applyImportedState(data) {
+      if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.() && window.isCollectionRecoveryPackage?.(data))
+        return window.runCollectionRecovery('restore-task-fields',data);
+      if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.())
+        throw new Error('Use a verified detached rollback before importing into this collection.');
       const isFullBackup = data && data.exportType === "taskpoints_full_backup" && data.state;
       const root =
         (data && Array.isArray(data.tasks) && Array.isArray(data.completions)) ? data :
@@ -1403,6 +1410,8 @@ ${b}`;
     }
 
     async function importBackupZip(file) {
+      if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.())
+        throw new Error('Use a verified detached rollback before importing into this collection.');
       const entries = readZipEntries(await file.arrayBuffer());
       let manifestEntry = entries.get("manifest.json");
       if (!manifestEntry) {
@@ -1441,6 +1450,8 @@ ${b}`;
     }
 
     async function handleSettingsFile(ev) {
+      if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.() && window.importCollectionRecoveryFile)
+        return window.importCollectionRecoveryFile(ev);
       const file = ev.target.files?.[0];
       if (!file) return;
 
@@ -1596,6 +1607,13 @@ ${b}`;
     }
 
     async function handleMergeBackupFile(ev) {
+      if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.()) {
+        return mergeIsolatedCollectionBackup(ev);
+      }
+      if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.()) {
+        ev.target.value='';
+        return alert('Finish the verified detached rollback before merging a backup.');
+      }
       const file = ev.target.files?.[0];
       if (!file) return;
       try {
@@ -1724,7 +1742,68 @@ ${summaryWithNotes}`)) return;
       }
     }
 
+    async function mergeIsolatedCollectionBackup(ev) {
+      try {
+        const file=ev.target.files?.[0];
+        if (!file || isZipFile(file))
+          throw new Error('Use a verified detached rollback before merging this backup into the collection.');
+        const data=JSON.parse(await file.text());
+        if (window.isCollectionRecoveryPackage?.(data)) {
+          await window.runCollectionRecovery('restore-task-reward',data);
+          return;
+        }
+        const backup=extractImportRoot(data);
+        if (!backup) throw new Error('Backup format is invalid for merge.');
+        const fields=['weightHistory','vo2MaxHistory','reminders'];
+        for (const key of ['completions','matchups','gameHistory',...fields]) {
+          if (Object.hasOwn(backup,key) && (!Array.isArray(backup[key])
+            || backup[key].some(row=>!row || typeof row!=='object' || Array.isArray(row))))
+            throw new Error(`Backup ${key} is unreadable.`);
+        }
+        const core=TaskPointsCore;
+        const before=localStorage.getItem(SETTINGS_STORAGE_KEY);
+        if (!confirm('Merge missing Weight, VO2 Max and Reminder records? The verified Task collection and reward history stay in place.')) return;
+        const result=await core.runWithVerifiedTaskScoring(()=>{
+          if (localStorage.getItem(SETTINGS_STORAGE_KEY)!==before) throw new Error('The current save changed. Reopen the backup and review it again.');
+          const current=core.parseTaskPointsStorageJson(before,null);
+          if (!Array.isArray(current?.tasks) || !Array.isArray(current.completions)) throw new Error('The current save is unreadable.');
+          const completions=core.readScoringCompletions(current.completions);
+          const notes=normalizeNotesPayload(readNotesPayloadFromBackupPayload(data));
+          if (mergeHistoryArray(completions,backup.completions,'completions').added
+            || ['matchups','gameHistory'].some(key=>mergeHistoryArray(current[key],backup[key],key).added)
+            || (notes.trim() && notes!==getCurrentNotesTextForSettings()))
+            throw new Error('This backup requires a reviewed history or notes import. Use the verified detached checkpoint workflow.');
+          const patch={};
+          let added=0;
+          for (const key of fields) {
+            const merged=mergeHistoryArray(current[key],backup[key],key);
+            if (merged.added) patch[key]=merged.merged;
+            added+=merged.added;
+          }
+          if (!added) return {added};
+          const ordered=sortHistoryForDisplay({...patch});
+          const candidate={...current,...Object.fromEntries(Object.keys(patch).map(key=>[key,ordered[key]]))};
+          const expected=core.normalizeState(candidate);
+          const saved=core.saveStateSnapshot(candidate, {
+            storageKey:SETTINGS_STORAGE_KEY,immediateWrite:true,userInitiated:true,source:'settings-collection-merge',
+            limits:{allowHistoryPrune:false,allowCompletionPrune:false}
+          });
+          assertCommittedSettingsImport(saved,'Merge');
+          const readback=core.parseTaskPointsStorageJson(localStorage.getItem(SETTINGS_STORAGE_KEY),null);
+          for (const key of Object.keys(patch))
+            if (core.shadowCanonicalJson(readback?.[key])!==core.shadowCanonicalJson(expected[key]))
+              throw new Error('Merge readback is incomplete.');
+          return {added};
+        });
+        if (!result) throw new Error('The V2 collection could not be verified.');
+        alert(`Merge verified. ${result.added} records added.`);
+      } catch (error) { alert(`Merge stopped. ${error.message}`); }
+      finally { ev.target.value=''; }
+    }
+
     function handleSettingsReset() {
+      if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.())
+        return alert('Use a verified detached rollback before resetting this collection.');
       const msg = [
         'This will erase ALL TaskPoints data stored on this device:',
         '- Tasks',
@@ -1865,6 +1944,8 @@ ${summaryWithNotes}`)) return;
       return Number.isFinite(num) ? num : null;
     }
 
+    let pendingMissingMetricEdit = null;
+
     function applyMissingScoreEntry() {
       const dateValue = document.getElementById("missingScoreDate")?.value;
       const type = document.getElementById("missingScoreType")?.value;
@@ -1886,7 +1967,7 @@ ${summaryWithNotes}`)) return;
         return;
       }
 
-      const state = loadSettingsState();
+      let state = loadSettingsState();
       if (!Array.isArray(state.completions)) state.completions = [];
       const whenISO = date.toISOString();
 
@@ -1901,6 +1982,7 @@ ${summaryWithNotes}`)) return;
       let title = "";
       let source = "metric";
       let extraFields = {};
+      let metricInput;
 
       if (type === "sleep") {
         const score = readNumberInput("missingSleepScore");
@@ -1918,6 +2000,7 @@ ${summaryWithNotes}`)) return;
         title = `Sleep Score (${score}) — Rest ${restedValue}`;
         label = "Sleep score";
         extraFields = { sleepRested: restedValue };
+        metricInput = {score,rested:restedValue};
       } else if (type === "work") {
         const score = readNumberInput("missingWorkScore");
         if (score == null) {
@@ -1935,6 +2018,7 @@ ${summaryWithNotes}`)) return;
         label = "Work score";
         source = "work";
         extraFields = { workHours: hoursValue };
+        metricInput = {score,hours:hoursValue};
       } else if (type === "calories") {
         const calories = readNumberInput("missingCaloriesValue");
         if (calories == null || calories < 0) {
@@ -1944,6 +2028,7 @@ ${summaryWithNotes}`)) return;
         points = TaskPointsCore.caloriesToPoints(calories, state);
         title = `Calories (${calories})`;
         label = "Calories";
+        metricInput = {calories,notTracked:false};
       } else if (type === "mood") {
         const score = readNumberInput("missingMoodScore");
         if (score == null || score < 0 || score > 10) {
@@ -1953,6 +2038,7 @@ ${summaryWithNotes}`)) return;
         points = TaskPointsCore.moodPoints(score, state);
         title = `Mood Score (${score})`;
         label = "Mood score";
+        metricInput = {score};
       } else if (type !== "flex") {
         setMissingScoreStatus("Select a valid metric to save.", "error");
         return;
@@ -1992,15 +2078,24 @@ ${summaryWithNotes}`)) return;
       } else {
         existing = findEntry(entryPrefixMap[type]);
       }
+      const writeLegacy = (verified) => {
+      if (verified) {
+        state = loadSettingsState();
+        existing = verified.entry ? state.completions.find(row=>row.id===verified.entry.id) : null;
+        if (verified.entry && !existing) throw new Error('owned_metric_selection_changed');
+      }
+      let savedId;
       if (existing) {
+        savedId = existing.id;
         existing.title = title;
         existing.points = points;
         existing.completedAtISO = whenISO;
         existing.source = source;
         Object.assign(existing, extraFields);
       } else {
+        savedId = crypto.randomUUID();
         state.completions.unshift({
-          id: crypto.randomUUID(),
+          id: savedId,
           title,
           points,
           completedAtISO: whenISO,
@@ -2018,6 +2113,13 @@ ${summaryWithNotes}`)) return;
       }
 
       saveSettingsState(nextState, { immediateWrite: true });
+      if (verified) {
+        TaskPointsCore.clearStateHotCache?.();
+        const saved = TaskPointsCore.readTaskPointsStoredState()?.completions.find(row=>row.id===savedId);
+        if (saved?.title!==title || saved.completedAtISO!==whenISO) throw new Error('owned_metric_result_unverified');
+      }
+      };
+      const showSaved = () => {
       setMissingScoreStatus(`${label} ${type === "flex" ? "added" : "saved"} for ${entryKey}.`, "success");
 
       if (type === "calories") {
@@ -2044,6 +2146,42 @@ ${summaryWithNotes}`)) return;
         const flexField = document.getElementById("missingFlexAction");
         if (flexField) flexField.value = "";
       }
+      };
+
+      if (!metricInput || !TaskPointsCore.usesIsolatedStandaloneMetrics?.()) {
+        writeLegacy();
+        showSaved();
+        return;
+      }
+
+      if (pendingMissingMetricEdit?.busy) return;
+      const request={formula:type,day:entryKey,time:'noon',zone:Intl.DateTimeFormat().resolvedOptions().timeZone};
+      const input=JSON.stringify([request,metricInput]);
+      const attempt=pendingMissingMetricEdit?.input===input ? pendingMissingMetricEdit
+        : {input,actionId:crypto.randomUUID()};
+      pendingMissingMetricEdit=attempt;
+      attempt.busy=true;
+      return (async()=>{
+        try {
+          const runtime=window.TaskPointsStateRuntimeV2;
+          attempt.selection ??= await runtime.inspectIsolatedStandaloneMetric(request);
+          const selection=attempt.selection;
+          if (selection.owned) {
+            const values=type==='calories' ? {...metricInput,
+              bonus:selection.entry.calLogBonusEnabled!==false && selection.entry.calLogBonusDisabled!==true
+                && selection.entry.caloriesNotTracked!==true} : metricInput;
+            const result=await TaskPointsCore.commitIsolatedMetricCorrection(selection,values,attempt);
+            if (!result.confirmedDurable && !result.unchanged) throw new Error('owned_metric_result_unverified');
+          } else {
+            await TaskPointsCore.runIsolatedLegacyMetricWrite(selection,writeLegacy);
+          }
+          pendingMissingMetricEdit=null;
+          showSaved();
+        } catch(error) {
+          if (['owned_metric_selection_changed','owned_task_stale_edit'].includes(error.message)) pendingMissingMetricEdit=null;
+          setMissingScoreStatus("The metric change could not be verified. Review the day and score before trying again.", "error");
+        } finally { attempt.busy=false; }
+      })();
     }
 
     function getHabitTagList(state) {

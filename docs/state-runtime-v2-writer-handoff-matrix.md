@@ -1048,3 +1048,57 @@ The synchronous production `journalTaskMutation()` completes its V1 write/readba
 This is useful evidence that **real** user Task edits can reach the existing V2 Task schema, but the journal itself is still the V1 authority; paused legacy tabs, all fallback writers and reset/restore paths are not atomically fenced. Consequently `allLegacyWritersFenced:false`, `canPromote:false`, and the eight known unfenced writer families remain unchanged. No source inventory anchor is reclassified as a certified V2 owner.
 
 The bridge notification excludes unrelated Work/SCWM completion batches, and automatic Task mirroring has bounded deep-idle retries rather than starting V2 work in the foreground or spinning indefinitely. These constraints are scoped exclusively to the preview-only observer.
+
+## M02 Package 5A synthetic collection evidence
+
+In the loopback experiment, the verified V2 receipt ledger owns supported Task
+IDs and their linked completion records. Independent legacy records stay under
+V1. Unsupported records remain held with their source evidence preserved. The
+actual Task mutation controls use the shared owner across Home, Today, Week,
+Archive, Trash, Log and overlapping metric editors. Game and persisted matchup
+scoring use the same verified completion read.
+
+Instrumented Task journal writes and shared snapshot replacement refuse writes
+to reserved Tasks and rewards. Existing pending journal work replays into the
+seal, and verified journal compaction can persist that same effective V1 shadow.
+Verified Matchups writes preserve the collection shadow while committing the
+matchup and related Game fields through the existing snapshot safeguards.
+Home and Settings reset/import and the Settings backup merge refuse before
+changing the owned collection. Detached rollback restores the latest verified
+collection, keeps original journal and recovery evidence and retains both
+permanent deletion and unresolved-record protections in the fresh profile.
+
+Package 5B still needs verified transitions for backup history merge, reset and
+import, plus proof for verified-secondary restore, emergency/vault and manual
+recovery, and any direct writer aliases that bypass the shared boundary. This
+browser evidence leaves the old-client fence, existing iPhone Home Screen
+handoff, and all production certification entries open. See the [Package 5
+checklist](../experiments/v2-home-plus-one-day/FULL-HOME.md#package-5-acceptance-checklist).
+
+## M02 Packages 5B and 5C synthetic recovery evidence
+
+| Writer route | Demonstrated on loopback Chromium | Remaining qualification |
+| --- | --- | --- |
+| Settings Merge Backup | Independent Weight, VO2 Max and Reminder history merges with readback. An obsolete completion or malformed backup leaves the existing snapshot intact. | Intentional recovery of missing Task rewards requires verified identity and deletion history. ZIP, Notes and scoring-history merge remain held. |
+| Home and Settings imports | JSON and ZIP replacement are held before the app changes Tasks, Projects or image data. Export includes the latest V2 records. The detached checkpoint loader restores into fresh V1. | An in-place full import and forward V2 re-admission remain open. |
+| Home and Settings Reset All | The collection boundary holds both ordinary command paths and raw removal. | Verify an intentional reset with a new generation and retained recovery evidence across all storage domains. |
+| Verified-secondary restore | The actual page holds its legacy replacement while V2 owns the source or a detached restore is incomplete. | Build a verified transition for a secondary recovery candidate carrying relevant V2 provenance. |
+| Emergency/vault and rolling backups | The real Emergency restore control and the rolling-slot writer refuse older V1 candidates. Existing backup evidence is preserved. | Verify intentional emergency recovery, including journal replay and vault lineage, through a V2 recovery transaction. |
+| Manual recovery | Verified source freeze, durable file retry, and same-checkpoint resume in a fresh disposable V1 profile. Readback keeps failed or incomplete destinations on hold. | Recovery directly into an existing V2 profile and recovery from older live copies remain open. |
+| Direct snapshot and storage aliases | The checked shared V1 save retains its existing protections. Instrumented `setItem`, `removeItem` and `clear` refuse raw authority replacement. Re-encoding that decodes to the same state can still pass the existing safeguards. | Inventory the remaining aliases and sidecar writes. Browser named-property writes and already-open uninstrumented clients are outside this proof. |
+
+These tests use synthetic storage. The physical iPhone handoff and old-client
+qualification remain separate. Production certification remains unchanged.
+
+### Authoritative synthetic transitions
+
+| Writer route | Working transition | Remaining qualification |
+| --- | --- | --- |
+| Home and Settings import | Real JSON and single-package ZIP pickers restore four Task fields from a locally verified ancestor using a durable intent, atomic receipt and new Task generation. | Full-profile replacement, scheduling/status restoration and general legacy JSON/ZIP and image sidecars remain held. |
+| Settings Merge Backup | The same transition can restore one deliberately selected regular reward with verified prior lineage and calendar evidence. It retains the reward identity and keeps the Task in its existing state. | Multi-reward and metric history, downstream scoring repairs, and ambiguous V1 evidence remain held. |
+| Settings synthetic Task reset | The transition retires admitted Tasks and rewards, fences stale writes, and keeps pre-reset evidence. Detached rollback preserves the reset tombstones. | The existing full-profile Reset All stays held while Tasks are V2-owned. It still needs a verified cross-store generation transition. |
+| Verified-secondary, emergency, vault and rolling recovery, direct aliases | The previously verified holds remain in force. The shared transaction gives no write admission to older V1 recovery copies without V2 lineage. | Qualify trusted recovery lineage for those source formats, remaining direct and sidecar paths, and old clients. |
+| Detached V1 destination | A newly frozen synthetic source can sign an authorization for one restored profile. The loader verifies the original ledger and the local restore receipt, retains supported V1 Task field edits and independent data, and seals a new generation. The writer hold survives interruption, and detached rollback works again after readmission. | Reconcile later V1 scheduling, statuses, new or deleted Tasks and rewards. Qualify off-origin live backups, physical iPhone storage and uninstrumented handoff separately. |
+
+These are synthetic Task-generation transitions. Production certification
+remains unchanged.

@@ -272,6 +272,8 @@
     // completion a second time on EACH foreground Work/Task interaction.
     // Keep the original validation path for any future untrusted caller.
     const normalized = alreadyNormalized ? record : (normalizeRecord(record) || emptyRecord());
+    if ((core.filterIsolatedRollbackTaskJournal?.(normalized) ?? normalized) !== normalized)
+      throw new Error('Detached rollback forbids changing a permanently deleted Task or its earned history.');
     const expectedRaw = isEmpty(normalized) ? null : JSON.stringify(normalized);
     assertPreviewTaskGeneration();
     if (!recoveryWriteAllowed()) {
@@ -336,6 +338,7 @@
 
   function journalMutation(mutation = {}) {
     const current = assertJournalWritable();
+    core.assertIsolatedCollectionJournalWrite?.(mutation, current.record);
     let record = current.record;
     if (mutation.task?.id && typeof mutation.task === 'object'
       && !Array.isArray(mutation.task)) {
@@ -423,6 +426,7 @@
     if (ids.some(id => !((typeof id === 'string' && id) || Number.isFinite(id))) || typeof prepare !== 'function')
       throw new TypeError('Task update batch requires valid Task IDs and a synchronous prepare callback.');
     const current = assertJournalWritable();
+    core.assertIsolatedCollectionJournalWrite?.({taskUpdates:ids}, current.record);
     const snapshotRaw = storage.getItem(STORAGE_KEY);
     if (snapshotRaw !== null && (typeof snapshotRaw !== 'string' || !snapshotRaw))
       throw new Error('The TaskPoints snapshot could not be read.');
@@ -471,7 +475,8 @@
     const state = sourceState && typeof sourceState === 'object' && !Array.isArray(sourceState)
       ? { ...sourceState }
       : {};
-    const record = suppliedRecord || readRecord().record;
+    const pending = suppliedRecord || readRecord().record;
+    const record = core.filterIsolatedRollbackTaskJournal?.(pending) ?? pending;
 
     const tasks = Array.isArray(state.tasks) ? [...state.tasks] : [];
     const taskIndex = record.tasks.length >= 8 ? new Map() : null;
@@ -880,6 +885,8 @@
     try { global.TaskPointsPerf?.mark?.('taskMutation.compactionStart', { reason }); } catch (_) {}
     const snapshot = current.record;
     try {
+      if ((core.filterIsolatedRollbackTaskJournal?.(snapshot) ?? snapshot) !== snapshot)
+        throw new Error('Detached rollback retained a journal that conflicts with a permanent deletion.');
       // Freeze the *raw* V1 snapshot used to build this candidate. Reading
       // and decoding a large compressed snapshot can give a peer tab time
       // to commit a newer full-state save even if the Task journal is unchanged.
@@ -1182,8 +1189,8 @@
     };
   }
 
-  core.readPendingTaskMutations = () => {
-    const current = readRecord();
+  core.readPendingTaskMutations = (raw) => {
+    const current = readRecord(raw);
     // Keep the public absent-key convention. Internal write guards compare
     // the actual storage value so a newly appeared empty string is a conflict.
     if (current.raw === null) current.raw = '';
@@ -1200,6 +1207,7 @@
   core.schedulePendingTaskMutationCompaction = scheduleCompaction;
   core.flushPendingTaskMutations = () => persistPending('explicit-flush');
   core.clearPendingTaskMutations = () => {
+    if (core.isIsolatedTaskCollectionSelected?.()) throw new Error('The collection requires its pending Task journal evidence.');
     // Unlike a normal edit, a SAME-PAGE Reset All may finish a scheduled
     // cleanup after its verified local epoch rotation. Only that exact,
     // snapshot-absent reset may use the new token once. Other old tabs must
@@ -1301,5 +1309,7 @@
     };
   };
 
-  global.setTimeout?.(() => scheduleCompaction('startup-replay'), 0);
+  const detachedRollback = ['localhost','127.0.0.1'].includes(global.location?.hostname)
+    && global.location.pathname === '/experiments/v2-home-plus-one-day/full/rollback.html';
+  if (!detachedRollback) global.setTimeout?.(() => scheduleCompaction('startup-replay'), 0);
 })(typeof window !== 'undefined' ? window : globalThis);

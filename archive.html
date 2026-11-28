@@ -252,14 +252,18 @@ function escapeHtml(s){
 }
 
 let state = load();
+const verifiedArchiveTasks = new Map();
+const pendingArchiveTasks = new Set();
 
 function renderArchive(){
   state = load();
   const listEl = $('archiveList');
   const emptyEl = $('archiveEmpty');
   listEl.innerHTML = '';
+  verifiedArchiveTasks.clear();
 
-  const hidden = state.tasks.filter(t => t.hidden && !t.completedAtISO && !t.deletedAtISO);
+  const tasks = window.TaskPointsCore?.projectIsolatedDoneTasks?.(state.tasks) ?? state.tasks;
+  const hidden = tasks.filter(t => t.hidden && !t.completedAtISO && !t.deletedAtISO);
 
   if (!hidden.length){
     emptyEl.classList.remove('hidden');
@@ -323,11 +327,54 @@ function renderArchive(){
       </div>
     `;
 
+    if (window.TaskPointsCore?.getLegacyTaskCompletionHold?.(t.id)) {
+      div.dataset.taskId = t.id;
+      const selection = TaskPointsCore.isolatedTaskDoneView(t.id);
+      if (selection) verifiedArchiveTasks.set(t.id,selection);
+      for (const button of div.querySelectorAll('button')) {
+        button.disabled = !selection || pendingArchiveTasks.has(t.id)
+          || (button.classList.contains('btn-check') && !!selection.reward);
+        if (pendingArchiveTasks.has(t.id)) button.setAttribute('aria-busy','true');
+      }
+    }
     listEl.appendChild(div);
   });
 }
 
+function changeOwnedArchiveTask(id, operation) {
+  const core = window.TaskPointsCore;
+  if (!core?.getLegacyTaskCompletionHold?.(id)) return false;
+  if (pendingArchiveTasks.has(id)) return true;
+  const selection = verifiedArchiveTasks.get(id);
+  if (!selection || !core.usesIsolatedTaskDone(id)) {
+    alert('Verified Archive changes are paused.');
+    return true;
+  }
+  if (operation === 'archive-decline' && (selection.task.recurrence?.mode || 'none') === 'none'
+    && !confirm('Won’t do this task? It will be removed.')) return true;
+  pendingArchiveTasks.add(id);
+  renderArchive();
+  const completion = operation === 'archive-done';
+  const work = completion
+    ? core.runIsolatedTaskDone(id,'archive',null,selection.basis)
+    : core.runIsolatedTaskTrash({...selection.basis,operation,day:todayKey()});
+  work.catch(error=>alert(completion ? core.isolatedTaskDoneError(error) : error.message))
+    .finally(async()=>{
+      await core.refreshIsolatedTaskScoring();
+      pendingArchiveTasks.delete(id);
+      renderArchive();
+      replayArchiveTodayCleanup();
+    });
+  return true;
+}
+
+function replayArchiveTodayCleanup() {
+  TaskPointsCore.reconcileIsolatedTodayList()
+    .catch(error=>console.warn('Today list reconciliation paused:',error.message));
+}
+
 function wontDo(id){
+  if (changeOwnedArchiveTask(id,'archive-decline')) return;
   let st = load();
   const t = st.tasks.find(x => x.id === id);
   if (!t) return;
@@ -351,6 +398,7 @@ function wontDo(id){
 }
 
 function completeTask(id){
+  if (changeOwnedArchiveTask(id,'archive-done')) return;
   let st = load();
   const t = st.tasks.find(x => x.id === id);
   if (!t) return;
@@ -387,6 +435,7 @@ function completeTask(id){
 }
 
 function unarchiveTask(id){
+  if (changeOwnedArchiveTask(id,'archive-unarchive')) return;
   let st = load();
   const t = st.tasks.find(x => x.id === id);
   if (!t) return;
@@ -399,6 +448,10 @@ function unarchiveTask(id){
 }
 
 window.addEventListener('load', renderArchive);
+window.TaskPointsCore?.watchIsolatedTaskDone?.(ready=>{
+  renderArchive();
+  if (ready) replayArchiveTodayCleanup();
+});
 </script>
   <div id="bottomToolbarMount"></div>
 </body>

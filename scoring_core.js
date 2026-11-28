@@ -3,6 +3,559 @@
   const NOTES_STORAGE_KEY = "taskpoints_notes_v1";
   const NOTES_DIRTY_KEY = "taskpoints_notes_dirty_v1";
   const NOTES_AUTHORITY_KEY = "taskpoints_notes_authoritative_v1";
+  // The disposable Home experiment selects t1 on a dedicated loopback origin.
+  // Check the durable marker at the point of use, even in a Today tab that
+  // loaded before selection or has no V2 adapter. Invalid bytes still reserve t1.
+  const ISOLATED_TASK_FIXTURE_KEY = 'taskpoints_isolated_task_fixture_v1';
+  const ISOLATED_TASK_CREATE_PENDING_PREFIX = 'taskpoints_isolated_task_create_pending_v1:';
+  const ISOLATED_TASK_SCHEDULE_PENDING_KEY = 'taskpoints_isolated_task_schedule_pending_v1';
+  const ISOLATED_SCORING_KEY = 'taskpoints_isolated_task_scoring_read_v1';
+  const ISOLATED_ROLLBACK_TOMBSTONES_KEY = 'taskpoints_isolated_rollback_tombstones_v1';
+  const isolatedCompletionOrigin = ['localhost', '127.0.0.1'].includes(global.location?.hostname);
+  const isolatedCompletionPage = isolatedCompletionOrigin &&
+    global.location.pathname?.startsWith('/experiments/v2-home-plus-one-day/full/');
+  let isolatedCompletionSelected = false;
+  let isolatedCollectionSelected = false;
+  let isolatedCollectionDeletedRewards = new Set();
+
+  function rememberIsolatedCollection(raw) {
+    try {
+      const fixture=JSON.parse(raw);
+      if (fixture?.syntheticOnly===true && fixture.taskCollection===true) {
+        isolatedCollectionSelected=true;
+        for (const id of fixture.legacyCompletionDeletes || []) isolatedCollectionDeletedRewards.add(id);
+      }
+      return true;
+    } catch (_) { return false; }
+  }
+
+  function isIsolatedTaskCollectionSelected(failClosed = false) {
+    if (!isolatedCompletionOrigin) return false;
+    try {
+      if (rememberIsolatedCollection(global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY))) return isolatedCollectionSelected;
+    } catch (_) { /* Retain the document's original admission hold. */ }
+    return isolatedCollectionSelected || (failClosed && isolatedCompletionPage && global.__TASKPOINTS_OWNED_TASK_SYNTHETIC__===true);
+  }
+
+  function isDetachedCollectionRecoveryPending() {
+    if (!isolatedCompletionOrigin || global.location.pathname==='/experiments/v2-home-plus-one-day/full/rollback.html') return false;
+    try { return JSON.parse(global.localStorage.getItem('taskpoints_recovery_write_lock_v1'))?.isolatedCollectionRollback===true; }
+    catch (_) { return false; }
+  }
+
+  function isIsolatedCollectionRecoveryHeld() {
+    return isIsolatedTaskCollectionSelected(true) || isDetachedCollectionRecoveryPending();
+  }
+
+  // Raw aliases have no authority to replace the collection. The checked
+  // writer admits a snapshot synchronously after its scoring and shadow checks.
+  let checkedCollectionWrite = 0;
+  function installIsolatedCollectionStorageBoundary() {
+    const storage=global.localStorage;
+    const prototype=global.Storage?.prototype;
+    if (!prototype || !storage) return;
+    const setItem=prototype.setItem;
+    const removeItem=prototype.removeItem;
+    const clear=prototype.clear;
+    const refused=()=>new Error('Use a verified detached rollback before replacing this collection.');
+    prototype.setItem=function collectionCheckedSetItem(key,value) {
+      if (this===storage && String(key)===STORAGE_KEY && isDetachedCollectionRecoveryPending()) throw refused();
+      if (this===storage && String(key)===STORAGE_KEY && !checkedCollectionWrite && isIsolatedTaskCollectionSelected(true)) {
+        const previous=parseTaskPointsStorageJson(storage.getItem(STORAGE_KEY),null);
+        const candidate=parseTaskPointsStorageJson(String(value),null);
+        if (!Array.isArray(previous?.tasks) || !Array.isArray(previous.completions) || !deepEqual(previous,candidate)) throw refused();
+      }
+      return setItem.call(this,key,value);
+    };
+    prototype.removeItem=function collectionCheckedRemoveItem(key) {
+      if (this===storage && String(key)===STORAGE_KEY && isIsolatedCollectionRecoveryHeld()) throw refused();
+      return removeItem.call(this,key);
+    };
+    prototype.clear=function collectionCheckedClear() {
+      if (this===storage && isIsolatedCollectionRecoveryHeld()) throw refused();
+      return clear.call(this);
+    };
+  }
+  if (isolatedCompletionOrigin) {
+    try {
+      isolatedCompletionSelected = global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY) !== null;
+      isIsolatedTaskCollectionSelected();
+      installIsolatedCollectionStorageBoundary();
+    }
+    catch (_) { /* The point-of-use check reports an unreadable marker. */ }
+    global.addEventListener?.('storage', event => {
+      if (event.key === ISOLATED_TASK_FIXTURE_KEY && event.storageArea === global.localStorage) {
+        isolatedCompletionSelected = true;
+        rememberIsolatedCollection(event.oldValue);
+        rememberIsolatedCollection(event.newValue);
+      }
+    });
+  }
+
+  // Reserve only the experiment's UUID namespace, even before its receipt
+  // is loaded or when the ownership read fails.
+  function isIsolatedCreatedTaskId(id) {
+    return typeof id === 'string' && /^v2-task-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id);
+  }
+  function getLegacyTaskCompletionHold(taskId) {
+    if (taskId && isIsolatedTaskCollectionSelected())
+      return 'This Task is reserved for verified collection ownership. The legacy writer is paused.';
+    if (taskId && isolatedRollbackTombstones()?.held?.tasks.some(row=>row.id===taskId))
+      return 'This Task was preserved by rollback and still needs recovery review.';
+    if (!isolatedCompletionOrigin || (taskId !== 't1' && !isIsolatedCreatedTaskId(taskId))) return null;
+    try {
+      isolatedCompletionSelected ||= global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY) !== null;
+    } catch (_) {
+      if (!isolatedCompletionSelected && !isolatedCompletionPage) return null;
+      return 'Task completion is paused because its ownership could not be checked.';
+    }
+    return isolatedCompletionSelected || usesIsolatedTaskScoring()
+      ? 'This Task is owned by the V2 experiment. Use a verified V1 rollback before completing it.'
+      : null;
+  }
+
+  function isIsolatedCollectionTaskLink(row) {
+    return Boolean(row?.taskId) && !(['habit','vice'].includes(row.source) && String(row.taskId).startsWith('habit:'))
+      && !(row.source==='flex' && row.flexId && String(row.taskId).startsWith('flex:'));
+  }
+
+  function getLegacyLinkedCompletionHold(row) {
+    if (isIsolatedTaskCollectionSelected() && !isIsolatedCollectionTaskLink(row)) return null;
+    if (row && isolatedRollbackTombstones()?.held?.completions.some(entry=>entry.id===row.id))
+      return 'This completion was preserved by rollback and still needs recovery review.';
+    return getLegacyTaskCompletionHold(row?.taskId);
+  }
+
+  function protectsIsolatedLegacyReward(row) {
+    return (isIsolatedTaskCollectionSelected() && isIsolatedCollectionTaskLink(row))
+      || Boolean(isolatedRollbackTombstones()?.held?.completions.some(entry=>entry.id===row?.id));
+  }
+
+  function isolatedTaskCollectionShadow(state, reservedIds = []) {
+    if (!Array.isArray(state?.tasks) || !Array.isArray(state.completions)) throw new Error('The collection shadow is unreadable.');
+    const ids=new Set(state.tasks.map(row=>row?.id));
+    const reserved=new Set(reservedIds);
+    return {
+      tasks:state.tasks.map(row=>{
+        const normalized=normalizeTask(row);
+        if (!normalized || typeof normalized.id!=='string' || !normalized.id) throw new Error('The Task identity is unreadable.');
+        return {skills:[],skipDates:[],...normalized,
+          ...(row.status && !['active','done','hidden','wontdo','trashed'].includes(row.status) ? {status:row.status} : {})};
+      }),
+      completions:state.completions.filter(row=>ids.has(row?.taskId) || isIsolatedCollectionTaskLink(row)
+        || reserved.has(row?.id) || String(row?.id).startsWith('isolated-done:'))
+        .map(normalizeCompletion)
+    };
+  }
+
+  function assertIsolatedCollectionJournalWrite(mutation, pending) {
+    if (isDetachedCollectionRecoveryPending()) throw new Error('Finish verified collection recovery before changing the Task journal.');
+    if (!isIsolatedTaskCollectionSelected()) return;
+    if (mutation.task || mutation.taskUpdates?.length) throw new Error('Task journal writes require verified V2 collection ownership.');
+    const upserts=[...(mutation.completionUpserts || []),mutation.completionUpsert].filter(Boolean);
+    if (!upserts.length && !mutation.completionDeleteId) return;
+    const canonical=parseTaskPointsStorageJson(localStorage.getItem(STORAGE_KEY),null);
+    const shadow=isolatedTaskCollectionShadow(canonical,[...isolatedCollectionDeletedRewards,...pending.completionDeletes]);
+    const protectedIds=new Set([...isolatedCollectionDeletedRewards,...pending.completionDeletes,
+      ...shadow.completions.map(row=>row.id),...pending.completionUpserts.filter(isIsolatedCollectionTaskLink).map(row=>row.id)]);
+    const reserved=id=>protectedIds.has(id) || String(id).startsWith('isolated-done:');
+    if (upserts.some(row=>isIsolatedCollectionTaskLink(row) || reserved(row.id)) || reserved(mutation.completionDeleteId))
+      throw new Error('Task completion journal writes require verified V2 collection ownership.');
+  }
+  let isolatedScoringSelected = false;
+  let verifiedCompletionRead = null;
+  let pendingCompletionRead = null;
+  let verifiedScoringWrite = null;
+
+  function usesIsolatedTaskScoring() {
+    if (!isolatedCompletionOrigin) return false;
+    try {
+      isolatedScoringSelected ||= global.localStorage.getItem(ISOLATED_SCORING_KEY) !== null;
+      const raw = global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY);
+      if (raw !== null) isolatedScoringSelected ||= JSON.parse(raw)?.completionRead === true;
+    } catch (_) {
+      return isolatedScoringSelected || isolatedCompletionSelected || isolatedCompletionPage;
+    }
+    return isolatedScoringSelected;
+  }
+
+  async function refreshIsolatedTaskScoring(keepPrevious = false) {
+    if (!usesIsolatedTaskScoring()) return true;
+    pendingCompletionRead ||= Promise.resolve().then(async () => {
+      if (!keepPrevious) verifiedCompletionRead = null;
+      try {
+        verifiedCompletionRead = await global.TaskPointsStateRuntimeV2.readIsolatedTaskScoring();
+        return true;
+      } catch (error) {
+        verifiedCompletionRead = null;
+        console.warn('Verified Task scoring is paused:', error.message);
+        return false;
+      }
+    }).finally(() => { pendingCompletionRead = null; });
+    return pendingCompletionRead;
+  }
+
+  function isolatedTaskDonePage() {
+    return isolatedCompletionPage && global.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true
+      && /^\/experiments\/v2-home-plus-one-day\/full\/(index|today|game|matchups|week|trash|archive|log)\.html$/.test(global.location.pathname);
+  }
+
+  function usesIsolatedTaskDone(taskId) {
+    if (!isolatedTaskDonePage()) return false;
+    try {
+      const fixture = JSON.parse(global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY));
+      return Boolean(fixture?.syntheticOnly === true && fixture.phase === 'sealed'
+        && (fixture.taskCollection===true ? taskId===undefined || verifiedCompletionRead?.ownedIds.includes(taskId)
+          : ((taskId ?? 't1') === 't1' || isIsolatedCreatedTaskId(taskId))
+            && (fixture.homeTaskId === (taskId ?? 't1') || fixture.taskCreate === true))
+        && fixture.completionRead === true && fixture.completionWrite === true && fixture.completionControls === true
+        && global.localStorage.getItem(ISOLATED_SCORING_KEY) === fixture.id);
+    } catch (_) { return false; }
+  }
+
+  function usesIsolatedWeekTaskActions(taskId) {
+    if (!usesIsolatedTaskDone(taskId) || !global.location.pathname.endsWith('/week.html')) return false;
+    try { return JSON.parse(global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY)).weekControls === true; }
+    catch (_) { return false; }
+  }
+
+  let isolatedStandaloneMetricSelected = false;
+  function usesIsolatedStandaloneMetrics() {
+    if (!isolatedCompletionOrigin || !/\/(index|settings)\.html$/.test(global.location.pathname)) return false;
+    try {
+      const fixture = JSON.parse(global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY));
+      isolatedStandaloneMetricSelected ||= fixture?.completionEvidence === true
+        || (fixture === null && usesIsolatedTaskScoring());
+    } catch (_) { return isolatedStandaloneMetricSelected || usesIsolatedTaskScoring(); }
+    return isolatedStandaloneMetricSelected;
+  }
+
+  function runIsolatedLegacyMetricWrite(selection, operation, liveRows) {
+    if (selection.owned) throw new Error('owned_metric_selection_changed');
+    return global.TaskPointsStateRuntimeV2.inspectIsolatedStandaloneMetric(selection.request,
+      (verified,proof) => withVerifiedCompletionRead(proof,() => operation(verified)),selection,liveRows);
+  }
+
+  async function commitIsolatedMetricCorrection(selection, values, attempt) {
+    const runtime=global.TaskPointsStateRuntimeV2;
+    try {
+      attempt.intent ??= await runtime.prepareIsolatedStandaloneCorrection(selection,values,attempt.actionId);
+      try { return await runtime.commitIsolatedTaskHistory(attempt.intent); }
+      catch (error) {
+        const receipt=await runtime.readIsolatedTaskScoring(proof=>proof.findHistoryReceipt(attempt.intent)).catch(()=>null);
+        if (!receipt) throw error;
+        return {confirmedDurable:true,replayed:true,receipt};
+      }
+    } catch (error) {
+      if (error.message==='owned_metric_source_changed') delete attempt.intent;
+      throw error;
+    }
+  }
+
+  function isolatedLogCompletionBasis(completionId) {
+    if (!global.location?.pathname.endsWith('/log.html') || !usesIsolatedTaskDone() || !verifiedCompletionRead) return null;
+    try {
+      const fixture = JSON.parse(global.localStorage.getItem(ISOLATED_TASK_FIXTURE_KEY));
+      if (fixture.logControls !== true) return null;
+      verifiedLegacyCompletions(verifiedCompletionRead);
+      const basis = verifiedCompletionRead.historyBasis(completionId);
+      return basis && fixture.completionEvidence === true
+        ? {...basis, zone:Intl.DateTimeFormat().resolvedOptions().timeZone} : basis;
+    } catch (_) { return null; }
+  }
+
+  let isolatedDonePending = false;
+  let checkIsolatedDoneView;
+  function watchIsolatedTaskDone(onChange) {
+    if (!isolatedTaskDonePage() || checkIsolatedDoneView) return;
+    let checking = false, started = false, shown;
+    checkIsolatedDoneView = async () => {
+      if (checking || isolatedDonePending) return;
+      checking = true;
+      try {
+        const ready = usesIsolatedTaskDone() && await refreshIsolatedTaskScoring(true);
+        const proof = ready && verifiedCompletionRead;
+        const identity = proof
+          ? JSON.stringify([proof.generation, proof.revision, todayKey(),
+            ...(proof.scoringSettings ? [Intl.DateTimeFormat().resolvedOptions().timeZone, proof.scoringSettings()] : [])])
+          : null;
+        if (!isolatedDonePending && identity !== shown) {
+          await onChange(Boolean(proof));
+          shown = identity;
+        }
+      } catch (error) {
+        console.warn('Verified completion refresh paused:', error.message);
+      } finally { checking = false; }
+    };
+    // Read the receipt-backed snapshot even when another tab closed just
+    // after commit and never had a chance to notify its peers.
+    const start = () => {
+      if (!started && usesIsolatedTaskDone()) {
+        started = true;
+        global.setInterval(checkIsolatedDoneView, 750);
+      }
+      if (started) checkIsolatedDoneView();
+    };
+    global.addEventListener('storage',event=>{
+      if (event.key === ISOLATED_TASK_FIXTURE_KEY || event.key === ISOLATED_SCORING_KEY) start();
+    });
+    global.addEventListener('pageshow',start);
+    global.document.addEventListener('visibilitychange',start);
+    start();
+  }
+
+  function isolatedTaskDoneView(taskId) {
+    if (!usesIsolatedTaskDone(taskId) || !verifiedCompletionRead) return null;
+    try {
+      verifiedLegacyCompletions(verifiedCompletionRead);
+      const task = verifiedCompletionRead.tasks.find(row=>row.id === taskId);
+      return task ? structuredClone({task,basis:{taskId,generation:verifiedCompletionRead.generation,
+        expectedRevision:verifiedCompletionRead.taskRevision(taskId)},
+        reward:verifiedCompletionRead.completions.find(row=>row.taskId===taskId && dateKey(row.completedAtISO)===todayKey())}) : null;
+    } catch (_) { return null; }
+  }
+
+  function projectIsolatedDoneTasks(tasks, {keepSeedWhenUnavailable = false} = {}) {
+    if (!usesIsolatedTaskDone()) return tasks;
+    const owned = new Map();
+    let verified = false;
+    if (verifiedCompletionRead) {
+      try {
+        verifiedLegacyCompletions(verifiedCompletionRead);
+        for (const task of verifiedCompletionRead.tasks) owned.set(task.id,structuredClone(task));
+        verified = true;
+      } catch (_) { /* Withhold unverified owned rows. */ }
+    }
+    const existing = new Set(tasks.map(task=>task.id));
+    const result = [...owned.values()].filter(task=>!existing.has(task.id));
+    for (const task of tasks) {
+      if (owned.has(task.id)) result.push(owned.get(task.id));
+      else if (!getLegacyTaskCompletionHold(task.id) || (verified && verifiedCompletionRead.heldTasks?.some(held=>held.id===task.id))
+        || (keepSeedWhenUnavailable && !verified && task.id==='t1')) result.push(task);
+    }
+    return result;
+  }
+
+  function isolatedTaskTrashDeletion(taskId) {
+    if (!usesIsolatedTaskDone(taskId) || !verifiedCompletionRead) return null;
+    try {
+      verifiedLegacyCompletions(verifiedCompletionRead);
+      return structuredClone(verifiedCompletionRead.deletions.find(row=>row.taskId===taskId)) ?? null;
+    } catch (_) { return null; }
+  }
+
+  async function runIsolatedTaskTrash(intent) {
+    if (!usesIsolatedTaskDone(intent.taskId)) throw new Error('Verified Trash is paused.');
+    const runtime = global.TaskPointsStateRuntimeV2;
+    try { return await runtime.commitIsolatedOwnedTaskTrash(intent); }
+    catch (error) {
+      // A lost response may conceal a committed action. Only recover its
+      // exact receipt, without retrying a write that failed admission.
+      const receipt = await runtime.readIsolatedTaskScoring(proof=>proof.findTrashReceipt(intent)).catch(()=>null);
+      if (!receipt || !usesIsolatedTaskDone(intent.taskId)) throw error;
+      return {confirmedDurable:true,replayed:true,receipt};
+    }
+  }
+
+  async function runIsolatedTaskDone(taskId, source, onVerified, renderedBasis) {
+    if (!usesIsolatedTaskDone(taskId)) throw new Error('Verified Task completion is paused.');
+    if (isolatedDonePending) return;
+    isolatedDonePending = true;
+    try {
+      const runtime = global.TaskPointsStateRuntimeV2;
+      const intent = await runtime.prepareIsolatedTaskCompletion(source,taskId,renderedBasis);
+      if (!usesIsolatedTaskDone(taskId)) throw new Error('Verified Task completion is paused.');
+      let result;
+      try {
+        result = await runtime.commitIsolatedTaskCompletion(intent);
+      } catch (error) {
+        if (error.message === 'owned_completion_already_awarded') return;
+        // Recover a lost response by reading the exact receipt. This check
+        // never submits another write or restarts the action on a new day.
+        const receipt = await runtime.readIsolatedTaskScoring(proof=>proof.findReceipt(intent)).catch(()=>null);
+        if (!receipt) throw error;
+        result = {confirmedDurable:true,replayed:true,receipt};
+      }
+      if (!result?.confirmedDurable || !result.receipt?.completion)
+        throw new Error('The saved completion could not be verified. Check the Task and retry if needed.');
+      if (!result.replayed) {
+        try { onVerified?.(result.receipt); }
+        catch (error) { console.warn('Verified completion feedback paused:', error.message); }
+      }
+    } finally {
+      isolatedDonePending = false;
+      checkIsolatedDoneView?.();
+    }
+  }
+
+  function isolatedTaskDoneError(error) {
+    const messages = {
+      isolated_completion_time_zone_or_selection_changed:'Verified completion is paused because the time zone or Task ownership changed.',
+      owned_completion_requires_metric_scoring:'This Task uses a separate scoring rule and cannot be completed in the V2 experiment.',
+      owned_metric_source_changed:'The scoring settings or source records changed. Check them and tap Done again.',
+      owned_task_stale_edit:'The Task changed before it could be completed. Review it and tap Done again.',
+      owned_completion_day_changed:'The day changed before completion. Check the Task before trying again.'
+    };
+    return messages[error.message] || 'Task completion could not be confirmed. Check the Task before retrying.';
+  }
+
+  const TODAY_LIST_KEY = 'taskpoints_today_view_v1';
+  const TODAY_DAY_MAPS = ['tasksByDay','notesByDay','selectedHabitIdsByDay','orderByDay'];
+
+  function parseIsolatedTodayList(raw) {
+    if (raw === null) return {};
+    const value = JSON.parse(raw);
+    const isObject = data => data && typeof data === 'object' && !Array.isArray(data);
+    const isDay = day => /^\d{4}-\d{2}-\d{2}$/.test(day);
+    if (!isObject(value) || (Object.hasOwn(value,'version') && value.version !== 1))
+      throw new Error('Today list format is unreadable.');
+    for (const key of TODAY_DAY_MAPS) {
+      if (!Object.hasOwn(value,key)) continue;
+      if (!isObject(value[key]) || Object.entries(value[key]).some(([day,rows])=>!isDay(day)||!Array.isArray(rows)))
+        throw new Error('Today list day map is unreadable.');
+    }
+    if (Object.hasOwn(value,'dayKey') && (!isDay(value.dayKey)
+      || ['taskIds','order'].some(key=>Object.hasOwn(value,key)&&!Array.isArray(value[key]))))
+      throw new Error('Legacy Today list is unreadable.');
+    return value;
+  }
+
+  function removeIsolatedTodayTask(list, day, taskId) {
+    const orderKey = 'task:'+taskId;
+    if (list.tasksByDay?.[day]) list.tasksByDay[day] = list.tasksByDay[day].filter(id=>id!==taskId);
+    if (list.orderByDay?.[day]) list.orderByDay[day] = list.orderByDay[day].filter(key=>key!==orderKey);
+    if (day === list.dayKey) {
+      if (list.taskIds) list.taskIds = list.taskIds.filter(id=>id!==taskId);
+      if (list.order) list.order = list.order.filter(key=>key!==orderKey);
+    }
+  }
+
+  function reconcileIsolatedTodayTaskMembership(list, tasks, permanentIds = [], statusReceipts = [], weekChanges = []) {
+    for (const task of tasks) if (task.status === 'trashed') removeIsolatedTodayTask(list,todayKey(),task.id);
+    if (permanentIds.length) {
+      const days = new Set([...Object.keys(list.tasksByDay || {}),...Object.keys(list.orderByDay || {}),list.dayKey]);
+      for (const id of permanentIds) for (const day of days) removeIsolatedTodayTask(list,day,id);
+    }
+    if (!statusReceipts.length && !weekChanges.length) return;
+    const latest = new Map(tasks.map(task=>[task.id,task]));
+    const statusChanges = statusReceipts.filter(({intent})=>intent.operation !== 'archive-unarchive')
+      .map(({taskId,intent})=>({taskId,day:intent.selectedDay ?? intent.day}));
+    for (const {taskId,day} of [...statusChanges,...weekChanges]) {
+      const task = latest.get(taskId);
+      // Remove only the affected day's active membership. A later
+      // unarchive or schedule can make this Task due again on that day.
+      if (task && normalizeTask(task).status === 'active' && !task.hidden && !task.deletedAtISO && !task.deletedAt
+        && !task.completedAtISO && task.dueDateISO === day) continue;
+      removeIsolatedTodayTask(list,day,taskId);
+    }
+  }
+
+  async function reconcileIsolatedTodayList(edit, expectedRaw) {
+    if (!usesIsolatedTaskScoring()) throw new Error('Isolated Today reconciliation is inactive.');
+    const locks = global.navigator?.locks;
+    if (typeof locks?.request !== 'function') throw new Error('Today list lock is unavailable.');
+    return locks.request(TODAY_LIST_KEY, () => global.TaskPointsStateRuntimeV2.readIsolatedTaskScoring(proof => {
+      // Start a new verification inside the lock. The already verified reward
+      // rows are the replay source, so this needs no separately written cursor.
+      const raw = localStorage.getItem(TODAY_LIST_KEY);
+      if (expectedRaw !== undefined && expectedRaw !== raw) throw new Error('Today list changed while editing.');
+      const list = parseIsolatedTodayList(raw);
+      const original = JSON.stringify(list);
+      if (edit) edit(list, structuredClone(proof.completions));
+
+      for (const completion of proof.completions) {
+        for (const day of proof.completionMembershipDays(completion)) removeIsolatedTodayTask(list,day,completion.taskId);
+      }
+      reconcileIsolatedTodayTaskMembership(list,proof.tasks,proof.permanentIds,proof.statusReceipts,
+        [...(proof.weekMembershipChanges || []),...(proof.historyMembershipChanges || [])]);
+
+      const candidate = JSON.stringify(list);
+      parseIsolatedTodayList(candidate);
+      verifiedLegacyCompletions(proof);
+      if (localStorage.getItem(TODAY_LIST_KEY) !== raw) throw new Error('Today list changed before writing.');
+      if (candidate === original) return false;
+      localStorage.setItem(TODAY_LIST_KEY,candidate);
+      if (localStorage.getItem(TODAY_LIST_KEY) !== candidate)
+        throw new Error('Today list write could not be verified.');
+      return true;
+    }));
+  }
+
+  function readScoringCompletions(completions) {
+    if (!usesIsolatedTaskScoring()) return completions;
+    if (!verifiedCompletionRead) throw new Error('Verified Task completions are unavailable.');
+    const legacy = verifiedLegacyCompletions(verifiedCompletionRead);
+    return [...legacy, ...verifiedCompletionRead.completions.map(row => structuredClone(row))];
+  }
+
+  function verifiedLegacyCompletions(proof) {
+    const legacy = proof.assertCurrent().filter(row => !proof.ownedIds.includes(row?.taskId));
+    const ids = new Set(proof.completions.map(row => row.id));
+    if (legacy.some(row => ids.has(row?.id))) throw new Error('Conflicting completion identity.');
+    return legacy;
+  }
+
+  function isolatedLiveScoringState(state) {
+    if (!verifiedCompletionRead?.scoringSettings || !usesIsolatedTaskScoring()) return state;
+    return {...state,scoringSettings:verifiedCompletionRead.scoringSettings()};
+  }
+
+  function isolatedScoringSource(read) {
+    return JSON.stringify([read.assertCurrent(),read.scoringSettings?.(),
+      read.scoringSettings ? Intl.DateTimeFormat().resolvedOptions().timeZone : null]);
+  }
+
+  function withVerifiedCompletionRead(read,operation) {
+    const previousWrite=verifiedScoringWrite;
+    verifiedScoringWrite={read,source:isolatedScoringSource(read)};
+    verifiedCompletionRead=read;
+    try { return operation(); }
+    finally { verifiedScoringWrite=previousWrite; }
+  }
+
+  async function runWithVerifiedTaskScoring(operation) {
+    verifiedCompletionRead = null;
+    let ran = false;
+    try {
+      return await global.TaskPointsStateRuntimeV2.readIsolatedTaskScoring(read => {
+        return withVerifiedCompletionRead(read,()=>{
+          ran = true;
+          return operation();
+        });
+      });
+    } catch (error) {
+      if (ran) throw error;
+      console.warn('Verified Task scoring is paused:', error.message);
+    }
+  }
+
+  function verifiedScoringSaveOptions() {
+    // Deferred toolbar saves outlive the verified scoring action. Persist
+    // inside the action so the last source check still applies.
+    return verifiedScoringWrite ? {immediateWrite:true} : {};
+  }
+
+  function assertIsolatedScoringWrite(raw) {
+    if (!usesIsolatedTaskScoring()) return;
+    const previousRaw = localStorage.getItem(STORAGE_KEY);
+    if (!previousRaw) throw new Error('Cannot verify the legacy scoring snapshot.');
+    const previous = parseTaskPointsStorageJson(previousRaw);
+    const candidate = parseTaskPointsStorageJson(raw);
+    const ownedRows = state => state.completions?.filter(row=>row?.taskId==='t1' || isIsolatedCreatedTaskId(row?.taskId));
+    const createdTasks = state => state.tasks?.filter(row=>isIsolatedCreatedTaskId(row?.id));
+    if (!isIsolatedTaskCollectionSelected() && (JSON.stringify(ownedRows(previous)) !== JSON.stringify(ownedRows(candidate))
+      || JSON.stringify(createdTasks(previous)) !== JSON.stringify(createdTasks(candidate))))
+      throw new Error('Legacy scoring cannot replace the selected Task completion history.');
+    const fields = ['matchups','gameHistory','goldLedger','goldEconomy'];
+    if (fields.every(key=>JSON.stringify(previous[key])===JSON.stringify(candidate[key]))) return;
+    if (!verifiedScoringWrite || verifiedScoringWrite.read !== verifiedCompletionRead)
+      throw new Error('Scoring write requires freshly verified Task completions.');
+    // Also check the legacy evidence at the point of storage replacement.
+    readScoringCompletions(candidate.completions);
+    if (isolatedScoringSource(verifiedCompletionRead) !== verifiedScoringWrite.source)
+      throw new Error('Completion source changed before the scoring write.');
+  }
+
   const PENDING_HABIT_DELTAS_KEY = "taskpoints_pending_habit_deltas_v1";
   const PROJECTS_STORAGE_KEY = "tp_projects_v1";
   const IMAGE_DB_NAME = "taskpoints";
@@ -151,7 +704,8 @@
       global.document.addEventListener(eventName, () => { lastPlayerJournalInteractionAt = Date.now(); }, true);
     }
   }
-  if (global.setTimeout) global.setTimeout(() => {
+  if (global.setTimeout && !(isolatedCompletionPage && global.location.pathname.endsWith('/full/rollback.html')))
+    global.setTimeout(() => {
     try { if (readPendingPlayerEdits().length) schedulePlayerJournalFlush(); } catch (_) {}
   }, 1000);
   const pendingHabitJournalCompactions = new Map();
@@ -816,6 +1370,75 @@ function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
     throw new Error(message);
   }
 
+  let observedRollbackTombstones = null;
+  function isolatedRollbackTombstones() {
+    if (!isolatedCompletionPage || global.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ !== true) return null;
+    const raw = localStorage.getItem(ISOLATED_ROLLBACK_TOMBSTONES_KEY);
+    if (raw === null && observedRollbackTombstones === null) return null;
+    if (observedRollbackTombstones !== null && observedRollbackTombstones !== raw)
+      throw new Error('Detached rollback tombstones changed.');
+    const data = JSON.parse(raw);
+    const deleted = data?.deletedCompletionIds ?? [];
+    const held = data?.held;
+    const distinctRows = rows => Array.isArray(rows) && rows.every(row=>typeof row?.id==='string' && row.id)
+      && new Set(rows.map(row=>row.id)).size===rows.length;
+    if (!Array.isArray(data?.ids) || !Array.isArray(deleted) || !(data.ids.length || deleted.length || held)
+      || new Set(data.ids).size !== data.ids.length || new Set(deleted).size !== deleted.length
+      || deleted.some(id=>typeof id!=='string'||!id)
+      || (data.taskCollection!==undefined && data.taskCollection!==true)
+      || data.ids.some(id=>data.taskCollection ? (typeof id!=='string' || !/^[A-Za-z0-9_-]{1,72}$/.test(id))
+        : id!=='t1' && !isIsolatedCreatedTaskId(id)) || !Array.isArray(data.rewards)
+      || data.rewards.some(row=>typeof row?.id!=='string' || !data.ids.includes(row.taskId) || deleted.includes(row.id))
+      || new Set(data.rewards.map(row=>row.id)).size!==data.rewards.length
+      || (held !== undefined && (data.taskCollection!==true || !distinctRows(held?.tasks) || !distinctRows(held?.completions)
+        || held.tasks.some(row=>data.ids.includes(row.id))
+        || held.completions.some(row=>data.ids.includes(row.taskId) || deleted.includes(row.id)))))
+      throw new Error('Detached rollback tombstones are unreadable.');
+    observedRollbackTombstones = raw;
+    return data;
+  }
+
+  function protectIsolatedRollbackState(state, guard = isolatedRollbackTombstones()) {
+    if (!guard) return state;
+    const tasks = Array.isArray(state?.tasks) ? state.tasks : [];
+    const completions = Array.isArray(state?.completions) ? state.completions : [];
+    const deleted = new Set(guard.deletedCompletionIds || []);
+    const linked = completions.filter(row=>guard.ids.includes(row?.taskId));
+    const byId = new Map(guard.rewards.map(row=>[row.id,row]));
+    const held=guard.held;
+    const holdsMatch=(actual,expected,normalize)=>{
+      const ids=new Set(expected.map(row=>row.id));
+      const matching=actual.filter(row=>ids.has(row?.id));
+      return matching.length===ids.size && new Set(matching.map(row=>row.id)).size===ids.size
+        && expected.every(row=>deepEqual(normalize(row),normalize(matching.find(entry=>entry.id===row.id))));
+    };
+    if (held && (!holdsMatch(tasks,held.tasks,normalizeTask) || !holdsMatch(completions,held.completions,normalizeCompletion)))
+      throw new Error('Detached rollback preserves unresolved Task and completion evidence.');
+    if (completions.some(row=>byId.has(row?.id) && byId.get(row.id).taskId!==row.taskId))
+      throw new Error('Detached rollback completion identity conflict.');
+    if (tasks.every(row=>!guard.ids.includes(row?.id)) && !completions.some(row=>deleted.has(row?.id))
+      && linked.length===byId.size && new Set(linked.map(row=>row.id)).size===byId.size
+      && linked.every(row=>deepEqual(row,byId.get(row.id)))) return state;
+    return {...state,tasks:tasks.filter(row=>!guard.ids.includes(row?.id)),
+      completions:[...completions.filter(row=>!guard.ids.includes(row?.taskId) && !deleted.has(row?.id)),...guard.rewards]};
+  }
+
+  function filterIsolatedRollbackTaskJournal(record) {
+    const guard = isolatedRollbackTombstones();
+    if (!guard) return record;
+    const heldTasks=new Set((guard.held?.tasks || []).map(row=>row.id));
+    const heldRewards=new Set((guard.held?.completions || []).map(row=>row.id));
+    const tasks = record.tasks.filter(row=>!guard.ids.includes(row.id) && !heldTasks.has(row.id));
+    const completionUpserts = record.completionUpserts.filter(row=>!guard.ids.includes(row.taskId)
+      && !guard.deletedCompletionIds?.includes(row.id)
+      && !heldTasks.has(row.taskId) && !heldRewards.has(row.id)
+      && !guard.rewards.some(reward=>reward.id===row.id));
+    const completionDeletes = record.completionDeletes.filter(id=>!heldRewards.has(id) && !guard.rewards.some(reward=>reward.id===id));
+    return tasks.length===record.tasks.length && completionUpserts.length===record.completionUpserts.length
+      && completionDeletes.length===record.completionDeletes.length ? record
+      : {...record,tasks,completionUpserts,completionDeletes};
+  }
+
   function readTaskPointsStoredState(storageKey = STORAGE_KEY, fallback = null) {
     const key = storageKey || STORAGE_KEY;
     const raw = localStorage.getItem(key);
@@ -826,7 +1449,7 @@ function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
       applyPendingHabitDeltas(state);
       applyPendingPlayerEdits(state);
     }
-    return state;
+    return key === STORAGE_KEY ? protectIsolatedRollbackState(state) : state;
   }
 
   function getNotesCacheAuthorityState() {
@@ -882,8 +1505,41 @@ function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
     const storageKey = options.storageKey || STORAGE_KEY;
     const protectedState = preserveAuthoritativeNotesBeforeSave(nextState, storageKey, options);
     const raw = serializeTaskPointsStoredState(protectedState, options);
-    safeReplaceTaskPointsStorage(storageKey, raw);
+    replaceCheckedTaskPointsStorage(storageKey, raw);
     return raw;
+  }
+
+  function replaceCheckedTaskPointsStorage(storageKey, serializedCandidate) {
+    let collection=false;
+    if (storageKey === STORAGE_KEY) {
+      const guard = isolatedRollbackTombstones();
+      if (guard) {
+        const state = parseTaskPointsStorageJson(serializedCandidate,null);
+        if (!Array.isArray(state?.tasks) || !Array.isArray(state?.completions)
+          || protectIsolatedRollbackState(state,guard) !== state)
+          throw new Error('Detached rollback forbids restoring permanently deleted Tasks or changing their earned history.');
+      }
+      assertIsolatedScoringWrite(serializedCandidate);
+      collection=isIsolatedTaskCollectionSelected(true);
+    }
+    if (!collection) return safeReplaceTaskPointsStorage(storageKey, serializedCandidate);
+    assertIsolatedCollectionSnapshotWrite(serializedCandidate);
+    checkedCollectionWrite++;
+    try { safeReplaceTaskPointsStorage(storageKey, serializedCandidate); }
+    finally { checkedCollectionWrite--; }
+  }
+
+  function assertIsolatedCollectionSnapshotWrite(serializedCandidate) {
+    const pending=global.TaskPointsCore.readPendingTaskMutations();
+    if (pending.malformed) throw new Error('The collection Task journal is unreadable.');
+    const readShadow=raw=>{
+      const state=parseTaskPointsStorageJson(raw,null);
+      if (!Array.isArray(state?.tasks) || !Array.isArray(state.completions)) throw new Error('The collection shadow is unreadable.');
+      return isolatedTaskCollectionShadow(global.TaskPointsCore.applyPendingTaskMutations(state,pending.record),
+        [...isolatedCollectionDeletedRewards,...pending.record.completionDeletes]);
+    };
+    if (!deepEqual(readShadow(localStorage.getItem(STORAGE_KEY)),readShadow(serializedCandidate)))
+      throw new Error('The legacy save cannot change the reserved Task collection.');
   }
 
   function safeReplaceTaskPointsStorage(storageKey, serializedCandidate) {
@@ -912,7 +1568,7 @@ function buildOptimizedTaskPointsStorageRaw(state, prepared = null) {
       const plan = buildOptimizedTaskPointsStorageRaw(pending.state);
       if (localStorage.getItem(storageKey) !== pending.rawSnapshot) return false;
       if (storageKey === STORAGE_KEY && readPendingHabitDeltas().length) return false;
-      safeReplaceTaskPointsStorage(storageKey, plan.chosenRaw);
+      replaceCheckedTaskPointsStorage(storageKey, plan.chosenRaw);
       if (global?.TP_DEBUG_PERF) console.debug('[TP_DEBUG_PERF] idle-recompress', { ms: Date.now() - started, encoding: plan.chosenEncoding, storageKey });
       return true;
     } catch (error) {
@@ -6325,7 +6981,7 @@ workHistory: Array.isArray(src.workHistory) ? src.workHistory : [],
 
     endLoadParse?.({ preloaded: !!options.preloadedState });
     const endLoadNormalize = global.TaskPointsPerf?.span?.('storage.load.normalize');
-    let state = normalizeState(parsed);
+    let state = normalizeState(protectIsolatedRollbackState(parsed));
     endLoadNormalize?.();
     // This is the authoritative app-wide recovery point. Every page using the
     // shared loader sees pending taps before scoring, rendering, or saves.
@@ -6922,6 +7578,11 @@ function fastEnsureStateShape(s) {
   // Internal-only short-lived reuse. Never trust a prior parse unless its exact
   // localStorage bytes are still current when sticky-field safeguards run.
   const mergedSaveSourceByState = new WeakMap();
+  const INBOX_JOURNAL_KEY = 'taskpoints_pending_inbox_state_v1';
+  const INBOX_SNAPSHOT_FIELDS = ['inboxMessages', 'inboxProcessedEventIds',
+    'inboxStartedDateKey', 'goldTheftTop50InboxStartedDateKey'];
+  const INBOX_SNAPSHOT_SAVE_PATHS = new Set(['inbox-auto-populate', 'season-series-upset-inbox',
+    'gold-theft-top50-inbox', 'inbox-journal-compaction']);
 
   function mergeState(nextState, options = {}) {
     const storageKey = options.storageKey || STORAGE_KEY;
@@ -6938,6 +7599,10 @@ function fastEnsureStateShape(s) {
         // storage payload may be reused, and the bytes are checked at save time.
         if (options.captureSaveSource === true) {
           sourceForStickyCheck = { raw: raw ?? null, storageKey, parsed: existing };
+          if (storageKey === STORAGE_KEY && INBOX_SNAPSHOT_SAVE_PATHS.has(options.savePath)) {
+            sourceForStickyCheck.inboxFields = INBOX_SNAPSHOT_FIELDS.filter(key =>
+              Object.prototype.hasOwnProperty.call(nextState || {}, key) && nextState[key] !== undefined);
+          }
         }
       } catch (e) {
         console.warn('Failed to parse existing TaskPoints storage; saving fresh state.', e);
@@ -7480,11 +8145,12 @@ return { state: merged, storageKey };
     }
   }
 
-  function preserveStickyFieldsBeforeSave(candidateState, storageKey = STORAGE_KEY, options = {}, verifiedSource = null) {
+  function preserveStickyFieldsBeforeSave(candidateState, storageKey = STORAGE_KEY, options = {}, verifiedSource = null, inboxCheck = null) {
     const next = candidateState && typeof candidateState === 'object' ? { ...candidateState } : {};
     let latest = null;
+    let currentRaw;
     try {
-      const currentRaw = localStorage.getItem(storageKey);
+      currentRaw = localStorage.getItem(storageKey);
       if (verifiedSource
         && verifiedSource.storageKey === storageKey
         && verifiedSource.raw === currentRaw
@@ -7496,6 +8162,49 @@ return { state: merged, storageKey };
       }
     } catch (_) {
       latest = null;
+    }
+    if (storageKey === STORAGE_KEY && options.allowDestructiveOverwrite !== true) {
+      const edits = verifiedSource?.inboxFields || [];
+      const hasOwn = (value, key) => value != null && Object.prototype.hasOwnProperty.call(value, key);
+      if (INBOX_SNAPSHOT_FIELDS.some(key => hasOwn(latest, key) || hasOwn(next, key)) || edits.length) {
+        if (currentRaw === undefined || latest === null || (edits.length && verifiedSource.raw !== currentRaw)) {
+          throw new Error('Inbox save source changed or is unreadable');
+        }
+        if (inboxCheck) inboxCheck.raw = currentRaw;
+        if (edits.length) {
+          const journal = localStorage.getItem(INBOX_JOURNAL_KEY);
+          if (inboxCheck) inboxCheck.journal = journal;
+          if (journal !== null && options.savePath !== 'inbox-journal-compaction') {
+            if (journal !== options.inboxFallbackJournalRaw) throw new Error('Inbox save has unresolved journal evidence');
+            // The compatibility fallback can still add a notification while
+            // malformed evidence is retained. It cannot discard known data.
+            const before = latest.inboxMessages;
+            const after = next.inboxMessages;
+            if (edits.includes('inboxMessages') && Array.isArray(before)
+              && (!Array.isArray(after) || before.some(row => !after.some(candidate => deepEqual(row, candidate))))) {
+              throw new Error('Inbox fallback cannot replace messages while journal evidence is unreadable');
+            }
+            const eventEntries = value => Array.isArray(value)
+              ? value.map(id => [String(id), true]) : Object.entries(value || {});
+            const savedEvents = new Map(eventEntries(next.inboxProcessedEventIds));
+            if (edits.includes('inboxProcessedEventIds')
+              && eventEntries(latest.inboxProcessedEventIds).some(([id, value]) => !deepEqual(savedEvents.get(id), value))) {
+              throw new Error('Inbox fallback cannot replace processed-event evidence while the journal is unreadable');
+            }
+
+          }
+        }
+        // Only an Inbox merge may change canonical Inbox fields. A routine
+        // snapshot may omit them or contain stale messages or event markers.
+        // Preserve absence and empty lists exactly, so deletions stay deleted.
+        if (currentRaw !== null) {
+          for (const key of INBOX_SNAPSHOT_FIELDS) {
+            if (edits.includes(key)) continue;
+            if (hasOwn(latest, key)) next[key] = latest[key];
+            else delete next[key];
+          }
+        }
+      }
     }
     const allowGeneratedCacheClear = Boolean(options.allowGeneratedCacheClear || options.storageEmergencyCompaction);
     const stickyArrayFields = [
@@ -7761,7 +8470,8 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
     const attemptSave = (candidate, trimmed, stage = 'initial', attemptOptions = {}) => {
       const stickyOptions = { ...options, ...attemptOptions };
       const endSticky = global.TaskPointsPerf?.span?.('storage.save.stickyProtection');
-      const candidateWithSticky = preserveStickyFieldsBeforeSave(candidate, storageKey, stickyOptions, verifiedMergeSource);
+      const inboxCheck = {};
+      const candidateWithSticky = preserveStickyFieldsBeforeSave(candidate, storageKey, stickyOptions, verifiedMergeSource, inboxCheck);
       endSticky?.({ savePath, stage });
       const storedBytes = getStorageKeySizeBytes(storageKey);
       const candidateBytes = getJsonSizeBytes(candidateWithSticky);
@@ -7835,8 +8545,12 @@ if (!userInitiatedSave && blockedUntil > Date.now()) {
           snapshot: storagePlan.packedState
         });
       }
+      if ((inboxCheck.raw !== undefined && localStorage.getItem(storageKey) !== inboxCheck.raw)
+        || (inboxCheck.journal !== undefined && localStorage.getItem(INBOX_JOURNAL_KEY) !== inboxCheck.journal)) {
+        throw new Error('Inbox save source changed before snapshot replacement');
+      }
       try {
-        safeReplaceTaskPointsStorage(storageKey, storagePlan.chosenRaw);
+        replaceCheckedTaskPointsStorage(storageKey, storagePlan.chosenRaw);
       } catch (err) {
         recordQuotaFailureDiagnostics({ savePath, stage, storageKey, storedBytes, candidateBytes: chosenStorageBytes, packedCandidateBytes, compressedCandidateBytes, unpackedCandidateBytes: candidateBytes, packedRawChars: storagePlan.packedRawChars, compressedRawChars: storagePlan.compressedRawChars, chosenStorageEncoding: storagePlan.chosenEncoding, chosenStorageChars: storagePlan.chosenChars, chosenStorageBytes, snapshot: candidateWithSticky });
         throw err;
@@ -8061,12 +8775,16 @@ const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
     const warningState = appendStorageWarning(compactStateForLocalStorage(state), quotaWarning);
     if (root) root.__tpQuotaSaveBlockedUntil = Date.now() + TASKPOINTS_SAVE_BLOCK_COOLDOWN_MS;
     try {
+      const inboxCheck = {};
       const warningRaw = buildOptimizedTaskPointsStorageRaw(preserveStickyFieldsBeforeSave(warningState, storageKey, {
         ...options,
         allowGeneratedCacheClear: true,
         storageEmergencyCompaction: true
-      })).chosenRaw;
-      safeReplaceTaskPointsStorage(storageKey, warningRaw);
+      }, null, inboxCheck)).chosenRaw;
+      if (inboxCheck.raw !== undefined && localStorage.getItem(storageKey) !== inboxCheck.raw) {
+        throw new Error('Inbox save source changed before storage warning replacement');
+      }
+      replaceCheckedTaskPointsStorage(storageKey, warningRaw);
     } catch (warningErr) {
       console.warn('TaskPointsCore: unable to persist storage warning after quota failure.', warningErr);
     }
@@ -8083,6 +8801,8 @@ const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
   // mergeAndSaveState/saveAppState and should not go through this guard.
   function saveValidatedSnapshot(state, options = {}) {
     const storageKey = options.storageKey || STORAGE_KEY;
+    if (storageKey===STORAGE_KEY && isIsolatedCollectionRecoveryHeld())
+      throw new Error('Use a verified detached rollback before importing into this collection.');
     const shapeCheck = validateSnapshotShape(state);
     if (!shapeCheck.ok) {
       quarantineRejectedSnapshot(state, shapeCheck.reason, options);
@@ -8145,6 +8865,8 @@ const cleanedInitialCandidate = cleanupOpponentDripSchedules(dedupedSaveState, {
   }
 
   function restoreBackupSlot(slotKey, options = {}) {
+    if (isIsolatedCollectionRecoveryHeld())
+      return {restored:false,reason:'Use a verified detached rollback before restoring a legacy backup.'};
     if (!slotKey) return { restored: false, reason: 'Missing backup slot key.' };
     let parsed = null;
     try {
@@ -9318,9 +10040,9 @@ function buildDailyBreakdowns(state){
   }
 
   function buildDaySnapshot(dateKeyStr, state){
-    const normalized = normalizeState(state || {});
+    const normalized = isolatedLiveScoringState(normalizeState(state || {}));
     const key = dateKey(dateKeyStr);
-    const comps = Array.isArray(normalized.completions) ? normalized.completions : [];
+    const comps = readScoringCompletions(Array.isArray(normalized.completions) ? normalized.completions : []);
 
     const dayComps = comps.filter(c => {
       if (!c || !c.completedAtISO) return false;
@@ -9553,7 +10275,7 @@ function buildDailyBreakdowns(state){
 
   function buildYouDayScoreMap(state, options = {}){
     // Invariant: options.normalized is only set when state already passed through normalizeState().
-    const normalized = options.normalized ? (state || {}) : normalizeState(state || {});
+    const normalized = isolatedLiveScoringState(options.normalized ? (state || {}) : normalizeState(state || {}));
     const perfEnabled = !!global.TP_DEBUG_PERF;
     const t0 = perfEnabled && global.performance && typeof global.performance.now === 'function'
       ? global.performance.now()
@@ -9562,7 +10284,7 @@ function buildDailyBreakdowns(state){
 
     const aggregated = (() => {
       aggregateCalls += 1;
-      return aggregateCompletionsByDate(normalized.completions, normalized);
+      return aggregateCompletionsByDate(readScoringCompletions(normalized.completions), normalized);
     })();
     const dailyTotals = aggregated.dailyTotals || {};
     const dayKeys = Array.from(new Set([
@@ -9656,7 +10378,7 @@ function buildDailyBreakdowns(state){
     let changed = false;
 
     normalized.completions = (normalized.completions || []).map(c => {
-      if (!c) return c;
+      if (!c || protectsIsolatedLegacyReward(c)) return c;
       const derived = deriveCompletionPoints(c, normalized);
       if (!derived) return c;
 
@@ -9947,7 +10669,13 @@ function computeRankingsPageRows(state){
   function syncYouMatchups(state, options = {}){
     // Invariant: options.normalized is only set when state already passed through normalizeState().
     const normalized = options.normalized ? (state || {}) : normalizeState(state || {});
-    const { dayScoreMap } = buildYouDayScoreMap(normalized, { normalized: true });
+    let dayScoreMap;
+    try {
+      ({ dayScoreMap } = buildYouDayScoreMap(normalized, { normalized: true }));
+    } catch (error) {
+      if (!usesIsolatedTaskScoring()) throw error;
+      return { state: normalized, changed: false, scoringBlocked: true };
+    }
 
     if (!dayScoreMap.size) {
       return { state: normalized, changed: false };
@@ -10999,10 +11727,47 @@ return Number(cappedScore.toFixed(1));
     isCompressedTaskPointsStorageRaw,
     assertTaskPointsParserAvailableForRaw,
     readTaskPointsStoredState,
+    getLegacyTaskCompletionHold,
+    isIsolatedCreatedTaskId,
+    ISOLATED_ROLLBACK_TOMBSTONES_KEY,
+    filterIsolatedRollbackTaskJournal,
+    ISOLATED_TASK_CREATE_PENDING_PREFIX,
+    ISOLATED_TASK_SCHEDULE_PENDING_KEY,
+    projectIsolatedDoneTasks,
+    isolatedTaskTrashDeletion,
+    runIsolatedTaskTrash,
+    usesIsolatedTaskDone,
+    usesIsolatedWeekTaskActions,
+    isolatedLogCompletionBasis,
+    watchIsolatedTaskDone,
+    isolatedTaskDoneView,
+    runIsolatedTaskDone,
+    isolatedTaskDoneError,
+    usesIsolatedTaskScoring,
+    isIsolatedTaskCollectionSelected,
+    isIsolatedCollectionRecoveryHeld,
+    isIsolatedCollectionTaskLink,
+    getLegacyLinkedCompletionHold,
+    protectsIsolatedLegacyReward,
+    isolatedTaskCollectionShadow,
+    assertIsolatedCollectionJournalWrite,
+    usesIsolatedStandaloneMetrics,
+    runIsolatedLegacyMetricWrite,
+    commitIsolatedMetricCorrection,
+    isolatedLiveScoringState,
+    refreshIsolatedTaskScoring,
+    readScoringCompletions,
+    parseIsolatedTodayList,
+    reconcileIsolatedTodayList,
+    removeIsolatedTodayTask,
+    reconcileIsolatedTodayTaskMembership,
+    ISOLATED_TODAY_LIST_KEY: TODAY_LIST_KEY,
+    runWithVerifiedTaskScoring,
+    verifiedScoringSaveOptions,
     serializeTaskPointsStoredState,
     writeTaskPointsStoredState,
     parseTaskPointsStorageJson,
-    safeReplaceTaskPointsStorage,
+    safeReplaceTaskPointsStorage: replaceCheckedTaskPointsStorage,
     scheduleInteractiveRecompress,
     flushPendingInteractiveRecompresses,
     getPendingInteractiveRecompressCount: () => pendingInteractiveRecompresses.size,
@@ -11033,6 +11798,7 @@ return Number(cappedScore.toFixed(1));
     workHoursBonus,
     workPoints,
     classifyPersonalMetricCompletion,
+    parseCaloriesFromTitle,
     buildPersonalScoreHistoryRows,
     buildPersonalScoreHistoryCsv,
     roundPoints,

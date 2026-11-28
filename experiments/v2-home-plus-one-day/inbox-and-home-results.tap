@@ -1,0 +1,125 @@
+TAP version 13
+# Chromium 156.0.8078.79 serves the full checked-in Home document and worker-ordered bundle on loopback
+# Subtest: full Home click commits V2 with ordinary startup running, and cold reload displays the V2 date before accepting another action
+ok 1 - full Home click commits V2 with ordinary startup running, and cold reload displays the V2 date before accepting another action
+  ---
+  duration_ms: 5138.534915
+  type: 'test'
+  ...
+# Subtest: Home to Notes and back retains the acknowledged Task date while the other post-startup records survive navigation
+ok 2 - Home to Notes and back retains the acknowledged Task date while the other post-startup records survive navigation
+  ---
+  duration_ms: 3895.678382
+  type: 'test'
+  ...
+# Subtest: ordinary Home save serializes only the V1 backing date and does not invalidate V2
+ok 3 - ordinary Home save serializes only the V1 backing date and does not invalidate V2
+  ---
+  duration_ms: 2430.240615
+  type: 'test'
+  ...
+# Subtest: V1 Task compaction preserves an unrelated edit and lifecycle refresh keeps the V2 date
+ok 4 - V1 Task compaction preserves an unrelated edit and lifecycle refresh keeps the V2 date
+  ---
+  duration_ms: 2201.222731
+  type: 'test'
+  ...
+# Subtest: verified-secondary maintenance and native startup retain V2 display and allow the next edit
+ok 5 - verified-secondary maintenance and native startup retain V2 display and allow the next edit
+  ---
+  duration_ms: 2518.478046
+  type: 'test'
+  ...
+# Subtest: competing legacy Task edit in another full Home tab survives and causes V2 admission and rollback to refuse
+ok 6 - competing legacy Task edit in another full Home tab survives and causes V2 admission and rollback to refuse
+  ---
+  duration_ms: 4201.58753
+  type: 'test'
+  ...
+# Subtest: full Home IndexedDB quota failure has no success and reload keeps the original V2 date
+ok 7 - full Home IndexedDB quota failure has no success and reload keeps the original V2 date
+  ---
+  duration_ms: 2103.843051
+  type: 'test'
+  ...
+# Subtest: rollback from the acknowledged full Home commit freezes V2 and a fresh full Home can read the detached Task checkpoint
+ok 8 - rollback from the acknowledged full Home commit freezes V2 and a fresh full Home can read the detached Task checkpoint
+  ---
+  duration_ms: 3748.694676
+  type: 'test'
+  ...
+# Subtest: after Chromium process restart full Home renders the acknowledged V2 date
+ok 9 - after Chromium process restart full Home renders the acknowledged V2 date
+  ---
+  duration_ms: 4932.966245
+  type: 'test'
+  ...
+# Subtest: ordinary Home startup preserves the notification created and compacted by the real Inbox
+ok 10 - ordinary Home startup preserves the notification created and compacted by the real Inbox
+  ---
+  duration_ms: 1974.696221
+  type: 'test'
+  ...
+# Subtest: malformed V1 Task journal remains byte-for-byte intact, blocks V2 edits and leaves the verified date visible
+ok 11 - malformed V1 Task journal remains byte-for-byte intact, blocks V2 edits and leaves the verified date visible
+  ---
+  duration_ms: 1846.024964
+  type: 'test'
+  ...
+# Subtest: a lifecycle refresh sees V2 edits from another Home tab even without a V1 revision change
+ok 12 - a lifecycle refresh sees V2 edits from another Home tab even without a V1 revision change
+  ---
+  duration_ms: 3333.862231
+  type: 'test'
+  ...
+# Subtest: full Home interrupted before commit reopens with exactly the committed V2 state
+ok 13 - full Home interrupted before commit reopens with exactly the committed V2 state
+  ---
+  duration_ms: 3679.066764
+  type: 'test'
+  ...
+# Subtest: full Home interrupted after commit reopens with exactly the committed V2 state
+ok 14 - full Home interrupted after commit reopens with exactly the committed V2 state
+  ---
+  duration_ms: 3375.372337
+  type: 'test'
+  ...
+# Subtest: rollback refuses unreadable Inbox journal evidence and preserves both stores
+ok 15 - rollback refuses unreadable Inbox journal evidence and preserves both stores
+  ---
+  duration_ms: 1668.809213
+  type: 'test'
+  ...
+# Subtest: an unreadable V2 receipt chain withholds the owned card on startup instead of displaying the legacy date
+ok 16 - an unreadable V2 receipt chain withholds the owned card on startup instead of displaying the legacy date
+  ---
+  duration_ms: 1808.967169
+  type: 'test'
+  ...
+# Subtest: pending Inbox edits survive startup and ordinary Home save, then compact and reopen in Inbox
+ok 17 - pending Inbox edits survive startup and ordinary Home save, then compact and reopen in Inbox
+  ---
+  duration_ms: 2099.732523
+  type: 'test'
+  ...
+# Subtest: an explicit empty Inbox journal compacts the deletion and stale Home state cannot resurrect it
+ok 18 - an explicit empty Inbox journal compacts the deletion and stale Home state cannot resurrect it
+  ---
+  duration_ms: 2353.135528
+  type: 'test'
+  ...
+# Subtest: malformed Inbox evidence is preserved; fallback allows addition and refuses deletion
+ok 19 - malformed Inbox evidence is preserved; fallback allows addition and refuses deletion
+  ---
+  duration_ms: 1987.066946
+  type: 'test'
+  ...
+1..19
+# tests 19
+# suites 0
+# pass 19
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 55943.788284

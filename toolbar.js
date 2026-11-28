@@ -3134,6 +3134,8 @@ function readZipEntriesFallback(arrayBuffer) {
 }
 
 async function importBackupZipFallback(file) {
+  if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.())
+    throw new Error('Use a verified detached rollback before importing into this collection.');
   const entries = readZipEntriesFallback(await file.arrayBuffer());
   let manifestEntry = entries.get('manifest.json');
   if (!manifestEntry) {
@@ -3232,6 +3234,8 @@ async function exportBackupWithImagesFallback() {
 }
 
 async function applyImportedStateFallback(rootOrPayload) {
+  if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.())
+    throw new Error('Use a verified detached rollback before importing into this collection.');
   const fullPayload = rootOrPayload?.exportType === 'taskpoints_full_backup' && rootOrPayload?.state ? rootOrPayload : null;
   const root = fullPayload?.state || rootOrPayload;
   const importedNotesPayload = fullPayload ? readNotesPayloadFromBackupPayloadFallback(fullPayload) : readNotesPayloadFromBackupPayloadFallback(rootOrPayload);
@@ -3291,6 +3295,13 @@ async function applyImportedStateFallback(rootOrPayload) {
 }
 
 async function importFileFallback(ev) {
+  if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.() && /\/(index|settings)\.html$/.test(location.pathname)) {
+    return importCollectionRecoveryFile(ev);
+  }
+  if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.()) {
+    ev.target.value='';
+    return alert('Use a verified detached rollback before importing into this collection.');
+  }
   const f = ev.target.files?.[0];
   if (!f) return;
 
@@ -3353,6 +3364,14 @@ async function importFileFallback(ev) {
 }
 
 function importPasteFallback() {
+  if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.() && /\/(index|settings)\.html$/.test(location.pathname)) {
+    const text=prompt('Paste a verified TaskPoints collection package:');
+    if (text) Promise.resolve().then(()=>runCollectionRecovery('restore-task-fields',JSON.parse(text)))
+      .catch(error=>alert(`Collection recovery stopped. ${error.message}`));
+    return;
+  }
+  if (window.TaskPointsCore?.isIsolatedCollectionRecoveryHeld?.())
+    return alert('Use a verified detached rollback before importing into this collection.');
   const txt = prompt('Paste TaskPoints JSON:');
   if (!txt) return;
 
@@ -3392,6 +3411,7 @@ function getHandler(name, fallback) {
 }
 
 function exportOGDataOnly() {
+  if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.()) return downloadCollectionPackage(false);
   window.TaskPointsCore?.flushPendingSaves?.();
   if (typeof window.exportData === 'function' && window.exportData !== exportOGDataOnly) {
     return window.exportData();
@@ -3400,11 +3420,70 @@ function exportOGDataOnly() {
 }
 
 function exportBackupWithImages() {
+  if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.()) return downloadCollectionPackage(false);
   window.TaskPointsCore?.flushPendingSaves?.();
   if (typeof window.exportBackupWithImages === 'function' && window.exportBackupWithImages !== exportBackupWithImages) {
     return window.exportBackupWithImages();
   }
   return exportBackupWithImagesFallback();
+}
+
+async function downloadCollectionPackage(freeze) {
+  try {
+    if (!/\/(index|settings)\.html$/.test(location.pathname)) throw new Error('Open Home or Settings to export the collection.');
+    if (freeze && !confirm('Freeze Task editing in this synthetic profile and download a checkpoint for a fresh V1 profile?')) return;
+    const runtime=window.TaskPointsStateRuntimeV2;
+    const checkpoint=await runtime.prepareIsolatedTaskCollectionPackage(freeze);
+    const proof=await runtime.verifyIsolatedCollectionPackage(checkpoint);
+    const url=URL.createObjectURL(new Blob([JSON.stringify(checkpoint)],{type:'application/json'}));
+    const anchor=document.createElement('a');
+    anchor.href=url;
+    anchor.download=proof.restorable ? 'taskpoints-collection-recovery.json' : 'taskpoints-collection-backup.json';
+    try { anchor.click(); }
+    finally { setTimeout(()=>URL.revokeObjectURL(url),0); }
+  } catch (error) { alert(`Collection export could not be verified. ${error.message}`); }
+}
+
+function isCollectionRecoveryPackage(value) {
+  return value?.taskCollectionVersion===1 && ['taskpoints-isolated-task-collection-backup-1',
+    'taskpoints-isolated-task-completion-rollback-1'].includes(value.format);
+}
+
+async function importCollectionRecoveryFile(ev) {
+  const file=ev.target.files?.[0];
+  if (!file) return;
+  try {
+    let text;
+    if (isZipFileFallback(file)) {
+      const entries=readZipEntriesFallback(await file.arrayBuffer());
+      const checkpoint=entries.get('checkpoint.json') || entries.get('manifest.json');
+      if (entries.size!==1 || !checkpoint)
+        throw new Error('Use a verified collection package. Legacy ZIP sidecars need separate recovery.');
+      text=new TextDecoder().decode(checkpoint.data);
+    } else text=await file.text();
+    await runCollectionRecovery('restore-task-fields',JSON.parse(text));
+  } catch (error) { alert(`Collection recovery stopped. ${error.message}`); }
+  finally { ev.target.value=''; }
+}
+
+async function runCollectionRecovery(operation, checkpoint) {
+  const reset=operation==='reset-task-collection';
+  if (!reset && !isCollectionRecoveryPackage(checkpoint))
+    throw new Error('Use a verified detached rollback before importing this backup into the collection.');
+  const runtime=window.TaskPointsStateRuntimeV2;
+  const intent=await runtime.prepareIsolatedCollectionRecovery(operation,checkpoint);
+  let message='Restore titles, importance, tags and point settings from this collection revision? Dates, statuses, rewards and other app data stay as they are now.';
+  if (reset) message='Erase the admitted synthetic Tasks and their linked rewards? Other app data stays in this profile and recovery evidence is retained.';
+  if (operation==='restore-task-reward') {
+    const reward=checkpoint.completions.find(row=>row.id===intent.rewardId);
+    message=`Intentionally restore the deleted reward for “${reward.title}” (${reward.points} points, ${reward.completedAtISO.slice(0,10)})? The Task status stays as it is now.`;
+  }
+  if (!confirm(message)) return;
+  const result=await runtime.commitIsolatedCollectionRecovery(intent);
+  if (result.unchanged) return alert('The collection already matches this request.');
+  if (!result.confirmedDurable) throw new Error('The recovery receipt could not be verified.');
+  alert(result.replayed ? 'The previous recovery receipt was verified.' : 'Collection recovery saved and verified.');
+  window.location.reload();
 }
 
 if (typeof window.exportOGDataOnly !== 'function') {
@@ -3433,6 +3512,26 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.querySelectorAll('[data-export-images]').forEach((btn) => {
     btn.addEventListener('click', exportOGDataOnly);
+  });
+  document.querySelectorAll('[data-collection-recovery-export]').forEach(btn=>{
+    btn.hidden=!window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.();
+    btn.addEventListener('click',()=>downloadCollectionPackage(true));
+  });
+  document.querySelectorAll('[data-collection-forward-key]').forEach(btn=>{
+    btn.hidden=!window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.();
+    btn.addEventListener('click',async()=>{
+      try {
+        const destination=prompt('Paste the code shown in the disposable V1 destination. This frozen checkpoint can authorize only one destination.');
+        if (!destination) return;
+        const authorization=await window.TaskPointsStateRuntimeV2.authorizeIsolatedCollectionDestination(destination.trim());
+        prompt('Copy this authorization directly to the destination that showed the code.',authorization);
+      } catch (error) { alert(`Handoff authorization unavailable. ${error.message}`); }
+    });
+  });
+  document.querySelectorAll('[data-collection-task-reset]').forEach(btn=>{
+    btn.hidden=!window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.();
+    btn.addEventListener('click',()=>runCollectionRecovery('reset-task-collection')
+      .catch(error=>alert(`Collection recovery stopped. ${error.message}`)));
   });
   // Daily Brief export integration (shared export controls).
   
@@ -3703,6 +3802,13 @@ document.addEventListener('DOMContentLoaded', () => {
         durationMs: Math.round((endedAt - resolveStartedAt) * 100) / 100
       });
     } catch (_) {}
+    const owner = window.TaskPointsOwnedTaskExperiment;
+    if (window.__TASKPOINTS_OWNED_TASK_SYNTHETIC__ === true && owner?.displayOnly && owner.isEnabled()) {
+      state = owner.taskView(state);
+    } else if (window.TaskPointsCore?.usesIsolatedTaskDone?.()) {
+      const tasks = Array.isArray(state.tasks) ? state.tasks : [];
+      state = {...state,tasks:TaskPointsCore.projectIsolatedDoneTasks(tasks)};
+    }
     const todayKey = todayKeyFallback();
     const tasks = Array.isArray(state.tasks) ? state.tasks : [];
     const list = [];

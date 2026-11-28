@@ -1535,7 +1535,8 @@ function saveState(nextState, options = {}) {
     if (saveFn) {
       const { state: merged, trimmed } = saveFn(nextState, {
         storageKey: STORAGE_KEY,
-        ...options
+        ...options,
+        ...window.TaskPointsCore?.verifiedScoringSaveOptions?.()
       });
 
       if (trimmed) {
@@ -2180,6 +2181,12 @@ function ensureOpponentDripSchedule(dateKeyStr, playerId, totalPoints){
 
 
 function simulateToday() {
+  if (window.TaskPointsCore?.usesIsolatedTaskScoring?.())
+    return TaskPointsCore.runWithVerifiedTaskScoring(simulateTodayVerified);
+  return simulateTodayVerified();
+}
+
+function simulateTodayVerified() {
   const todayKey = getGameDayKey(new Date());
 
   state.gameHistory = state.gameHistory || [];
@@ -2700,11 +2707,13 @@ function buildPlayerHistoryStats() {
 
 
 function calcYouStats() {
+  const core = window.TaskPointsCore;
+  const scoreState = core?.usesIsolatedTaskScoring?.() ? core.syncYouMatchups(state).state : state;
   const record = window.TaskPointsCore?.computeRecord
-    ? TaskPointsCore.computeRecord(state, "YOU", { includeToday: false, allowFallback: false })
+    ? TaskPointsCore.computeRecord(scoreState, "YOU", { includeToday: false, allowFallback: false })
     : { wins: 0, losses: 0, ties: 0, games: 0, source: "unknown" };
 
-  const comps = state.completions || [];
+  const comps = core?.readScoringCompletions?.(scoreState.completions || []) ?? scoreState.completions ?? [];
   if (!comps.length && record.source !== "matchups") {
     return {
       record: "0-0",
@@ -2716,7 +2725,7 @@ function calcYouStats() {
   }
 
   if (record.source === "matchups") {
-    const matchups = Array.isArray(state.matchups) ? state.matchups : [];
+    const matchups = Array.isArray(scoreState.matchups) ? scoreState.matchups : [];
     const youGames = matchups.filter(m => m && (m.playerAId === "YOU" || m.playerBId === "YOU"));
     let totalPoints = 0;
     let games = 0;
@@ -2811,6 +2820,10 @@ function wireViewCardProfileLinks(card, playerId, playerName) {
 async function renderPlayers() {
   const container = $("playersList");
   if (!container) return;
+  if (window.TaskPointsCore?.usesIsolatedTaskScoring?.() && !await TaskPointsCore.refreshIsolatedTaskScoring()) {
+    container.textContent = 'Verified Task score unavailable.';
+    return;
+  }
 
   updateSortSelectUI();
   container.innerHTML = "";
@@ -4147,6 +4160,7 @@ if (playerSortSelect) {
 
 // Auto-sim once per day after 8am, then render
 renderPlayers(); // always render even if auto-sim dies
+window.TaskPointsCore?.watchIsolatedTaskDone?.(renderPlayers);
 
 
 // ----- View mode toggle (Card vs Gallery) -----

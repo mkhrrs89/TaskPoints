@@ -8,9 +8,22 @@
   <link rel="stylesheet" href="assets/tailwind.css">
   <link rel="stylesheet" href="styles.css">
   <script>
+    // This runs before the normal storage bundle on the recovery page.
+    if (['localhost','127.0.0.1'].includes(window.location?.hostname)) {
+      let collectionHeld = false;
+      window.isTaskPointsCollectionRecoveryHeld = () => {
+        try {
+          const fixture = JSON.parse(localStorage.getItem('taskpoints_isolated_task_fixture_v1'));
+          const lock = JSON.parse(localStorage.getItem('taskpoints_recovery_write_lock_v1'));
+          collectionHeld ||= (fixture?.syntheticOnly === true && fixture.taskCollection === true)
+            || lock?.isolatedCollectionRollback === true;
+        } catch (_) { collectionHeld = true; }
+        return collectionHeld;
+      };
+    }
     // Enter recovery hold before the normal storage bundle installs. This is
     // deliberately synchronous and does not touch app data.
-    try {
+    if (!window.isTaskPointsCollectionRecoveryHeld?.()) try {
       localStorage.setItem('taskpoints_emergency_recovery_hold_v1', JSON.stringify({
         active: true,
         enteredAtISO: new Date().toISOString(),
@@ -332,6 +345,10 @@
     }
 
     async function restoreCandidate(id, button) {
+      if (window.isTaskPointsCollectionRecoveryHeld?.()) {
+        showMessage('This legacy copy cannot replace the verified V2 collection. Use the collection recovery checkpoint from Home or Settings.', 'warning');
+        return;
+      }
       const candidate = candidateMap.get(id);
       if (!candidate) return;
       const first = confirm(`Restore “${candidate.source}” with ${candidate.counts.majorTotal.toLocaleString()} major records?\n\nThe current empty state will be replaced. Player images are not touched.`);

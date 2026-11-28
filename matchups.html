@@ -921,7 +921,12 @@ document
   .getElementById("exportMatchupsCsvBtn")
   ?.addEventListener("click", exportMatchupsForSelectedRange);
   
-    function renderMatchups(){
+    async function renderMatchups(){
+      if (window.TaskPointsCore?.usesIsolatedTaskScoring?.() && !await TaskPointsCore.refreshIsolatedTaskScoring()) {
+        $("matchupsChronological").textContent = 'Verified Task scores unavailable.';
+        $("matchupsByPlayer").textContent = 'Verified Task scores unavailable.';
+        return;
+      }
       state = load();
 
 // sync may write back; keep local state updated
@@ -978,6 +983,12 @@ state = syncYouMatchupsWithCompletions(state, { persist: false, pathName: 'rende
       }
 
       function generateRetroMatchupsForDate(dateKeyStr) {
+        if (window.TaskPointsCore?.usesIsolatedTaskScoring?.())
+          return TaskPointsCore.runWithVerifiedTaskScoring(() => generateRetroMatchupsVerified(dateKeyStr));
+        return generateRetroMatchupsVerified(dateKeyStr);
+      }
+
+      function generateRetroMatchupsVerified(dateKeyStr) {
         let nextState = load();
         nextState = syncYouMatchupsWithCompletions(nextState, { persist: true, pathName: 'generateRetroMatchupsForDate:syncYouMatchupsWithCompletions' });
 
@@ -1534,17 +1545,32 @@ function save(nextState, savePath = 'matchups-save') {
   try {
     const existing = load() || {};
     const fullState = { ...existing, ...(nextState || {}) };
+    const options = { storageKey: STORAGE_KEY, savePath, ...window.TaskPointsCore?.verifiedScoringSaveOptions?.() };
+    if (window.TaskPointsCore?.isIsolatedTaskCollectionSelected?.()) {
+      // Scoring consumes the verified completion projection. Only the matchup
+      // domains belong in the legacy write; keep the exact current Task shadow.
+      const live=TaskPointsCore.parseTaskPointsStorageJson(localStorage.getItem(STORAGE_KEY),null);
+      if (!Array.isArray(live?.tasks) || !Array.isArray(live.completions))
+        throw new Error('The collection snapshot is unreadable.');
+      const result=TaskPointsCore.saveStateSnapshot({...live,matchups:fullState.matchups,gameHistory:fullState.gameHistory,
+        opponentDripSchedules:fullState.opponentDripSchedules},options);
+      if (result?.skipped || result?.blockedByQuotaCircuit || !result?.state)
+        throw new Error('The matchup save could not be verified.');
+      pageStateCache=result.state;
+      pageStateCacheDirty=false;
+      return result.state;
+    }
     if (window.TaskPointsCore?.mergeAndSaveState) {
       // Matchups only edits matchup/game-history domains. Always merge with the
       // latest full app snapshot so Home-only histories (weight, VO2, live H2H
       // differential samples) cannot be replaced by this page's partial state.
-      const saved = TaskPointsCore.mergeAndSaveState(fullState, { storageKey: STORAGE_KEY, savePath }).state;
+      const saved = TaskPointsCore.mergeAndSaveState(fullState, options).state;
       pageStateCache = saved;
       pageStateCacheDirty = false;
       return saved;
     }
     if (window.TaskPointsCore?.saveStateSnapshot) {
-      const saved = TaskPointsCore.saveStateSnapshot(fullState, { storageKey: STORAGE_KEY, savePath }).state;
+      const saved = TaskPointsCore.saveStateSnapshot(fullState, options).state;
       pageStateCache = saved;
       pageStateCacheDirty = false;
       return saved;
@@ -1562,7 +1588,10 @@ function save(nextState, savePath = 'matchups-save') {
 }
 
       
-    document.addEventListener("DOMContentLoaded", renderMatchups);
+    document.addEventListener("DOMContentLoaded", () => {
+      renderMatchups();
+      window.TaskPointsCore?.watchIsolatedTaskDone?.(renderMatchups);
+    });
     document.addEventListener("DOMContentLoaded", () => {
       const tabs = document.querySelectorAll("#matchupTabs [data-tab]");
       const chrono = $("matchupsChronological");

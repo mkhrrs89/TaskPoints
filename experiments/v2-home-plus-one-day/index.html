@@ -1,0 +1,13 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>V2-owned Home +1 Day — synthetic only</title><link rel="stylesheet" href="./style.css">
+<script src="./isolation.js"></script><script defer src="/scoring_core.js"></script><script defer src="/state_runtime_v2.js"></script>
+<script defer src="./real-home.js"></script><script defer src="./app.js"></script></head>
+<body><main><p>SYNTHETIC ONLY · disposable localhost storage</p><h1>Home +1 Day, owned by V2</h1>
+<p>The Task cards, +1d button, click handler and date rules below come from the real Home page. Only this action is enabled in this experiment; ordinary TaskPoints is unchanged.</p>
+<button id="create">Create synthetic fixture</button><button id="refresh" disabled>Reload V2 state</button><button id="rollback" disabled>Freeze and prepare Task rollback</button>
+<a id="rollbackFile" download="synthetic-task-rollback.json" hidden>Save synthetic rollback checkpoint</a>
+<p id="status" role="status">Checking isolated context…</p><pre id="details"></pre>
+<label>Sort <select id="sortSelect"><option value="due">Due date</option><option value="importance">Importance</option><option value="points">Points</option></select></label>
+<div id="emptyList">No tasks loaded.</div><div id="taskList"></div>
+<p>V1 snapshots, journals, backups and images remain untouched. Never use this with production data.</p>
+</main></body></html>

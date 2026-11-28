@@ -1,0 +1,18 @@
+TAP version 13
+# Chromium 156.0.8078.79 serves the full checked-in Home document and worker-ordered bundle on loopback
+# EXISTING STARTUP BLOCKER Inbox loss stack:     at safeReplaceTaskPointsStorage (local/scoring_core.js:903:18) |     at attemptSave (local/scoring_core.js:7828:9) |     at Object.saveStateSnapshot (local/scoring_core.js:7914:14) |     at Object.guardedDestructiveEntryPoint (local/scoring_core.js:12075:68) |     at Object.saveStateSnapshotWithPendingFlex (local/scoring_core.js:18307:22) |     at Object.saveStateSnapshotWithScoreAliasConsistency (local/scoring_core.js:19176:14) |     at Object.saveStateSnapshotWithAlignedYouAliases (local/scoring_core.js:19684:14) |     at saveAndRefreshTracker (local/scoring_core.js:19851:20) |     at Object.guardedHabitCompletionSave (local/scoring_core.js:19951:14)
+# Subtest: existing Home startup loses the seeded Inbox message before V2 ownership starts
+ok 1 - existing Home startup loses the seeded Inbox message before V2 ownership starts
+  ---
+  duration_ms: 1449.727245
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2091.714487

@@ -42,9 +42,13 @@
 <script>
 const STORAGE_KEY = 'taskpoints_v1';
 let appState = { tasks: [] };
+const pendingOwnedTrash = new Set();
 
 function loadState() {
-  if (window.TaskPointsCore?.loadAppState) return TaskPointsCore.loadAppState().state;
+  if (window.TaskPointsCore?.loadAppState) {
+    return (TaskPointsCore.usesIsolatedTaskScoring?.()
+      ? TaskPointsCore.loadAppState({syncDerived:false,persistSync:false}) : TaskPointsCore.loadAppState()).state;
+  }
   const raw = localStorage.getItem(STORAGE_KEY);
   try { return raw ? TaskPointsCore.readTaskPointsStoredState(STORAGE_KEY, {}) : { tasks: [] }; } catch { return { tasks: [] }; }
 }
@@ -66,7 +70,34 @@ function fmt(iso) {
   return d.toLocaleString();
 }
 
-function restoreTask(id) {
+async function changeOwnedTrash(id, button, operation) {
+  if (pendingOwnedTrash.has(id)) return;
+  const deletion = TaskPointsCore.isolatedTaskTrashDeletion?.(id);
+  if (!deletion || deletion.id !== button?.dataset.deletionId) {
+    alert('This deletion could not be verified. Check Trash and try again.');
+    return;
+  }
+  if (operation==='trash-delete-forever' && !confirm('Delete forever? This cannot be undone.')) return;
+  pendingOwnedTrash.add(id);
+  button.disabled = true;
+  button.setAttribute('aria-busy','true');
+  try {
+    const result = await TaskPointsCore.runIsolatedTaskTrash({
+      operation,taskId:id,generation:deletion.generation,
+      expectedRevision:deletion.revision,deletionId:deletion.id
+    });
+    if (!result.confirmedDurable) throw Error('The Trash change could not be verified.');
+  } catch (error) {
+    alert('The Trash change could not be confirmed. '+error.message);
+  } finally {
+    await TaskPointsCore.refreshIsolatedTaskScoring();
+    pendingOwnedTrash.delete(id);
+    render();
+  }
+}
+
+function restoreTask(id, button) {
+  if (window.TaskPointsCore?.getLegacyTaskCompletionHold?.(id)) return changeOwnedTrash(id,button,'trash-restore');
   const task = appState.tasks.find(t => t && t.id === id);
   if (!task) return;
   const now = new Date().toISOString();
@@ -80,7 +111,8 @@ function restoreTask(id) {
   render();
 }
 
-function deleteForever(id) {
+function deleteForever(id, button) {
+  if (window.TaskPointsCore?.getLegacyTaskCompletionHold?.(id)) return changeOwnedTrash(id,button,'trash-delete-forever');
   if (!confirm('Delete forever? This cannot be undone.')) return;
   appState.tasks = (Array.isArray(appState.tasks) ? appState.tasks : []).filter(t => t && t.id !== id);
   saveState(appState);
@@ -90,7 +122,8 @@ function deleteForever(id) {
 function render() {
   const listEl = document.getElementById('trashList');
   const emptyEl = document.getElementById('empty');
-  const tasks = (Array.isArray(appState.tasks) ? appState.tasks : [])
+  const legacyTasks = Array.isArray(appState.tasks) ? appState.tasks : [];
+  const tasks = (window.TaskPointsCore?.projectIsolatedDoneTasks?.(legacyTasks) ?? legacyTasks)
     .filter(t => t && (t.status === 'trashed' || t.deletedAtISO))
     .sort((a, b) => (new Date(b.deletedAtISO || b.deletedAt || 0)).getTime() - (new Date(a.deletedAtISO || a.deletedAt || 0)).getTime());
 
@@ -111,6 +144,14 @@ function render() {
           <button class="btn btn-warn btn-toolbar" data-action="delete" data-id="${t.id}">Delete Forever</button>
         </div>
       </div>`;
+    if (window.TaskPointsCore?.getLegacyTaskCompletionHold?.(t.id)) {
+      const deletion = TaskPointsCore.isolatedTaskTrashDeletion?.(t.id);
+      for (const button of row.querySelectorAll('button[data-action]')) {
+        if (deletion) button.dataset.deletionId = deletion.id;
+        button.disabled = !deletion || pendingOwnedTrash.has(t.id);
+        if (pendingOwnedTrash.has(t.id)) button.setAttribute('aria-busy','true');
+      }
+    }
     listEl.appendChild(row);
   });
 }
@@ -120,12 +161,13 @@ document.addEventListener('click', (e) => {
   if (!btn) return;
   const id = btn.getAttribute('data-id');
   const action = btn.getAttribute('data-action');
-  if (action === 'restore') restoreTask(id);
-  if (action === 'delete') deleteForever(id);
+  if (action === 'restore') restoreTask(id,btn);
+  if (action === 'delete') deleteForever(id,btn);
 });
 
 appState = loadState();
 render();
+window.TaskPointsCore?.watchIsolatedTaskDone?.(render);
 </script>
 </body>
 </html>

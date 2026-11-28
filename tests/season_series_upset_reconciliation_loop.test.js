@@ -80,6 +80,9 @@ function loadHarness(initialState, options = {}) {
       loadCalls.push(loadOptions);
       return { state: loadOptions?.preloadedState || state };
     },
+    readTaskPointsStoredState() {
+      return state;
+    },
     mergeAndSaveState(patch, saveOptions) {
       mergeCalls.push({ patch, options: saveOptions });
       state = { ...state, ...patch };
@@ -257,6 +260,28 @@ test('Home reconciliation skips derived sync while reusing the live Home state a
   assert.equal(harness.loadCalls[0].preloadedState, liveState);
   assert.equal(harness.api.getReadHotpathStatus().homePreloadedReads, 1);
   assert.equal(harness.api.getReadHotpathStatus().persistedStateReads, 0);
+});
+
+test('Home reconciliation checks persisted Inbox evidence before replacing the message list', () => {
+  const message = { id: 'record:synthetic', read: true, archived: true };
+  const state = {
+    ...upsetState(), inboxMessages: [message], inboxProcessedEventIds: { [message.id]: true }
+  };
+  const liveState = { players: state.players, currentSeason: state.currentSeason };
+  const harness = loadHarness(state, { pathname: '/', homeLiveState: liveState });
+  const result = harness.api.reconcileStored({ now: new Date('2026-08-08T06:00:00-04:00') });
+
+  assert.equal(result.changed, true);
+  assert.equal(harness.mergeCalls.length, 1);
+  const { patch } = harness.mergeCalls[0];
+  assert.equal(patch.inboxMessages.length, 2);
+  assert.deepEqual(patch.inboxMessages.find(row => row.id === message.id), message);
+  assert.equal(patch.inboxProcessedEventIds[message.id], true);
+  assert.equal(patch.inboxStartedDateKey, state.inboxStartedDateKey);
+
+  const empty = loadHarness(noChangeState(), { pathname: '/', homeLiveState: { players: [] } });
+  assert.equal(empty.api.reconcileStored({ now: new Date('2026-08-08T06:00:00-04:00') }).changed, false);
+  assert.equal(empty.mergeCalls.length, 0);
 });
 
 test('superseded Home quiet reconciliation gates cannot schedule stale duplicate checks', () => {

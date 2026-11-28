@@ -351,7 +351,7 @@
     // depend on a future animation/idle/pagehide event for the *only* save.
     // The journal-backed fast path suppresses this full save when it has
     // safely written the mutation first; any fallback goes through now.
-    if (commitDepth > 0) {
+    if (commitDepth > 0 || global.TaskPointsWorkEntryAccess?.isAdmittedMetricWrite?.()) {
       if (pendingSave) flushSave();
       return originals.save.apply(this, arguments);
     }
